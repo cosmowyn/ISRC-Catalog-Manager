@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from isrc_manager.services.settings_reads import HistoryRetentionSettings
+from isrc_manager.storage_sizes import megabytes_to_bytes
 
 from .manager import HistoryManager
 from .models import HistoryEntry
@@ -89,11 +90,21 @@ class HistoryStorageProjection:
     blocked_by_protected_items: bool
 
 
+@dataclass(slots=True)
+class HistorySnapshotRetentionResult:
+    retained_snapshot_ids: tuple[int, ...]
+    pruned_snapshot_ids: tuple[int, ...]
+    protected_visible_undo_snapshot_ids: tuple[int, ...]
+    quarantined_entry_ids: tuple[int, ...]
+    removed_paths: tuple[str, ...]
+    retained_live_snapshot_count: int
+    cap_limited_by_visible_undo: bool
+
+
 class HistoryStorageCleanupService:
     """Inspects and removes safe-to-delete history artifacts."""
 
     SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm", "-journal")
-    AUTO_SNAPSHOT_KIND_PREFIX = "auto_"
     AUTO_CLEANUP_ITEM_TYPES = {
         "orphan_snapshot_file",
         "orphan_snapshot_bundle",
@@ -380,6 +391,64 @@ class HistoryStorageCleanupService:
             removed_entry_ids=tuple(removable_entry_ids),
         )
 
+    def enforce_snapshot_retention(
+        self,
+        settings: HistoryRetentionSettings,
+    ) -> HistorySnapshotRetentionResult:
+        snapshots = self.history_manager._all_snapshots()
+        if not snapshots:
+            return HistorySnapshotRetentionResult((), (), (), (), (), 0, False)
+
+        keep_latest = max(0, int(settings.auto_snapshot_keep_latest or 0))
+        protected_snapshot_ids = self.history_manager._visible_undo_snapshot_ids()
+        protected_snapshot_ids &= {int(snapshot.snapshot_id) for snapshot in snapshots}
+        survivor_ids = set(protected_snapshot_ids)
+        cap_limited_by_visible_undo = len(survivor_ids) > keep_latest
+
+        if len(survivor_ids) < keep_latest:
+            for snapshot in sorted(
+                snapshots,
+                key=lambda candidate: int(candidate.snapshot_id or 0),
+                reverse=True,
+            ):
+                snapshot_id = int(snapshot.snapshot_id or 0)
+                if snapshot_id <= 0 or snapshot_id in survivor_ids:
+                    continue
+                survivor_ids.add(snapshot_id)
+                if len(survivor_ids) >= keep_latest:
+                    break
+
+        pruned_snapshot_ids = tuple(
+            int(snapshot.snapshot_id)
+            for snapshot in sorted(snapshots, key=lambda candidate: int(candidate.snapshot_id or 0))
+            if int(snapshot.snapshot_id or 0) not in survivor_ids
+        )
+        removed_paths: list[str] = []
+        quarantined_entry_ids: tuple[int, ...] = ()
+        if pruned_snapshot_ids:
+            quarantined_entry_ids = tuple(
+                self.history_manager._quarantine_artifact_references(
+                    snapshot_ids=set(pruned_snapshot_ids)
+                )
+            )
+            for snapshot_id in pruned_snapshot_ids:
+                removed_paths.extend(self.history_manager._remove_snapshot_record(snapshot_id))
+            removed_paths.extend(self._cleanup_orphaned_history_artifacts_after_prune())
+
+        self.history_manager._ensure_history_invariants()
+        retained_snapshot_ids = tuple(
+            int(snapshot.snapshot_id) for snapshot in self.history_manager._all_snapshots()
+        )
+        return HistorySnapshotRetentionResult(
+            retained_snapshot_ids=retained_snapshot_ids,
+            pruned_snapshot_ids=pruned_snapshot_ids,
+            protected_visible_undo_snapshot_ids=tuple(sorted(protected_snapshot_ids)),
+            quarantined_entry_ids=quarantined_entry_ids,
+            removed_paths=tuple(dict.fromkeys(removed_paths)),
+            retained_live_snapshot_count=len(retained_snapshot_ids),
+            cap_limited_by_visible_undo=cap_limited_by_visible_undo,
+        )
+
     def preview_storage_budget(
         self, settings: HistoryRetentionSettings
     ) -> HistoryStorageBudgetPreview:
@@ -393,7 +462,7 @@ class HistoryStorageCleanupService:
             for item in (*preview.eligible_items, *preview.protected_items)
         )
         budget_mb = max(0, int(settings.storage_budget_mb or 0))
-        budget_bytes = budget_mb * 1024 * 1024
+        budget_bytes = megabytes_to_bytes(budget_mb)
         over_budget_bytes = max(0, total_bytes - budget_bytes) if budget_bytes > 0 else 0
         candidate_keys = {item.item_key for item in candidate_items}
         protected_over_budget_items = (
@@ -412,15 +481,18 @@ class HistoryStorageCleanupService:
     def enforce_storage_budget(
         self, settings: HistoryRetentionSettings
     ) -> HistoryStorageBudgetResult:
+        retention_result = self.enforce_snapshot_retention(settings)
         preview = self.preview_storage_budget(settings)
-        removed_item_keys: tuple[str, ...] = ()
-        removed_paths: tuple[str, ...] = ()
+        removed_item_keys: list[str] = [
+            f"snapshot_record:{snapshot_id}" for snapshot_id in retention_result.pruned_snapshot_ids
+        ]
+        removed_paths: list[str] = list(retention_result.removed_paths)
         if preview.auto_cleanup_enabled and preview.candidate_items:
             cleanup_result = self.cleanup_selected(
                 [item.item_key for item in preview.candidate_items]
             )
-            removed_item_keys = cleanup_result.removed_item_keys
-            removed_paths = cleanup_result.removed_paths
+            removed_item_keys.extend(cleanup_result.removed_item_keys)
+            removed_paths.extend(cleanup_result.removed_paths)
             preview = self.preview_storage_budget(settings)
         blocked = (
             preview.budget_bytes > 0
@@ -428,8 +500,8 @@ class HistoryStorageCleanupService:
             and bool(preview.protected_over_budget_items)
         )
         return HistoryStorageBudgetResult(
-            removed_item_keys=removed_item_keys,
-            removed_paths=removed_paths,
+            removed_item_keys=tuple(dict.fromkeys(removed_item_keys)),
+            removed_paths=tuple(dict.fromkeys(removed_paths)),
             total_bytes=preview.total_bytes,
             budget_bytes=preview.budget_bytes,
             over_budget_bytes=preview.over_budget_bytes,
@@ -551,18 +623,9 @@ class HistoryStorageCleanupService:
         *,
         settings: HistoryRetentionSettings,
     ) -> tuple[HistoryCleanupItem, ...]:
-        keep_snapshot_ids = self._auto_snapshot_ids_to_keep(
-            int(settings.auto_snapshot_keep_latest or 0)
-        )
         candidates: list[HistoryCleanupItem] = []
         for item in eligible_items:
             if item.item_type in self.AUTO_CLEANUP_ITEM_TYPES:
-                candidates.append(item)
-                continue
-            if item.item_type == "snapshot_record" and self._is_auto_snapshot_cleanup_candidate(
-                item,
-                keep_snapshot_ids=keep_snapshot_ids,
-            ):
                 candidates.append(item)
                 continue
             if item.item_type == "backup_record" and self._is_prunable_pre_restore_backup(
@@ -571,33 +634,6 @@ class HistoryStorageCleanupService:
             ):
                 candidates.append(item)
         return tuple(candidates)
-
-    def _auto_snapshot_ids_to_keep(self, keep_latest: int) -> set[int]:
-        keep_count = max(0, int(keep_latest or 0))
-        auto_snapshots = [
-            snapshot
-            for snapshot in self.history_manager._all_snapshots()
-            if str(snapshot.kind or "").strip().lower().startswith(self.AUTO_SNAPSHOT_KIND_PREFIX)
-        ]
-        auto_snapshots.sort(key=lambda snapshot: int(snapshot.snapshot_id), reverse=True)
-        return {
-            int(snapshot.snapshot_id)
-            for snapshot in auto_snapshots[:keep_count]
-            if int(snapshot.snapshot_id or 0) > 0
-        }
-
-    def _is_auto_snapshot_cleanup_candidate(
-        self,
-        item: HistoryCleanupItem,
-        *,
-        keep_snapshot_ids: set[int],
-    ) -> bool:
-        if not item.eligible or int(item.record_id or 0) <= 0:
-            return False
-        kind = str(item.kind or "").strip().lower()
-        if not kind.startswith(self.AUTO_SNAPSHOT_KIND_PREFIX):
-            return False
-        return int(item.record_id or 0) not in keep_snapshot_ids
 
     def _is_prunable_pre_restore_backup(
         self,
@@ -641,8 +677,17 @@ class HistoryStorageCleanupService:
             self.history_manager._remove_path(companion_path)
         self.history_manager._remove_path(self.history_manager._backup_sidecar_path(backup_path))
 
+    def _cleanup_orphaned_history_artifacts_after_prune(self) -> list[str]:
+        removed_paths: list[str] = []
+        preview = self.inspect()
+        for item in preview.eligible_items:
+            if item.item_type not in self.AUTO_CLEANUP_ITEM_TYPES:
+                continue
+            removed_paths.extend(self._remove_item(item))
+        return removed_paths
+
     def _protected_snapshot_ids(self, entries: list[HistoryEntry]) -> set[int]:
-        snapshot_ids = set(self.history_manager._referenced_snapshot_ids())
+        snapshot_ids = set(self.history_manager._visible_undo_snapshot_ids())
         for entry in entries:
             snapshot_ids.update(self._collect_int_values(entry.payload, "snapshot_id"))
             snapshot_ids.update(self._collect_int_values(entry.inverse_payload, "snapshot_id"))
@@ -772,6 +817,12 @@ class HistoryStorageCleanupService:
             if not root.exists():
                 continue
             files.extend(self._orphan_database_companion_files_under_root(root))
+            files.extend(
+                self._orphan_sidecar_files_under_root(
+                    root,
+                    suffix=self.history_manager.SNAPSHOT_SIDECAR_SUFFIX,
+                )
+            )
         return sorted(files)
 
     def _orphan_backup_companion_files(self) -> list[Path]:
@@ -780,7 +831,14 @@ class HistoryStorageCleanupService:
             or not self.history_manager.backups_root.exists()
         ):
             return []
-        return self._orphan_database_companion_files_under_root(self.history_manager.backups_root)
+        files = self._orphan_database_companion_files_under_root(self.history_manager.backups_root)
+        files.extend(
+            self._orphan_sidecar_files_under_root(
+                self.history_manager.backups_root,
+                suffix=self.history_manager.BACKUP_SIDECAR_SUFFIX,
+            )
+        )
+        return sorted(files)
 
     def _orphan_database_companion_files_under_root(self, root: Path) -> list[Path]:
         files: list[Path] = []
@@ -792,6 +850,17 @@ class HistoryStorageCleanupService:
                 if base_path.exists():
                     continue
                 files.append(path)
+        return sorted(files)
+
+    def _orphan_sidecar_files_under_root(self, root: Path, *, suffix: str) -> list[Path]:
+        files: list[Path] = []
+        for path in root.rglob(f"*{suffix}"):
+            if not path.is_file():
+                continue
+            base_path = Path(str(path)[: -len(suffix)])
+            if base_path.exists():
+                continue
+            files.append(path)
         return sorted(files)
 
     def _live_paths_under_root(self, entries: list[HistoryEntry], root: Path) -> set[Path]:

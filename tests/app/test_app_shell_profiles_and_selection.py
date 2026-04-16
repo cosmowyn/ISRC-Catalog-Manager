@@ -29,6 +29,12 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_delete_entry_history_stays_a_single_visible_user_action = (
         AppShellTestCase.case_delete_entry_history_stays_a_single_visible_user_action
     )
+    test_programmatic_header_resize_does_not_record_history = (
+        AppShellTestCase.case_programmatic_header_resize_does_not_record_history
+    )
+    test_interactive_header_resize_records_a_single_visible_history_entry = (
+        AppShellTestCase.case_interactive_header_resize_records_a_single_visible_history_entry
+    )
     test_add_data_comboboxes_include_release_level_catalog_values = (
         AppShellTestCase.case_add_data_comboboxes_include_release_level_catalog_values
     )

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from time import monotonic
+
 from PySide6.QtCore import QDate, QEvent, Qt
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QApplication,
@@ -30,6 +33,11 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.help_content import help_topic_title
+from isrc_manager.storage_sizes import (
+    clamp_history_storage_budget_mb,
+    format_budget_megabytes,
+    parse_storage_text_to_megabytes,
+)
 
 _MIDDLE_ABBREVIATION_PREFIX_LENGTH = 20
 _MIDDLE_ABBREVIATION_SUFFIX_LENGTH = 25
@@ -400,7 +408,7 @@ def _create_action_button_cluster(
 ) -> QWidget:
     container = QFrame(owner)
     container.setProperty("role", "compactControlGroup")
-    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
     layout = QGridLayout(container)
     left, top, right, bottom = outer_margins
     layout.setContentsMargins(left, top, right, bottom)
@@ -429,13 +437,23 @@ def _create_action_button_cluster(
             continue
         layout.addWidget(button, row, column)
     total_rows = ((len(buttons) - 1) // total_columns) + 1 if buttons else 0
+    lower_bound_height = 0
     if total_rows and button_heights:
-        container.setMinimumHeight(
+        lower_bound_height = (
             top
             + bottom
             + (max(button_heights) * total_rows)
             + (layout.verticalSpacing() * max(0, total_rows - 1))
         )
+    layout.activate()
+    container.ensurePolished()
+    container.setMinimumHeight(
+        max(
+            int(lower_bound_height or 0),
+            int(container.minimumSizeHint().height()),
+            int(container.sizeHint().height()),
+        )
+    )
     return container
 
 
@@ -478,6 +496,93 @@ class FocusWheelSpinBox(_WheelIntentMixin, QSpinBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setFocusPolicy(Qt.StrongFocus)
+
+
+class StorageBudgetSpinBox(FocusWheelSpinBox):
+    """Unit-aware spinbox for profile history storage budgets."""
+
+    _REPEAT_WINDOW_SECONDS = 0.35
+    _REPEAT_THRESHOLD_MB = 10
+    _ACCELERATED_STEP_MB = 100
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setAlignment(Qt.AlignRight)
+        self._repeat_direction = 0
+        self._repeat_moved_mb = 0
+        self._last_step_timestamp = 0.0
+
+    def textFromValue(self, value: int) -> str:
+        return format_budget_megabytes(int(value or 0))
+
+    def valueFromText(self, text: str) -> int:
+        return parse_storage_text_to_megabytes(text)
+
+    def validate(self, text: str, pos: int):
+        clean = str(text or "").strip()
+        if not clean:
+            return (QValidator.Intermediate, text, pos)
+        try:
+            parse_storage_text_to_megabytes(clean)
+        except ValueError:
+            lowered = clean.lower().replace(",", ".")
+            if lowered.endswith((".", ",", "m", "mb", "g", "gb", "t", "tb")) or lowered[
+                -1:
+            ].isdigit():
+                return (QValidator.Intermediate, text, pos)
+            return (QValidator.Invalid, text, pos)
+        return (QValidator.Acceptable, text, pos)
+
+    def stepBy(self, steps: int) -> None:
+        direction = 0
+        if steps > 0:
+            direction = 1
+        elif steps < 0:
+            direction = -1
+        if direction == 0:
+            return
+
+        now = monotonic()
+        continuing_repeat = (
+            direction == self._repeat_direction
+            and (now - self._last_step_timestamp) <= self._REPEAT_WINDOW_SECONDS
+        )
+        if not continuing_repeat:
+            self._reset_repeat_state()
+            self._repeat_direction = direction
+
+        remaining_steps = abs(int(steps))
+        current_value = int(self.value())
+        while remaining_steps > 0:
+            step_size_mb = 1
+            if continuing_repeat and self._repeat_moved_mb >= self._REPEAT_THRESHOLD_MB:
+                step_size_mb = self._ACCELERATED_STEP_MB
+            current_value = clamp_history_storage_budget_mb(
+                current_value + (direction * step_size_mb)
+            )
+            if continuing_repeat:
+                self._repeat_moved_mb += step_size_mb
+            remaining_steps -= 1
+
+        self._last_step_timestamp = now
+        self.setValue(current_value)
+
+    def focusOutEvent(self, event):
+        self._reset_repeat_state()
+        super().focusOutEvent(event)
+
+    def keyReleaseEvent(self, event):
+        self._reset_repeat_state()
+        super().keyReleaseEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._reset_repeat_state()
+        super().mouseReleaseEvent(event)
+
+    def _reset_repeat_state(self) -> None:
+        self._repeat_direction = 0
+        self._repeat_moved_mb = 0
+        self._last_step_timestamp = 0.0
 
 
 class FocusWheelFontComboBox(_WheelIntentMixin, QFontComboBox):

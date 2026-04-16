@@ -924,6 +924,8 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_mode_label = QLabel("Governance")
     app.add_data_work_mode_combo = FocusWheelComboBox()
     app.add_data_work_mode_combo.setEditable(False)
+    for value, label in app._work_track_governance_modes():
+        app.add_data_work_mode_combo.addItem(label, value)
     app.add_data_work_mode_combo.currentIndexChanged.connect(
         app._on_add_track_governance_mode_changed
     )
@@ -936,6 +938,8 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_work_label = QLabel("Work")
     app.add_data_work_work_combo = FocusWheelComboBox()
     app.add_data_work_work_combo.setEditable(False)
+    app.add_data_work_work_combo.addItem("Choose the governing Work…", None)
+    app.add_data_work_work_combo.setEnabled(False)
     app.add_data_work_work_combo.currentIndexChanged.connect(app._on_add_track_work_changed)
     add_data_work_context_layout.addWidget(
         app._create_add_data_row(
@@ -946,6 +950,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_relationship_label = QLabel("Child Type")
     app.add_data_work_relationship_combo = FocusWheelComboBox()
     app.add_data_work_relationship_combo.setEditable(False)
+    for value in app._work_track_relationship_choices():
+        app.add_data_work_relationship_combo.addItem(
+            app._work_track_relationship_label(value),
+            value,
+        )
+    app.add_data_work_relationship_combo.setEnabled(False)
     app.add_data_work_relationship_combo.currentIndexChanged.connect(
         app._on_add_track_relationship_changed
     )
@@ -958,6 +968,8 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_parent_label = QLabel("Parent Track")
     app.add_data_work_parent_combo = FocusWheelComboBox()
     app.add_data_work_parent_combo.setEditable(False)
+    app.add_data_work_parent_combo.addItem("No direct parent track", None)
+    app.add_data_work_parent_combo.setEnabled(False)
     app.add_data_work_parent_combo.currentIndexChanged.connect(
         app._on_add_track_parent_track_changed
     )
@@ -972,6 +984,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_context_actions_layout.setContentsMargins(0, 0, 0, 0)
     app.add_data_work_context_actions_layout.setSpacing(8)
     app.add_data_clear_work_context_button = QPushButton("Open Work Manager")
+    app.add_data_clear_work_context_button.setVisible(False)
     app.add_data_clear_work_context_button.clicked.connect(
         app._return_from_work_track_creation_context
     )
@@ -1290,11 +1303,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         lambda *_args: app._schedule_main_dock_state_save()
     )
     app.add_data_dock.topLevelChanged.connect(lambda *_args: app._schedule_main_dock_state_save())
-    app.add_data_dock.visibilityChanged.connect(
-        lambda visible: app._sync_dock_visibility(
-            app.add_data_action, "display/add_data_panel", visible
-        )
-    )
+    app.add_data_dock.visibilityChanged.connect(app._on_add_track_dock_visibility_changed)
 
     app.table_panel_widget = QWidget()
     app.table_panel_widget.setProperty("role", "workspaceCanvas")

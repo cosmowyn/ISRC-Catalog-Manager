@@ -1,7 +1,9 @@
 import unittest
+from unittest import mock
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent, QValidator
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,
@@ -13,12 +15,15 @@ try:
     )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QEvent = None
+    QKeyEvent = None
     Qt = None
     QDialog = None
     QFormLayout = None
     QFrame = None
     QLineEdit = None
     QPushButton = None
+    QValidator = None
     QWidget = None
     QT_IMPORT_ERROR = exc
 else:
@@ -26,6 +31,7 @@ else:
 
 from isrc_manager.ui_common import (
     DatePickerDialog,
+    StorageBudgetSpinBox,
     TwoDigitSpinBox,
     _abbreviate_middle_text,
     _apply_compact_dialog_control_heights,
@@ -101,6 +107,58 @@ class UICommonTests(unittest.TestCase):
         try:
             self.assertEqual(spinbox.textFromValue(5), "05")
             self.assertEqual(spinbox.textFromValue(12), "12")
+        finally:
+            spinbox.close()
+
+    def test_storage_budget_spinbox_formats_and_parses_human_units(self):
+        spinbox = StorageBudgetSpinBox()
+        try:
+            self.assertEqual(spinbox.textFromValue(512), "512 MB")
+            self.assertEqual(spinbox.textFromValue(1536), "1.5 GB")
+            self.assertEqual(spinbox.textFromValue(1048576), "1 TB")
+            self.assertEqual(spinbox.valueFromText("1,5 GB"), 1536)
+            self.assertEqual(spinbox.valueFromText("1 tb"), 1048576)
+            self.assertEqual(
+                spinbox.validate("1.5 gb", 6)[0],
+                QValidator.Acceptable,
+            )
+            self.assertEqual(
+                spinbox.validate("1.", 2)[0],
+                QValidator.Intermediate,
+            )
+        finally:
+            spinbox.close()
+
+    def test_storage_budget_spinbox_accelerates_held_steps_and_resets_after_release(self):
+        spinbox = StorageBudgetSpinBox()
+        spinbox.setRange(128, 1048576)
+        spinbox.setValue(512)
+        try:
+            with mock.patch(
+                "isrc_manager.ui_common.monotonic",
+                side_effect=[float(index) / 10.0 for index in range(40)],
+            ):
+                for _ in range(11):
+                    spinbox.stepBy(1)
+                self.assertEqual(spinbox.value(), 523)
+
+                spinbox.stepBy(1)
+                self.assertEqual(spinbox.value(), 623)
+
+                spinbox.keyReleaseEvent(QKeyEvent(QEvent.KeyRelease, Qt.Key_Up, Qt.NoModifier))
+                spinbox.stepBy(1)
+                self.assertEqual(spinbox.value(), 624)
+
+            with mock.patch(
+                "isrc_manager.ui_common.monotonic",
+                side_effect=[10.0 + (float(index) / 10.0) for index in range(40)],
+            ):
+                for _ in range(11):
+                    spinbox.stepBy(-1)
+                self.assertEqual(spinbox.value(), 613)
+
+                spinbox.stepBy(-1)
+                self.assertEqual(spinbox.value(), 513)
         finally:
             spinbox.close()
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from isrc_manager.constants import MAX_HISTORY_STORAGE_BUDGET_MB
 from isrc_manager.services import OwnerPartySettings, SettingsMutationService
 
 
@@ -179,6 +180,16 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.assertEqual(
             self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone(),
             ("REL-3", "IPI-4"),
+        )
+
+    def test_set_history_storage_budget_mb_clamps_to_supported_maximum(self):
+        self.service.set_history_storage_budget_mb(MAX_HISTORY_STORAGE_BUDGET_MB + 8192)
+
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_storage_budget_mb'"
+            ).fetchone(),
+            (str(MAX_HISTORY_STORAGE_BUDGET_MB),),
         )
 
     def test_set_owner_party_settings_only_persists_owner_binding(self):

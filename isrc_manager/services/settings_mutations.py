@@ -21,6 +21,7 @@ from isrc_manager.constants import (
     MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     MIN_HISTORY_STORAGE_BUDGET_MB,
 )
+from isrc_manager.storage_sizes import clamp_history_storage_budget_mb
 
 from .settings_reads import OwnerPartySettings
 
@@ -161,10 +162,7 @@ class SettingsMutationService:
         self._profile_set("history_retention_mode", normalized)
 
     def set_history_storage_budget_mb(self, megabytes: int) -> None:
-        value = int(megabytes)
-        value = max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, value))
-        if value <= 0:
-            value = DEFAULT_HISTORY_STORAGE_BUDGET_MB
+        value = clamp_history_storage_budget_mb(int(megabytes))
         self._profile_set("history_storage_budget_mb", value)
 
     def set_history_auto_snapshot_keep_latest(self, keep_latest: int) -> None:

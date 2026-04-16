@@ -215,13 +215,49 @@ class StorageAdminServiceTests(unittest.TestCase):
             allow_warning_deletes=True,
         )
 
-        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[
-            0
-        ]
+        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[0]
+        quarantined_rows = self.conn.execute(
+            """
+            SELECT reversible, status
+            FROM HistoryEntries
+            WHERE status='artifact_missing'
+            """
+        ).fetchall()
+
         self.assertGreaterEqual(len(result.removed_history_entry_ids), 1)
-        self.assertLess(history_entries_after, history_entries_before)
+        self.assertEqual(history_entries_after, history_entries_before)
+        self.assertTrue(quarantined_rows)
+        self.assertTrue(all(int(reversible) == 0 for reversible, _status in quarantined_rows))
         self.assertFalse(Path(self.protected_snapshot.db_snapshot_path).exists())
         self.assertIsNone(self.history.fetch_snapshot(self.protected_snapshot.snapshot_id))
+
+    def test_inspect_reports_orphan_snapshot_and_backup_companion_artifacts(self):
+        snapshot_root = self.layout.history_dir / "snapshots" / self.db_path.stem
+        snapshot_root.mkdir(parents=True, exist_ok=True)
+        orphan_snapshot_assets = snapshot_root / "orphan_snapshot.assets"
+        orphan_snapshot_assets.mkdir(parents=True, exist_ok=True)
+        (orphan_snapshot_assets / "artifact.bin").write_bytes(b"artifact")
+        orphan_snapshot_companion = snapshot_root / "orphan_snapshot.db-journal"
+        orphan_snapshot_companion.write_bytes(b"journal")
+
+        orphan_backup_companion = self.layout.backups_dir / "orphan_backup.db-journal"
+        orphan_backup_companion.write_bytes(b"backup-journal")
+
+        audit = self.service.inspect(current_db_path=self.db_path)
+        items_by_path = {item.path: item for item in audit.items}
+
+        self.assertEqual(
+            items_by_path[str(orphan_snapshot_assets)].status_key,
+            STATUS_ORPHANED,
+        )
+        self.assertEqual(
+            items_by_path[str(orphan_snapshot_companion)].status_key,
+            STATUS_ORPHANED,
+        )
+        self.assertEqual(
+            items_by_path[str(orphan_backup_companion)].status_key,
+            STATUS_ORPHANED,
+        )
 
     def test_cleanup_of_deleted_profile_session_snapshot_prunes_session_history(self):
         audit = self.service.inspect(current_db_path=self.db_path)

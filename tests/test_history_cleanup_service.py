@@ -52,6 +52,15 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         DatabaseSessionService.close(self.conn)
         self.tmpdir.cleanup()
 
+    def _snapshot_create_entry(self, snapshot_id: int):
+        for entry in self.history.list_entries(limit=100, include_hidden=True):
+            if (
+                entry.action_type == "snapshot.create"
+                and str(entry.entity_id or "") == str(int(snapshot_id))
+            ):
+                return entry
+        self.fail(f"Could not find snapshot.create entry for snapshot {snapshot_id}")
+
     def test_inspect_classifies_eligible_and_protected_artifacts(self):
         protected_snapshot = self.history.create_manual_snapshot("Protected Snapshot")
         loose_snapshot = self.history.capture_snapshot(kind="manual", label="Loose Snapshot")
@@ -221,14 +230,14 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         preview = self.cleanup.preview_storage_budget(settings)
         candidate_keys = {item.item_key for item in preview.candidate_items}
 
-        self.assertIn(f"snapshot_record:{old_auto_snapshot.snapshot_id}", candidate_keys)
+        self.assertNotIn(f"snapshot_record:{old_auto_snapshot.snapshot_id}", candidate_keys)
         self.assertIn(f"file_state_bundle:{stale_bundle}", candidate_keys)
         self.assertGreater(preview.budget_bytes, 0)
 
-    def test_enforce_storage_budget_removes_old_auto_snapshots_but_not_manual_ones(self):
-        manual_snapshot = self.history.create_manual_snapshot("Manual Keep")
-        old_auto_snapshot = self.history.capture_snapshot(kind="auto_interval", label="Old Auto")
-        self.history.capture_snapshot(kind="auto_interval", label="Keep Auto")
+    def test_enforce_storage_budget_applies_hard_cap_to_live_snapshots_before_cleanup(self):
+        oldest_manual = self.history.capture_snapshot(kind="manual", label="Manual One")
+        middle_manual = self.history.capture_snapshot(kind="manual", label="Manual Two")
+        newest_manual = self.history.capture_snapshot(kind="manual", label="Manual Three")
 
         settings = HistoryRetentionSettings(
             auto_cleanup_enabled=True,
@@ -240,11 +249,107 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         result = self.cleanup.enforce_storage_budget(settings)
 
         self.assertIn(
-            f"snapshot_record:{old_auto_snapshot.snapshot_id}",
+            f"snapshot_record:{oldest_manual.snapshot_id}",
             set(result.removed_item_keys),
         )
-        self.assertIsNone(self.history.fetch_snapshot(old_auto_snapshot.snapshot_id))
-        self.assertIsNotNone(self.history.fetch_snapshot(manual_snapshot.snapshot_id))
+        self.assertIn(
+            f"snapshot_record:{middle_manual.snapshot_id}",
+            set(result.removed_item_keys),
+        )
+        self.assertIsNone(self.history.fetch_snapshot(oldest_manual.snapshot_id))
+        self.assertIsNone(self.history.fetch_snapshot(middle_manual.snapshot_id))
+        self.assertIsNotNone(self.history.fetch_snapshot(newest_manual.snapshot_id))
+
+    def test_enforce_snapshot_retention_keeps_visible_undo_boundary_even_when_it_exceeds_cap(self):
+        protected_target = self.history.create_manual_snapshot("Protected Target")
+        pruned_candidate = self.history.create_manual_snapshot("Pruned Candidate")
+        self.history.restore_snapshot_as_action(
+            protected_target.snapshot_id,
+            label="Restore Protected Target",
+        )
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=2048,
+            auto_snapshot_keep_latest=1,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        result = self.cleanup.enforce_snapshot_retention(settings)
+        retained_ids = set(result.retained_snapshot_ids)
+        protected_ids = set(result.protected_visible_undo_snapshot_ids)
+
+        self.assertTrue(result.cap_limited_by_visible_undo)
+        self.assertEqual(retained_ids, protected_ids)
+        self.assertNotIn(pruned_candidate.snapshot_id, retained_ids)
+        self.assertEqual(result.retained_live_snapshot_count, 2)
+
+        undone = self.history.undo()
+        self.assertIsNotNone(undone)
+        self.assertEqual(undone.action_type, "snapshot.restore")
+
+    def test_enforce_snapshot_retention_prunes_oldest_first_at_keep_latest_five(self):
+        snapshots = [
+            self.history.capture_snapshot(kind="manual", label=f"Snapshot {index}")
+            for index in range(1, 8)
+        ]
+        oldest_path = Path(snapshots[0].db_snapshot_path)
+        oldest_assets = oldest_path.with_suffix(".assets")
+        oldest_assets.mkdir(parents=True, exist_ok=True)
+        (oldest_assets / "artifact.bin").write_bytes(b"artifact")
+        oldest_companion = Path(f"{oldest_path}-journal")
+        oldest_companion.write_bytes(b"journal")
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=2048,
+            auto_snapshot_keep_latest=5,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        result = self.cleanup.enforce_snapshot_retention(settings)
+
+        self.assertEqual(
+            result.pruned_snapshot_ids,
+            (snapshots[0].snapshot_id, snapshots[1].snapshot_id),
+        )
+        self.assertEqual(
+            result.retained_snapshot_ids,
+            tuple(snapshot.snapshot_id for snapshot in snapshots[2:]),
+        )
+        self.assertFalse(oldest_path.exists())
+        self.assertFalse(oldest_assets.exists())
+        self.assertFalse(oldest_companion.exists())
+
+    def test_enforce_snapshot_retention_quarantines_old_snapshot_history_in_place(self):
+        old_snapshot = self.history.create_manual_snapshot("Old Snapshot")
+        old_entry = self._snapshot_create_entry(old_snapshot.snapshot_id)
+        old_archive_path = Path(
+            old_entry.redo_payload["archived_snapshot"]["db_snapshot_path"]
+        )
+        self.assertTrue(old_archive_path.exists())
+
+        current_snapshot = self.history.create_manual_snapshot("Current Snapshot")
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=2048,
+            auto_snapshot_keep_latest=1,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        result = self.cleanup.enforce_snapshot_retention(settings)
+        refreshed_old_entry = self.history.fetch_entry(old_entry.entry_id)
+
+        self.assertIsNotNone(refreshed_old_entry)
+        self.assertIn(old_snapshot.snapshot_id, result.pruned_snapshot_ids)
+        self.assertNotIn(current_snapshot.snapshot_id, result.pruned_snapshot_ids)
+        self.assertIn(old_entry.entry_id, result.quarantined_entry_ids)
+        self.assertFalse(refreshed_old_entry.reversible)
+        self.assertEqual(refreshed_old_entry.status, self.history.STATUS_ARTIFACT_MISSING)
+        self.assertIsNone(refreshed_old_entry.payload.get("snapshot_id"))
+        self.assertIsNone(refreshed_old_entry.inverse_payload.get("snapshot_id"))
+        self.assertFalse(old_archive_path.exists())
 
     def test_preview_storage_budget_counts_orphan_snapshot_assets_and_companions(self):
         snapshot_dir = self.history_root / "snapshots" / self.db_path.stem

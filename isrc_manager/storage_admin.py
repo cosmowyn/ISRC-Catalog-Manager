@@ -92,7 +92,7 @@ class StorageAdminCleanupResult:
 class ApplicationStorageAdminService:
     """Audits application-wide storage and performs final cleanup without new history."""
 
-    _SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm")
+    _SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm", "-journal")
     _MANAGED_REFERENCE_SPECS = (
         {
             "root": "track_media",
@@ -854,6 +854,50 @@ class ApplicationStorageAdminService:
                         },
                     )
                 )
+        for path in self._orphan_snapshot_bundle_roots(snapshot_root, archive_root):
+            items.append(
+                StorageAdminItem(
+                    item_key=f"history:{profile_path}:orphan_snapshot_bundle:{path}",
+                    status_key=STATUS_ORPHANED,
+                    status_label="Orphaned / Unreferenced",
+                    category_key="history_snapshot",
+                    category_label="History Snapshot",
+                    label=path.name,
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    profile_name=profile_name,
+                    profile_path=profile_path,
+                    reason="Snapshot asset storage is present on disk without a matching snapshot database file.",
+                    recommended=True,
+                    warning_required=False,
+                    metadata={
+                        "cleanup_kind": "direct_path",
+                        "stored_path": str(path),
+                    },
+                )
+            )
+        for path in self._orphan_snapshot_companion_files(snapshot_root, archive_root):
+            items.append(
+                StorageAdminItem(
+                    item_key=f"history:{profile_path}:orphan_snapshot_companion:{path}",
+                    status_key=STATUS_ORPHANED,
+                    status_label="Orphaned / Unreferenced",
+                    category_key="history_snapshot",
+                    category_label="History Snapshot",
+                    label=path.name,
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    profile_name=profile_name,
+                    profile_path=profile_path,
+                    reason="Snapshot companion storage is present on disk without a matching snapshot database file.",
+                    recommended=True,
+                    warning_required=False,
+                    metadata={
+                        "cleanup_kind": "direct_path",
+                        "stored_path": str(path),
+                    },
+                )
+            )
 
         if archive_root.exists():
             for archive_path in sorted(
@@ -1025,6 +1069,44 @@ class ApplicationStorageAdminService:
                     profile_path=source_db_path,
                     reason=reason,
                     recommended=recommended,
+                    warning_required=False,
+                    metadata={
+                        "cleanup_kind": "direct_path",
+                        "stored_path": str(path),
+                    },
+                )
+            )
+        for path in self._orphan_backup_companion_files():
+            metadata_path = (
+                path
+                if str(path).endswith(HistoryManager.BACKUP_SIDECAR_SUFFIX)
+                else self._backup_sidecar_path(path)
+            )
+            metadata = self._load_json_sidecar(metadata_path)
+            source_db_path = self._normalize_existing_path(metadata.get("source_db_path"))
+            status_key = STATUS_ORPHANED
+            status_label = "Orphaned / Unreferenced"
+            reason = "Backup companion storage is present on disk without a matching database copy."
+            if source_db_path and source_db_path not in active_profile_set:
+                status_key = STATUS_DELETED_PROFILE
+                status_label = "Deleted / Missing Profile Residue"
+                reason = (
+                    "Backup companion storage belongs to a profile database that no longer exists."
+                )
+            items.append(
+                StorageAdminItem(
+                    item_key=f"backup-companion:{path}",
+                    status_key=status_key,
+                    status_label=status_label,
+                    category_key="database_copy",
+                    category_label="Database Copy",
+                    label=path.name,
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    profile_name=Path(source_db_path).name if source_db_path else None,
+                    profile_path=source_db_path,
+                    reason=reason,
+                    recommended=True,
                     warning_required=False,
                     metadata={
                         "cleanup_kind": "direct_path",
@@ -1238,7 +1320,7 @@ class ApplicationStorageAdminService:
             conn, manager, cleanup_service = self._history_context(profile_path, history_contexts)
             history_item_type = str(item.metadata.get("history_item_type") or "")
             if item.warning_required:
-                entry_ids = self._remove_referencing_history_entries(
+                entry_ids = self._quarantine_referencing_history_entries(
                     manager,
                     history_item_type=history_item_type,
                     item=item,
@@ -1250,7 +1332,8 @@ class ApplicationStorageAdminService:
                     raise ValueError(
                         f"Snapshot cleanup item is missing its record id: {item.item_key}"
                     )
-                cleanup_service.cleanup_selected([f"snapshot_record:{int(record_id)}"])
+                manager._remove_snapshot_record(int(record_id))
+                manager._ensure_history_invariants()
                 return [item.path]
             if history_item_type == "backup_record":
                 if record_id is None:
@@ -1306,7 +1389,7 @@ class ApplicationStorageAdminService:
         settings.setFallbacksEnabled(False)
         return settings
 
-    def _remove_referencing_history_entries(
+    def _quarantine_referencing_history_entries(
         self,
         manager: HistoryManager,
         *,
@@ -1315,59 +1398,20 @@ class ApplicationStorageAdminService:
     ) -> list[int]:
         if history_item_type == "snapshot_record":
             record_id = int(item.metadata.get("record_id") or 0)
-            entry_ids = []
-            for entry in manager._all_history_entries():
-                if entry.snapshot_before_id == record_id or entry.snapshot_after_id == record_id:
-                    entry_ids.append(int(entry.entry_id))
-                    continue
-                payload_ids = set()
-                payload_ids.update(self._collect_int_values(entry.payload, "snapshot_id"))
-                payload_ids.update(self._collect_int_values(entry.inverse_payload, "snapshot_id"))
-                payload_ids.update(self._collect_int_values(entry.redo_payload, "snapshot_id"))
-                if record_id in payload_ids:
-                    entry_ids.append(int(entry.entry_id))
+            entry_ids = manager._quarantine_artifact_references(snapshot_ids={record_id})
         elif history_item_type == "snapshot_archive":
-            entry_ids = self._history_entry_ids_referencing_path(
-                manager,
-                Path(item.path),
-                root=Path(item.path).parent,
+            target_path = Path(item.path)
+            entry_ids = manager._quarantine_artifact_references(
+                artifact_roots=(target_path, target_path.with_suffix(".assets")),
             )
         elif history_item_type == "file_state_bundle":
-            entry_ids = self._history_entry_ids_referencing_path(
-                manager,
-                Path(item.path),
-                root=Path(item.path),
+            entry_ids = manager._quarantine_artifact_references(
+                artifact_roots=(Path(item.path),),
             )
         else:
             entry_ids = []
-        if not entry_ids:
-            manager._ensure_history_invariants()
-            return []
-        with manager.conn:
-            manager.conn.executemany(
-                "DELETE FROM HistoryEntries WHERE id=?",
-                [(int(entry_id),) for entry_id in sorted(set(entry_ids))],
-            )
         manager._ensure_history_invariants()
         return sorted(set(entry_ids))
-
-    def _history_entry_ids_referencing_path(
-        self,
-        manager: HistoryManager,
-        target_path: Path,
-        *,
-        root: Path,
-    ) -> list[int]:
-        entry_ids: list[int] = []
-        normalized_target = target_path.resolve()
-        for entry in manager._all_history_entries():
-            live_paths = set()
-            live_paths.update(self._paths_under_root(entry.payload, root))
-            live_paths.update(self._paths_under_root(entry.inverse_payload, root))
-            live_paths.update(self._paths_under_root(entry.redo_payload, root))
-            if self._path_is_referenced(normalized_target, live_paths):
-                entry_ids.append(int(entry.entry_id))
-        return entry_ids
 
     def _table_names(self, conn: sqlite3.Connection) -> set[str]:
         return {
@@ -1576,6 +1620,70 @@ class ApplicationStorageAdminService:
     @staticmethod
     def _backup_sidecar_path(backup_path: Path) -> Path:
         return backup_path.with_suffix(backup_path.suffix + HistoryManager.BACKUP_SIDECAR_SUFFIX)
+
+    @classmethod
+    def _orphan_snapshot_bundle_roots(cls, *roots: Path) -> list[Path]:
+        bundle_roots: list[Path] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            for path in sorted(candidate for candidate in root.glob("*.assets") if candidate.is_dir()):
+                if path.with_suffix(".db").exists():
+                    continue
+                bundle_roots.append(path)
+        return bundle_roots
+
+    @classmethod
+    def _orphan_snapshot_companion_files(cls, *roots: Path) -> list[Path]:
+        files: list[Path] = []
+        for root in roots:
+            files.extend(cls._orphan_database_companion_files_under_root(root))
+            files.extend(
+                cls._orphan_sidecar_files_under_root(
+                    root,
+                    suffix=HistoryManager.SNAPSHOT_SIDECAR_SUFFIX,
+                )
+            )
+        return sorted(files)
+
+    def _orphan_backup_companion_files(self) -> list[Path]:
+        return self._orphan_database_companion_files_under_root(self.layout.backups_dir)
+
+    @staticmethod
+    def _orphan_database_companion_files_under_root(root: Path) -> list[Path]:
+        if not root.exists():
+            return []
+        files: list[Path] = []
+        for suffix in HistoryManager.DATABASE_ARTIFACT_COMPANION_SUFFIXES:
+            for path in root.rglob(f"*{suffix}"):
+                if not path.is_file():
+                    continue
+                base_path = Path(str(path)[: -len(suffix)])
+                if base_path.exists():
+                    continue
+                files.append(path)
+        for path in root.rglob(f"*{HistoryManager.BACKUP_SIDECAR_SUFFIX}"):
+            if not path.is_file():
+                continue
+            base_path = Path(str(path)[: -len(HistoryManager.BACKUP_SIDECAR_SUFFIX)])
+            if base_path.exists():
+                continue
+            files.append(path)
+        return sorted(dict.fromkeys(files))
+
+    @staticmethod
+    def _orphan_sidecar_files_under_root(root: Path, *, suffix: str) -> list[Path]:
+        if not root.exists():
+            return []
+        files: list[Path] = []
+        for path in root.rglob(f"*{suffix}"):
+            if not path.is_file():
+                continue
+            base_path = Path(str(path)[: -len(suffix)])
+            if base_path.exists():
+                continue
+            files.append(path)
+        return sorted(files)
 
     @staticmethod
     def _managed_manifest_size(manifest: object | None) -> int:

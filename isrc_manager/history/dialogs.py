@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.history.cleanup import HistoryCleanupBlockedError, HistoryStorageCleanupService
+from isrc_manager.storage_sizes import format_storage_bytes
 from isrc_manager.ui_common import _apply_standard_dialog_chrome
 
 
@@ -461,7 +462,10 @@ class HistoryCleanupDialog(QDialog):
                         "safe item(s) under the current policy."
                     )
                 elif budget_preview.protected_over_budget_items:
-                    summary_text += " The remaining over-budget storage is protected by retained history or manual restore points."
+                    summary_text += (
+                        " The remaining over-budget storage is still needed by the current "
+                        "undo boundary or other retained history references."
+                    )
         self.summary_label.setText(summary_text)
 
         self._populate_cleanup_table(self.eligible_table, preview.eligible_items)
@@ -590,13 +594,4 @@ class HistoryCleanupDialog(QDialog):
 
     @staticmethod
     def _human_size(size_bytes: int) -> str:
-        try:
-            value = float(int(size_bytes or 0))
-        except Exception:
-            value = 0.0
-        units = ["B", "KB", "MB", "GB", "TB"]
-        index = 0
-        while value >= 1024.0 and index < len(units) - 1:
-            value /= 1024.0
-            index += 1
-        return f"{value:.0f} {units[index]}" if index == 0 else f"{value:.1f} {units[index]}"
+        return format_storage_bytes(size_bytes, max_decimals=1)

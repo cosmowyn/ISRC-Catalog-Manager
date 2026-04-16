@@ -5,6 +5,7 @@ from .cleanup import (
     HistoryCleanupItem,
     HistoryCleanupPreview,
     HistoryCleanupResult,
+    HistorySnapshotRetentionResult,
     HistoryStorageCleanupService,
     HistoryTrimPreview,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "HistoryManager",
     "HistoryRecoveryError",
     "HistoryRepairResult",
+    "HistorySnapshotRetentionResult",
     "HistoryStorageCleanupService",
     "HistoryTrimPreview",
     "SessionHistoryManager",

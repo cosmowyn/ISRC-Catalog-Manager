@@ -20,6 +20,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_creates_governed_child_track_in_add_panel = (
         AppShellTestCase.case_work_manager_creates_governed_child_track_in_add_panel
     )
+    test_work_manager_controls_remain_non_overlapping_when_fonts_expand = (
+        AppShellTestCase.case_work_manager_controls_remain_non_overlapping_when_fonts_expand
+    )
     test_create_work_offers_first_track_creation_context = (
         AppShellTestCase.case_create_work_offers_first_track_creation_context
     )

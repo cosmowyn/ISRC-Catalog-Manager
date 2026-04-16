@@ -822,8 +822,15 @@ class ThemeBuilderTests(unittest.TestCase):
             )
             dialog.history_retention_mode_combo.setCurrentIndex(lean_index)
             self.assertEqual(dialog.values()["history_retention_mode"], "lean")
+            self.assertEqual(dialog.values()["history_storage_budget_mb"], 1024)
             self.assertEqual(dialog.values()["history_auto_snapshot_keep_latest"], 10)
             self.assertEqual(dialog.values()["history_prune_pre_restore_copies_after_days"], 7)
+
+            dialog.history_storage_budget_spin.setValue(1536)
+            self.assertEqual(dialog.values()["history_retention_mode"], "custom")
+
+            dialog.history_storage_budget_spin.setValue(1024)
+            self.assertEqual(dialog.values()["history_retention_mode"], "lean")
 
             dialog.history_auto_snapshot_keep_latest_spin.setValue(13)
             self.assertEqual(dialog.values()["history_retention_mode"], "custom")

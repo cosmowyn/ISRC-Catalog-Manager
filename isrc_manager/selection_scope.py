@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -82,7 +83,9 @@ class SelectionScopeBanner(QWidget):
     def __init__(self, *, chooser_label: str = "Choose Tracks", parent=None):
         super().__init__(parent)
         self.setObjectName("selectionScopeBanner")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         _apply_standard_widget_chrome(self, "selectionScopeBanner")
+        self._syncing_height = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -122,12 +125,42 @@ class SelectionScopeBanner(QWidget):
 
         self.clear_override_button.setEnabled(False)
         _apply_compact_dialog_control_heights(self)
+        self._sync_layout_height()
 
     def set_state(self, state: SelectionScopeState) -> None:
         self.scope_label.setText(state.source_label)
         self.count_label.setText(f"{state.count} track{'s' if state.count != 1 else ''}")
         self.preview_label.setText(state.preview_text or "No tracks selected.")
         self.clear_override_button.setEnabled(bool(state.override_active))
+        self._sync_layout_height()
+
+    def _sync_layout_height(self) -> None:
+        if self._syncing_height:
+            return
+        self._syncing_height = True
+        try:
+            layout = self.layout()
+            if layout is not None:
+                layout.activate()
+            target_height = max(
+                int(self.minimumSizeHint().height()),
+                int(self.sizeHint().height()),
+            )
+            if self.minimumHeight() != target_height:
+                self.setMinimumHeight(target_height)
+                self.updateGeometry()
+        finally:
+            self._syncing_height = False
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if event.type() in (
+            QEvent.FontChange,
+            QEvent.LayoutRequest,
+            QEvent.StyleChange,
+        ):
+            self._sync_layout_height()
+        return result
 
 
 class TrackSelectionChooserDialog(QDialog):

@@ -2974,6 +2974,55 @@ class AppShellTestCase(unittest.TestCase):
             "Delete Track: Delete History Song",
         )
 
+    def case_programmatic_header_resize_does_not_record_history(self):
+        self._create_track(index=138, title="Programmatic Resize One")
+        self._create_track(index=139, title="Programmatic Resize Two")
+        self.window.refresh_table()
+        self.window.col_width_action.setChecked(True)
+        self.window._apply_col_width_mode(True)
+        self.app.processEvents()
+
+        header = self.window.table.horizontalHeader()
+        title_column = self.window._column_index_by_header("Track Title")
+        self.assertGreaterEqual(title_column, 0)
+        history_before = self.window.history_manager.list_entries(limit=20)
+
+        with mock.patch.object(
+            app_module.QApplication,
+            "mouseButtons",
+            return_value=Qt.NoButton,
+        ):
+            header.resizeSection(title_column, header.sectionSize(title_column) + 48)
+            self.app.processEvents()
+
+        history_after = self.window.history_manager.list_entries(limit=20)
+        self.assertEqual([entry.label for entry in history_after], [entry.label for entry in history_before])
+
+    def case_interactive_header_resize_records_a_single_visible_history_entry(self):
+        self._create_track(index=140, title="Interactive Resize One")
+        self._create_track(index=141, title="Interactive Resize Two")
+        self.window.refresh_table()
+        self.window.col_width_action.setChecked(True)
+        self.window._apply_col_width_mode(True)
+        self.app.processEvents()
+
+        header = self.window.table.horizontalHeader()
+        title_column = self.window._column_index_by_header("Track Title")
+        self.assertGreaterEqual(title_column, 0)
+
+        with mock.patch.object(
+            app_module.QApplication,
+            "mouseButtons",
+            return_value=Qt.LeftButton,
+        ):
+            header.resizeSection(title_column, header.sectionSize(title_column) + 56)
+            self.app.processEvents()
+
+        visible_history = self.window.history_manager.list_entries(limit=10)
+        self.assertTrue(visible_history)
+        self.assertEqual(visible_history[0].label, "Adjust Column Widths")
+        self.assertEqual(visible_history[0].action_type, "settings.bundle")
+
     def case_catalog_release_browser_opens_as_tabified_dock(self):
         track_id = self._create_track(index=101, title="Release Dock Track")
         self.window.release_service.create_release(
@@ -3249,6 +3298,40 @@ class AppShellTestCase(unittest.TestCase):
         assert detail is not None
         self.assertIn(int(track_id), detail.track_ids)
         self.assertGreaterEqual(self.window.add_data_work_parent_combo.count(), 2)
+
+    def case_work_manager_controls_remain_non_overlapping_when_fonts_expand(self):
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+
+        enlarged_font = app_module.QFont(panel.font())
+        enlarged_font.setPointSize(enlarged_font.pointSize() + 10)
+
+        for button in panel.manage_actions_cluster.findChildren(app_module.QPushButton):
+            button.setFont(enlarged_font)
+        for label in panel.selection_banner.findChildren(app_module.QLabel):
+            label.setFont(enlarged_font)
+        panel.search_edit.setFont(enlarged_font)
+        self.app.processEvents()
+
+        cluster_rect = panel.manage_actions_cluster.geometry()
+        banner_rect = panel.selection_banner.geometry()
+        self.assertGreaterEqual(
+            banner_rect.top(),
+            cluster_rect.bottom() + 1,
+        )
+        self.assertTrue(
+            all(
+                button.geometry().bottom() <= panel.manage_actions_cluster.rect().bottom()
+                for button in panel.manage_actions_cluster.findChildren(app_module.QPushButton)
+            )
+        )
+        self.assertTrue(
+            all(
+                widget.geometry().bottom() <= panel.selection_banner.rect().bottom()
+                for widget in panel.selection_banner.findChildren(app_module.QWidget)
+                if widget is not panel.selection_banner
+            )
+        )
 
     def case_create_work_offers_first_track_creation_context(self):
         panel = self.window.open_work_manager()
@@ -4491,7 +4574,7 @@ class AppShellTestCase(unittest.TestCase):
 
             def addButton(self, label, _role=None):
                 button = object()
-                if label == "Open Cleanup":
+                if label == "Open Application Storage Admin":
                     self._cleanup_button = button
                 return button
 
@@ -4506,7 +4589,10 @@ class AppShellTestCase(unittest.TestCase):
 
         with (
             mock.patch.object(app_module, "QMessageBox", _CleanupPromptBox),
-            mock.patch.object(self.window, "open_history_cleanup_dialog") as open_cleanup,
+            mock.patch.object(
+                self.window,
+                "open_application_storage_admin_dialog",
+            ) as open_cleanup,
         ):
             allowed = self.window._prepare_history_storage_for_projected_growth(
                 trigger_label="manual snapshot",
@@ -4518,7 +4604,7 @@ class AppShellTestCase(unittest.TestCase):
         open_cleanup.assert_called_once_with()
         self.assertIn("Projected usage", _CleanupPromptBox.last_text)
         self.assertIn(
-            "Continue anyway, or review History Cleanup first?",
+            "Continue anyway, or review Application Storage Admin first?",
             _CleanupPromptBox.last_text,
         )
 
@@ -5864,6 +5950,66 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.audio_file_warning_label.isHidden())
         self.assertIn("MP3", self.window.audio_file_warning_label.text())
+
+    def case_add_track_workspace_initializes_governance_controls_when_shown_without_entry_reset(self):
+        self.window.open_add_track_workspace()
+        self.app.processEvents()
+
+        self.assertEqual(self.window.add_data_work_mode_combo.count(), 2)
+        self.assertEqual(
+            self.window.add_data_work_mode_combo.currentData(),
+            "create_new_work",
+        )
+        self.assertGreaterEqual(self.window.add_data_work_work_combo.count(), 1)
+        self.assertEqual(
+            self.window.add_data_work_work_combo.itemText(0),
+            "Choose the governing Work…",
+        )
+        self.assertFalse(self.window.add_data_work_work_combo.isEnabled())
+        self.assertGreaterEqual(self.window.add_data_work_relationship_combo.count(), 1)
+        self.assertEqual(
+            self.window.add_data_work_relationship_combo.currentData(),
+            "original",
+        )
+        self.assertFalse(self.window.add_data_work_relationship_combo.isEnabled())
+        self.assertGreaterEqual(self.window.add_data_work_parent_combo.count(), 1)
+        self.assertEqual(
+            self.window.add_data_work_parent_combo.itemText(0),
+            "No direct parent track",
+        )
+        self.assertFalse(self.window.add_data_work_parent_combo.isEnabled())
+        self.assertFalse(self.window.add_data_clear_work_context_button.isVisible())
+
+    def case_add_track_workspace_show_preserves_existing_draft_and_work_context(self):
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Visible Draft Work", iswc="T-123.456.720-0")
+        )
+
+        self.window.open_add_track_entry()
+        self.app.processEvents()
+        self.window.track_title_field.setText("Visible Draft Track")
+        self.window.artist_field.setCurrentText("Visible Draft Artist")
+        mode_index = self.window.add_data_work_mode_combo.findData("link_existing_work")
+        self.assertGreaterEqual(mode_index, 0)
+        self.window.add_data_work_mode_combo.setCurrentIndex(mode_index)
+        self.app.processEvents()
+        work_index = self.window.add_data_work_work_combo.findData(work_id)
+        self.assertGreaterEqual(work_index, 0)
+        self.window.add_data_work_work_combo.setCurrentIndex(work_index)
+        self.app.processEvents()
+
+        self.window._apply_add_data_panel_state(False)
+        self.app.processEvents()
+        self.window.open_add_track_workspace()
+        self.app.processEvents()
+
+        self.assertEqual(self.window.track_title_field.text(), "Visible Draft Track")
+        self.assertEqual(self.window.artist_field.currentText(), "Visible Draft Artist")
+        self.assertEqual(
+            self.window.add_data_work_mode_combo.currentData(),
+            "link_existing_work",
+        )
+        self.assertEqual(self.window.add_data_work_work_combo.currentData(), work_id)
 
     def case_track_editor_uses_tabbed_sections(self):
         track_id = self._create_track(

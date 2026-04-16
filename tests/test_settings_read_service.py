@@ -9,6 +9,7 @@ from isrc_manager.constants import (
     DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     DEFAULT_HISTORY_RETENTION_MODE,
     DEFAULT_HISTORY_STORAGE_BUDGET_MB,
+    MAX_HISTORY_STORAGE_BUDGET_MB,
 )
 from isrc_manager.services import (
     AutoSnapshotSettings,
@@ -353,6 +354,29 @@ class SettingsReadServiceTests(unittest.TestCase):
                 auto_snapshot_keep_latest=12,
                 prune_pre_restore_copies_after_days=21,
             ),
+        )
+
+    def test_load_history_storage_budget_clamps_numeric_values_and_falls_back_for_invalid(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                ("history_storage_budget_mb", str(MAX_HISTORY_STORAGE_BUDGET_MB + 99)),
+            )
+
+        self.assertEqual(
+            self.service.load_history_storage_budget_mb(),
+            MAX_HISTORY_STORAGE_BUDGET_MB,
+        )
+
+        with self.conn:
+            self.conn.execute(
+                "UPDATE app_kv SET value=? WHERE key='history_storage_budget_mb'",
+                ("not-a-number",),
+            )
+
+        self.assertEqual(
+            self.service.load_history_storage_budget_mb(),
+            DEFAULT_HISTORY_STORAGE_BUDGET_MB,
         )
 
 

@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from PySide6.QtCore import QSettings
 
 from isrc_manager.blob_icons import default_blob_icon_settings
+from isrc_manager.constants import MAX_HISTORY_STORAGE_BUDGET_MB
 from isrc_manager.services import (
     ApplicationSettingsTransferService,
     GS1ContractEntry,
@@ -40,7 +41,12 @@ def build_template(path: Path):
     workbook.save(path)
 
 
-def build_current_values(*, icon_path: str, custom_theme_name: str = "Migrated Theme"):
+def build_current_values(
+    *,
+    icon_path: str,
+    custom_theme_name: str = "Migrated Theme",
+    history_storage_budget_mb: int = 2048,
+):
     theme_library = starter_theme_library()
     theme_library[custom_theme_name] = {
         "accent": "#118AB2",
@@ -56,7 +62,7 @@ def build_current_values(*, icon_path: str, custom_theme_name: str = "Migrated T
         "auto_snapshot_interval_minutes": 45,
         "history_retention_mode": "balanced",
         "history_auto_cleanup_enabled": True,
-        "history_storage_budget_mb": 2048,
+        "history_storage_budget_mb": history_storage_budget_mb,
         "history_auto_snapshot_keep_latest": 25,
         "history_prune_pre_restore_copies_after_days": 14,
         "isrc_prefix": "NLABC",
@@ -278,6 +284,36 @@ class SettingsTransferServiceTests(unittest.TestCase):
         self.assertTrue(result.values["gs1_template_clear_existing"])
         self.assertEqual(result.values["gs1_contract_entries"], ())
         self.assertEqual(result.values["gs1_contracts_csv_path"], "")
+
+    def test_settings_bundle_round_trips_one_terabyte_history_budget(self):
+        icon_path = self.root / "app-icon.ico"
+        icon_path.write_bytes(b"ICON")
+        export_service = ApplicationSettingsTransferService(
+            gs1_settings_service=self.source_gs1,
+            data_root=self.root / "export-data",
+        )
+        archive_path = export_service.export_bundle(
+            self.root / "settings-max-budget.zip",
+            current_values=build_current_values(
+                icon_path=str(icon_path),
+                history_storage_budget_mb=MAX_HISTORY_STORAGE_BUDGET_MB,
+            ),
+            app_version="3.1.1",
+        )
+
+        target_transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=self.root / "import-data",
+        )
+        result = target_transfer.prepare_import(
+            archive_path,
+            current_values=build_current_values(icon_path=""),
+        )
+
+        self.assertEqual(
+            result.values["history_storage_budget_mb"],
+            MAX_HISTORY_STORAGE_BUDGET_MB,
+        )
 
 
 if __name__ == "__main__":

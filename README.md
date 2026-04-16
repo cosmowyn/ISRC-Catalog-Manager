@@ -211,7 +211,7 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - global search and relationship browsing give the richer catalog model a usable navigation layer
 - package exchange can carry managed files and restore their recorded storage mode on import
 - audio tag import workflows can preview conflicts before writing metadata into the catalog, while catalog-backed audio exports embed metadata automatically and plain external conversion stays metadata-free
-- history settings include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
+- history settings include retention and safety presets, storage budgets, and cleanup prompts that enforce a hard retained-snapshot cap while preserving the current visible undo boundary
 - theme tooling goes beyond colors into starter themes, optional hint text, a live preview pane, app-wide preview, BLOB badge icons, selector discovery, and QSS autocomplete
 
 ## Who It Is For

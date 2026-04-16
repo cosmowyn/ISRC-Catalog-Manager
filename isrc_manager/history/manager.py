@@ -2626,44 +2626,151 @@ class HistoryManager:
                 return archived_snapshot
         return {}
 
-    def _quarantine_snapshot_references(self, snapshot_id: int) -> list[int]:
-        rows = self.conn.execute(
-            """
-            SELECT id, parent_id
-            FROM HistoryEntries
-            WHERE snapshot_before_id=? OR snapshot_after_id=?
-            ORDER BY id
-            """,
-            (int(snapshot_id), int(snapshot_id)),
-        ).fetchall()
-        entry_ids = [int(row[0]) for row in rows]
-        if not entry_ids:
+    def _visible_undo_snapshot_ids(self) -> set[int]:
+        protected_ids: set[int] = set()
+        for entry in self._visible_undo_plan():
+            if str(entry.action_type or "").startswith("snapshot.delete"):
+                continue
+            if entry.strategy == "snapshot":
+                if entry.snapshot_before_id is not None:
+                    protected_ids.add(int(entry.snapshot_before_id))
+                if entry.snapshot_after_id is not None:
+                    protected_ids.add(int(entry.snapshot_after_id))
+                continue
+            if entry.action_type == "snapshot.create":
+                protected_ids.update(self._collect_int_values(entry.payload, "snapshot_id"))
+                protected_ids.update(self._collect_int_values(entry.inverse_payload, "snapshot_id"))
+        live_snapshot_ids = {int(snapshot.snapshot_id) for snapshot in self._all_snapshots()}
+        return {snapshot_id for snapshot_id in protected_ids if snapshot_id in live_snapshot_ids}
+
+    def _quarantine_artifact_references(
+        self,
+        *,
+        snapshot_ids: set[int] | list[int] | tuple[int, ...] | None = None,
+        artifact_roots: list[Path] | tuple[Path, ...] | set[Path] | None = None,
+    ) -> list[int]:
+        target_snapshot_ids = {
+            int(snapshot_id)
+            for snapshot_id in (snapshot_ids or ())
+            if int(snapshot_id or 0) > 0
+        }
+        normalized_roots = self._normalize_artifact_roots(artifact_roots or ())
+        if not target_snapshot_ids and not normalized_roots:
             return []
+
+        entries = self._all_history_entries()
+        current_plan_ids = {entry.entry_id for entry in self._visible_undo_plan()}
+        affected_entry_ids: list[int] = []
         current_id = self.get_current_entry_id()
-        fallback_head_id = None
+        payload_roots = normalized_roots + self._quarantinable_payload_roots()
+
         with self.conn:
-            for entry_id, parent_id in rows:
-                self.conn.execute(
+            cursor = self.conn.cursor()
+            for entry in entries:
+                snapshot_before_id = entry.snapshot_before_id
+                snapshot_after_id = entry.snapshot_after_id
+                changed = False
+
+                if (
+                    snapshot_before_id is not None
+                    and int(snapshot_before_id) in target_snapshot_ids
+                ):
+                    snapshot_before_id = None
+                    changed = True
+                if snapshot_after_id is not None and int(snapshot_after_id) in target_snapshot_ids:
+                    snapshot_after_id = None
+                    changed = True
+
+                payload, payload_changed = self._scrub_artifact_references(
+                    entry.payload,
+                    snapshot_ids=target_snapshot_ids,
+                    artifact_roots=normalized_roots,
+                )
+                inverse_payload, inverse_changed = self._scrub_artifact_references(
+                    entry.inverse_payload,
+                    snapshot_ids=target_snapshot_ids,
+                    artifact_roots=normalized_roots,
+                )
+                redo_payload, redo_changed = self._scrub_artifact_references(
+                    entry.redo_payload,
+                    snapshot_ids=target_snapshot_ids,
+                    artifact_roots=normalized_roots,
+                )
+                changed = changed or payload_changed or inverse_changed or redo_changed
+                if changed:
+                    payload, payload_path_changed = self._scrub_artifact_references(
+                        payload,
+                        snapshot_ids=set(),
+                        artifact_roots=payload_roots,
+                    )
+                    inverse_payload, inverse_path_changed = self._scrub_artifact_references(
+                        inverse_payload,
+                        snapshot_ids=set(),
+                        artifact_roots=payload_roots,
+                    )
+                    redo_payload, redo_path_changed = self._scrub_artifact_references(
+                        redo_payload,
+                        snapshot_ids=set(),
+                        artifact_roots=payload_roots,
+                    )
+                    changed = (
+                        changed
+                        or payload_path_changed
+                        or inverse_path_changed
+                        or redo_path_changed
+                    )
+                if not changed:
+                    continue
+
+                cursor.execute(
                     """
                     UPDATE HistoryEntries
                     SET reversible=0,
                         status=?,
-                        snapshot_before_id=NULL,
-                        snapshot_after_id=NULL
+                        payload_json=?,
+                        inverse_json=?,
+                        redo_json=?,
+                        snapshot_before_id=?,
+                        snapshot_after_id=?
                     WHERE id=?
                     """,
-                    (self.STATUS_ARTIFACT_MISSING, int(entry_id)),
+                    (
+                        self.STATUS_ARTIFACT_MISSING,
+                        json.dumps(payload or {}),
+                        json.dumps(inverse_payload or {}),
+                        json.dumps(redo_payload or {}),
+                        snapshot_before_id,
+                        snapshot_after_id,
+                        int(entry.entry_id),
+                    ),
                 )
-                if current_id is not None and int(entry_id) == int(current_id):
-                    fallback_head_id = int(parent_id) if parent_id is not None else None
-            if current_id is not None and current_id in entry_ids:
-                self._set_current_entry_id_in_cursor(fallback_head_id, cursor=self.conn.cursor())
-        return entry_ids
+                affected_entry_ids.append(int(entry.entry_id))
 
-    def _remove_snapshot_record(self, snapshot_id: int) -> None:
+            affected_set = set(affected_entry_ids)
+            if affected_set and current_id is not None and affected_set.intersection(current_plan_ids):
+                fallback_head_id = self._nearest_visible_unaffected_ancestor(
+                    current_id,
+                    affected_set,
+                )
+                if fallback_head_id is None:
+                    fallback_head_id = self._select_fallback_current_entry_id()
+                self._set_current_entry_id_in_cursor(fallback_head_id, cursor=cursor)
+
+        return sorted(set(affected_entry_ids))
+
+    def _quarantine_snapshot_references(self, snapshot_id: int) -> list[int]:
+        return self._quarantine_artifact_references(snapshot_ids={int(snapshot_id)})
+
+    def _remove_snapshot_record(self, snapshot_id: int) -> list[str]:
+        removed_paths: list[str] = []
         snapshot = self.fetch_snapshot(snapshot_id)
         if snapshot is not None:
             snapshot_path = Path(snapshot.db_snapshot_path)
+            removed_paths.append(str(snapshot_path))
+            removed_paths.append(str(self._snapshot_sidecar_path(snapshot_path)))
+            removed_paths.append(str(self._snapshot_assets_root(snapshot_path)))
+            for companion_path in self._database_artifact_companion_paths(snapshot_path):
+                removed_paths.append(str(companion_path))
             self._remove_path(snapshot_path)
             self._remove_path(self._snapshot_sidecar_path(snapshot_path))
             for companion_path in self._database_artifact_companion_paths(snapshot_path):
@@ -2672,9 +2779,132 @@ class HistoryManager:
             for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
                 asset_path = state.get("snapshot_path")
                 if asset_path:
+                    removed_paths.append(str(asset_path))
                     self._remove_path(Path(asset_path))
         with self.conn:
             self.conn.execute("DELETE FROM HistorySnapshots WHERE id=?", (int(snapshot_id),))
+        return list(dict.fromkeys(removed_paths))
+
+    def _nearest_visible_unaffected_ancestor(
+        self,
+        current_id: int,
+        affected_entry_ids: set[int],
+    ) -> int | None:
+        entry = self.fetch_entry(int(current_id))
+        while entry is not None:
+            if (
+                entry.entry_id not in affected_entry_ids
+                and entry.visible_in_history
+                and entry.reversible
+                and entry.status == self.STATUS_APPLIED
+            ):
+                return int(entry.entry_id)
+            if entry.parent_id is None:
+                break
+            entry = self.fetch_entry(int(entry.parent_id))
+        return None
+
+    def _normalize_artifact_roots(
+        self,
+        artifact_roots: list[Path] | tuple[Path, ...] | set[Path],
+    ) -> tuple[Path, ...]:
+        normalized: list[Path] = []
+        for root in artifact_roots:
+            try:
+                candidate = Path(root)
+            except Exception:
+                continue
+            normalized.append(candidate)
+        return tuple(normalized)
+
+    def _quarantinable_payload_roots(self) -> tuple[Path, ...]:
+        return (
+            self.history_root / "snapshot_archives" / self.db_path.stem,
+            self.history_root / "file_states" / self.db_path.stem,
+        )
+
+    def _scrub_artifact_references(
+        self,
+        value: Any,
+        *,
+        snapshot_ids: set[int],
+        artifact_roots: tuple[Path, ...],
+    ) -> tuple[Any, bool]:
+        changed = False
+        if isinstance(value, dict):
+            scrubbed: dict[Any, Any] = {}
+            for key, item in value.items():
+                if key == "snapshot_id":
+                    snapshot_id = self._int_or_none(item)
+                    if snapshot_id is not None and snapshot_id in snapshot_ids:
+                        scrubbed[key] = None
+                        changed = True
+                        continue
+                scrubbed_item, item_changed = self._scrub_artifact_references(
+                    item,
+                    snapshot_ids=snapshot_ids,
+                    artifact_roots=artifact_roots,
+                )
+                scrubbed[key] = scrubbed_item
+                changed = changed or item_changed
+            return scrubbed, changed
+        if isinstance(value, list):
+            scrubbed_list: list[Any] = []
+            for item in value:
+                scrubbed_item, item_changed = self._scrub_artifact_references(
+                    item,
+                    snapshot_ids=snapshot_ids,
+                    artifact_roots=artifact_roots,
+                )
+                scrubbed_list.append(scrubbed_item)
+                changed = changed or item_changed
+            return scrubbed_list, changed
+        if isinstance(value, str) and self._path_value_matches_roots(value, artifact_roots):
+            return None, True
+        return value, False
+
+    def _path_value_matches_roots(
+        self,
+        value: str,
+        artifact_roots: tuple[Path, ...],
+    ) -> bool:
+        text = str(value or "").strip()
+        if not text or not artifact_roots:
+            return False
+        try:
+            candidate = Path(text)
+        except Exception:
+            return False
+        if not candidate.is_absolute():
+            return False
+        for root in artifact_roots:
+            try:
+                if candidate.resolve() == root.resolve():
+                    return True
+            except Exception:
+                if candidate == root:
+                    return True
+            try:
+                candidate.resolve().relative_to(root.resolve())
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _collect_int_values(self, value: Any, key_name: str) -> set[int]:
+        values: set[int] = set()
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == key_name:
+                    candidate = self._int_or_none(item)
+                    if candidate is not None:
+                        values.add(candidate)
+                values.update(self._collect_int_values(item, key_name))
+            return values
+        if isinstance(value, list):
+            for item in value:
+                values.update(self._collect_int_values(item, key_name))
+        return values
 
     def _infer_snapshot_manifest(self, snapshot_path: Path) -> dict:
         assets_root = snapshot_path.with_suffix(".assets")

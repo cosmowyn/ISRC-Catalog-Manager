@@ -5,6 +5,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_add_data_panel_uses_tabbed_sections = (
         AppShellTestCase.case_add_data_panel_uses_tabbed_sections
     )
+    test_add_track_workspace_initializes_governance_controls_when_shown_without_entry_reset = (
+        AppShellTestCase.case_add_track_workspace_initializes_governance_controls_when_shown_without_entry_reset
+    )
+    test_add_track_workspace_show_preserves_existing_draft_and_work_context = (
+        AppShellTestCase.case_add_track_workspace_show_preserves_existing_draft_and_work_context
+    )
     test_track_editor_uses_tabbed_sections = AppShellTestCase.case_track_editor_uses_tabbed_sections
     test_track_editor_disables_album_art_upload_for_shared_art_slave = (
         AppShellTestCase.case_track_editor_disables_album_art_upload_for_shared_art_slave

@@ -39,6 +39,7 @@ from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
 from isrc_manager.external_launch import open_external_url
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, iter_help_sections
+from isrc_manager.storage_sizes import format_storage_bytes
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
@@ -1978,7 +1979,7 @@ class ApplicationStorageAdminDialog(QDialog):
         ]
         if history_count:
             parts.append(
-                f"Removed {history_count} dependent history entr{'y' if history_count == 1 else 'ies'}."
+                f"Quarantined {history_count} dependent history entr{'y' if history_count == 1 else 'ies'}."
             )
         if session_count:
             parts.append(
@@ -1987,6 +1988,9 @@ class ApplicationStorageAdminDialog(QDialog):
         if skipped_count:
             parts.append(f"Skipped {skipped_count} item(s).")
         QMessageBox.information(self, "Cleanup Complete", "\n".join(parts))
+        refresh_history_actions = getattr(self.app, "_refresh_history_actions", None)
+        if callable(refresh_history_actions):
+            refresh_history_actions()
         self.refresh()
 
     def _set_busy(self, busy: bool, message: str | None = None) -> None:
@@ -2037,14 +2041,7 @@ class ApplicationStorageAdminDialog(QDialog):
 
     @staticmethod
     def _display_bytes(value: int) -> str:
-        total = float(max(0, int(value or 0)))
-        for unit in ("B", "KB", "MB", "GB", "TB"):
-            if total < 1024.0 or unit == "TB":
-                if unit == "B":
-                    return f"{int(total)} {unit}"
-                return f"{total:.1f} {unit}"
-            total /= 1024.0
-        return "0 B"
+        return format_storage_bytes(value, max_decimals=1)
 
 
 class AboutDialog(QDialog):

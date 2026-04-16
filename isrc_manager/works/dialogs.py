@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -723,6 +723,7 @@ class WorkBrowserPanel(QWidget):
         self.track_choice_provider = track_choice_provider or (lambda: [])
         self.linked_track_id = linked_track_id
         self._selection_override_track_ids: list[int] = []
+        self._control_height_sync_pending = False
         self.setObjectName("workBrowserPanel")
         _apply_standard_widget_chrome(self, "workBrowserPanel")
 
@@ -744,6 +745,7 @@ class WorkBrowserPanel(QWidget):
             "Find and Manage",
             "Search by work title, alternate title, ISWC, or registration number, then inspect, link, filter, and manage the selected work and its related tracks.",
         )
+        self._controls_box = controls_box
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(10)
@@ -822,6 +824,7 @@ class WorkBrowserPanel(QWidget):
         root.addWidget(table_box, 1)
 
         _apply_compact_dialog_control_heights(self)
+        self._schedule_control_height_sync()
 
         self.refresh()
         self.refresh_selection_scope()
@@ -931,6 +934,48 @@ class WorkBrowserPanel(QWidget):
 
     def refresh_selection_scope(self) -> None:
         self.selection_banner.set_state(self.selection_scope_state())
+        self._schedule_control_height_sync()
+
+    def _schedule_control_height_sync(self) -> None:
+        if getattr(self, "_control_height_sync_pending", False):
+            return
+        if not hasattr(self, "manage_actions_cluster") or not hasattr(self, "selection_banner"):
+            return
+        self._control_height_sync_pending = True
+        QTimer.singleShot(0, self._sync_control_height_constraints)
+
+    def _sync_control_height_constraints(self) -> None:
+        self._control_height_sync_pending = False
+        for widget in (
+            getattr(self, "manage_actions_cluster", None),
+            getattr(self, "selection_banner", None),
+            getattr(self, "_controls_box", None),
+        ):
+            if not isinstance(widget, QWidget):
+                continue
+            widget.ensurePolished()
+            layout = widget.layout()
+            if layout is not None:
+                layout.activate()
+            target_height = max(
+                int(widget.minimumSizeHint().height()),
+                int(widget.sizeHint().height()),
+            )
+            if widget.minimumHeight() != target_height:
+                widget.setMinimumHeight(target_height)
+            widget.updateGeometry()
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if event.type() in (
+            QEvent.FontChange,
+            QEvent.LayoutRequest,
+            QEvent.Resize,
+            QEvent.Show,
+            QEvent.StyleChange,
+        ):
+            self._schedule_control_height_sync()
+        return result
 
     def _use_current_selection(self) -> None:
         self.set_selection_override_track_ids([])

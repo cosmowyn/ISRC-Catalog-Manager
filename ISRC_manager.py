@@ -389,6 +389,11 @@ from isrc_manager.startup_splash import (
     create_startup_splash_controller,
 )
 from isrc_manager.storage_admin import ApplicationStorageAdminService
+from isrc_manager.storage_sizes import (
+    bytes_to_megabytes_floor,
+    format_budget_megabytes,
+    format_storage_bytes,
+)
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_RESUMABLE_STAGE,
@@ -475,6 +480,7 @@ from isrc_manager.ui_common import (
     FocusWheelFontComboBox,
     FocusWheelSlider,
     FocusWheelSpinBox,
+    StorageBudgetSpinBox,
     TwoDigitSpinBox,
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -670,17 +676,17 @@ class ApplicationSettingsDialog(QDialog):
         (
             HISTORY_RETENTION_MODE_MAXIMUM_SAFETY,
             "Maximum Safety",
-            "Keeps more automatic snapshots and never ages pre-restore safety copies automatically.",
+            "Keeps more retained snapshots and never ages pre-restore safety copies automatically.",
         ),
         (
             HISTORY_RETENTION_MODE_BALANCED,
             "Balanced",
-            "Balances automatic cleanup with a moderate automatic snapshot history and aged safety-copy pruning.",
+            "Balances the retained snapshot count with moderate cleanup and aged safety-copy pruning.",
         ),
         (
             HISTORY_RETENTION_MODE_LEAN,
             "Lean",
-            "Uses a smaller automatic snapshot history and faster cleanup for constrained storage budgets.",
+            "Uses a smaller retained snapshot count and faster cleanup for constrained storage budgets.",
         ),
         (
             HISTORY_RETENTION_MODE_CUSTOM,
@@ -1055,7 +1061,7 @@ class ApplicationSettingsDialog(QDialog):
             2,
             "Retention & Safety Level",
             self.history_retention_mode_combo,
-            "Choose a practical cleanup posture for automatic history artifacts. Manual snapshots and protected restore points stay protected by default.",
+            "Choose a practical cleanup posture for retained history artifacts. The snapshot count applies to both manual and automatic snapshots.",
         )
         self.history_retention_mode_hint = self._make_hint("")
         snapshots_grid.addWidget(self.history_retention_mode_hint, 3, 1, 1, 2)
@@ -1070,10 +1076,10 @@ class ApplicationSettingsDialog(QDialog):
             4,
             "Automatic Cleanup",
             self.history_auto_cleanup_enabled_check,
-            "Allow the app to remove older automatic snapshots, unreferenced bundles, and aged pre-restore safety copies when the retention policy allows it.",
+            "Allow the app to remove unreferenced bundles and aged pre-restore safety copies automatically after the retained snapshot cap is enforced.",
         )
 
-        self.history_storage_budget_spin = FocusWheelSpinBox()
+        self.history_storage_budget_spin = StorageBudgetSpinBox()
         self.history_storage_budget_spin.setRange(
             MIN_HISTORY_STORAGE_BUDGET_MB,
             MAX_HISTORY_STORAGE_BUDGET_MB,
@@ -1087,7 +1093,6 @@ class ApplicationSettingsDialog(QDialog):
                 ),
             )
         )
-        self.history_storage_budget_spin.setSuffix(" MB")
         self.history_storage_budget_spin.setMinimumWidth(180)
         self.history_storage_budget_spin.setMaximumWidth(220)
         self._add_row(
@@ -1095,7 +1100,7 @@ class ApplicationSettingsDialog(QDialog):
             5,
             "Storage Budget",
             self.history_storage_budget_spin,
-            "Set a soft cap for history snapshots, backups, and artifact bundles stored for this profile.",
+            "Set the profile history-storage budget. Values stay exact internally and are displayed in MB, GB, or TB as appropriate.",
         )
 
         self.history_auto_snapshot_keep_latest_spin = FocusWheelSpinBox()
@@ -1120,9 +1125,9 @@ class ApplicationSettingsDialog(QDialog):
         self._add_row(
             snapshots_grid,
             6,
-            "Keep Latest Auto Snapshots",
+            "Keep Latest Snapshots",
             self.history_auto_snapshot_keep_latest_spin,
-            "Older automatic snapshots beyond this count can be trimmed automatically when they are no longer referenced by retained history.",
+            "Retain this many live snapshots for the profile. Older live snapshots are pruned first unless the current visible undo boundary still needs them.",
         )
 
         self.history_prune_pre_restore_copies_after_days_spin = FocusWheelSpinBox()
@@ -1176,6 +1181,9 @@ class ApplicationSettingsDialog(QDialog):
             self.history_auto_cleanup_enabled_check.isChecked()
         )
         self.history_auto_cleanup_enabled_check.toggled.connect(
+            self._sync_history_retention_mode_from_controls
+        )
+        self.history_storage_budget_spin.valueChanged.connect(
             self._sync_history_retention_mode_from_controls
         )
         self.history_auto_snapshot_keep_latest_spin.valueChanged.connect(
@@ -1635,6 +1643,7 @@ class ApplicationSettingsDialog(QDialog):
     def _history_retention_control_payload(self) -> dict[str, object]:
         return {
             "auto_cleanup_enabled": self.history_auto_cleanup_enabled_check.isChecked(),
+            "storage_budget_mb": int(self.history_storage_budget_spin.value()),
             "auto_snapshot_keep_latest": int(self.history_auto_snapshot_keep_latest_spin.value()),
             "prune_pre_restore_copies_after_days": int(
                 self.history_prune_pre_restore_copies_after_days_spin.value()
@@ -1647,6 +1656,9 @@ class ApplicationSettingsDialog(QDialog):
         try:
             self.history_auto_cleanup_enabled_check.setChecked(
                 bool(payload.get("auto_cleanup_enabled", True))
+            )
+            self.history_storage_budget_spin.setValue(
+                int(payload.get("storage_budget_mb", DEFAULT_HISTORY_STORAGE_BUDGET_MB))
             )
             self.history_auto_snapshot_keep_latest_spin.setValue(
                 int(
@@ -8735,7 +8747,7 @@ class App(QMainWindow):
                     "Enabled" if retention_settings.auto_cleanup_enabled else "Disabled"
                 ),
                 "usage_text": self._human_size(budget_preview.total_bytes),
-                "budget_text": self._human_size(budget_preview.budget_bytes),
+                "budget_text": format_budget_megabytes(retention_settings.storage_budget_mb),
                 "over_budget_text": self._human_size(budget_preview.over_budget_bytes),
                 "reclaimable_text": self._human_size(reclaimable_bytes),
                 "within_budget": budget_preview.over_budget_bytes <= 0,
@@ -8747,9 +8759,9 @@ class App(QMainWindow):
                     if retention_settings.auto_cleanup_enabled
                     else "Automatic cleanup: disabled"
                 ),
-                f"Storage budget: {self._human_size(budget_preview.budget_bytes)}",
+                f"Storage budget: {format_budget_megabytes(retention_settings.storage_budget_mb)}",
                 f"Current usage: {self._human_size(budget_preview.total_bytes)}",
-                f"Keep latest auto snapshots: {retention_settings.auto_snapshot_keep_latest}",
+                f"Keep latest snapshots: {retention_settings.auto_snapshot_keep_latest}",
                 (
                     "Prune pre-restore safety copies: never"
                     if retention_settings.prune_pre_restore_copies_after_days <= 0
@@ -8770,7 +8782,7 @@ class App(QMainWindow):
                 )
                 history_storage_budget_summary["summary"] = (
                     f"History storage is using {self._human_size(budget_preview.total_bytes)} "
-                    f"of a {self._human_size(budget_preview.budget_bytes)} budget."
+                    f"of a {format_budget_megabytes(retention_settings.storage_budget_mb)} budget."
                 )
             else:
                 warning_summary = f"History storage is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
@@ -8778,7 +8790,7 @@ class App(QMainWindow):
                     warning_summary += " Safe cleanup candidates are available."
                 elif budget_preview.protected_over_budget_items:
                     warning_summary += (
-                        " Remaining space is protected by retained history or manual artifacts."
+                        " Remaining space is still needed by the current undo boundary or retained recovery artifacts."
                     )
                 budget_details.extend(
                     [
@@ -8794,7 +8806,7 @@ class App(QMainWindow):
                 )
                 history_storage_budget_summary["summary"] = (
                     f"History storage is using {self._human_size(budget_preview.total_bytes)} "
-                    f"of a {self._human_size(budget_preview.budget_bytes)} budget and is over budget by "
+                    f"of a {format_budget_megabytes(retention_settings.storage_budget_mb)} budget and is over budget by "
                     f"{self._human_size(budget_preview.over_budget_bytes)}."
                 )
             progress.complete("Evaluated history storage budget.")
@@ -10077,6 +10089,29 @@ class App(QMainWindow):
             return HistoryRetentionSettings()
         return self.settings_reads.load_history_retention_settings()
 
+    def _apply_history_snapshot_retention_policy(
+        self,
+        *,
+        trigger_label: str,
+        settings: HistoryRetentionSettings | None = None,
+    ):
+        if self.history_manager is None or self.settings_reads is None:
+            return None
+        cleanup_service = HistoryStorageCleanupService(self.history_manager)
+        active_settings = settings or self._current_history_retention_settings()
+        result = cleanup_service.enforce_snapshot_retention(active_settings)
+        if result.pruned_snapshot_ids or result.quarantined_entry_ids:
+            self._refresh_history_actions()
+            if result.pruned_snapshot_ids:
+                self.statusBar().showMessage(
+                    (
+                        f"Applied snapshot retention after {trigger_label}: "
+                        f"removed {len(result.pruned_snapshot_ids)} live snapshot(s)."
+                    ),
+                    5000,
+                )
+        return result
+
     def open_history_cleanup_dialog(self):
         dialog = HistoryCleanupDialog(self, parent=self)
         dialog.exec()
@@ -10132,6 +10167,10 @@ class App(QMainWindow):
         if self.history_manager is None or self.settings_reads is None:
             return True
         settings = self._current_history_retention_settings()
+        self._apply_history_snapshot_retention_policy(
+            trigger_label=trigger_label,
+            settings=settings,
+        )
         cleanup_service = HistoryStorageCleanupService(self.history_manager)
         projection = cleanup_service.preview_storage_projection(
             settings,
@@ -10186,9 +10225,7 @@ class App(QMainWindow):
                 f"{self._human_size(projection.budget_bytes)} budget."
             )
             if projection.blocked_by_protected_items:
-                message += (
-                    " Remaining space is protected by retained history or manual restore points."
-                )
+                message += " Remaining space is still required by the current undo boundary or retained recovery artifacts."
             self.statusBar().showMessage(message, 7000)
             self.logger.info(
                 "Skipped %s because projected history usage would exceed the budget",
@@ -10217,26 +10254,29 @@ class App(QMainWindow):
             )
         if projection.blocked_by_protected_items:
             details.append(
-                "Even after safe automatic cleanup, the profile would still be over budget because the remaining items are protected by retained history or manual restore points."
+                "Even after safe automatic cleanup, the profile would still be over budget because the remaining items are still needed by the current undo boundary or retained recovery artifacts."
             )
         else:
             details.append(
                 "The profile would cross the storage budget before the next cleanup pass."
             )
-        details.append("Continue anyway, or review History Cleanup first?")
+        details.append("Continue anyway, or review Application Storage Admin first?")
 
         message_box = QMessageBox(self)
         message_box.setIcon(QMessageBox.Warning)
         message_box.setWindowTitle("History Storage Budget")
         message_box.setText("\n\n".join(details))
         continue_btn = message_box.addButton("Continue", QMessageBox.AcceptRole)
-        cleanup_btn = message_box.addButton("Open Cleanup", QMessageBox.ActionRole)
+        cleanup_btn = message_box.addButton(
+            "Open Application Storage Admin",
+            QMessageBox.ActionRole,
+        )
         cancel_btn = message_box.addButton(QMessageBox.Cancel)
         message_box.setDefaultButton(continue_btn)
         message_box.exec()
         clicked = message_box.clickedButton()
         if clicked is cleanup_btn:
-            self.open_history_cleanup_dialog()
+            self.open_application_storage_admin_dialog()
             return False
         if clicked is cancel_btn:
             return False
@@ -10252,6 +10292,10 @@ class App(QMainWindow):
             return
         cleanup_service = HistoryStorageCleanupService(self.history_manager)
         settings = self._current_history_retention_settings()
+        self._apply_history_snapshot_retention_policy(
+            trigger_label=trigger_label,
+            settings=settings,
+        )
         try:
             result = cleanup_service.enforce_storage_budget(settings)
         except HistoryCleanupBlockedError as exc:
@@ -10291,8 +10335,8 @@ class App(QMainWindow):
 
         signature = (
             str(trigger_label),
-            int(result.total_bytes or 0) // (1024 * 1024),
-            int(result.budget_bytes or 0) // (1024 * 1024),
+            bytes_to_megabytes_floor(result.total_bytes),
+            bytes_to_megabytes_floor(result.budget_bytes),
             bool(result.blocked_by_protected_items),
         )
         if not interactive and signature == self._last_history_budget_warning_signature:
@@ -10315,13 +10359,13 @@ class App(QMainWindow):
             )
         if result.blocked_by_protected_items:
             message_parts.append(
-                "The remaining over-budget storage is protected by retained history references or manual restore points."
+                "The remaining over-budget storage is still needed by the current undo boundary or retained recovery artifacts."
             )
         else:
             message_parts.append(
-                "The profile is still over budget and may need a manual cleanup review."
+                "The profile is still over budget and may need application-wide storage cleanup."
             )
-        message_parts.append("Open History Cleanup now?")
+        message_parts.append("Open Application Storage Admin now?")
         if (
             QMessageBox.question(
                 self,
@@ -10331,7 +10375,7 @@ class App(QMainWindow):
             )
             == QMessageBox.Yes
         ):
-            self.open_history_cleanup_dialog()
+            self.open_application_storage_admin_dialog()
 
     def _refresh_auto_snapshot_schedule(self) -> None:
         if not hasattr(self, "auto_snapshot_timer"):
@@ -10758,7 +10802,7 @@ class App(QMainWindow):
                         key="history_storage_budget_mb",
                         label=(
                             f"Set History Storage Budget: "
-                            f"{int(after_values['history_storage_budget_mb'])} MB"
+                            f"{format_budget_megabytes(int(after_values['history_storage_budget_mb']))}"
                         ),
                         before_value=before_values["history_storage_budget_mb"],
                         after_value=after_values["history_storage_budget_mb"],
@@ -12020,8 +12064,19 @@ class App(QMainWindow):
             history_entity_id=f"{prefix}/column_order",
         )
 
-    def _on_header_sections_resized(self, *_args):
+    def _should_record_header_resize_history(self) -> bool:
         if getattr(self, "_suspend_layout_history", False):
+            return False
+        col_width_action = getattr(self, "col_width_action", None)
+        if col_width_action is not None and not col_width_action.isChecked():
+            return False
+        try:
+            return QApplication.mouseButtons() != Qt.NoButton
+        except Exception:
+            return False
+
+    def _on_header_sections_resized(self, *_args):
+        if not self._should_record_header_resize_history():
             return
         prefix = self._table_settings_prefix()
         self._save_header_state(
@@ -13178,6 +13233,7 @@ class App(QMainWindow):
             dock.setVisible(enabled)
             if enabled:
                 dock.raise_()
+                self._ensure_add_track_panel_initialized()
 
     def _apply_catalog_table_panel_state(self, enabled: bool):
         enabled = bool(enabled)
@@ -15750,6 +15806,81 @@ class App(QMainWindow):
             ("link_existing_work", "Link to Existing Work"),
         )
 
+    def _refresh_add_track_lookup_sources_preserving_text(self) -> None:
+        self._refresh_add_track_artist_party_choices()
+        if self.conn is None:
+            return
+
+        def _set_items_preserving_text(combo: QComboBox, values) -> None:
+            clean_values: list[str] = []
+            seen: set[str] = set()
+            for value in values:
+                clean_value = str(value or "").strip()
+                if not clean_value or clean_value in seen:
+                    continue
+                seen.add(clean_value)
+                clean_values.append(clean_value)
+            current_text = str(combo.currentText() or "").strip()
+            previous_state = combo.blockSignals(True)
+            try:
+                combo.clear()
+                combo.setEditable(True)
+                combo.setInsertPolicy(QComboBox.NoInsert)
+                combo.addItem("")
+                combo.addItems(clean_values)
+                if current_text and combo.findText(current_text, Qt.MatchFixedString) < 0:
+                    combo.addItem(current_text)
+                combo.setCurrentText(current_text)
+                completer = QCompleter(clean_values, combo)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                combo.setCompleter(completer)
+            finally:
+                combo.blockSignals(previous_state)
+
+        album_combo = getattr(self, "album_title_field", None)
+        upc_combo = getattr(self, "upc_field", None)
+        genre_combo = getattr(self, "genre_field", None)
+        catalog_field = getattr(self, "catalog_number_field", None)
+
+        combo_values = self._catalog_combo_values_from_connection(self.conn)
+
+        if isinstance(album_combo, QComboBox):
+            _set_items_preserving_text(album_combo, combo_values.get("albums", []))
+        if isinstance(upc_combo, QComboBox):
+            _set_items_preserving_text(upc_combo, combo_values.get("upcs", []))
+        if isinstance(genre_combo, QComboBox):
+            _set_items_preserving_text(genre_combo, combo_values.get("genres", []))
+        if catalog_field is not None and hasattr(catalog_field, "refresh"):
+            current_catalog_number = (
+                str(catalog_field.currentText() or "").strip()
+                if hasattr(catalog_field, "currentText")
+                else ""
+            )
+            catalog_field.refresh()
+            catalog_field.setCurrentText(current_catalog_number)
+
+    def _ensure_add_track_panel_initialized(self) -> None:
+        if not hasattr(self, "add_data_work_mode_combo"):
+            return
+        self._current_work_track_context()
+        self._refresh_work_track_creation_context_ui()
+
+        lookup_combos = (
+            getattr(self, "album_title_field", None),
+            getattr(self, "upc_field", None),
+            getattr(self, "genre_field", None),
+        )
+        catalog_combo = getattr(getattr(self, "catalog_number_field", None), "combo", None)
+        if any(
+            isinstance(combo, QComboBox) and combo.count() == 0 for combo in lookup_combos
+        ) or (isinstance(catalog_combo, QComboBox) and catalog_combo.count() == 0):
+            self._refresh_add_track_lookup_sources_preserving_text()
+
+    def _on_add_track_dock_visibility_changed(self, visible: bool) -> None:
+        self._sync_dock_visibility(self.add_data_action, "display/add_data_panel", visible)
+        if bool(visible):
+            self._ensure_add_track_panel_initialized()
+
     def _default_work_track_context(self) -> dict[str, object]:
         return {
             "mode": "create_new_work",
@@ -18242,6 +18373,7 @@ class App(QMainWindow):
 
     def open_add_track_workspace(self):
         self._apply_add_data_panel_state(True)
+        self._ensure_add_track_panel_initialized()
         field = getattr(self, "track_title_field", None)
         if field is not None:
             try:
@@ -27752,18 +27884,7 @@ class App(QMainWindow):
         )
 
     def _human_size(self, n: int) -> str:
-        try:
-            n = int(n or 0)
-        except Exception:
-            n = 0
-        thresh = 1024.0
-        units = ["B", "KB", "MB", "GB", "TB"]
-        u = 0
-        val = float(n)
-        while val >= thresh and u < len(units) - 1:
-            val /= thresh
-            u += 1
-        return f"{val:.0f} {units[u]}" if u == 0 else f"{val:.1f} {units[u]}"
+        return format_storage_bytes(n, max_decimals=1)
 
     def _format_blob_badge(self, mime_type: str | None, size_bytes: int) -> str:
         _mime_type = mime_type

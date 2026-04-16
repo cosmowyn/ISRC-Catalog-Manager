@@ -23,6 +23,7 @@ from isrc_manager.constants import (
     MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     MIN_HISTORY_STORAGE_BUDGET_MB,
 )
+from isrc_manager.storage_sizes import parse_history_storage_budget_mb
 
 
 @dataclass(slots=True)
@@ -381,11 +382,7 @@ class SettingsReadService:
 
     def load_history_storage_budget_mb(self) -> int:
         raw = self._read_profile_value("history_storage_budget_mb")
-        try:
-            value = int(raw)
-        except Exception:
-            value = DEFAULT_HISTORY_STORAGE_BUDGET_MB
-        return max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, value))
+        return parse_history_storage_budget_mb(raw)
 
     def load_history_auto_snapshot_keep_latest(self) -> int:
         raw = self._read_profile_value("history_auto_snapshot_keep_latest")

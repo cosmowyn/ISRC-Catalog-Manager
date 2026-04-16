@@ -18,7 +18,7 @@ MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES = 1440
 DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED = True
 DEFAULT_HISTORY_STORAGE_BUDGET_MB = 2048
 MIN_HISTORY_STORAGE_BUDGET_MB = 128
-MAX_HISTORY_STORAGE_BUDGET_MB = 65536
+MAX_HISTORY_STORAGE_BUDGET_MB = 1048576
 DEFAULT_HISTORY_RETENTION_MODE = "balanced"
 HISTORY_RETENTION_MODE_MAXIMUM_SAFETY = "maximum_safety"
 HISTORY_RETENTION_MODE_BALANCED = "balanced"
@@ -39,16 +39,19 @@ MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS = 3650
 HISTORY_RETENTION_MODE_PRESETS = {
     HISTORY_RETENTION_MODE_MAXIMUM_SAFETY: {
         "auto_cleanup_enabled": True,
+        "storage_budget_mb": 4096,
         "auto_snapshot_keep_latest": 50,
         "prune_pre_restore_copies_after_days": 0,
     },
     HISTORY_RETENTION_MODE_BALANCED: {
         "auto_cleanup_enabled": True,
+        "storage_budget_mb": DEFAULT_HISTORY_STORAGE_BUDGET_MB,
         "auto_snapshot_keep_latest": DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
         "prune_pre_restore_copies_after_days": DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     },
     HISTORY_RETENTION_MODE_LEAN: {
         "auto_cleanup_enabled": True,
+        "storage_budget_mb": 1024,
         "auto_snapshot_keep_latest": 10,
         "prune_pre_restore_copies_after_days": 7,
     },
