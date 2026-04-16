@@ -13996,9 +13996,9 @@ class App(QMainWindow):
             },
             {
                 "id": "reset_form",
-                "label": "Reset Add Track Draft and Search",
+                "label": "Reset Search Filter",
                 "category": "Edit",
-                "description": "Clear the current Add Track draft and reset the current search filter.",
+                "description": "Clear the current catalog search text and restore the full table.",
                 "action": self.reset_form_action,
             },
             {
@@ -16178,15 +16178,14 @@ class App(QMainWindow):
 
     def reset_search(self):
         self._explicit_row_filter_track_ids = None
+        self.search_field.blockSignals(True)
         self.search_field.clear()
+        self.search_field.blockSignals(False)
+        self.search_column_combo.blockSignals(True)
         idx = self.search_column_combo.findData(-1)  # “All columns”
         self.search_column_combo.setCurrentIndex(idx if idx != -1 else 0)
-        for row in range(self.table.rowCount()):
-            self.table.setRowHidden(row, False)
-        self.refresh_table()
-        self._update_count_label()
-        self._update_duration_label()
-        self._refresh_workspace_selection_scopes()
+        self.search_column_combo.blockSignals(False)
+        self.apply_search_filter()
 
     def _load_catalog_ui_dataset(
         self,
@@ -26168,7 +26167,6 @@ class App(QMainWindow):
         if event.key() == Qt.Key_Delete:
             self.delete_entry()
         elif event.key() == Qt.Key_Escape:
-            self.init_form()
             self.reset_search()
         elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
             # Only save when the Add Data panel is active AND focus is inside that panel

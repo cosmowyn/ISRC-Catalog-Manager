@@ -104,8 +104,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Delete", "Meta+Backspace"),
     )
     app.reset_form_action = app._create_action(
-        "Reset Add Track Draft and Search",
-        slot=lambda: (app.init_form(), app.reset_search()),
+        "Reset Search Filter",
+        slot=app.reset_search,
         shortcuts=("Escape",),
     )
 

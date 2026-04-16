@@ -731,6 +731,20 @@ class AppShellTestCase(unittest.TestCase):
                 return row
         raise AssertionError(f"Track row not found: {track_id}")
 
+    def _visible_track_ids(self) -> list[int]:
+        visible_track_ids: list[int] = []
+        for row in range(self.window.table.rowCount()):
+            if self.window.table.isRowHidden(row):
+                continue
+            item = self.window.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                visible_track_ids.append(int(item.text()))
+            except Exception:
+                continue
+        return visible_track_ids
+
     @staticmethod
     def _menu_action_texts(menu) -> list[str]:
         return [action.text() for action in menu.actions() if action.text()]
@@ -2805,6 +2819,88 @@ class AppShellTestCase(unittest.TestCase):
 
         selected_ids = self.window._selected_track_ids()
         self.assertEqual(len(selected_ids), len(visible_rows))
+
+    def case_reset_button_clears_filters_without_refreshing_catalog(self):
+        track_ids = [
+            self._create_track(index=131, title="Reset Filter One"),
+            self._create_track(index=132, title="Reset Filter Two"),
+            self._create_track(index=133, title="Orbit After Reset"),
+        ]
+        self.window.refresh_table()
+        self.window.search_field.setText("Reset Filter")
+        for index in range(self.window.search_column_combo.count()):
+            if self.window.search_column_combo.itemText(index) == "Track Title":
+                self.window.search_column_combo.setCurrentIndex(index)
+                break
+        self.window._set_explicit_track_filter([track_ids[0]])
+        self.app.processEvents()
+
+        self.assertEqual(self._visible_track_ids(), [track_ids[0]])
+
+        with mock.patch.object(self.window, "refresh_table") as refresh_table:
+            self.window.search_button.click()
+            self.app.processEvents()
+
+        refresh_table.assert_not_called()
+        self.assertIsNone(self.window._explicit_row_filter_track_ids)
+        self.assertEqual(self.window.search_field.text(), "")
+        self.assertEqual(self.window.search_column_combo.currentData(), -1)
+        self.assertEqual(set(self._visible_track_ids()), set(track_ids))
+
+    def case_reset_filter_action_keeps_form_state_and_skips_catalog_refresh(self):
+        track_ids = [
+            self._create_track(index=134, title="Action Reset One"),
+            self._create_track(index=135, title="Action Reset Two"),
+        ]
+        self.window.refresh_table()
+        self.window.track_title_field.setText("Keep This Draft")
+        self.window.search_field.setText("Action Reset One")
+        self.app.processEvents()
+
+        self.assertEqual(self._visible_track_ids(), [track_ids[0]])
+
+        with (
+            mock.patch.object(self.window, "init_form") as init_form,
+            mock.patch.object(self.window, "refresh_table") as refresh_table,
+        ):
+            self.window.reset_form_action.trigger()
+            self.app.processEvents()
+
+        init_form.assert_not_called()
+        refresh_table.assert_not_called()
+        self.assertEqual(self.window.track_title_field.text(), "Keep This Draft")
+        self.assertEqual(self.window.search_field.text(), "")
+        self.assertEqual(set(self._visible_track_ids()), set(track_ids))
+
+    def case_escape_resets_filter_without_rebuilding_catalog_or_form(self):
+        track_ids = [
+            self._create_track(index=136, title="Escape Reset One"),
+            self._create_track(index=137, title="Escape Reset Two"),
+        ]
+        self.window.refresh_table()
+        self.window.track_title_field.setText("Leave Draft Alone")
+        self.window.search_field.setText("Escape Reset One")
+        self.app.processEvents()
+
+        self.assertEqual(self._visible_track_ids(), [track_ids[0]])
+
+        class _EscapeEvent:
+            @staticmethod
+            def key():
+                return Qt.Key_Escape
+
+        with (
+            mock.patch.object(self.window, "init_form") as init_form,
+            mock.patch.object(self.window, "refresh_table") as refresh_table,
+        ):
+            self.window.keyPressEvent(_EscapeEvent())
+            self.app.processEvents()
+
+        init_form.assert_not_called()
+        refresh_table.assert_not_called()
+        self.assertEqual(self.window.track_title_field.text(), "Leave Draft Alone")
+        self.assertEqual(self.window.search_field.text(), "")
+        self.assertEqual(set(self._visible_track_ids()), set(track_ids))
 
     def case_delete_entry_history_stays_a_single_visible_user_action(self):
         track_id = self._create_track(index=121, title="Delete History Song")

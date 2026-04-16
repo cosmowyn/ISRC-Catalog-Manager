@@ -17,6 +17,15 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_filtered_select_all_counts_only_visible_tracks = (
         AppShellTestCase.case_filtered_select_all_counts_only_visible_tracks
     )
+    test_reset_button_clears_filters_without_refreshing_catalog = (
+        AppShellTestCase.case_reset_button_clears_filters_without_refreshing_catalog
+    )
+    test_reset_filter_action_keeps_form_state_and_skips_catalog_refresh = (
+        AppShellTestCase.case_reset_filter_action_keeps_form_state_and_skips_catalog_refresh
+    )
+    test_escape_resets_filter_without_rebuilding_catalog_or_form = (
+        AppShellTestCase.case_escape_resets_filter_without_rebuilding_catalog_or_form
+    )
     test_delete_entry_history_stays_a_single_visible_user_action = (
         AppShellTestCase.case_delete_entry_history_stays_a_single_visible_user_action
     )
