@@ -1185,6 +1185,15 @@ class DatabaseSchemaService:
             for metric in metrics:
                 diagnostics[(system_key, metric)] += 0
 
+        party_service = PartyService(self.conn)
+        legacy_artist_names: dict[int, str] = {}
+        if self._table_exists("Artists"):
+            legacy_artist_names = {
+                int(row[0]): str(row[1] or "").strip()
+                for row in self.cursor.execute("SELECT id, name FROM Artists").fetchall()
+                if row and row[0] is not None
+            }
+
         def _table_rows(table_name: str) -> list[dict[str, object]]:
             column_names = [
                 str(column[1] or "")
@@ -1194,6 +1203,34 @@ class DatabaseSchemaService:
                 dict(zip(column_names, row))
                 for row in self.cursor.execute(f"SELECT * FROM {table_name}").fetchall()
             ]
+
+        def _resolve_track_main_artist_party_id(payload: dict[str, object]) -> int | None:
+            current_party_id = payload.get("main_artist_party_id")
+            if current_party_id is not None:
+                return int(current_party_id)
+            for field_name in ("artist_name", "main_artist", "primary_artist"):
+                artist_name = str(payload.get(field_name) or "").strip()
+                if artist_name:
+                    return int(
+                        party_service.ensure_artist_party_by_name(
+                            artist_name,
+                            cursor=self.cursor,
+                        )
+                    )
+            legacy_artist_id = payload.get("main_artist_id")
+            if legacy_artist_id is None:
+                return None
+            artist_name = legacy_artist_names.get(int(legacy_artist_id), "")
+            if not artist_name and int(legacy_artist_id) > 0:
+                artist_name = f"Legacy Artist #{int(legacy_artist_id)}"
+            if not artist_name:
+                return None
+            return int(
+                party_service.ensure_artist_party_by_name(
+                    artist_name,
+                    cursor=self.cursor,
+                )
+            )
 
         legacy_external_rows: list[tuple] = []
         if self._table_exists("ExternalCatalogIdentifiers"):
@@ -1407,6 +1444,14 @@ class DatabaseSchemaService:
                     insert_payload["catalog_number"] = catalog_value
                     insert_payload["catalog_registry_entry_id"] = catalog_entry_id
                     insert_payload["catalog_external_code_identifier_id"] = catalog_external_id
+                    insert_payload["main_artist_party_id"] = _resolve_track_main_artist_party_id(
+                        insert_payload
+                    )
+                    if insert_payload["main_artist_party_id"] is None:
+                        raise ValueError(
+                            "Track "
+                            f"{int(payload.get('id') or 0)} has no resolvable main artist for migration."
+                        )
                     values: list[object] = []
                     for column_name in track_insert_columns:
                         value = insert_payload.get(column_name)
@@ -3322,6 +3367,7 @@ class DatabaseSchemaService:
         )
 
         self._create_current_contracts_table()
+        contract_columns = self._table_columns("Contracts")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_contracts_status ON Contracts(status)")
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_contracts_notice_deadline ON Contracts(notice_deadline)"
@@ -3329,27 +3375,30 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON Contracts(end_date)"
         )
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
-            ON Contracts(contract_registry_entry_id)
-            WHERE contract_registry_entry_id IS NOT NULL
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
-            ON Contracts(license_registry_entry_id)
-            WHERE license_registry_entry_id IS NOT NULL
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
-            ON Contracts(registry_sha256_key_entry_id)
-            WHERE registry_sha256_key_entry_id IS NOT NULL
-            """
-        )
+        if "contract_registry_entry_id" in contract_columns:
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
+                ON Contracts(contract_registry_entry_id)
+                WHERE contract_registry_entry_id IS NOT NULL
+                """
+            )
+        if "license_registry_entry_id" in contract_columns:
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
+                ON Contracts(license_registry_entry_id)
+                WHERE license_registry_entry_id IS NOT NULL
+                """
+            )
+        if "registry_sha256_key_entry_id" in contract_columns:
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
+                ON Contracts(registry_sha256_key_entry_id)
+                WHERE registry_sha256_key_entry_id IS NOT NULL
+                """
+            )
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS ContractParties (
