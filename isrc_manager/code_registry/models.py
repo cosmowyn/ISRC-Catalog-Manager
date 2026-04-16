@@ -19,14 +19,21 @@ ENTRY_KIND_IMPORTED = "imported"
 ENTRY_KIND_MANUAL_CAPTURE = "manual_capture"
 ENTRY_KIND_SHA256_GENERATED = "sha256_generated"
 
-CATALOG_MODE_INTERNAL = "internal"
-CATALOG_MODE_EXTERNAL = "external"
-CATALOG_MODE_EMPTY = "empty"
+IDENTIFIER_MODE_INTERNAL = "internal"
+IDENTIFIER_MODE_EXTERNAL = "external"
+IDENTIFIER_MODE_EMPTY = "empty"
+
+CATALOG_MODE_INTERNAL = IDENTIFIER_MODE_INTERNAL
+CATALOG_MODE_EXTERNAL = IDENTIFIER_MODE_EXTERNAL
+CATALOG_MODE_EMPTY = IDENTIFIER_MODE_EMPTY
 
 CLASSIFICATION_INTERNAL = "internal"
 CLASSIFICATION_EXTERNAL = "external"
 CLASSIFICATION_MISMATCH = "mismatch"
 CLASSIFICATION_CANONICAL_CANDIDATE = "canonical_candidate"
+CLASSIFICATION_SHADOWED_BY_INTERNAL = "shadowed_by_internal"
+CLASSIFICATION_MIGRATION_CONFLICT = "migration_conflict"
+CLASSIFICATION_AMBIGUOUS = "ambiguous"
 
 BUILTIN_CATEGORY_CATALOG_NUMBER = "catalog_number"
 BUILTIN_CATEGORY_CONTRACT_NUMBER = "contract_number"
@@ -78,16 +85,18 @@ class CodeRegistryEntryRecord:
 
 
 @dataclass(slots=True)
-class ExternalCatalogIdentifierRecord:
+class ExternalCodeIdentifierRecord:
     id: int
-    subject_kind: str
-    subject_id: int
+    category_system_key: str
     value: str
     normalized_value: str
+    origin_record_kind: str | None
+    origin_record_id: int | None
     provenance_kind: str
     classification_status: str
     classification_reason: str | None
     source_label: str | None
+    matched_registry_entry_id: int | None
     created_at: str | None
     updated_at: str | None
     usage_count: int = 0
@@ -132,11 +141,13 @@ class CodeRegistryChoice:
 
 
 @dataclass(slots=True)
-class CatalogIdentifierResolution:
+class CodeIdentifierResolution:
     mode: str
+    category_system_key: str | None = None
     value: str | None = None
     registry_entry_id: int | None = None
     category_id: int | None = None
+    external_identifier_id: int | None = None
     external_value: str | None = None
     classification_status: str | None = None
     classification_reason: str | None = None
@@ -146,7 +157,7 @@ class CatalogIdentifierResolution:
 
 
 @dataclass(slots=True)
-class CatalogIdentifierClassification:
+class CodeIdentifierClassification:
     input_value: str
     normalized_value: str
     classification: str
@@ -184,3 +195,8 @@ class CodeRegistryEntryGenerationResult:
             "entry": self.entry.to_dict(),
             "category": self.category.to_dict(),
         }
+
+
+ExternalCatalogIdentifierRecord = ExternalCodeIdentifierRecord
+CatalogIdentifierResolution = CodeIdentifierResolution
+CatalogIdentifierClassification = CodeIdentifierClassification

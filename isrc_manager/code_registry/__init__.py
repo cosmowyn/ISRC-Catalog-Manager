@@ -19,6 +19,9 @@ from .models import (
     GENERATION_STRATEGY_MANUAL,
     GENERATION_STRATEGY_SEQUENTIAL,
     GENERATION_STRATEGY_SHA256,
+    IDENTIFIER_MODE_EMPTY,
+    IDENTIFIER_MODE_EXTERNAL,
+    IDENTIFIER_MODE_INTERNAL,
     SUBJECT_KIND_CATALOG,
     SUBJECT_KIND_CONTRACT,
     SUBJECT_KIND_GENERIC,
@@ -26,6 +29,8 @@ from .models import (
     SUBJECT_KIND_LICENSE,
     CatalogIdentifierClassification,
     CatalogIdentifierResolution,
+    CodeIdentifierClassification,
+    CodeIdentifierResolution,
     CodeRegistryAssignmentTarget,
     CodeRegistryCategoryPayload,
     CodeRegistryCategoryRecord,
@@ -34,9 +39,10 @@ from .models import (
     CodeRegistryEntryRecord,
     CodeRegistryUsageLink,
     ExternalCatalogIdentifierRecord,
+    ExternalCodeIdentifierRecord,
 )
 from .service import CodeRegistryService
-from .widgets import CatalogIdentifierField, CatalogIdentifierSelector
+from .widgets import CatalogIdentifierField, CatalogIdentifierSelector, CodeIdentifierSelector
 from .workspace import CodeRegistryWorkspacePanel
 
 __all__ = [
@@ -58,6 +64,9 @@ __all__ = [
     "GENERATION_STRATEGY_MANUAL",
     "GENERATION_STRATEGY_SEQUENTIAL",
     "GENERATION_STRATEGY_SHA256",
+    "IDENTIFIER_MODE_EMPTY",
+    "IDENTIFIER_MODE_EXTERNAL",
+    "IDENTIFIER_MODE_INTERNAL",
     "SUBJECT_KIND_CATALOG",
     "SUBJECT_KIND_CONTRACT",
     "SUBJECT_KIND_GENERIC",
@@ -67,6 +76,9 @@ __all__ = [
     "CatalogIdentifierResolution",
     "CatalogIdentifierField",
     "CatalogIdentifierSelector",
+    "CodeIdentifierClassification",
+    "CodeIdentifierResolution",
+    "CodeIdentifierSelector",
     "CodeRegistryAssignmentTarget",
     "CodeRegistryCategoryPayload",
     "CodeRegistryCategoryRecord",
@@ -77,4 +89,5 @@ __all__ = [
     "CodeRegistryWorkspacePanel",
     "CodeRegistryUsageLink",
     "ExternalCatalogIdentifierRecord",
+    "ExternalCodeIdentifierRecord",
 ]

@@ -21,6 +21,8 @@ from isrc_manager.code_registry import (
     CLASSIFICATION_MISMATCH,
     CatalogIdentifierClassification,
     CatalogIdentifierResolution,
+    CodeIdentifierClassification,
+    CodeIdentifierResolution,
     CodeRegistryCategoryPayload,
     CodeRegistryCategoryRecord,
     CodeRegistryChoice,
@@ -29,6 +31,7 @@ from isrc_manager.code_registry import (
     CodeRegistryService,
     CodeRegistryUsageLink,
     ExternalCatalogIdentifierRecord,
+    ExternalCodeIdentifierRecord,
 )
 from isrc_manager.contract_templates import (
     SUPPORTED_TEMPLATE_SOURCE_FORMATS,
@@ -226,6 +229,8 @@ __all__ = [
     "CatalogAdminService",
     "CatalogIdentifierClassification",
     "CatalogIdentifierResolution",
+    "CodeIdentifierClassification",
+    "CodeIdentifierResolution",
     "CatalogReadService",
     "CLASSIFICATION_CANONICAL_CANDIDATE",
     "CLASSIFICATION_EXTERNAL",
@@ -389,6 +394,7 @@ __all__ = [
     "ContractTemplateService",
     "DOCXTemplateScanner",
     "ExternalCatalogIdentifierRecord",
+    "ExternalCodeIdentifierRecord",
     "HTMLTemplateBundle",
     "HTMLTemplateBundleError",
     "HTMLTemplateScanner",

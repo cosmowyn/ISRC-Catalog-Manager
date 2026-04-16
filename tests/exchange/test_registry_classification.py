@@ -4,7 +4,11 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from isrc_manager.code_registry import BUILTIN_CATEGORY_CATALOG_NUMBER, CodeRegistryService
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    CodeRegistryService,
+)
 from isrc_manager.exchange import ExchangeImportOptions, ExchangeService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.services import (
@@ -87,10 +91,54 @@ class ExchangeRegistryClassificationTests(unittest.TestCase):
         )
         self.assertEqual(
             self.conn.execute(
-                "SELECT COUNT(*) FROM Tracks WHERE external_catalog_identifier_id IS NOT NULL"
+                "SELECT COUNT(*) FROM Tracks WHERE catalog_external_code_identifier_id IS NOT NULL"
             ).fetchone()[0],
             2,
         )
+
+    def test_import_can_stage_and_store_unbound_external_identifier_with_override(self):
+        csv_path = self.root / "external-identifier-review.csv"
+        csv_path.write_text(
+            "\n".join(
+                [
+                    "track_title,artist_name,isrc,Contract Source",
+                    "Review Row,Moonwake,NL-ABC-26-22001,CTR-EXTERNAL-9001",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        review_key = "|".join(("1", "Contract Source", "contract_number", "CTR-EXTERNAL-9001"))
+        report = self.exchange_service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "isrc": "isrc",
+                "Contract Source": "contract_number",
+            },
+            options=ExchangeImportOptions(
+                mode="create",
+                identifier_overrides={review_key: BUILTIN_CATEGORY_LICENSE_NUMBER},
+            ),
+        )
+
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            report.identifier_totals[BUILTIN_CATEGORY_LICENSE_NUMBER]["external"],
+            1,
+        )
+        stored = self.conn.execute(
+            """
+            SELECT category_system_key, value
+            FROM ExternalCodeIdentifiers
+            WHERE value=?
+            """,
+            ("CTR-EXTERNAL-9001",),
+        ).fetchone()
+        self.assertEqual(stored, (BUILTIN_CATEGORY_LICENSE_NUMBER, "CTR-EXTERNAL-9001"))
 
 
 if __name__ == "__main__":

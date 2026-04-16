@@ -10,6 +10,8 @@ from .master_transfer import (
     MasterTransferService,
 )
 from .models import (
+    ExchangeIdentifierClassificationOutcome,
+    ExchangeIdentifierReviewRow,
     ExchangeCatalogClassificationOutcome,
     ExchangeImportOptions,
     ExchangeImportReport,
@@ -27,6 +29,8 @@ __all__ = [
     "ExchangeImportOptions",
     "ExchangeImportReport",
     "ExchangeInspection",
+    "ExchangeIdentifierClassificationOutcome",
+    "ExchangeIdentifierReviewRow",
     "ExchangeCatalogClassificationOutcome",
     "ExchangeService",
     "MasterTransferExportOption",

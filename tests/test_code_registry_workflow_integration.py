@@ -52,7 +52,8 @@ class CodeRegistryWorkflowIntegrationTests(unittest.TestCase):
         assert snapshot is not None
         self.assertEqual(snapshot.catalog_number, f"ACR{yy:02d}0001")
         self.assertIsNotNone(snapshot.catalog_registry_entry_id)
-        self.assertIsNone(snapshot.external_catalog_identifier_id)
+        self.assertIsNone(snapshot.catalog_external_code_identifier_id)
+        self.assertEqual(snapshot.catalog_number_mode, "internal")
 
     def test_release_create_and_update_switch_between_external_and_internal_catalog_modes(self):
         track_id = self.track_service.create_track(
@@ -84,7 +85,8 @@ class CodeRegistryWorkflowIntegrationTests(unittest.TestCase):
         assert created is not None
         self.assertEqual(created.catalog_number, "EXT-777")
         self.assertIsNone(created.catalog_registry_entry_id)
-        self.assertIsNotNone(created.external_catalog_identifier_id)
+        self.assertIsNotNone(created.catalog_external_code_identifier_id)
+        self.assertEqual(created.catalog_number_mode, "external")
 
         yy = datetime.now().year % 100
         self.release_service.update_release(
@@ -102,7 +104,8 @@ class CodeRegistryWorkflowIntegrationTests(unittest.TestCase):
         assert updated is not None
         self.assertEqual(updated.catalog_number, f"ACR{yy:02d}0002")
         self.assertIsNotNone(updated.catalog_registry_entry_id)
-        self.assertIsNone(updated.external_catalog_identifier_id)
+        self.assertIsNone(updated.catalog_external_code_identifier_id)
+        self.assertEqual(updated.catalog_number_mode, "internal")
 
 
 if __name__ == "__main__":

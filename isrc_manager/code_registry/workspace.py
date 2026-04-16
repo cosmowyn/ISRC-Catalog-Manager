@@ -213,7 +213,7 @@ class _RegistryOwnerAssignmentDialog(QDialog):
 
 
 class CodeRegistryWorkspacePanel(QWidget):
-    """Integrated management surface for internal codes, external catalogs, and categories."""
+    """Integrated management surface for internal codes, external identifiers, and categories."""
 
     close_requested = Signal()
     _REALIGNABLE_SYSTEM_KEYS = frozenset(
@@ -235,6 +235,13 @@ class CodeRegistryWorkspacePanel(QWidget):
         ("Sequential", GENERATION_STRATEGY_SEQUENTIAL),
         ("SHA-256", GENERATION_STRATEGY_SHA256),
         ("Manual", GENERATION_STRATEGY_MANUAL),
+    )
+    _EXTERNAL_IDENTIFIER_FILTERS = (
+        ("All Supported Types", None),
+        ("Catalog Number", BUILTIN_CATEGORY_CATALOG_NUMBER),
+        ("Contract Number", BUILTIN_CATEGORY_CONTRACT_NUMBER),
+        ("License Number", BUILTIN_CATEGORY_LICENSE_NUMBER),
+        ("Registry SHA-256 Key", BUILTIN_CATEGORY_REGISTRY_SHA256_KEY),
     )
 
     def __init__(
@@ -271,7 +278,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             title="Code Registry",
             subtitle=(
                 "Manage authoritative internal business codes and the separate Registry SHA-256 Key, "
-                "while keeping foreign catalog identifiers safely distinct."
+                "while keeping external identifiers safely distinct."
             ),
         )
         self.status_label = QLabel("", self)
@@ -405,9 +412,14 @@ class CodeRegistryWorkspacePanel(QWidget):
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(8)
         self.external_search_edit = QLineEdit(page)
-        self.external_search_edit.setPlaceholderText("Search external catalog identifiers...")
+        self.external_search_edit.setPlaceholderText("Search external identifiers...")
         self.external_search_edit.textChanged.connect(self.refresh_external)
         toolbar.addWidget(self.external_search_edit, 1)
+        self.external_category_filter = QComboBox(page)
+        for label, value in self._EXTERNAL_IDENTIFIER_FILTERS:
+            self.external_category_filter.addItem(label, value)
+        self.external_category_filter.currentIndexChanged.connect(self.refresh_external)
+        toolbar.addWidget(self.external_category_filter)
         promote_button = QPushButton("Promote External", page)
         promote_button.clicked.connect(self._promote_external)
         toolbar.addWidget(promote_button)
@@ -424,12 +436,12 @@ class CodeRegistryWorkspacePanel(QWidget):
 
         table_box, table_layout = _create_standard_section(
             page,
-            "External Catalogs",
-            "Foreign or non-conforming catalog identifiers stay here as shared values. Each row tracks total usage across linked tracks and releases.",
+            "External Identifiers",
+            "Shared external identifier values live here when they are intentionally kept outside the internal registry. Filter by supported type and review usage before promoting anything.",
         )
-        self.external_table = QTableWidget(0, 7, table_box)
+        self.external_table = QTableWidget(0, 8, table_box)
         self.external_table.setHorizontalHeaderLabels(
-            ["ID", "Value", "Usage", "Status", "Provenance", "Source", "Updated"]
+            ["ID", "Type", "Value", "Usage", "Status", "Provenance", "Source", "Updated"]
         )
         self.external_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.external_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -437,11 +449,12 @@ class CodeRegistryWorkspacePanel(QWidget):
         self.external_table.verticalHeader().setVisible(False)
         self.external_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.external_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.external_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.external_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.external_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.external_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.external_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.external_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.external_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.external_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
         self.external_table.itemSelectionChanged.connect(self._load_external_details)
         table_layout.addWidget(self.external_table, 1)
 
@@ -454,12 +467,14 @@ class CodeRegistryWorkspacePanel(QWidget):
         _configure_standard_form_layout(details_form)
         self.external_value_label = QLabel("No external identifier selected.", details_box)
         self.external_value_label.setWordWrap(True)
+        self.external_type_label = QLabel("", details_box)
         self.external_status_label = QLabel("", details_box)
         self.external_usage_label = QLabel("", details_box)
         self.external_anchor_label = QLabel("", details_box)
         self.external_source_label = QLabel("", details_box)
         self.external_reason_label = QLabel("", details_box)
         self.external_reason_label.setWordWrap(True)
+        details_form.addRow("Type", self.external_type_label)
         details_form.addRow("Value", self.external_value_label)
         details_form.addRow("Status", self.external_status_label)
         details_form.addRow("Usage", self.external_usage_label)
@@ -476,7 +491,7 @@ class CodeRegistryWorkspacePanel(QWidget):
         splitter.addWidget(details_box)
         splitter.setSizes([760, 420])
         layout.addWidget(splitter, 1)
-        self.tabs.addTab(page, "External Catalogs")
+        self.tabs.addTab(page, "External Identifiers")
 
     def _build_categories_tab(self) -> None:
         page = QWidget(self)
@@ -669,8 +684,9 @@ class CodeRegistryWorkspacePanel(QWidget):
         self._external_row_ids = []
         if service is None:
             return
-        records = service.list_external_catalog_identifiers(
-            search_text=self.external_search_edit.text().strip() or None
+        records = service.list_external_code_identifiers(
+            search_text=self.external_search_edit.text().strip() or None,
+            category_system_key=self.external_category_filter.currentData(),
         )
         for record in records:
             row = self.external_table.rowCount()
@@ -678,6 +694,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             self._external_row_ids.append(int(record.id))
             values = [
                 str(record.id),
+                self._external_identifier_label(record.category_system_key),
                 record.value,
                 str(record.usage_count),
                 record.classification_status,
@@ -740,6 +757,7 @@ class CodeRegistryWorkspacePanel(QWidget):
         external_id = self._selected_row_id(self.external_table, self._external_row_ids)
         if service is None or external_id is None:
             self.external_value_label.setText("No external identifier selected.")
+            self.external_type_label.setText("")
             self.external_status_label.setText("")
             self.external_usage_label.setText("")
             self.external_anchor_label.setText("")
@@ -747,18 +765,19 @@ class CodeRegistryWorkspacePanel(QWidget):
             self.external_reason_label.setText("")
             self.external_usage_text.clear()
             return
-        record = service.fetch_external_catalog_identifier(external_id)
+        record = service.fetch_external_code_identifier(external_id)
         usage = service.usage_for_external_identifier(external_id)
         if record is None:
             return
+        self.external_type_label.setText(self._external_identifier_label(record.category_system_key))
         self.external_value_label.setText(record.value)
         self.external_status_label.setText(record.classification_status)
         self.external_usage_label.setText(str(record.usage_count))
         self.external_anchor_label.setText(
             (
-                f"{record.subject_kind} #{record.subject_id}"
-                if record.subject_kind and int(record.subject_id or 0) > 0
-                else "Shared external registry value"
+                f"{record.origin_record_kind} #{record.origin_record_id}"
+                if record.origin_record_kind and int(record.origin_record_id or 0) > 0
+                else "Shared reusable external value"
             )
         )
         self.external_source_label.setText(record.source_label or record.provenance_kind)
@@ -937,7 +956,7 @@ class CodeRegistryWorkspacePanel(QWidget):
         if service is None or external_id is None:
             return
         try:
-            entry = service.promote_external_catalog_identifier(
+            entry = service.promote_external_code_identifier(
                 external_id,
                 created_via="workspace.promote",
             )
@@ -946,7 +965,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             return
         self.refresh()
         self._set_status(
-            f"Promoted external catalog value into internal registry entry {entry.value}."
+            f"Promoted external identifier into internal registry entry {entry.value}."
         )
 
     def _reclassify_external(self) -> None:
@@ -954,7 +973,9 @@ class CodeRegistryWorkspacePanel(QWidget):
         if service is None:
             return
         try:
-            result = service.reclassify_external_catalog_identifiers()
+            result = service.reclassify_external_code_identifiers(
+                category_system_key=self.external_category_filter.currentData()
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Code Registry", str(exc))
             return
@@ -963,6 +984,17 @@ class CodeRegistryWorkspacePanel(QWidget):
             "Reclassified external identifiers. "
             + ", ".join(f"{key}={int(value)}" for key, value in sorted(result.items()))
         )
+
+    @staticmethod
+    def _external_identifier_label(system_key: str | None) -> str:
+        labels = {
+            BUILTIN_CATEGORY_CATALOG_NUMBER: "Catalog Number",
+            BUILTIN_CATEGORY_CONTRACT_NUMBER: "Contract Number",
+            BUILTIN_CATEGORY_LICENSE_NUMBER: "License Number",
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: "Registry SHA-256 Key",
+        }
+        clean_key = str(system_key or "").strip()
+        return labels.get(clean_key, clean_key or "External")
 
     def _delete_category(self) -> None:
         service = self._service()

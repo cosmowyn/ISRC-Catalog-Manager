@@ -34,6 +34,15 @@ class ExchangeImportDialog(QDialog):
     """Preview source columns, map them, and choose import mode/options."""
 
     SKIP_MAPPING_TARGET = "__skip_field__"
+    IDENTIFIER_CATEGORY_OPTIONS = (
+        ("Catalog Number", "catalog_number"),
+        ("Contract Number", "contract_number"),
+        ("License Number", "license_number"),
+        ("Registry SHA-256 Key", "registry_sha256_key"),
+    )
+    IDENTIFIER_REVIEW_TARGETS = frozenset(
+        {"contract_number", "license_number", "registry_sha256_key"}
+    )
 
     def __init__(
         self,
@@ -52,6 +61,12 @@ class ExchangeImportDialog(QDialog):
         self.initial_mode = str(initial_mode or "dry_run")
         self.csv_reinspect_callback = csv_reinspect_callback
         self._csv_delimiter_error: str | None = None
+        self.identifier_review_table: QTableWidget | None = None
+        self._identifier_review_reason_by_key = {
+            str(row.review_key or "").strip(): str(row.reason or "").strip()
+            for row in inspection.identifier_review_rows
+            if str(row.review_key or "").strip()
+        }
 
         self.setWindowTitle(f"Import {inspection.format_name.upper()}")
         self.resize(1100, 760)
@@ -87,6 +102,18 @@ class ExchangeImportDialog(QDialog):
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(12)
         self.content_tabs.addTab(preview_page, "Source Preview")
+
+        review_layout: QVBoxLayout | None = None
+        if any(
+            str(name or "").strip() in self.IDENTIFIER_REVIEW_TARGETS
+            for name in self.supported_headers
+        ):
+            review_page = QWidget(self.content_tabs)
+            review_page.setProperty("role", "workspaceCanvas")
+            review_layout = QVBoxLayout(review_page)
+            review_layout.setContentsMargins(0, 0, 0, 0)
+            review_layout.setSpacing(12)
+            self.content_tabs.addTab(review_page, "Identifier Review")
 
         meta_row = QHBoxLayout()
         meta_row.setContentsMargins(0, 0, 0, 0)
@@ -204,6 +231,20 @@ class ExchangeImportDialog(QDialog):
         self.preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
         preview_layout.addWidget(self.preview_table, 1)
 
+        if review_layout is not None:
+            review_label = QLabel(
+                "Choose how staged external identifier values should be stored in Codespace when you apply the import."
+            )
+            review_label.setWordWrap(True)
+            review_layout.addWidget(review_label)
+            self.identifier_review_table = QTableWidget(0, 5, self)
+            self.identifier_review_table.setHorizontalHeaderLabels(
+                ["Row", "Source Column", "Store As", "Value", "Reason"]
+            )
+            self.identifier_review_table.verticalHeader().setVisible(False)
+            self.identifier_review_table.horizontalHeader().setStretchLastSection(True)
+            review_layout.addWidget(self.identifier_review_table, 1)
+
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.import_button = QPushButton("Run Import")
@@ -218,6 +259,7 @@ class ExchangeImportDialog(QDialog):
         self._reload_presets()
         self._populate_mapping_table()
         self._populate_preview_table()
+        self._populate_identifier_review_table()
         self._apply_initial_mode()
         self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
         if self.delimiter_combo is not None and self.custom_delimiter_edit is not None:
@@ -351,6 +393,7 @@ class ExchangeImportDialog(QDialog):
                 suggested = self.inspection.suggested_mapping.get(header, "")
             index = combo.findData(suggested)
             combo.setCurrentIndex(index if index >= 0 else 0)
+            combo.currentIndexChanged.connect(self._on_mapping_changed)
             self.mapping_table.setCellWidget(row, 1, combo)
 
     def _populate_preview_table(self) -> None:
@@ -448,6 +491,7 @@ class ExchangeImportDialog(QDialog):
             heuristic_match=self.heuristic_checkbox.isChecked(),
             create_missing_custom_fields=self.create_custom_checkbox.isChecked(),
             skip_targets=self.skipped_source_headers(),
+            identifier_overrides=self._identifier_overrides(),
         )
 
     def resolved_csv_delimiter(self) -> str | None:
@@ -468,10 +512,16 @@ class ExchangeImportDialog(QDialog):
         preferred_mapping: dict[str, str] | None = None,
     ) -> None:
         self.inspection = inspection
+        self._identifier_review_reason_by_key = {
+            str(row.review_key or "").strip(): str(row.reason or "").strip()
+            for row in inspection.identifier_review_rows
+            if str(row.review_key or "").strip()
+        }
         self.source_label.setText(f"Source: {inspection.file_path}")
         self._update_warning_label()
         self._populate_mapping_table(preferred_mapping=preferred_mapping)
         self._populate_preview_table()
+        self._populate_identifier_review_table()
 
     def _apply_dialog_validation(self) -> None:
         self.import_button.setEnabled(not bool(self._csv_delimiter_error))
@@ -537,6 +587,97 @@ class ExchangeImportDialog(QDialog):
             return
         self._set_csv_delimiter_error(None)
         self._apply_inspection(inspection, preferred_mapping=preferred_mapping)
+
+    @staticmethod
+    def _identifier_review_key(
+        *,
+        row_index: int,
+        source_header: str,
+        target_field_name: str,
+        value: str,
+    ) -> str:
+        return "|".join(
+            (
+                str(int(row_index)),
+                str(source_header or "").strip(),
+                str(target_field_name or "").strip(),
+                str(value or "").strip(),
+            )
+        )
+
+    def _identifier_review_rows(self) -> list[tuple[str, int, str, str, str, str]]:
+        rows: list[tuple[str, int, str, str, str, str]] = []
+        mapping = self.mapping()
+        for row_index, preview_row in enumerate(self.inspection.preview_rows, start=1):
+            for source_header, target_field_name in mapping.items():
+                clean_target = str(target_field_name or "").strip()
+                if clean_target not in self.IDENTIFIER_REVIEW_TARGETS:
+                    continue
+                clean_value = str(preview_row.get(source_header) or "").strip()
+                if not clean_value:
+                    continue
+                review_key = self._identifier_review_key(
+                    row_index=row_index,
+                    source_header=source_header,
+                    target_field_name=clean_target,
+                    value=clean_value,
+                )
+                rows.append(
+                    (
+                        review_key,
+                        int(row_index),
+                        str(source_header),
+                        clean_target,
+                        clean_value,
+                        self._identifier_review_reason_by_key.get(review_key)
+                        or (
+                            "Staged only until apply. The selected type controls which "
+                            "External Identifier bucket receives this value."
+                        ),
+                    )
+                )
+        return rows
+
+    def _populate_identifier_review_table(self) -> None:
+        if self.identifier_review_table is None:
+            return
+        existing_overrides = self._identifier_overrides()
+        rows = self._identifier_review_rows()
+        self.identifier_review_table.clearContents()
+        self.identifier_review_table.setRowCount(len(rows))
+        for row_index, (review_key, source_row, source_header, target_name, value, reason) in enumerate(
+            rows
+        ):
+            row_item = QTableWidgetItem(str(source_row))
+            row_item.setData(0x0100, review_key)
+            self.identifier_review_table.setItem(row_index, 0, row_item)
+            self.identifier_review_table.setItem(row_index, 1, QTableWidgetItem(source_header))
+            combo = QComboBox(self.identifier_review_table)
+            for label, system_key in self.IDENTIFIER_CATEGORY_OPTIONS:
+                combo.addItem(label, system_key)
+            combo_index = combo.findData(existing_overrides.get(review_key) or target_name)
+            combo.setCurrentIndex(combo_index if combo_index >= 0 else 0)
+            self.identifier_review_table.setCellWidget(row_index, 2, combo)
+            self.identifier_review_table.setItem(row_index, 3, QTableWidgetItem(value))
+            self.identifier_review_table.setItem(row_index, 4, QTableWidgetItem(reason))
+
+    def _identifier_overrides(self) -> dict[str, str]:
+        if self.identifier_review_table is None:
+            return {}
+        overrides: dict[str, str] = {}
+        for row in range(self.identifier_review_table.rowCount()):
+            key_item = self.identifier_review_table.item(row, 0)
+            combo = self.identifier_review_table.cellWidget(row, 2)
+            if key_item is None or combo is None:
+                continue
+            review_key = str(key_item.data(0x0100) or "").strip()
+            selected = str(combo.currentData() or "").strip()
+            if review_key and selected:
+                overrides[review_key] = selected
+        return overrides
+
+    def _on_mapping_changed(self) -> None:
+        self._populate_identifier_review_table()
 
     def accept(self) -> None:
         if self.remember_choices_checkbox.isChecked():

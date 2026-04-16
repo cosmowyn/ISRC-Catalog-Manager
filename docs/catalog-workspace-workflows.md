@@ -35,7 +35,7 @@ These panels are meant to stay in the same workflow loop as the table. You can r
 Its tabs are:
 
 - `Internal Registry`: inspect issued internal values, filter by category and year, generate the next code, generate a `Registry SHA-256 Key`, review usage, link an unassigned value later, and delete an unused Registry SHA-256 Key
-- `External Catalogs`: review foreign/non-conforming catalog identifiers, inspect shared usage counts, and promote or reclassify canonical candidates
+- `External Identifiers`: review foreign/non-conforming identifier values, inspect shared usage counts, and promote or reclassify canonical candidates
 - `Categories`: manage built-in prefixes and custom categories
 
 Repeated catalog identifiers are intentionally shared. When multiple tracks in the same album use the same catalog number, the workspace keeps one unique identifier row and shows how many tracks or releases reference it.
@@ -54,7 +54,7 @@ This keeps release maintenance grounded in the actual catalog rows rather than i
 Catalog-number fields in `Add Track`, `Add Album`, `Edit Track`, and `Release Editor` use the same registry-aware control:
 
 - choose `Internal Registry` to select an existing managed value or generate the next one
-- choose `External Catalog` to keep a third-party or non-conforming value without forcing it into the internal numbering rules
+- choose `External Identifier` to keep a third-party or non-conforming value without forcing it into the internal numbering rules
 
 If a code was generated earlier without an owner, the workspace can assign it later with `Link Selected Value`.
 

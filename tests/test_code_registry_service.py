@@ -238,7 +238,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
 
         before = self.conn.execute(
             """
-            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
             FROM Tracks
             WHERE id=?
             """,
@@ -250,7 +250,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
         result = self.registry.reclassify_external_catalog_identifiers()
         after = self.conn.execute(
             """
-            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
             FROM Tracks
             WHERE id=?
             """,
@@ -264,7 +264,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
         self.assertEqual(after[0], canonical_value)
         self.assertIsNotNone(external)
         assert external is not None
-        self.assertEqual(external.classification_status, "promoted")
+        self.assertEqual(external.classification_status, "shadowed_by_internal")
 
     def test_external_catalog_values_are_shared_with_usage_count(self):
         first_track_id = self._create_track(isrc="NL-TST-26-40011", title="Album Track One")
@@ -292,11 +292,11 @@ class CodeRegistryServiceTests(unittest.TestCase):
         )
 
         first_row = self.conn.execute(
-            "SELECT external_catalog_identifier_id FROM Tracks WHERE id=?",
+            "SELECT catalog_external_code_identifier_id FROM Tracks WHERE id=?",
             (first_track_id,),
         ).fetchone()
         second_row = self.conn.execute(
-            "SELECT external_catalog_identifier_id FROM Tracks WHERE id=?",
+            "SELECT catalog_external_code_identifier_id FROM Tracks WHERE id=?",
             (second_track_id,),
         ).fetchone()
         self.assertIsNotNone(first_row)
@@ -334,7 +334,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
 
         row = self.conn.execute(
             """
-            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
             FROM Tracks
             WHERE id=?
             """,

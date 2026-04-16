@@ -28,7 +28,7 @@ Catalog-number intake is no longer just loose text storage.
 During migration, exchange import, and editor-side capture, the shared classifier now decides whether a catalog value should become:
 
 - an `Internal Registry` value
-- an `External Catalog` value
+- an `External Identifier` value
 - a preserved mismatch that still remains external
 
 Canonical values are accepted as internal when they match:

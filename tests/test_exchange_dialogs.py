@@ -345,6 +345,56 @@ class ExchangeImportDialogTests(unittest.TestCase):
         finally:
             dlg.close()
 
+    def test_identifier_review_tab_collects_staged_override_choices(self):
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["track_title", "artist_name", "Contract Source"],
+            preview_rows=[
+                {
+                    "track_title": "Orbit",
+                    "artist_name": "Moonwake",
+                    "Contract Source": "CTR-EXTERNAL-9001",
+                }
+            ],
+            suggested_mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "Contract Source": "contract_number",
+            },
+            resolved_delimiter=",",
+        )
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=[
+                "track_title",
+                "artist_name",
+                "contract_number",
+                "license_number",
+                "registry_sha256_key",
+            ],
+            settings=_FakeSettings(),
+            csv_reinspect_callback=lambda delimiter: inspection,
+        )
+        try:
+            tabs = dlg.findChild(QTabWidget, "exchangeImportTabs")
+            self.assertIsNotNone(tabs)
+            assert tabs is not None
+            self.assertIn("Identifier Review", [tabs.tabText(i) for i in range(tabs.count())])
+            self.assertIsNotNone(dlg.identifier_review_table)
+            assert dlg.identifier_review_table is not None
+            self.assertEqual(dlg.identifier_review_table.rowCount(), 1)
+            combo = dlg.identifier_review_table.cellWidget(0, 2)
+            self.assertIsInstance(combo, QComboBox)
+            combo.setCurrentIndex(combo.findData("license_number"))
+            overrides = dlg.import_options().identifier_overrides
+            self.assertEqual(
+                overrides["1|Contract Source|contract_number|CTR-EXTERNAL-9001"],
+                "license_number",
+            )
+        finally:
+            dlg.close()
+
 
 if __name__ == "__main__":
     unittest.main()

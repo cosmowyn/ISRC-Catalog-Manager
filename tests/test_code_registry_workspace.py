@@ -129,7 +129,7 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=2)
         self.assertEqual(
             [self.panel.tabs.tabText(index) for index in range(self.panel.tabs.count())],
-            ["Internal Registry", "External Catalogs", "Categories"],
+            ["Internal Registry", "External Identifiers", "Categories"],
         )
         self.assertGreaterEqual(self.panel.category_table.rowCount(), 4)
         self.assertGreaterEqual(self.panel.entry_table.rowCount(), 1)
@@ -146,7 +146,7 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         self.assertEqual(self.panel.entry_value_label.text(), generated.value)
         self.assertIn("Track #", self.panel.entry_usage_text.toPlainText())
 
-    def test_workspace_actions_generate_hash_and_promote_external_catalogs(self):
+    def test_workspace_actions_generate_hash_and_promote_external_identifiers(self):
         canonical_track_id = self._create_track(
             isrc="NL-TST-26-50002",
             title="Promotion Candidate",
@@ -188,7 +188,7 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         critical.assert_not_called()
         row = self.conn.execute(
             """
-            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
             FROM Tracks
             WHERE id=?
             """,
@@ -197,7 +197,7 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         self.assertEqual(row[0], canonical_value)
         self.assertIsNotNone(row[1])
         self.assertIsNone(row[2])
-        self.assertIn("Promoted external catalog value", self.panel.status_label.text())
+        self.assertIn("Promoted external identifier", self.panel.status_label.text())
 
     def test_workspace_can_generate_contract_numbers_for_selected_category(self):
         contract_category = self.registry.fetch_category_by_system_key(
@@ -229,7 +229,7 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         self.assertTrue(str(latest[0]).startswith("CTR"))
         self.assertIn("generated contract number", self.panel.status_label.text().lower())
 
-    def test_workspace_external_catalog_tab_shows_shared_usage_counts(self):
+    def test_workspace_external_identifiers_tab_shows_shared_usage_counts(self):
         first_track_id = self._create_track(isrc="NL-TST-26-50003", title="Shared One")
         second_track_id = self._create_track(isrc="NL-TST-26-50004", title="Shared Two")
         shared_value = "ALB-2501"
@@ -258,8 +258,9 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=2)
 
         self.assertEqual(self.panel.external_table.rowCount(), 1)
-        self.assertEqual(self.panel.external_table.item(0, 1).text(), shared_value)
-        self.assertEqual(self.panel.external_table.item(0, 2).text(), "2")
+        self.assertEqual(self.panel.external_table.item(0, 1).text(), "Catalog Number")
+        self.assertEqual(self.panel.external_table.item(0, 2).text(), shared_value)
+        self.assertEqual(self.panel.external_table.item(0, 3).text(), "2")
 
     def test_workspace_can_link_selected_internal_entry(self):
         track_id = self._create_track(isrc="NL-TST-26-50005", title="Assignment Target")

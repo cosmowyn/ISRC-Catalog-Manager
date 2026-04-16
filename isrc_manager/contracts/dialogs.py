@@ -39,6 +39,7 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CodeIdentifierSelector,
     CodeRegistryService,
 )
 from isrc_manager.external_launch import open_external_path
@@ -2395,7 +2396,7 @@ class ContractEditorDialog(QDialog):
         registry_box, registry_layout = _create_standard_section(
             self,
             "Registry IDs",
-            "Assign immutable internal contract and license numbers here, and keep the Registry SHA-256 Key clearly separate from watermark/authenticity keys.",
+            "Choose whether each value is app-managed in the internal registry or preserved as an external identifier, while keeping the Registry SHA-256 Key clearly separate from watermark/authenticity keys.",
         )
         registry_form = QFormLayout()
         _configure_standard_form_layout(registry_form)
@@ -2405,24 +2406,24 @@ class ContractEditorDialog(QDialog):
             def registry_service_provider():
                 return None
 
-        self.contract_number_edit = _RegistryFieldEditor(
-            registry_service_provider=registry_service_provider,
+        self.contract_number_edit = CodeIdentifierSelector(
+            service_provider=registry_service_provider,
             system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
-            generate_label="Generate",
+            created_via="contract.editor.contract_number",
             parent=self,
         )
         registry_form.addRow("Contract Number", self.contract_number_edit)
-        self.license_number_edit = _RegistryFieldEditor(
-            registry_service_provider=registry_service_provider,
+        self.license_number_edit = CodeIdentifierSelector(
+            service_provider=registry_service_provider,
             system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
-            generate_label="Generate",
+            created_via="contract.editor.license_number",
             parent=self,
         )
         registry_form.addRow("License Number", self.license_number_edit)
-        self.registry_sha256_key_edit = _RegistryFieldEditor(
-            registry_service_provider=registry_service_provider,
+        self.registry_sha256_key_edit = CodeIdentifierSelector(
+            service_provider=registry_service_provider,
             system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
-            generate_label="Generate Key",
+            created_via="contract.editor.registry_sha256_key",
             parent=self,
         )
         registry_form.addRow("Registry SHA-256 Key", self.registry_sha256_key_edit)
@@ -2621,16 +2622,22 @@ class ContractEditorDialog(QDialog):
             self.reversion_edit.setText(contract.reversion_date or "")
             self.termination_edit.setText(contract.termination_date or "")
             self.contract_number_edit.set_value(
-                entry_id=contract.contract_registry_entry_id,
                 value=contract.contract_number,
+                mode=contract.contract_number_mode,
+                registry_entry_id=contract.contract_registry_entry_id,
+                external_identifier_id=contract.contract_external_code_identifier_id,
             )
             self.license_number_edit.set_value(
-                entry_id=contract.license_registry_entry_id,
                 value=contract.license_number,
+                mode=contract.license_number_mode,
+                registry_entry_id=contract.license_registry_entry_id,
+                external_identifier_id=contract.license_external_code_identifier_id,
             )
             self.registry_sha256_key_edit.set_value(
-                entry_id=contract.registry_sha256_key_entry_id,
                 value=contract.registry_sha256_key,
+                mode=contract.registry_sha256_key_mode,
+                registry_entry_id=contract.registry_sha256_key_entry_id,
+                external_identifier_id=contract.registry_sha256_key_external_code_identifier_id,
             )
             self.summary_edit.setPlainText(contract.summary or "")
             self.notes_edit.setPlainText(contract.notes or "")
@@ -2641,9 +2648,9 @@ class ContractEditorDialog(QDialog):
             self.obligations_editor.load_obligations(detail.obligations)
             self.documents_editor.load_documents(detail.documents)
         else:
-            self.contract_number_edit.set_value(entry_id=None, value=None)
-            self.license_number_edit.set_value(entry_id=None, value=None)
-            self.registry_sha256_key_edit.set_value(entry_id=None, value=None)
+            self.contract_number_edit.set_value(value=None, mode=None, registry_entry_id=None)
+            self.license_number_edit.set_value(value=None, mode=None, registry_entry_id=None)
+            self.registry_sha256_key_edit.set_value(value=None, mode=None, registry_entry_id=None)
             self.obligations_editor.load_obligations([])
             self.documents_editor.load_documents([])
 
@@ -2744,12 +2751,18 @@ class ContractEditorDialog(QDialog):
         return ContractPayload(
             title=self.title_edit.text().strip(),
             contract_type=self.type_edit.text().strip() or None,
-            contract_number=self.contract_number_edit.value(),
-            license_number=self.license_number_edit.value(),
-            registry_sha256_key=self.registry_sha256_key_edit.value(),
-            contract_registry_entry_id=self.contract_number_edit.entry_id(),
-            license_registry_entry_id=self.license_number_edit.entry_id(),
-            registry_sha256_key_entry_id=self.registry_sha256_key_edit.entry_id(),
+            contract_number=self.contract_number_edit.identifier_value(),
+            license_number=self.license_number_edit.identifier_value(),
+            registry_sha256_key=self.registry_sha256_key_edit.identifier_value(),
+            contract_number_mode=self.contract_number_edit.identifier_mode(),
+            license_number_mode=self.license_number_edit.identifier_mode(),
+            registry_sha256_key_mode=self.registry_sha256_key_edit.identifier_mode(),
+            contract_registry_entry_id=self.contract_number_edit.registry_entry_id(),
+            contract_external_code_identifier_id=self.contract_number_edit.external_code_identifier_id(),
+            license_registry_entry_id=self.license_number_edit.registry_entry_id(),
+            license_external_code_identifier_id=self.license_number_edit.external_code_identifier_id(),
+            registry_sha256_key_entry_id=self.registry_sha256_key_edit.registry_entry_id(),
+            registry_sha256_key_external_code_identifier_id=self.registry_sha256_key_edit.external_code_identifier_id(),
             draft_date=self.draft_edit.text().strip() or None,
             signature_date=self.signature_edit.text().strip() or None,
             effective_date=self.effective_edit.text().strip() or None,

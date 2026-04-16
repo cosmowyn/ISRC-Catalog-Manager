@@ -28,7 +28,7 @@ Examples follow the same structure as `ACR250001`.
 The registry keeps two distinct concepts separate:
 
 - `Internal Registry`: app-managed identifiers with category rules, configured prefixes, uniqueness, and immutability
-- `External Catalogs`: foreign or non-conforming catalog identifiers that still need to be stored safely
+- `External Identifiers`: foreign or non-conforming identifier values that still need to be stored safely
 
 This separation is deliberate. Internal generated values remain strongly governed, while external catalog identifiers stay flexible enough for third-party catalog data that does not match the internal scheme.
 
@@ -37,7 +37,7 @@ This separation is deliberate. Internal generated values remain strongly governe
 The docked `Code Registry Workspace` is organized into three tabs:
 
 - `Internal Registry`: search, filter by category/year, inspect usage, generate internal codes, generate Registry SHA-256 Keys, link unassigned values, explicitly realign values where allowed, and delete unused unlinked values when safe
-- `External Catalogs`: review shared external identifiers, usage counts, provenance/classification notes, promote values into the internal registry, and reclassify canonical candidates after prefix setup changes
+- `External Identifiers`: review shared external identifier values, usage counts, provenance/classification notes, promote values into the internal registry, and reclassify canonical candidates after prefix setup changes
 - `Categories`: manage built-in and custom categories, edit allowed prefixes, activate/deactivate categories, and remove custom categories when safe
 
 The workspace is meant to be operational, not just administrative. It shows where a value is used and keeps shared identifiers collapsed to one unique row with a usage count instead of duplicating the same catalog value for every linked track or release.
@@ -56,7 +56,7 @@ Registry-backed fields stay available directly in the natural editing workflows:
 Catalog identifier controls support two modes:
 
 - `Internal Registry`: select an existing internal value or generate the next one when the category allows it
-- `External Catalog`: type or pick a non-conforming foreign identifier without forcing it into the internal rules
+- `External Identifier`: type or pick a non-conforming external value without forcing it into the internal rules
 
 Bulk track edit can assign an existing internal value or an external/manual value, but it intentionally does not expose `Generate` to avoid accidental mass issuance.
 

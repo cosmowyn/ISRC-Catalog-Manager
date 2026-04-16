@@ -85,9 +85,15 @@ class ContractPayload:
     contract_number: str | None = None
     license_number: str | None = None
     registry_sha256_key: str | None = None
+    contract_number_mode: str | None = None
+    license_number_mode: str | None = None
+    registry_sha256_key_mode: str | None = None
     contract_registry_entry_id: int | None = None
+    contract_external_code_identifier_id: int | None = None
     license_registry_entry_id: int | None = None
+    license_external_code_identifier_id: int | None = None
     registry_sha256_key_entry_id: int | None = None
+    registry_sha256_key_external_code_identifier_id: int | None = None
     draft_date: str | None = None
     signature_date: str | None = None
     effective_date: str | None = None
@@ -120,9 +126,15 @@ class ContractRecord:
     contract_number: str | None
     license_number: str | None
     registry_sha256_key: str | None
+    contract_number_mode: str | None
+    license_number_mode: str | None
+    registry_sha256_key_mode: str | None
     contract_registry_entry_id: int | None
+    contract_external_code_identifier_id: int | None
     license_registry_entry_id: int | None
+    license_external_code_identifier_id: int | None
     registry_sha256_key_entry_id: int | None
+    registry_sha256_key_external_code_identifier_id: int | None
     draft_date: str | None
     signature_date: str | None
     effective_date: str | None

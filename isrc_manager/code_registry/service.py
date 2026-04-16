@@ -1,4 +1,4 @@
-"""Central registry service for app-managed internal codes and external catalog IDs."""
+"""Central registry service for app-managed internal codes and external code IDs."""
 
 from __future__ import annotations
 
@@ -18,10 +18,14 @@ from .models import (
     CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
+    CatalogIdentifierClassification,
+    CatalogIdentifierResolution,
     CLASSIFICATION_CANONICAL_CANDIDATE,
     CLASSIFICATION_EXTERNAL,
     CLASSIFICATION_INTERNAL,
+    CLASSIFICATION_MIGRATION_CONFLICT,
     CLASSIFICATION_MISMATCH,
+    CLASSIFICATION_SHADOWED_BY_INTERNAL,
     ENTRY_KIND_GENERATED,
     ENTRY_KIND_MANUAL_CAPTURE,
     ENTRY_KIND_SHA256_GENERATED,
@@ -33,8 +37,8 @@ from .models import (
     SUBJECT_KIND_GENERIC,
     SUBJECT_KIND_KEY,
     SUBJECT_KIND_LICENSE,
-    CatalogIdentifierClassification,
-    CatalogIdentifierResolution,
+    CodeIdentifierClassification,
+    CodeIdentifierResolution,
     CodeRegistryAssignmentTarget,
     CodeRegistryCategoryPayload,
     CodeRegistryCategoryRecord,
@@ -43,6 +47,7 @@ from .models import (
     CodeRegistryEntryRecord,
     CodeRegistryUsageLink,
     ExternalCatalogIdentifierRecord,
+    ExternalCodeIdentifierRecord,
 )
 
 _SEQUENTIAL_REMAINDER_RE = re.compile(r"^(?P<yy>\d{2})(?P<seq>\d{4})$")
@@ -90,6 +95,15 @@ _OWNER_TABLES = {
     "contract": ("Contracts", "title"),
 }
 
+_SUPPORTED_EXTERNAL_IDENTIFIER_SYSTEM_KEYS = frozenset(
+    {
+        BUILTIN_CATEGORY_CATALOG_NUMBER,
+        BUILTIN_CATEGORY_CONTRACT_NUMBER,
+        BUILTIN_CATEGORY_LICENSE_NUMBER,
+        BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    }
+)
+
 _CONTRACT_ENTRY_FIELDS = {
     BUILTIN_CATEGORY_CONTRACT_NUMBER: (
         "contract_registry_entry_id",
@@ -110,7 +124,7 @@ _CONTRACT_ENTRY_FIELDS = {
 
 
 class CodeRegistryService:
-    """Owns internal registry categories, immutable entries, and external catalog IDs."""
+    """Owns internal registry categories, immutable entries, and external code IDs."""
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -122,19 +136,20 @@ class CodeRegistryService:
             "CodeRegistryCategories",
             "CodeRegistrySequences",
             "CodeRegistryEntries",
-            "ExternalCatalogIdentifiers",
         )
         rows = cur.execute(
             """
             SELECT name
             FROM sqlite_master
             WHERE type='table'
-              AND name IN (?, ?, ?, ?)
+              AND name IN (?, ?, ?, ?, ?)
             """,
-            required_tables,
+            (*required_tables, "ExternalCodeIdentifiers", "ExternalCatalogIdentifiers"),
         ).fetchall()
         present = {str(row[0]) for row in rows}
-        return all(table_name in present for table_name in required_tables)
+        return all(table_name in present for table_name in required_tables) and (
+            "ExternalCodeIdentifiers" in present or "ExternalCatalogIdentifiers" in present
+        )
 
     @staticmethod
     def _clean_text(value: object | None) -> str | None:
@@ -154,6 +169,146 @@ class CodeRegistryService:
     @classmethod
     def normalize_external_value(cls, value: str | None) -> str:
         return " ".join(str(value or "").split()).casefold()
+
+    def _table_names(self) -> set[str]:
+        return {
+            str(row[0] or "")
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
+    def _table_columns(self, table_name: str) -> set[str]:
+        try:
+            return {
+                str(row[1] or "")
+                for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+                if row and row[1]
+            }
+        except sqlite3.DatabaseError:
+            return set()
+
+    def _external_identifier_table_name(self) -> str | None:
+        table_names = self._table_names()
+        if "ExternalCodeIdentifiers" in table_names:
+            return "ExternalCodeIdentifiers"
+        if "ExternalCatalogIdentifiers" in table_names:
+            return "ExternalCatalogIdentifiers"
+        return None
+
+    def _using_legacy_external_catalog_schema(self) -> bool:
+        return self._external_identifier_table_name() == "ExternalCatalogIdentifiers"
+
+    def _catalog_external_column_name(self, table_name: str) -> str | None:
+        columns = self._table_columns(table_name)
+        if "catalog_external_code_identifier_id" in columns:
+            return "catalog_external_code_identifier_id"
+        if "external_catalog_identifier_id" in columns:
+            return "external_catalog_identifier_id"
+        return None
+
+    def _contract_external_column_name(self, system_key: str) -> str | None:
+        columns = self._table_columns("Contracts")
+        mapping = {
+            BUILTIN_CATEGORY_CONTRACT_NUMBER: "contract_external_code_identifier_id",
+            BUILTIN_CATEGORY_LICENSE_NUMBER: "license_external_code_identifier_id",
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: "registry_sha256_key_external_code_identifier_id",
+        }
+        column_name = mapping.get(str(system_key or ""))
+        if column_name and column_name in columns:
+            return column_name
+        return None
+
+    def _owner_identifier_columns(
+        self, *, owner_kind: str, system_key: str
+    ) -> tuple[str, str, str, str | None, str] | None:
+        clean_owner_kind = str(owner_kind or "").strip().lower()
+        clean_system_key = str(system_key or "").strip()
+        if clean_owner_kind == "track" and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
+            external_column = self._catalog_external_column_name("Tracks")
+            return (
+                "Tracks",
+                "catalog_number",
+                "catalog_registry_entry_id",
+                external_column,
+                "Catalog Number",
+            )
+        if clean_owner_kind == "release" and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
+            external_column = self._catalog_external_column_name("Releases")
+            return (
+                "Releases",
+                "catalog_number",
+                "catalog_registry_entry_id",
+                external_column,
+                "Catalog Number",
+            )
+        if clean_owner_kind == "contract":
+            contract_mapping = {
+                BUILTIN_CATEGORY_CONTRACT_NUMBER: (
+                    "contract_number",
+                    "contract_registry_entry_id",
+                    "Contract Number",
+                ),
+                BUILTIN_CATEGORY_LICENSE_NUMBER: (
+                    "license_number",
+                    "license_registry_entry_id",
+                    "License Number",
+                ),
+                BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
+                    "registry_sha256_key",
+                    "registry_sha256_key_entry_id",
+                    "Registry SHA-256 Key",
+                ),
+            }
+            config = contract_mapping.get(clean_system_key)
+            if config is None:
+                return None
+            text_column, internal_column, label = config
+            return (
+                "Contracts",
+                text_column,
+                internal_column,
+                self._contract_external_column_name(clean_system_key),
+                label,
+            )
+        return None
+
+    def _normalization_for_external_identifier(self, *, system_key: str, value: str | None) -> str:
+        clean_system_key = str(system_key or "").strip()
+        clean_value = self._clean_text(value) or ""
+        if clean_system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY:
+            return clean_value
+        return self.normalize_external_value(clean_value)
+
+    @staticmethod
+    def _persisted_external_status(classification: str | None) -> str:
+        clean = str(classification or "").strip().lower()
+        if clean == CLASSIFICATION_MISMATCH:
+            return CLASSIFICATION_MISMATCH
+        if clean == CLASSIFICATION_MIGRATION_CONFLICT:
+            return CLASSIFICATION_MIGRATION_CONFLICT
+        if clean == CLASSIFICATION_SHADOWED_BY_INTERNAL:
+            return CLASSIFICATION_SHADOWED_BY_INTERNAL
+        return CLASSIFICATION_EXTERNAL
+
+    def _classification_reason_for_external_storage(
+        self,
+        *,
+        system_key: str,
+        classification: CodeIdentifierClassification,
+    ) -> str | None:
+        if classification.classification == CLASSIFICATION_INTERNAL:
+            if str(system_key or "").strip() == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY:
+                return (
+                    "Valid-looking external key values stay external until you explicitly "
+                    "choose the internal registry."
+                )
+            return (
+                "Explicit external mode keeps this value in External Identifiers instead of "
+                "capturing it into the internal registry."
+            )
+        return classification.reason
 
     def ensure_default_categories(self, *, cursor: sqlite3.Cursor | None = None) -> None:
         cur = cursor or self.conn.cursor()
@@ -243,36 +398,74 @@ class CodeRegistryService:
             usage_count=int(row[16] or 0) if len(row) > 16 else 0,
         )
 
-    def _row_to_external(self, row) -> ExternalCatalogIdentifierRecord:
-        return ExternalCatalogIdentifierRecord(
+    def _row_to_external(self, row) -> ExternalCodeIdentifierRecord:
+        return ExternalCodeIdentifierRecord(
             id=int(row[0]),
-            subject_kind=str(row[1] or ""),
-            subject_id=int(row[2] or 0),
-            value=str(row[3] or ""),
-            normalized_value=str(row[4] or ""),
-            provenance_kind=str(row[5] or "manual"),
-            classification_status=str(row[6] or CLASSIFICATION_EXTERNAL),
-            classification_reason=self._clean_text(row[7]),
-            source_label=self._clean_text(row[8]),
-            created_at=self._clean_text(row[9]),
-            updated_at=self._clean_text(row[10]),
-            usage_count=int(row[11] or 0) if len(row) > 11 else 0,
-            linked_flag=bool(row[12]) if len(row) > 12 else False,
+            category_system_key=str(row[1] or ""),
+            value=str(row[2] or ""),
+            normalized_value=str(row[3] or ""),
+            origin_record_kind=self._clean_text(row[4]),
+            origin_record_id=int(row[5]) if row[5] is not None else None,
+            provenance_kind=str(row[6] or "manual"),
+            classification_status=str(row[7] or CLASSIFICATION_EXTERNAL),
+            classification_reason=self._clean_text(row[8]),
+            source_label=self._clean_text(row[9]),
+            matched_registry_entry_id=int(row[10]) if row[10] is not None else None,
+            created_at=self._clean_text(row[11]),
+            updated_at=self._clean_text(row[12]),
+            usage_count=int(row[13] or 0) if len(row) > 13 else 0,
+            linked_flag=bool(row[14]) if len(row) > 14 else False,
         )
 
-    @staticmethod
-    def _external_usage_counts_cte() -> str:
-        return """
-            WITH usage_counts AS (
-                SELECT external_catalog_identifier_id AS external_id, COUNT(*) AS usage_count
+    def _external_usage_counts_cte(self) -> str:
+        parts: list[str] = []
+        track_column = self._catalog_external_column_name("Tracks")
+        if track_column is not None:
+            parts.append(
+                f"""
+                SELECT {track_column} AS external_id, COUNT(*) AS usage_count
                 FROM Tracks
-                WHERE external_catalog_identifier_id IS NOT NULL
-                GROUP BY external_catalog_identifier_id
-                UNION ALL
-                SELECT external_catalog_identifier_id AS external_id, COUNT(*) AS usage_count
+                WHERE {track_column} IS NOT NULL
+                GROUP BY {track_column}
+                """
+            )
+        release_column = self._catalog_external_column_name("Releases")
+        if release_column is not None:
+            parts.append(
+                f"""
+                SELECT {release_column} AS external_id, COUNT(*) AS usage_count
                 FROM Releases
-                WHERE external_catalog_identifier_id IS NOT NULL
-                GROUP BY external_catalog_identifier_id
+                WHERE {release_column} IS NOT NULL
+                GROUP BY {release_column}
+                """
+            )
+        contract_columns = (
+            self._contract_external_column_name(BUILTIN_CATEGORY_CONTRACT_NUMBER),
+            self._contract_external_column_name(BUILTIN_CATEGORY_LICENSE_NUMBER),
+            self._contract_external_column_name(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY),
+        )
+        for column_name in contract_columns:
+            if column_name is None:
+                continue
+            parts.append(
+                f"""
+                SELECT {column_name} AS external_id, COUNT(*) AS usage_count
+                FROM Contracts
+                WHERE {column_name} IS NOT NULL
+                GROUP BY {column_name}
+                """
+            )
+        if not parts:
+            return """
+                WITH usage_totals AS (
+                    SELECT NULL AS external_id, 0 AS usage_count
+                    WHERE 0
+                )
+            """
+        usage_sql = "\nUNION ALL\n".join(parts)
+        return f"""
+            WITH usage_counts AS (
+                {usage_sql}
             ),
             usage_totals AS (
                 SELECT external_id, SUM(usage_count) AS usage_count
@@ -750,127 +943,236 @@ class CodeRegistryService:
             for entry in entries
         ]
 
-    def list_external_catalog_identifiers(
+    def list_external_code_identifiers(
         self,
         *,
         search_text: str | None = None,
-    ) -> list[ExternalCatalogIdentifierRecord]:
+        category_system_key: str | None = None,
+    ) -> list[ExternalCodeIdentifierRecord]:
+        table_name = self._external_identifier_table_name()
+        if table_name is None:
+            return []
         params: list[object] = []
-        where_sql = ""
+        where: list[str] = []
+        clean_system_key = self._clean_text(category_system_key)
+        if clean_system_key:
+            if self._using_legacy_external_catalog_schema():
+                if clean_system_key != BUILTIN_CATEGORY_CATALOG_NUMBER:
+                    return []
+            else:
+                where.append("e.category_system_key=?")
+                params.append(clean_system_key)
         if search_text:
-            where_sql = "WHERE value LIKE ? OR source_label LIKE ? OR classification_status LIKE ?"
             needle = f"%{str(search_text).strip()}%"
+            where.append("(e.value LIKE ? OR e.source_label LIKE ? OR e.classification_status LIKE ?)")
             params.extend([needle, needle, needle])
-        rows = self.conn.execute(
-            f"""
-            {self._external_usage_counts_cte()}
-            SELECT
-                e.id,
-                e.subject_kind,
-                e.subject_id,
-                e.value,
-                e.normalized_value,
-                e.provenance_kind,
-                e.classification_status,
-                e.classification_reason,
-                e.source_label,
-                e.created_at,
-                e.updated_at,
-                COALESCE(u.usage_count, 0) AS usage_count,
-                CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
-            FROM ExternalCatalogIdentifiers e
-            LEFT JOIN usage_totals u ON u.external_id = e.id
-            {where_sql}
-            ORDER BY COALESCE(u.usage_count, 0) DESC, e.updated_at DESC, lower(e.value), e.id DESC
-            """,
-            params,
-        ).fetchall()
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        if self._using_legacy_external_catalog_schema():
+            rows = self.conn.execute(
+                f"""
+                {self._external_usage_counts_cte()}
+                SELECT
+                    e.id,
+                    ? AS category_system_key,
+                    e.value,
+                    e.normalized_value,
+                    e.subject_kind,
+                    e.subject_id,
+                    e.provenance_kind,
+                    e.classification_status,
+                    e.classification_reason,
+                    e.source_label,
+                    NULL AS matched_registry_entry_id,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(u.usage_count, 0) AS usage_count,
+                    CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
+                FROM ExternalCatalogIdentifiers e
+                LEFT JOIN usage_totals u ON u.external_id = e.id
+                {where_sql}
+                ORDER BY COALESCE(u.usage_count, 0) DESC, e.updated_at DESC, lower(e.value), e.id DESC
+                """,
+                [BUILTIN_CATEGORY_CATALOG_NUMBER, *params],
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f"""
+                {self._external_usage_counts_cte()}
+                SELECT
+                    e.id,
+                    e.category_system_key,
+                    e.value,
+                    e.normalized_value,
+                    e.origin_record_kind,
+                    e.origin_record_id,
+                    e.provenance_kind,
+                    e.classification_status,
+                    e.classification_reason,
+                    e.source_label,
+                    e.matched_registry_entry_id,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(u.usage_count, 0) AS usage_count,
+                    CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
+                FROM ExternalCodeIdentifiers e
+                LEFT JOIN usage_totals u ON u.external_id = e.id
+                {where_sql}
+                ORDER BY COALESCE(u.usage_count, 0) DESC, e.updated_at DESC, lower(e.value), e.id DESC
+                """,
+                params,
+            ).fetchall()
         return [self._row_to_external(row) for row in rows]
 
-    def external_catalog_suggestions(self, *, limit: int = 250) -> list[str]:
-        try:
-            rows = self.conn.execute(
+    def external_identifier_suggestions(
+        self,
+        *,
+        system_key: str,
+        limit: int = 250,
+    ) -> list[str]:
+        clean_system_key = str(system_key or "").strip()
+        if clean_system_key not in _SUPPORTED_EXTERNAL_IDENTIFIER_SYSTEM_KEYS:
+            return []
+        values_sql: list[str] = []
+        params: list[object] = []
+        table_name = self._external_identifier_table_name()
+        if table_name == "ExternalCodeIdentifiers":
+            values_sql.append(
                 """
                 SELECT value
-                FROM (
-                    SELECT value
-                    FROM ExternalCatalogIdentifiers
-                    WHERE value IS NOT NULL AND value != ''
-                    UNION
-                    SELECT catalog_number AS value
-                    FROM Tracks
-                    WHERE catalog_number IS NOT NULL
-                      AND catalog_number != ''
-                      AND catalog_registry_entry_id IS NULL
-                    UNION
-                    SELECT catalog_number AS value
-                    FROM Releases
-                    WHERE catalog_number IS NOT NULL
-                      AND catalog_number != ''
-                      AND catalog_registry_entry_id IS NULL
-                )
-                ORDER BY lower(value), value
-                LIMIT ?
-                """,
-                (int(limit),),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            rows = self.conn.execute(
+                FROM ExternalCodeIdentifiers
+                WHERE category_system_key=?
+                  AND value IS NOT NULL
+                  AND value != ''
+                """
+            )
+            params.append(clean_system_key)
+        elif table_name == "ExternalCatalogIdentifiers" and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
+            values_sql.append(
                 """
                 SELECT value
                 FROM ExternalCatalogIdentifiers
-                WHERE value IS NOT NULL AND value != ''
-                GROUP BY normalized_value, value
-                ORDER BY lower(value), value
-                LIMIT ?
-                """,
-                (int(limit),),
-            ).fetchall()
+                WHERE value IS NOT NULL
+                  AND value != ''
+                """
+            )
+        owner_columns: list[tuple[str, str, str | None, str | None]] = []
+        if clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
+            owner_columns.extend(
+                [
+                    (
+                        "Tracks",
+                        "catalog_number",
+                        "catalog_registry_entry_id",
+                        self._catalog_external_column_name("Tracks"),
+                    ),
+                    (
+                        "Releases",
+                        "catalog_number",
+                        "catalog_registry_entry_id",
+                        self._catalog_external_column_name("Releases"),
+                    ),
+                ]
+            )
+        elif clean_system_key in {
+            BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            BUILTIN_CATEGORY_LICENSE_NUMBER,
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        } and "Contracts" in self._table_names():
+            contract_mapping = {
+                BUILTIN_CATEGORY_CONTRACT_NUMBER: (
+                    "contract_number",
+                    "contract_registry_entry_id",
+                ),
+                BUILTIN_CATEGORY_LICENSE_NUMBER: (
+                    "license_number",
+                    "license_registry_entry_id",
+                ),
+                BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
+                    "registry_sha256_key",
+                    "registry_sha256_key_entry_id",
+                ),
+            }
+            text_column, internal_column = contract_mapping[clean_system_key]
+            owner_columns.append(
+                (
+                    "Contracts",
+                    text_column,
+                    internal_column,
+                    self._contract_external_column_name(clean_system_key),
+                )
+            )
+        for table, text_column, internal_column, external_column in owner_columns:
+            where_bits = [
+                f"{text_column} IS NOT NULL",
+                f"{text_column} != ''",
+                f"{internal_column} IS NULL",
+            ]
+            if external_column:
+                where_bits.append(f"{external_column} IS NULL")
+            values_sql.append(
+                f"""
+                SELECT {text_column} AS value
+                FROM {table}
+                WHERE {' AND '.join(where_bits)}
+                """
+            )
+        if not values_sql:
+            return []
+        query = "\nUNION\n".join(values_sql)
+        rows = self.conn.execute(
+            f"""
+            SELECT value
+            FROM ({query})
+            ORDER BY lower(value), value
+            LIMIT ?
+            """,
+            [*params, int(limit)],
+        ).fetchall()
         return [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
 
-    def classify_catalog_identifier(self, value: str | None) -> CatalogIdentifierClassification:
+    def _classify_sequential_identifier(
+        self,
+        *,
+        category: CodeRegistryCategoryRecord,
+        value: str | None,
+    ) -> CodeIdentifierClassification:
         clean_value = self._clean_text(value) or ""
         normalized_value = self.normalize_internal_value(clean_value)
         if not clean_value:
-            return CatalogIdentifierClassification(
+            return CodeIdentifierClassification(
                 input_value="",
                 normalized_value="",
                 classification=CATALOG_MODE_EMPTY,
+                category_id=category.id,
+                category_system_key=category.system_key,
+                category_display_name=category.display_name,
                 reason="blank",
             )
-        matching_categories = [
-            category
-            for category in self.list_categories(
-                subject_kind=SUBJECT_KIND_CATALOG,
-                active_only=True,
-            )
-            if category.generation_strategy == GENERATION_STRATEGY_SEQUENTIAL
-            and category.normalized_prefix
-            and normalized_value.startswith(str(category.normalized_prefix))
-        ]
-        if not matching_categories:
+        prefix = str(category.normalized_prefix or "")
+        if not prefix or not normalized_value.startswith(prefix):
             classification = (
                 CLASSIFICATION_CANONICAL_CANDIDATE
                 if _GENERIC_CODE_RE.fullmatch(normalized_value)
                 else CLASSIFICATION_EXTERNAL
             )
-            return CatalogIdentifierClassification(
+            reason = (
+                f"No configured internal prefix matched this value for '{category.display_name}'."
+                if classification == CLASSIFICATION_CANONICAL_CANDIDATE
+                else f"Value does not match the configured internal prefix for '{category.display_name}'."
+            )
+            return CodeIdentifierClassification(
                 input_value=clean_value,
                 normalized_value=normalized_value,
                 classification=classification,
-                canonical_value=clean_value,
-                reason=(
-                    "No configured internal catalog prefix matched this value."
-                    if classification == CLASSIFICATION_CANONICAL_CANDIDATE
-                    else "Value does not match any configured internal catalog prefix."
-                ),
+                category_id=category.id,
+                category_system_key=category.system_key,
+                category_display_name=category.display_name,
+                reason=reason,
             )
-        category = matching_categories[0]
-        prefix = str(category.normalized_prefix or "")
         remainder = normalized_value[len(prefix) :]
         match = _SEQUENTIAL_REMAINDER_RE.fullmatch(remainder)
         if not match:
-            return CatalogIdentifierClassification(
+            return CodeIdentifierClassification(
                 input_value=clean_value,
                 normalized_value=normalized_value,
                 classification=CLASSIFICATION_MISMATCH,
@@ -878,12 +1180,15 @@ class CodeRegistryService:
                 category_system_key=category.system_key,
                 category_display_name=category.display_name,
                 matched_prefix=prefix,
-                reason="Value uses a known internal prefix but not the canonical <PREFIX><YY><NNNN> format.",
+                reason=(
+                    f"Value uses the known internal prefix for '{category.display_name}' but not "
+                    "the canonical <PREFIX><YY><NNNN> format."
+                ),
             )
         sequence_year = int(match.group("yy"))
         sequence_number = int(match.group("seq"))
         if sequence_number < 1 or sequence_number > 9999:
-            return CatalogIdentifierClassification(
+            return CodeIdentifierClassification(
                 input_value=clean_value,
                 normalized_value=normalized_value,
                 classification=CLASSIFICATION_MISMATCH,
@@ -895,7 +1200,7 @@ class CodeRegistryService:
             )
         canonical_value = f"{prefix}{sequence_year:02d}{sequence_number:04d}"
         existing_entry = self.fetch_entry_by_value(canonical_value)
-        return CatalogIdentifierClassification(
+        return CodeIdentifierClassification(
             input_value=clean_value,
             normalized_value=normalized_value,
             classification=CLASSIFICATION_INTERNAL,
@@ -907,7 +1212,752 @@ class CodeRegistryService:
             sequence_year=sequence_year,
             sequence_number=sequence_number,
             existing_entry_id=existing_entry.id if existing_entry is not None else None,
-            reason="Accepted as an internal catalog identifier.",
+            reason=f"Accepted as an internal {category.display_name.lower()}.",
+        )
+
+    def classify_identifier_value(
+        self,
+        *,
+        system_key: str,
+        value: str | None,
+        allow_existing_internal_match: bool = False,
+    ) -> CodeIdentifierClassification:
+        category = self.fetch_category_by_system_key(str(system_key or "").strip())
+        clean_value = self._clean_text(value) or ""
+        if category is None:
+            return CodeIdentifierClassification(
+                input_value=clean_value,
+                normalized_value=self.normalize_external_value(clean_value),
+                classification=CLASSIFICATION_EXTERNAL if clean_value else CATALOG_MODE_EMPTY,
+                category_system_key=str(system_key or "").strip() or None,
+                reason="The requested identifier category is not configured.",
+            )
+        if not clean_value:
+            return CodeIdentifierClassification(
+                input_value="",
+                normalized_value="",
+                classification=CATALOG_MODE_EMPTY,
+                category_id=category.id,
+                category_system_key=category.system_key,
+                category_display_name=category.display_name,
+                reason="blank",
+            )
+        if category.generation_strategy == GENERATION_STRATEGY_SHA256:
+            normalized_internal = str(clean_value).strip().lower()
+            existing_entry = (
+                self.fetch_entry_by_value(normalized_internal)
+                if allow_existing_internal_match and _SHA256_RE.fullmatch(normalized_internal)
+                else None
+            )
+            if existing_entry is not None and int(existing_entry.category_id) == int(category.id):
+                return CodeIdentifierClassification(
+                    input_value=clean_value,
+                    normalized_value=str(clean_value).strip(),
+                    classification=CLASSIFICATION_INTERNAL,
+                    category_id=category.id,
+                    category_system_key=category.system_key,
+                    category_display_name=category.display_name,
+                    canonical_value=existing_entry.value,
+                    existing_entry_id=existing_entry.id,
+                    reason="Matched an existing internal Registry SHA-256 Key.",
+                )
+            return CodeIdentifierClassification(
+                input_value=clean_value,
+                normalized_value=str(clean_value).strip(),
+                classification=CLASSIFICATION_EXTERNAL,
+                category_id=category.id,
+                category_system_key=category.system_key,
+                category_display_name=category.display_name,
+                reason=(
+                    "External key values remain external unless you explicitly select the internal registry."
+                ),
+            )
+        if category.generation_strategy == GENERATION_STRATEGY_SEQUENTIAL:
+            return self._classify_sequential_identifier(category=category, value=clean_value)
+        return CodeIdentifierClassification(
+            input_value=clean_value,
+            normalized_value=self.normalize_external_value(clean_value),
+            classification=CLASSIFICATION_EXTERNAL,
+            category_id=category.id,
+            category_system_key=category.system_key,
+            category_display_name=category.display_name,
+            reason=f"'{category.display_name}' values stay external unless captured into the internal registry.",
+        )
+
+    def resolve_identifier_input(
+        self,
+        *,
+        system_key: str,
+        mode: str,
+        value: str | None,
+        registry_entry_id: int | None = None,
+        external_identifier_id: int | None = None,
+        created_via: str | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> CodeIdentifierResolution:
+        clean_system_key = str(system_key or "").strip()
+        clean_value = self._clean_text(value)
+        clean_mode = str(mode or "").strip().lower()
+        explicit_mode = clean_mode in {
+            CATALOG_MODE_INTERNAL,
+            CATALOG_MODE_EXTERNAL,
+            CATALOG_MODE_EMPTY,
+        }
+        if not explicit_mode:
+            clean_mode = ""
+        if not clean_mode:
+            if registry_entry_id is not None:
+                clean_mode = CATALOG_MODE_INTERNAL
+            elif external_identifier_id is not None:
+                clean_mode = CATALOG_MODE_EXTERNAL
+            elif not clean_value:
+                clean_mode = CATALOG_MODE_EMPTY
+            else:
+                inferred = self.classify_identifier_value(
+                    system_key=clean_system_key,
+                    value=clean_value,
+                    allow_existing_internal_match=False,
+                )
+                clean_mode = (
+                    CATALOG_MODE_INTERNAL
+                    if inferred.classification == CLASSIFICATION_INTERNAL
+                    else CATALOG_MODE_EXTERNAL
+                )
+        if clean_mode == CATALOG_MODE_EMPTY:
+            return CodeIdentifierResolution(mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key)
+        if clean_mode == CATALOG_MODE_INTERNAL:
+            if external_identifier_id is not None:
+                raise ValueError("Internal identifier mode cannot carry an external identifier link.")
+            if registry_entry_id is not None:
+                entry = self.fetch_entry(int(registry_entry_id))
+                if entry is None:
+                    raise ValueError("Selected internal registry value was not found.")
+                if str(entry.category_system_key or "").strip() != clean_system_key:
+                    raise ValueError("Selected internal registry value belongs to a different category.")
+                return CodeIdentifierResolution(
+                    mode=CATALOG_MODE_INTERNAL,
+                    category_system_key=clean_system_key,
+                    value=entry.value,
+                    registry_entry_id=entry.id,
+                    category_id=entry.category_id,
+                    classification_status=CLASSIFICATION_INTERNAL,
+                    classification_reason="Selected existing internal registry value.",
+                )
+            entry = self.capture_value_for_category(
+                system_key=clean_system_key,
+                value=str(value or ""),
+                created_via=created_via,
+                entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+                cursor=cursor,
+            )
+            return CodeIdentifierResolution(
+                mode=CATALOG_MODE_INTERNAL,
+                category_system_key=clean_system_key,
+                value=entry.value,
+                registry_entry_id=entry.id,
+                category_id=entry.category_id,
+                classification_status=CLASSIFICATION_INTERNAL,
+                classification_reason=f"Captured as an internal {entry.category_display_name.lower()}.",
+            )
+        if registry_entry_id is not None:
+            raise ValueError("External identifier mode cannot carry an internal registry link.")
+        if external_identifier_id is not None:
+            record = self.fetch_external_code_identifier(int(external_identifier_id))
+            if record is None:
+                raise ValueError("Selected external identifier was not found.")
+            if str(record.category_system_key or "").strip() != clean_system_key:
+                raise ValueError("Selected external identifier belongs to a different category.")
+            return CodeIdentifierResolution(
+                mode=CATALOG_MODE_EXTERNAL,
+                category_system_key=clean_system_key,
+                value=record.value,
+                external_identifier_id=record.id,
+                external_value=record.value,
+                classification_status=record.classification_status,
+                classification_reason=record.classification_reason,
+            )
+        if not clean_value:
+            return CodeIdentifierResolution(mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key)
+        classification = self.classify_identifier_value(
+            system_key=clean_system_key,
+            value=clean_value,
+            allow_existing_internal_match=False,
+        )
+        return CodeIdentifierResolution(
+            mode=CATALOG_MODE_EXTERNAL,
+            category_system_key=clean_system_key,
+            value=clean_value,
+            external_value=clean_value,
+            classification_status=self._persisted_external_status(classification.classification),
+            classification_reason=self._classification_reason_for_external_storage(
+                system_key=clean_system_key,
+                classification=classification,
+            ),
+        )
+
+    def _upsert_external_code_identifier(
+        self,
+        *,
+        system_key: str,
+        owner_kind: str,
+        owner_id: int,
+        value: str,
+        provenance_kind: str,
+        classification_status: str,
+        classification_reason: str | None,
+        source_label: str | None,
+        cursor: sqlite3.Cursor,
+    ) -> int:
+        table_name = self._external_identifier_table_name()
+        clean_value = self._clean_text(value)
+        clean_system_key = str(system_key or "").strip()
+        if table_name is None:
+            raise ValueError("External identifier storage is unavailable.")
+        if clean_system_key not in _SUPPORTED_EXTERNAL_IDENTIFIER_SYSTEM_KEYS:
+            raise ValueError("Unsupported external identifier category.")
+        if not clean_value:
+            raise ValueError("External identifiers require a value.")
+        if table_name == "ExternalCatalogIdentifiers":
+            if clean_system_key != BUILTIN_CATEGORY_CATALOG_NUMBER:
+                raise ValueError("Legacy external catalog storage only supports catalog numbers.")
+            normalized = self.normalize_external_value(clean_value)
+            existing = cursor.execute(
+                """
+                SELECT id
+                FROM ExternalCatalogIdentifiers
+                WHERE normalized_value=?
+                ORDER BY id
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+            if existing is not None:
+                external_id = int(existing[0])
+                cursor.execute(
+                    """
+                    UPDATE ExternalCatalogIdentifiers
+                    SET value=?,
+                        provenance_kind=?,
+                        classification_status=?,
+                        classification_reason=?,
+                        source_label=?,
+                        updated_at=datetime('now')
+                    WHERE id=?
+                    """,
+                    (
+                        clean_value,
+                        str(provenance_kind or "manual"),
+                        self._persisted_external_status(classification_status),
+                        self._clean_text(classification_reason),
+                        self._clean_text(source_label),
+                        external_id,
+                    ),
+                )
+                return external_id
+            cursor.execute(
+                """
+                INSERT INTO ExternalCatalogIdentifiers(
+                    subject_kind,
+                    subject_id,
+                    value,
+                    normalized_value,
+                    provenance_kind,
+                    classification_status,
+                    classification_reason,
+                    source_label
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(owner_kind or "").strip().lower() or "migration",
+                    int(owner_id),
+                    clean_value,
+                    normalized,
+                    str(provenance_kind or "manual"),
+                    self._persisted_external_status(classification_status),
+                    self._clean_text(classification_reason),
+                    self._clean_text(source_label),
+                ),
+            )
+            return int(cursor.lastrowid)
+        normalized = self._normalization_for_external_identifier(
+            system_key=clean_system_key,
+            value=clean_value,
+        )
+        existing = cursor.execute(
+            """
+            SELECT id
+            FROM ExternalCodeIdentifiers
+            WHERE category_system_key=?
+              AND normalized_value=?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (clean_system_key, normalized),
+        ).fetchone()
+        if existing is not None:
+            external_id = int(existing[0])
+            cursor.execute(
+                """
+                UPDATE ExternalCodeIdentifiers
+                SET value=?,
+                    provenance_kind=?,
+                    classification_status=?,
+                    classification_reason=?,
+                    source_label=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    clean_value,
+                    str(provenance_kind or "manual"),
+                    self._persisted_external_status(classification_status),
+                    self._clean_text(classification_reason),
+                    self._clean_text(source_label),
+                    external_id,
+                ),
+            )
+            return external_id
+        cursor.execute(
+            """
+            INSERT INTO ExternalCodeIdentifiers(
+                category_system_key,
+                value,
+                normalized_value,
+                origin_record_kind,
+                origin_record_id,
+                provenance_kind,
+                classification_status,
+                classification_reason,
+                source_label,
+                matched_registry_entry_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                clean_system_key,
+                clean_value,
+                normalized,
+                str(owner_kind or "").strip().lower() or None,
+                int(owner_id) if owner_id > 0 else None,
+                str(provenance_kind or "manual"),
+                self._persisted_external_status(classification_status),
+                self._clean_text(classification_reason),
+                self._clean_text(source_label),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    def store_external_code_identifier(
+        self,
+        *,
+        system_key: str,
+        value: str,
+        provenance_kind: str = "manual",
+        source_label: str | None = None,
+        owner_kind: str = "generic",
+        owner_id: int = 0,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> ExternalCodeIdentifierRecord:
+        service_cursor = cursor or self.conn.cursor()
+        classification = self.classify_identifier_value(
+            system_key=system_key,
+            value=value,
+            allow_existing_internal_match=False,
+        )
+        external_id = self._upsert_external_code_identifier(
+            system_key=system_key,
+            owner_kind=owner_kind,
+            owner_id=int(owner_id),
+            value=value,
+            provenance_kind=provenance_kind,
+            classification_status=self._persisted_external_status(classification.classification),
+            classification_reason=self._classification_reason_for_external_storage(
+                system_key=system_key,
+                classification=classification,
+            ),
+            source_label=source_label,
+            cursor=service_cursor,
+        )
+        if cursor is None:
+            self.conn.commit()
+        record = self.fetch_external_code_identifier(int(external_id))
+        if record is None:
+            raise RuntimeError("External code identifier could not be reloaded after storage.")
+        return record
+
+    def assign_identifier_to_owner(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: int,
+        system_key: str,
+        resolution: CodeIdentifierResolution,
+        provenance_kind: str = "manual",
+        source_label: str | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> tuple[int | None, int | None, str | None]:
+        config = self._owner_identifier_columns(
+            owner_kind=str(owner_kind or ""),
+            system_key=str(system_key or ""),
+        )
+        if config is None:
+            raise ValueError("Unsupported identifier owner/category combination.")
+        table_name, text_column, internal_column, external_column, field_label = config
+        if resolution.mode == CATALOG_MODE_INTERNAL and resolution.external_identifier_id is not None:
+            raise ValueError(f"{field_label} cannot carry both internal and external authority links.")
+        if resolution.mode == CATALOG_MODE_EXTERNAL and resolution.registry_entry_id is not None:
+            raise ValueError(f"{field_label} cannot carry both internal and external authority links.")
+        if resolution.mode == CATALOG_MODE_EXTERNAL and external_column is None:
+            raise ValueError(f"{field_label} does not support external identifier storage in this schema.")
+        cur = cursor or self.conn.cursor()
+        if resolution.mode == CATALOG_MODE_EMPTY:
+            if external_column is None:
+                cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET {internal_column}=NULL,
+                        {text_column}=NULL
+                    WHERE id=?
+                    """,
+                    (int(owner_id),),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET {internal_column}=NULL,
+                        {external_column}=NULL,
+                        {text_column}=NULL
+                    WHERE id=?
+                    """,
+                    (int(owner_id),),
+                )
+            if cursor is None:
+                self.conn.commit()
+            return None, None, None
+        if resolution.mode == CATALOG_MODE_INTERNAL:
+            entry = self.fetch_entry(int(resolution.registry_entry_id or 0))
+            if entry is None:
+                raise ValueError(f"Selected internal {field_label.lower()} no longer exists.")
+            if str(entry.category_system_key or "").strip() != str(system_key or "").strip():
+                raise ValueError(f"Selected internal value does not belong to {field_label}.")
+            if external_column is None:
+                cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET {internal_column}=?,
+                        {text_column}=?
+                    WHERE id=?
+                    """,
+                    (entry.id, entry.value, int(owner_id)),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET {internal_column}=?,
+                        {external_column}=NULL,
+                        {text_column}=?
+                    WHERE id=?
+                    """,
+                    (entry.id, entry.value, int(owner_id)),
+                )
+            if cursor is None:
+                self.conn.commit()
+            return entry.id, None, entry.value
+        external_id = (
+            int(resolution.external_identifier_id)
+            if resolution.external_identifier_id is not None
+            else self._upsert_external_code_identifier(
+                system_key=str(system_key or ""),
+                owner_kind=str(owner_kind or ""),
+                owner_id=int(owner_id),
+                value=str(resolution.external_value or resolution.value or ""),
+                provenance_kind=provenance_kind,
+                classification_status=str(
+                    resolution.classification_status or CLASSIFICATION_EXTERNAL
+                ),
+                classification_reason=resolution.classification_reason,
+                source_label=source_label,
+                cursor=cur,
+            )
+        )
+        clean_value = self._clean_text(resolution.external_value or resolution.value)
+        cur.execute(
+            f"""
+            UPDATE {table_name}
+            SET {internal_column}=NULL,
+                {external_column}=?,
+                {text_column}=?
+            WHERE id=?
+            """,
+            (external_id, clean_value, int(owner_id)),
+        )
+        if cursor is None:
+            self.conn.commit()
+        return None, external_id, clean_value
+
+    def fetch_external_code_identifier(self, external_id: int) -> ExternalCodeIdentifierRecord | None:
+        table_name = self._external_identifier_table_name()
+        if table_name is None:
+            return None
+        if table_name == "ExternalCatalogIdentifiers":
+            row = self.conn.execute(
+                f"""
+                {self._external_usage_counts_cte()}
+                SELECT
+                    e.id,
+                    ? AS category_system_key,
+                    e.value,
+                    e.normalized_value,
+                    e.subject_kind,
+                    e.subject_id,
+                    e.provenance_kind,
+                    e.classification_status,
+                    e.classification_reason,
+                    e.source_label,
+                    NULL AS matched_registry_entry_id,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(u.usage_count, 0) AS usage_count,
+                    CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
+                FROM ExternalCatalogIdentifiers e
+                LEFT JOIN usage_totals u ON u.external_id = e.id
+                WHERE e.id=?
+                """,
+                (BUILTIN_CATEGORY_CATALOG_NUMBER, int(external_id)),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                f"""
+                {self._external_usage_counts_cte()}
+                SELECT
+                    e.id,
+                    e.category_system_key,
+                    e.value,
+                    e.normalized_value,
+                    e.origin_record_kind,
+                    e.origin_record_id,
+                    e.provenance_kind,
+                    e.classification_status,
+                    e.classification_reason,
+                    e.source_label,
+                    e.matched_registry_entry_id,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(u.usage_count, 0) AS usage_count,
+                    CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
+                FROM ExternalCodeIdentifiers e
+                LEFT JOIN usage_totals u ON u.external_id = e.id
+                WHERE e.id=?
+                """,
+                (int(external_id),),
+            ).fetchone()
+        return self._row_to_external(row) if row else None
+
+    def _set_external_identifier_shadow_state(
+        self,
+        *,
+        external_id: int,
+        matched_registry_entry_id: int,
+        classification_reason: str | None,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        table_name = self._external_identifier_table_name()
+        if table_name == "ExternalCodeIdentifiers":
+            cursor.execute(
+                """
+                UPDATE ExternalCodeIdentifiers
+                SET classification_status=?,
+                    classification_reason=?,
+                    matched_registry_entry_id=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    CLASSIFICATION_SHADOWED_BY_INTERNAL,
+                    self._clean_text(classification_reason)
+                    or "Reclassified into the internal registry while preserving external provenance.",
+                    int(matched_registry_entry_id),
+                    int(external_id),
+                ),
+            )
+            return
+        if table_name == "ExternalCatalogIdentifiers":
+            cursor.execute(
+                """
+                UPDATE ExternalCatalogIdentifiers
+                SET classification_status=?,
+                    classification_reason=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    CLASSIFICATION_SHADOWED_BY_INTERNAL,
+                    self._clean_text(classification_reason)
+                    or "Reclassified into the internal registry while preserving external provenance.",
+                    int(external_id),
+                ),
+            )
+
+    def promote_external_code_identifier(
+        self,
+        external_id: int,
+        *,
+        created_via: str | None = "workspace.promote",
+    ) -> CodeRegistryEntryRecord:
+        record = self.fetch_external_code_identifier(int(external_id))
+        if record is None:
+            raise ValueError(f"External identifier {int(external_id)} was not found.")
+        resolution = self.resolve_identifier_input(
+            system_key=record.category_system_key,
+            mode=CATALOG_MODE_INTERNAL,
+            value=record.value,
+            created_via=created_via,
+        )
+        entry = self.fetch_entry(int(resolution.registry_entry_id or 0))
+        if entry is None:
+            raise RuntimeError("Promoted internal registry entry could not be reloaded.")
+        usage = self.usage_for_external_identifier(int(external_id))
+        with self.conn:
+            cur = self.conn.cursor()
+            for link in usage:
+                self.assign_identifier_to_owner(
+                    owner_kind=link.subject_kind,
+                    owner_id=link.subject_id,
+                    system_key=record.category_system_key,
+                    resolution=CodeIdentifierResolution(
+                        mode=CATALOG_MODE_INTERNAL,
+                        category_system_key=record.category_system_key,
+                        value=entry.value,
+                        registry_entry_id=entry.id,
+                        category_id=entry.category_id,
+                        classification_status=CLASSIFICATION_INTERNAL,
+                        classification_reason="Promoted from External Identifiers.",
+                    ),
+                    provenance_kind="promoted",
+                    source_label=created_via,
+                    cursor=cur,
+                )
+            self._set_external_identifier_shadow_state(
+                external_id=int(external_id),
+                matched_registry_entry_id=entry.id,
+                classification_reason="Promoted into the internal registry from External Identifiers.",
+                cursor=cur,
+            )
+        return entry
+
+    def reclassify_external_code_identifiers(
+        self,
+        *,
+        category_system_key: str | None = None,
+    ) -> dict[str, int]:
+        promoted = 0
+        retained = 0
+        mismatched = 0
+        conflicts = 0
+        for record in self.list_external_code_identifiers(
+            category_system_key=category_system_key,
+        ):
+            allow_existing_internal_match = (
+                record.category_system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+            )
+            classification = self.classify_identifier_value(
+                system_key=record.category_system_key,
+                value=record.value,
+                allow_existing_internal_match=allow_existing_internal_match,
+            )
+            if (
+                classification.classification == CLASSIFICATION_INTERNAL
+                and record.category_system_key != BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+            ) or (
+                classification.classification == CLASSIFICATION_INTERNAL
+                and record.category_system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+                and classification.existing_entry_id is not None
+            ):
+                self.promote_external_code_identifier(
+                    record.id,
+                    created_via="workspace.reclassify",
+                )
+                promoted += 1
+                continue
+            table_name = self._external_identifier_table_name()
+            if table_name is None:
+                continue
+            status = self._persisted_external_status(classification.classification)
+            if classification.classification == CLASSIFICATION_MISMATCH:
+                mismatched += 1
+            elif classification.classification == CLASSIFICATION_MIGRATION_CONFLICT:
+                conflicts += 1
+                status = CLASSIFICATION_MIGRATION_CONFLICT
+            else:
+                retained += 1
+            with self.conn:
+                if table_name == "ExternalCodeIdentifiers":
+                    self.conn.execute(
+                        """
+                        UPDATE ExternalCodeIdentifiers
+                        SET classification_status=?,
+                            classification_reason=?,
+                            updated_at=datetime('now')
+                        WHERE id=?
+                        """,
+                        (
+                            status,
+                            self._classification_reason_for_external_storage(
+                                system_key=record.category_system_key,
+                                classification=classification,
+                            ),
+                            int(record.id),
+                        ),
+                    )
+                else:
+                    self.conn.execute(
+                        """
+                        UPDATE ExternalCatalogIdentifiers
+                        SET classification_status=?,
+                            classification_reason=?,
+                            updated_at=datetime('now')
+                        WHERE id=?
+                        """,
+                        (
+                            status,
+                            self._classification_reason_for_external_storage(
+                                system_key=record.category_system_key,
+                                classification=classification,
+                            ),
+                            int(record.id),
+                        ),
+                    )
+        return {
+            "promoted": promoted,
+            "retained_external": retained,
+            "mismatched": mismatched,
+            "migration_conflicts": conflicts,
+        }
+
+    def list_external_catalog_identifiers(
+        self,
+        *,
+        search_text: str | None = None,
+    ) -> list[ExternalCodeIdentifierRecord]:
+        return self.list_external_code_identifiers(
+            search_text=search_text,
+            category_system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+        )
+
+    def external_catalog_suggestions(self, *, limit: int = 250) -> list[str]:
+        return self.external_identifier_suggestions(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            limit=limit,
+        )
+
+    def classify_catalog_identifier(self, value: str | None) -> CodeIdentifierClassification:
+        return self.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=value,
+            allow_existing_internal_match=False,
         )
 
     def _upsert_sequence_state(
@@ -1252,49 +2302,16 @@ class CodeRegistryService:
         mode: str,
         value: str | None,
         registry_entry_id: int | None = None,
+        external_identifier_id: int | None = None,
         created_via: str | None = None,
-    ) -> CatalogIdentifierResolution:
-        clean_mode = str(mode or CATALOG_MODE_EMPTY).strip().lower()
-        if clean_mode not in {CATALOG_MODE_INTERNAL, CATALOG_MODE_EXTERNAL, CATALOG_MODE_EMPTY}:
-            clean_mode = CATALOG_MODE_EMPTY
-        if clean_mode == CATALOG_MODE_EMPTY:
-            return CatalogIdentifierResolution(mode=CATALOG_MODE_EMPTY)
-        if clean_mode == CATALOG_MODE_INTERNAL:
-            if registry_entry_id is not None:
-                entry = self.fetch_entry(int(registry_entry_id))
-                if entry is None:
-                    raise ValueError("Selected internal code was not found.")
-                return CatalogIdentifierResolution(
-                    mode=CATALOG_MODE_INTERNAL,
-                    value=entry.value,
-                    registry_entry_id=entry.id,
-                    category_id=entry.category_id,
-                    classification_status=CLASSIFICATION_INTERNAL,
-                    classification_reason="Selected existing internal registry value.",
-                )
-            entry = self.create_or_capture_catalog_entry(
-                str(value or ""),
-                created_via=created_via,
-                entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
-            )
-            return CatalogIdentifierResolution(
-                mode=CATALOG_MODE_INTERNAL,
-                value=entry.value,
-                registry_entry_id=entry.id,
-                category_id=entry.category_id,
-                classification_status=CLASSIFICATION_INTERNAL,
-                classification_reason="Captured as an internal catalog identifier.",
-            )
-        clean_value = self._clean_text(value)
-        classification = self.classify_catalog_identifier(clean_value)
-        if not clean_value:
-            return CatalogIdentifierResolution(mode=CATALOG_MODE_EMPTY)
-        return CatalogIdentifierResolution(
-            mode=CATALOG_MODE_EXTERNAL,
-            value=clean_value,
-            external_value=clean_value,
-            classification_status=classification.classification,
-            classification_reason=classification.reason,
+    ) -> CodeIdentifierResolution:
+        return self.resolve_identifier_input(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            mode=mode,
+            value=value,
+            registry_entry_id=registry_entry_id,
+            external_identifier_id=external_identifier_id,
+            created_via=created_via,
         )
 
     def _upsert_external_catalog_identifier(
@@ -1309,193 +2326,42 @@ class CodeRegistryService:
         source_label: str | None,
         cursor: sqlite3.Cursor,
     ) -> int:
-        clean_value = self._clean_text(value)
-        if not clean_value:
-            raise ValueError("External catalog identifiers require a value.")
-        normalized = self.normalize_external_value(clean_value)
-        existing = cursor.execute(
-            """
-            SELECT id
-            FROM ExternalCatalogIdentifiers
-            WHERE normalized_value=?
-            ORDER BY id
-            LIMIT 1
-            """,
-            (normalized,),
-        ).fetchone()
-        if existing is not None:
-            external_id = int(existing[0])
-            cursor.execute(
-                """
-                UPDATE ExternalCatalogIdentifiers
-                SET value=?,
-                    provenance_kind=?,
-                    classification_status=?,
-                    classification_reason=?,
-                    source_label=?,
-                    updated_at=datetime('now')
-                WHERE id=?
-                """,
-                (
-                    clean_value,
-                    str(provenance_kind or "manual"),
-                    str(classification_status or CLASSIFICATION_EXTERNAL),
-                    self._clean_text(classification_reason),
-                    self._clean_text(source_label),
-                    external_id,
-                ),
-            )
-            return external_id
-        next_shared_anchor_id = int(
-            cursor.execute(
-                """
-                SELECT COALESCE(MIN(subject_id), 0) - 1
-                FROM ExternalCatalogIdentifiers
-                WHERE subject_kind='shared'
-                """
-            ).fetchone()[0]
-            or -1
+        return self._upsert_external_code_identifier(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            owner_kind=subject_kind,
+            owner_id=subject_id,
+            value=value,
+            provenance_kind=provenance_kind,
+            classification_status=classification_status,
+            classification_reason=classification_reason,
+            source_label=source_label,
+            cursor=cursor,
         )
-        cursor.execute(
-            """
-            INSERT INTO ExternalCatalogIdentifiers(
-                subject_kind,
-                subject_id,
-                value,
-                normalized_value,
-                provenance_kind,
-                classification_status,
-                classification_reason,
-                source_label
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "shared",
-                next_shared_anchor_id,
-                clean_value,
-                normalized,
-                str(provenance_kind or "manual"),
-                str(classification_status or CLASSIFICATION_EXTERNAL),
-                self._clean_text(classification_reason),
-                self._clean_text(source_label),
-            ),
-        )
-        return int(cursor.lastrowid)
 
     def assign_catalog_to_owner(
         self,
         *,
         owner_kind: str,
         owner_id: int,
-        resolution: CatalogIdentifierResolution,
+        resolution: CodeIdentifierResolution,
         provenance_kind: str = "manual",
         source_label: str | None = None,
         cursor: sqlite3.Cursor | None = None,
     ) -> tuple[int | None, int | None, str | None]:
-        clean_owner_kind = str(owner_kind or "").strip().lower()
-        table_name = _OWNER_TABLES.get(clean_owner_kind, (None, None))[0]
-        if not table_name:
-            raise ValueError(f"Unsupported catalog owner kind '{owner_kind}'.")
-        cur = cursor or self.conn.cursor()
-        if resolution.mode == CATALOG_MODE_EMPTY:
-            cur.execute(
-                f"""
-                UPDATE {table_name}
-                SET catalog_registry_entry_id=NULL,
-                    external_catalog_identifier_id=NULL,
-                    catalog_number=NULL
-                WHERE id=?
-                """,
-                (int(owner_id),),
-            )
-            if cursor is None:
-                self.conn.commit()
-            return None, None, None
-        if resolution.mode == CATALOG_MODE_INTERNAL:
-            entry = self.fetch_entry(int(resolution.registry_entry_id or 0))
-            if entry is None:
-                raise ValueError("Selected internal catalog value no longer exists.")
-            cur.execute(
-                f"""
-                UPDATE {table_name}
-                SET catalog_registry_entry_id=?,
-                    external_catalog_identifier_id=NULL,
-                    catalog_number=?
-                WHERE id=?
-                """,
-                (entry.id, entry.value, int(owner_id)),
-            )
-            if cursor is None:
-                self.conn.commit()
-            return entry.id, None, entry.value
-        external_id = self._upsert_external_catalog_identifier(
-            subject_kind=clean_owner_kind,
-            subject_id=int(owner_id),
-            value=str(resolution.external_value or resolution.value or ""),
+        return self.assign_identifier_to_owner(
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            resolution=resolution,
             provenance_kind=provenance_kind,
-            classification_status=str(resolution.classification_status or CLASSIFICATION_EXTERNAL),
-            classification_reason=resolution.classification_reason,
             source_label=source_label,
-            cursor=cur,
+            cursor=cursor,
         )
-        clean_value = self._clean_text(resolution.external_value or resolution.value)
-        cur.execute(
-            f"""
-            UPDATE {table_name}
-            SET catalog_registry_entry_id=NULL,
-                external_catalog_identifier_id=?,
-                catalog_number=?
-            WHERE id=?
-            """,
-            (external_id, clean_value, int(owner_id)),
-        )
-        if cursor is None:
-            self.conn.commit()
-        return None, external_id, clean_value
 
     def fetch_external_catalog_identifier(
         self, external_id: int
-    ) -> ExternalCatalogIdentifierRecord | None:
-        row = self.conn.execute(
-            """
-            WITH usage_counts AS (
-                SELECT external_catalog_identifier_id AS external_id, COUNT(*) AS usage_count
-                FROM Tracks
-                WHERE external_catalog_identifier_id IS NOT NULL
-                GROUP BY external_catalog_identifier_id
-                UNION ALL
-                SELECT external_catalog_identifier_id AS external_id, COUNT(*) AS usage_count
-                FROM Releases
-                WHERE external_catalog_identifier_id IS NOT NULL
-                GROUP BY external_catalog_identifier_id
-            ),
-            usage_totals AS (
-                SELECT external_id, SUM(usage_count) AS usage_count
-                FROM usage_counts
-                GROUP BY external_id
-            )
-            SELECT
-                e.id,
-                e.subject_kind,
-                e.subject_id,
-                e.value,
-                e.normalized_value,
-                e.provenance_kind,
-                e.classification_status,
-                e.classification_reason,
-                e.source_label,
-                e.created_at,
-                e.updated_at,
-                COALESCE(u.usage_count, 0) AS usage_count,
-                CASE WHEN COALESCE(u.usage_count, 0) > 0 THEN 1 ELSE 0 END AS linked_flag
-            FROM ExternalCatalogIdentifiers e
-            LEFT JOIN usage_totals u ON u.external_id = e.id
-            WHERE e.id=?
-            """,
-            (int(external_id),),
-        ).fetchone()
-        return self._row_to_external(row) if row else None
+    ) -> ExternalCodeIdentifierRecord | None:
+        return self.fetch_external_code_identifier(int(external_id))
 
     def promote_external_catalog_identifier(
         self,
@@ -1503,112 +2369,15 @@ class CodeRegistryService:
         *,
         created_via: str | None = "workspace.promote",
     ) -> CodeRegistryEntryRecord:
-        record = self.fetch_external_catalog_identifier(int(external_id))
-        if record is None:
-            raise ValueError(f"External catalog identifier {int(external_id)} was not found.")
-        entry = self.create_or_capture_catalog_entry(
-            record.value,
+        return self.promote_external_code_identifier(
+            int(external_id),
             created_via=created_via,
-            entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
         )
-        usage = self.usage_for_external_identifier(int(external_id))
-        with self.conn:
-            for link in usage:
-                self.assign_catalog_to_owner(
-                    owner_kind=link.subject_kind,
-                    owner_id=link.subject_id,
-                    resolution=CatalogIdentifierResolution(
-                        mode=CATALOG_MODE_INTERNAL,
-                        value=entry.value,
-                        registry_entry_id=entry.id,
-                        category_id=entry.category_id,
-                        classification_status=CLASSIFICATION_INTERNAL,
-                    ),
-                    provenance_kind="promoted",
-                    source_label=created_via,
-                    cursor=self.conn.cursor(),
-                )
-            self.conn.execute(
-                """
-                UPDATE ExternalCatalogIdentifiers
-                SET classification_status='promoted',
-                    classification_reason='Promoted to an internal registry entry.',
-                    updated_at=datetime('now')
-                WHERE id=?
-                """,
-                (int(external_id),),
-            )
-        return entry
 
     def reclassify_external_catalog_identifiers(self) -> dict[str, int]:
-        promoted = 0
-        retained = 0
-        mismatched = 0
-        candidates = 0
-        for record in self.list_external_catalog_identifiers():
-            classification = self.classify_catalog_identifier(record.value)
-            if classification.classification == CLASSIFICATION_INTERNAL:
-                self.promote_external_catalog_identifier(
-                    record.id, created_via="workspace.reclassify"
-                )
-                promoted += 1
-            elif classification.classification == CLASSIFICATION_MISMATCH:
-                mismatched += 1
-                with self.conn:
-                    self.conn.execute(
-                        """
-                        UPDATE ExternalCatalogIdentifiers
-                        SET classification_status=?,
-                            classification_reason=?,
-                            updated_at=datetime('now')
-                        WHERE id=?
-                        """,
-                        (
-                            CLASSIFICATION_MISMATCH,
-                            classification.reason,
-                            int(record.id),
-                        ),
-                    )
-            elif classification.classification == CLASSIFICATION_CANONICAL_CANDIDATE:
-                candidates += 1
-                with self.conn:
-                    self.conn.execute(
-                        """
-                        UPDATE ExternalCatalogIdentifiers
-                        SET classification_status=?,
-                            classification_reason=?,
-                            updated_at=datetime('now')
-                        WHERE id=?
-                        """,
-                        (
-                            CLASSIFICATION_CANONICAL_CANDIDATE,
-                            classification.reason,
-                            int(record.id),
-                        ),
-                    )
-            else:
-                retained += 1
-                with self.conn:
-                    self.conn.execute(
-                        """
-                        UPDATE ExternalCatalogIdentifiers
-                        SET classification_status=?,
-                            classification_reason=?,
-                            updated_at=datetime('now')
-                        WHERE id=?
-                        """,
-                        (
-                            CLASSIFICATION_EXTERNAL,
-                            classification.reason,
-                            int(record.id),
-                        ),
-                    )
-        return {
-            "promoted": promoted,
-            "retained_external": retained,
-            "mismatched": mismatched,
-            "canonical_candidates": candidates,
-        }
+        return self.reclassify_external_code_identifiers(
+            category_system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+        )
 
     def assignment_owner_kinds_for_entry(self, entry_id: int) -> list[str]:
         entry = self.fetch_entry(int(entry_id))
@@ -1907,9 +2676,12 @@ class CodeRegistryService:
         table_name = _OWNER_TABLES.get(clean_owner_kind, (None, None))[0]
         if table_name not in {"Tracks", "Releases"}:
             raise ValueError(f"Unsupported catalog owner kind '{owner_kind}'.")
+        external_column = self._catalog_external_column_name(table_name)
+        if external_column is None:
+            raise ValueError("External catalog identifier storage is unavailable.")
         row = self.conn.execute(
             f"""
-            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            SELECT catalog_number, catalog_registry_entry_id, {external_column}
             FROM {table_name}
             WHERE id=?
             """,
@@ -2029,18 +2801,49 @@ class CodeRegistryService:
         ]
 
     def usage_for_external_identifier(self, external_id: int) -> list[CodeRegistryUsageLink]:
+        unions: list[str] = []
+        params: list[object] = []
+        track_column = self._catalog_external_column_name("Tracks")
+        if track_column is not None:
+            unions.append(
+                f"""
+                SELECT 'track' AS subject_kind, t.id, COALESCE(t.track_title, ''), 'Catalog Number'
+                FROM Tracks t
+                WHERE t.{track_column}=?
+                """
+            )
+            params.append(int(external_id))
+        release_column = self._catalog_external_column_name("Releases")
+        if release_column is not None:
+            unions.append(
+                f"""
+                SELECT 'release' AS subject_kind, r.id, COALESCE(r.title, ''), 'Catalog Number'
+                FROM Releases r
+                WHERE r.{release_column}=?
+                """
+            )
+            params.append(int(external_id))
+        contract_column_map = {
+            self._contract_external_column_name(BUILTIN_CATEGORY_CONTRACT_NUMBER): "Contract Number",
+            self._contract_external_column_name(BUILTIN_CATEGORY_LICENSE_NUMBER): "License Number",
+            self._contract_external_column_name(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY): "Registry SHA-256 Key",
+        }
+        for column_name, label in contract_column_map.items():
+            if column_name is None:
+                continue
+            unions.append(
+                f"""
+                SELECT 'contract' AS subject_kind, c.id, COALESCE(c.title, ''), '{label}'
+                FROM Contracts c
+                WHERE c.{column_name}=?
+                """
+            )
+            params.append(int(external_id))
+        if not unions:
+            return []
         rows = self.conn.execute(
-            """
-            SELECT 'track' AS subject_kind, t.id, COALESCE(t.track_title, ''), 'External Catalog'
-            FROM Tracks t
-            WHERE t.external_catalog_identifier_id=?
-            UNION ALL
-            SELECT 'release' AS subject_kind, r.id, COALESCE(r.title, ''), 'External Catalog'
-            FROM Releases r
-            WHERE r.external_catalog_identifier_id=?
-            ORDER BY 1, 4, 2
-            """,
-            (int(external_id), int(external_id)),
+            "\nUNION ALL\n".join(unions) + "\nORDER BY 1, 4, 2",
+            params,
         ).fetchall()
         return [
             CodeRegistryUsageLink(

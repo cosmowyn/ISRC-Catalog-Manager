@@ -16506,10 +16506,24 @@ class App(QMainWindow):
                 iswc=(iso_iswc or None),
                 upc=(self.upc_field.currentText().strip() or None),
                 genre=(self.genre_field.currentText().strip() or None),
-                catalog_number=(self.catalog_number_field.currentText().strip() or None),
+                catalog_number=(
+                    self.catalog_number_field.identifier_value()
+                    if hasattr(self.catalog_number_field, "identifier_value")
+                    else (self.catalog_number_field.currentText().strip() or None)
+                ),
+                catalog_number_mode=(
+                    self.catalog_number_field.identifier_mode()
+                    if hasattr(self.catalog_number_field, "identifier_mode")
+                    else None
+                ),
                 catalog_registry_entry_id=(
                     self.catalog_number_field.catalog_registry_entry_id()
                     if hasattr(self.catalog_number_field, "catalog_registry_entry_id")
+                    else None
+                ),
+                catalog_external_code_identifier_id=(
+                    self.catalog_number_field.external_code_identifier_id()
+                    if hasattr(self.catalog_number_field, "external_code_identifier_id")
                     else None
                 ),
                 external_catalog_identifier_id=(
@@ -18941,26 +18955,34 @@ class App(QMainWindow):
             lines.append(f"Would create tracks: {report.would_create_tracks}")
         if report.would_update_tracks:
             lines.append(f"Would update tracks: {report.would_update_tracks}")
-        if report.internal_catalog_identifiers:
-            lines.append(
-                f"Catalogs accepted as internal: {report.internal_catalog_identifiers}"
-            )
-        if report.external_catalog_identifiers:
-            lines.append(
-                f"Catalogs stored as external: {report.external_catalog_identifiers}"
-            )
-        if report.mismatched_catalog_identifiers:
-            lines.append(
-                f"Catalog mismatches flagged: {report.mismatched_catalog_identifiers}"
-            )
-        if report.merged_catalog_identifiers:
-            lines.append(
-                f"Catalog values merged/skipped: {report.merged_catalog_identifiers}"
-            )
-        if report.skipped_catalog_identifiers:
-            lines.append(
-                f"Catalog values skipped: {report.skipped_catalog_identifiers}"
-            )
+        identifier_labels = {
+            "catalog_number": "Catalog Number",
+            "contract_number": "Contract Number",
+            "license_number": "License Number",
+            "registry_sha256_key": "Registry SHA-256 Key",
+        }
+        for system_key in (
+            "catalog_number",
+            "contract_number",
+            "license_number",
+            "registry_sha256_key",
+        ):
+            counts = report.identifier_totals.get(system_key) or {}
+            parts: list[str] = []
+            if counts.get("internal"):
+                parts.append(f"internal {int(counts['internal'])}")
+            if counts.get("external"):
+                parts.append(f"external {int(counts['external'])}")
+            if counts.get("mismatch"):
+                parts.append(f"mismatch {int(counts['mismatch'])}")
+            if counts.get("merged"):
+                parts.append(f"merged/skipped {int(counts['merged'])}")
+            if counts.get("skipped"):
+                parts.append(f"skipped {int(counts['skipped'])}")
+            if counts.get("conflicted"):
+                parts.append(f"conflicted {int(counts['conflicted'])}")
+            if parts:
+                lines.append(f"{identifier_labels[system_key]}: " + ", ".join(parts))
         if report.duplicates:
             lines.append(f"Duplicate-safe skips: {len(report.duplicates)}")
         if report.unknown_fields:
@@ -22768,7 +22790,7 @@ class App(QMainWindow):
                     self._advance_task_ui_progress(
                         ui_progress,
                         value=97,
-                        message="Applying imported catalog changes...",
+                        message="Applying imported identifier changes...",
                     )
                     try:
                         self.conn.commit()
@@ -22905,7 +22927,7 @@ class App(QMainWindow):
                     accepted = self._open_import_review_dialog(
                         title=f"Review {normalized_format.upper()} Import",
                         subtitle=(
-                            "Dry run completed. Review the planned catalog changes before anything is written to the current profile."
+                            "Dry run completed. Review the planned identifier changes before anything is written to the current profile."
                         ),
                         summary_lines=self._exchange_import_review_summary(report),
                         warnings=report.warnings,
@@ -22989,16 +23011,36 @@ class App(QMainWindow):
                 lines.append(f"Would create tracks: {report.would_create_tracks}")
             if report.would_update_tracks:
                 lines.append(f"Would update tracks: {report.would_update_tracks}")
-        if report.internal_catalog_identifiers:
-            lines.append(f"Accepted as internal: {report.internal_catalog_identifiers}")
-        if report.external_catalog_identifiers:
-            lines.append(f"Stored as external: {report.external_catalog_identifiers}")
-        if report.mismatched_catalog_identifiers:
-            lines.append(f"Flagged mismatch: {report.mismatched_catalog_identifiers}")
-        if report.merged_catalog_identifiers:
-            lines.append(f"Merged/skipped catalog values: {report.merged_catalog_identifiers}")
-        if report.skipped_catalog_identifiers:
-            lines.append(f"Skipped catalog values: {report.skipped_catalog_identifiers}")
+        identifier_labels = {
+            "catalog_number": "Catalog Number",
+            "contract_number": "Contract Number",
+            "license_number": "License Number",
+            "registry_sha256_key": "Registry SHA-256 Key",
+        }
+        for system_key in (
+            "catalog_number",
+            "contract_number",
+            "license_number",
+            "registry_sha256_key",
+        ):
+            counts = report.identifier_totals.get(system_key) or {}
+            if not counts:
+                continue
+            parts: list[str] = []
+            if counts.get("internal"):
+                parts.append(f"internal {int(counts['internal'])}")
+            if counts.get("external"):
+                parts.append(f"external {int(counts['external'])}")
+            if counts.get("mismatch"):
+                parts.append(f"mismatch {int(counts['mismatch'])}")
+            if counts.get("merged"):
+                parts.append(f"merged/skipped {int(counts['merged'])}")
+            if counts.get("skipped"):
+                parts.append(f"skipped {int(counts['skipped'])}")
+            if counts.get("conflicted"):
+                parts.append(f"conflicted {int(counts['conflicted'])}")
+            if parts:
+                lines.append(f"{identifier_labels[system_key]}: " + ", ".join(parts))
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
         if report.repair_queue_entry_ids:
@@ -28601,9 +28643,19 @@ class AlbumEntryDialog(QDialog):
                     upc=(upc_raw or None),
                     genre=genre,
                     catalog_number=catalog_number,
+                    catalog_number_mode=(
+                        self.catalog_number.identifier_mode()
+                        if hasattr(self.catalog_number, "identifier_mode")
+                        else None
+                    ),
                     catalog_registry_entry_id=(
                         self.catalog_number.catalog_registry_entry_id()
                         if hasattr(self.catalog_number, "catalog_registry_entry_id")
+                        else None
+                    ),
+                    catalog_external_code_identifier_id=(
+                        self.catalog_number.external_code_identifier_id()
+                        if hasattr(self.catalog_number, "external_code_identifier_id")
                         else None
                     ),
                     external_catalog_identifier_id=(
@@ -29096,13 +29148,19 @@ class EditDialog(QDialog):
             self.catalog_number.set_assignment(
                 value=self.snapshot.catalog_number or "",
                 registry_entry_id=self.snapshot.catalog_registry_entry_id,
-                external_catalog_identifier_id=self.snapshot.external_catalog_identifier_id,
+                external_identifier_id=(
+                    self.snapshot.catalog_external_code_identifier_id
+                    if self.snapshot.catalog_external_code_identifier_id is not None
+                    else self.snapshot.external_catalog_identifier_id
+                ),
+                mode=self.snapshot.catalog_number_mode,
             )
         else:
             self.catalog_number.set_assignment(
                 value=self._display_value_for_field("catalog_number", self.snapshot.catalog_number or ""),
                 registry_entry_id=None,
-                external_catalog_identifier_id=None,
+                external_identifier_id=None,
+                mode=None,
             )
             self._set_bulk_hint(self.catalog_number.combo, "catalog_number")
             line_edit = self.catalog_number.lineEdit()
@@ -30011,9 +30069,19 @@ class EditDialog(QDialog):
                 upc=(new_upc_raw or None),
                 genre=(new_genre or None),
                 catalog_number=new_catalog_number,
+                catalog_number_mode=(
+                    self.catalog_number.identifier_mode()
+                    if hasattr(self.catalog_number, "identifier_mode")
+                    else None
+                ),
                 catalog_registry_entry_id=(
                     self.catalog_number.catalog_registry_entry_id()
                     if hasattr(self.catalog_number, "catalog_registry_entry_id")
+                    else None
+                ),
+                catalog_external_code_identifier_id=(
+                    self.catalog_number.external_code_identifier_id()
+                    if hasattr(self.catalog_number, "external_code_identifier_id")
                     else None
                 ),
                 external_catalog_identifier_id=(
@@ -30415,6 +30483,15 @@ class EditDialog(QDialog):
                     if apply_catalog_number
                     else snapshot.catalog_number
                 ),
+                catalog_number_mode=(
+                    (
+                        self.catalog_number.identifier_mode()
+                        if hasattr(self.catalog_number, "identifier_mode")
+                        else None
+                    )
+                    if apply_catalog_number
+                    else snapshot.catalog_number_mode
+                ),
                 catalog_registry_entry_id=(
                     (
                         self.catalog_number.catalog_registry_entry_id()
@@ -30423,6 +30500,15 @@ class EditDialog(QDialog):
                     )
                     if apply_catalog_number
                     else snapshot.catalog_registry_entry_id
+                ),
+                catalog_external_code_identifier_id=(
+                    (
+                        self.catalog_number.external_code_identifier_id()
+                        if hasattr(self.catalog_number, "external_code_identifier_id")
+                        else None
+                    )
+                    if apply_catalog_number
+                    else snapshot.catalog_external_code_identifier_id
                 ),
                 external_catalog_identifier_id=(
                     (

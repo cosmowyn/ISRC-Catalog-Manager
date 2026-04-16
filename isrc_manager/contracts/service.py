@@ -13,6 +13,9 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CATALOG_MODE_EMPTY,
+    CATALOG_MODE_EXTERNAL,
+    CATALOG_MODE_INTERNAL,
     ENTRY_KIND_MANUAL_CAPTURE,
     GENERATION_STRATEGY_SHA256,
     CodeRegistryEntryRecord,
@@ -110,28 +113,89 @@ class ContractService:
         return self._code_registry_service()
 
     @staticmethod
-    def _contract_registry_columns(system_key: str) -> tuple[str, str, str]:
+    def _contract_identifier_spec(system_key: str) -> tuple[str, str, str, str, str]:
         column_map = {
             BUILTIN_CATEGORY_CONTRACT_NUMBER: (
                 "contract_number",
+                "contract_number_mode",
                 "contract_registry_entry_id",
+                "contract_external_code_identifier_id",
                 "Contract Number",
             ),
             BUILTIN_CATEGORY_LICENSE_NUMBER: (
                 "license_number",
+                "license_number_mode",
                 "license_registry_entry_id",
+                "license_external_code_identifier_id",
                 "License Number",
             ),
             BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
                 "registry_sha256_key",
+                "registry_sha256_key_mode",
                 "registry_sha256_key_entry_id",
+                "registry_sha256_key_external_code_identifier_id",
                 "Registry SHA-256 Key",
             ),
         }
-        text_column, link_column, label = column_map.get(system_key, (None, None, None))
-        if not text_column or not link_column or not label:
+        spec = column_map.get(system_key)
+        if spec is None:
             raise ValueError(f"Unsupported contract registry category '{system_key}'.")
-        return text_column, link_column, label
+        return spec
+
+    def _contract_columns(self) -> set[str]:
+        return {
+            str(row[1] or "")
+            for row in self.conn.execute("PRAGMA table_info(Contracts)").fetchall()
+            if row and row[1]
+        }
+
+    def _contract_external_column_name(self, system_key: str) -> str | None:
+        _text_column, _mode_attr, _internal_column, external_column, _label = (
+            self._contract_identifier_spec(system_key)
+        )
+        return external_column if external_column in self._contract_columns() else None
+
+    def _contract_identifier_mode_sql(self, system_key: str, alias: str = "c") -> str:
+        text_column, _mode_attr, internal_column, declared_external_column, _label = (
+            self._contract_identifier_spec(system_key)
+        )
+        external_column = self._contract_external_column_name(system_key)
+        external_predicate = (
+            f"{alias}.{external_column} IS NOT NULL" if external_column is not None else "0"
+        )
+        return f"""
+            CASE
+                WHEN {alias}.{internal_column} IS NOT NULL THEN '{CATALOG_MODE_INTERNAL}'
+                WHEN {external_predicate} THEN '{CATALOG_MODE_EXTERNAL}'
+                WHEN COALESCE(trim({alias}.{text_column}), '') != '' THEN '{CATALOG_MODE_EXTERNAL}'
+                ELSE '{CATALOG_MODE_EMPTY}'
+            END
+        """
+
+    def _contract_identifier_select_sql(self, system_key: str, alias: str = "c") -> str:
+        external_column = self._contract_external_column_name(system_key)
+        if external_column is None:
+            return "NULL"
+        return f"{alias}.{external_column}"
+
+    @staticmethod
+    def _resolve_identifier_mode(
+        *,
+        mode: str | None,
+        registry_entry_id: int | None,
+        external_identifier_id: int | None,
+        value: str | None,
+    ) -> str:
+        clean_mode = str(mode or "").strip().lower()
+        if clean_mode in {CATALOG_MODE_INTERNAL, CATALOG_MODE_EXTERNAL, CATALOG_MODE_EMPTY}:
+            return clean_mode
+        if registry_entry_id is not None:
+            return CATALOG_MODE_INTERNAL
+        if external_identifier_id is not None:
+            return CATALOG_MODE_EXTERNAL
+        if clean_text(value):
+            return ""
+        return CATALOG_MODE_EMPTY
 
     def _assign_contract_registry_entry(
         self,
@@ -141,17 +205,23 @@ class ContractService:
         entry: CodeRegistryEntryRecord,
         cursor: sqlite3.Cursor | None = None,
     ) -> None:
-        text_column, link_column, _label = self._contract_registry_columns(system_key)
-        target = cursor or self.conn
-        target.execute(
-            f"""
-            UPDATE Contracts
-            SET {text_column}=?,
-                {link_column}=?,
-                updated_at=datetime('now')
-            WHERE id=?
-            """,
-            (entry.value, int(entry.id), int(contract_id)),
+        service = self._code_registry_service()
+        if service is None:
+            raise ValueError("Code registry service is unavailable.")
+        resolution = service.resolve_identifier_input(
+            system_key=system_key,
+            mode=CATALOG_MODE_INTERNAL,
+            value=entry.value,
+            registry_entry_id=entry.id,
+        )
+        service.assign_identifier_to_owner(
+            owner_kind="contract",
+            owner_id=int(contract_id),
+            system_key=system_key,
+            resolution=resolution,
+            provenance_kind="internal_registry",
+            source_label="contract.ensure",
+            cursor=cursor,
         )
 
     def ensure_registry_value_for_contract(
@@ -170,8 +240,12 @@ class ContractService:
         category = service.fetch_category_by_system_key(system_key)
         if category is None:
             raise ValueError(f"Registry category '{system_key}' is not available.")
-        text_column, link_column, label = self._contract_registry_columns(system_key)
+        text_column, mode_attr, link_column, external_column, label = self._contract_identifier_spec(
+            system_key
+        )
         existing_entry_id = getattr(contract, link_column, None)
+        existing_external_id = getattr(contract, external_column, None)
+        existing_mode = getattr(contract, mode_attr, None)
         existing_value = clean_text(getattr(contract, text_column, None))
         if existing_entry_id is not None:
             entry = service.fetch_entry(int(existing_entry_id))
@@ -189,6 +263,8 @@ class ContractService:
                         entry=entry,
                     )
             return entry
+        if existing_external_id is not None:
+            existing_value = None
         if existing_value:
             try:
                 entry = service.capture_value_for_category(
@@ -262,40 +338,40 @@ class ContractService:
             )
         return result.entry
 
-    def _resolve_contract_registry_entry(
+    def _resolve_contract_identifier_resolution(
         self,
         *,
-        entry_id: int | None,
-        value: str | None,
+        payload: ContractPayload,
         system_key: str,
         created_via: str,
-        cursor: sqlite3.Cursor,
-    ) -> CodeRegistryEntryRecord | None:
+        cursor: sqlite3.Cursor | None = None,
+    ):
         service = self._code_registry_service()
         if service is None:
-            return None
-        category = service.fetch_category_by_system_key(system_key)
-        if category is None:
-            raise ValueError(f"Registry category '{system_key}' is not available.")
-        if entry_id is not None:
-            entry = service.fetch_entry(int(entry_id))
-            if entry is None:
-                raise ValueError(f"Registry entry {int(entry_id)} was not found.")
-            if int(entry.category_id) != int(category.id):
-                raise ValueError(
-                    f"Registry entry {int(entry_id)} does not belong to '{category.display_name}'."
-                )
-            return entry
-        clean_value = clean_text(value)
-        if not clean_value:
-            return None
-        return service.capture_value_for_category(
-            category_id=category.id,
-            value=clean_value,
-            created_via=created_via,
-            entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
-            cursor=cursor,
+            raise ValueError("Code registry service is unavailable.")
+        text_attr, mode_attr, internal_attr, external_attr, label = self._contract_identifier_spec(
+            system_key
         )
+        internal_id = getattr(payload, internal_attr, None)
+        external_id = getattr(payload, external_attr, None)
+        resolution_mode = self._resolve_identifier_mode(
+            mode=getattr(payload, mode_attr, None),
+            registry_entry_id=int(internal_id) if internal_id is not None else None,
+            external_identifier_id=int(external_id) if external_id is not None else None,
+            value=getattr(payload, text_attr, None),
+        )
+        try:
+            return service.resolve_identifier_input(
+                system_key=system_key,
+                mode=resolution_mode,
+                value=getattr(payload, text_attr, None),
+                registry_entry_id=int(internal_id) if internal_id is not None else None,
+                external_identifier_id=int(external_id) if external_id is not None else None,
+                created_via=created_via,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise ValueError(f"{label}: {exc}") from exc
 
     def _apply_registry_assignments(
         self,
@@ -307,49 +383,127 @@ class ContractService:
     ) -> None:
         service = self._code_registry_service()
         if service is None:
+            has_identifier_state = any(
+                clean_text(getattr(payload, text_attr, None))
+                or getattr(payload, internal_attr, None) is not None
+                or getattr(payload, external_attr, None) is not None
+                for text_attr, _mode_attr, internal_attr, external_attr, _label in (
+                    self._contract_identifier_spec(BUILTIN_CATEGORY_CONTRACT_NUMBER),
+                    self._contract_identifier_spec(BUILTIN_CATEGORY_LICENSE_NUMBER),
+                    self._contract_identifier_spec(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY),
+                )
+            )
+            if has_identifier_state:
+                raise ValueError("Code registry service is unavailable.")
             return
-        contract_entry = self._resolve_contract_registry_entry(
-            entry_id=payload.contract_registry_entry_id,
-            value=payload.contract_number,
-            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
-            created_via=f"{created_via}.contract_number",
-            cursor=cursor,
+        for system_key in (
+            BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            BUILTIN_CATEGORY_LICENSE_NUMBER,
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        ):
+            resolution = self._resolve_contract_identifier_resolution(
+                payload=payload,
+                system_key=system_key,
+                created_via=f"{created_via}.{system_key}",
+                cursor=cursor,
+            )
+            service.assign_identifier_to_owner(
+                owner_kind="contract",
+                owner_id=int(contract_id),
+                system_key=system_key,
+                resolution=resolution,
+                provenance_kind="manual",
+                source_label=created_via,
+                cursor=cursor,
+            )
+
+    def _row_to_contract(self, row) -> ContractRecord:
+        return ContractRecord(
+            id=int(row[0]),
+            title=str(row[1] or ""),
+            contract_type=clean_text(row[2]),
+            contract_number=clean_text(row[3]),
+            contract_number_mode=str(row[4] or "").strip() or None,
+            contract_registry_entry_id=int(row[5]) if row[5] is not None else None,
+            contract_external_code_identifier_id=int(row[6]) if row[6] is not None else None,
+            license_number=clean_text(row[7]),
+            license_number_mode=str(row[8] or "").strip() or None,
+            license_registry_entry_id=int(row[9]) if row[9] is not None else None,
+            license_external_code_identifier_id=int(row[10]) if row[10] is not None else None,
+            registry_sha256_key=clean_text(row[11]),
+            registry_sha256_key_mode=str(row[12] or "").strip() or None,
+            registry_sha256_key_entry_id=int(row[13]) if row[13] is not None else None,
+            registry_sha256_key_external_code_identifier_id=int(row[14])
+            if row[14] is not None
+            else None,
+            draft_date=clean_text(row[15]),
+            signature_date=clean_text(row[16]),
+            effective_date=clean_text(row[17]),
+            start_date=clean_text(row[18]),
+            end_date=clean_text(row[19]),
+            renewal_date=clean_text(row[20]),
+            notice_deadline=clean_text(row[21]),
+            option_periods=clean_text(row[22]),
+            reversion_date=clean_text(row[23]),
+            termination_date=clean_text(row[24]),
+            status=str(row[25] or "draft"),
+            supersedes_contract_id=int(row[26]) if row[26] is not None else None,
+            superseded_by_contract_id=int(row[27]) if row[27] is not None else None,
+            summary=clean_text(row[28]),
+            notes=clean_text(row[29]),
+            profile_name=clean_text(row[30]),
+            created_at=clean_text(row[31]),
+            updated_at=clean_text(row[32]),
+            obligation_count=int(row[33] or 0),
+            document_count=int(row[34] or 0),
         )
-        license_entry = self._resolve_contract_registry_entry(
-            entry_id=payload.license_registry_entry_id,
-            value=payload.license_number,
-            system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
-            created_via=f"{created_via}.license_number",
-            cursor=cursor,
+
+    @staticmethod
+    def _row_to_party(row) -> ContractPartyRecord:
+        return ContractPartyRecord(
+            party_id=int(row[0]),
+            party_name=str(row[1] or ""),
+            role_label=str(row[2] or "counterparty"),
+            is_primary=bool(row[3]),
+            notes=clean_text(row[4]),
         )
-        registry_key_entry = self._resolve_contract_registry_entry(
-            entry_id=payload.registry_sha256_key_entry_id,
-            value=payload.registry_sha256_key,
-            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
-            created_via=f"{created_via}.registry_sha256_key",
-            cursor=cursor,
+
+    @staticmethod
+    def _row_to_obligation(row) -> ContractObligationRecord:
+        return ContractObligationRecord(
+            id=int(row[0]),
+            contract_id=int(row[1]),
+            obligation_type=str(row[2] or "other"),
+            title=str(row[3] or ""),
+            due_date=clean_text(row[4]),
+            follow_up_date=clean_text(row[5]),
+            reminder_date=clean_text(row[6]),
+            completed=bool(row[7]),
+            completed_at=clean_text(row[8]),
+            notes=clean_text(row[9]),
         )
-        cursor.execute(
-            """
-            UPDATE Contracts
-            SET contract_number=?,
-                license_number=?,
-                registry_sha256_key=?,
-                contract_registry_entry_id=?,
-                license_registry_entry_id=?,
-                registry_sha256_key_entry_id=?,
-                updated_at=datetime('now')
-            WHERE id=?
-            """,
-            (
-                contract_entry.value if contract_entry is not None else None,
-                license_entry.value if license_entry is not None else None,
-                registry_key_entry.value if registry_key_entry is not None else None,
-                contract_entry.id if contract_entry is not None else None,
-                license_entry.id if license_entry is not None else None,
-                registry_key_entry.id if registry_key_entry is not None else None,
-                int(contract_id),
-            ),
+
+    @staticmethod
+    def _row_to_document(row) -> ContractDocumentRecord:
+        return ContractDocumentRecord(
+            id=int(row[0]),
+            contract_id=int(row[1]),
+            title=str(row[2] or ""),
+            document_type=str(row[3] or "other"),
+            version_label=clean_text(row[4]),
+            created_date=clean_text(row[5]),
+            received_date=clean_text(row[6]),
+            signed_status=clean_text(row[7]),
+            signed_by_all_parties=bool(row[8]),
+            active_flag=bool(row[9]),
+            supersedes_document_id=int(row[10]) if row[10] is not None else None,
+            superseded_by_document_id=int(row[11]) if row[11] is not None else None,
+            file_path=clean_text(row[12]),
+            filename=clean_text(row[13]),
+            storage_mode=clean_text(row[14]),
+            checksum_sha256=clean_text(row[16]),
+            notes=clean_text(row[17]),
+            uploaded_at=clean_text(row[18]),
         )
 
     def _ensure_storage_columns(self) -> None:
@@ -437,87 +591,6 @@ class ContractService:
             raise FileNotFoundError(row[12] or filename or document_id)
         return resolved.read_bytes(), mime_type
 
-    @staticmethod
-    def _row_to_contract(row) -> ContractRecord:
-        return ContractRecord(
-            id=int(row[0]),
-            title=str(row[1] or ""),
-            contract_type=clean_text(row[2]),
-            contract_number=clean_text(row[3]),
-            license_number=clean_text(row[4]),
-            registry_sha256_key=clean_text(row[5]),
-            contract_registry_entry_id=int(row[6]) if row[6] is not None else None,
-            license_registry_entry_id=int(row[7]) if row[7] is not None else None,
-            registry_sha256_key_entry_id=int(row[8]) if row[8] is not None else None,
-            draft_date=clean_text(row[9]),
-            signature_date=clean_text(row[10]),
-            effective_date=clean_text(row[11]),
-            start_date=clean_text(row[12]),
-            end_date=clean_text(row[13]),
-            renewal_date=clean_text(row[14]),
-            notice_deadline=clean_text(row[15]),
-            option_periods=clean_text(row[16]),
-            reversion_date=clean_text(row[17]),
-            termination_date=clean_text(row[18]),
-            status=str(row[19] or "draft"),
-            supersedes_contract_id=int(row[20]) if row[20] is not None else None,
-            superseded_by_contract_id=int(row[21]) if row[21] is not None else None,
-            summary=clean_text(row[22]),
-            notes=clean_text(row[23]),
-            profile_name=clean_text(row[24]),
-            created_at=clean_text(row[25]),
-            updated_at=clean_text(row[26]),
-            obligation_count=int(row[27] or 0),
-            document_count=int(row[28] or 0),
-        )
-
-    @staticmethod
-    def _row_to_party(row) -> ContractPartyRecord:
-        return ContractPartyRecord(
-            party_id=int(row[0]),
-            party_name=str(row[1] or ""),
-            role_label=str(row[2] or "counterparty"),
-            is_primary=bool(row[3]),
-            notes=clean_text(row[4]),
-        )
-
-    @staticmethod
-    def _row_to_obligation(row) -> ContractObligationRecord:
-        return ContractObligationRecord(
-            id=int(row[0]),
-            contract_id=int(row[1]),
-            obligation_type=str(row[2] or "other"),
-            title=str(row[3] or ""),
-            due_date=clean_text(row[4]),
-            follow_up_date=clean_text(row[5]),
-            reminder_date=clean_text(row[6]),
-            completed=bool(row[7]),
-            completed_at=clean_text(row[8]),
-            notes=clean_text(row[9]),
-        )
-
-    @staticmethod
-    def _row_to_document(row) -> ContractDocumentRecord:
-        return ContractDocumentRecord(
-            id=int(row[0]),
-            contract_id=int(row[1]),
-            title=str(row[2] or ""),
-            document_type=str(row[3] or "other"),
-            version_label=clean_text(row[4]),
-            created_date=clean_text(row[5]),
-            received_date=clean_text(row[6]),
-            signed_status=clean_text(row[7]),
-            signed_by_all_parties=bool(row[8]),
-            active_flag=bool(row[9]),
-            supersedes_document_id=int(row[10]) if row[10] is not None else None,
-            superseded_by_document_id=int(row[11]) if row[11] is not None else None,
-            file_path=clean_text(row[12]),
-            filename=clean_text(row[13]),
-            storage_mode=clean_text(row[14]),
-            checksum_sha256=clean_text(row[16]),
-            notes=clean_text(row[17]),
-            uploaded_at=clean_text(row[18]),
-        )
 
     def _hash_file(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -844,6 +917,78 @@ class ContractService:
                         f"Amendment document '{document.title or 'Untitled'}' does not declare which version it supersedes.",
                     )
                 )
+        registry_service = self._code_registry_service()
+        for system_key in (
+            BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            BUILTIN_CATEGORY_LICENSE_NUMBER,
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        ):
+            text_attr, mode_attr, internal_attr, external_attr, label = self._contract_identifier_spec(
+                system_key
+            )
+            internal_id = getattr(payload, internal_attr, None)
+            external_id = getattr(payload, external_attr, None)
+            clean_value = clean_text(getattr(payload, text_attr, None))
+            resolved_mode = self._resolve_identifier_mode(
+                mode=getattr(payload, mode_attr, None),
+                registry_entry_id=int(internal_id) if internal_id is not None else None,
+                external_identifier_id=int(external_id) if external_id is not None else None,
+                value=clean_value,
+            )
+            if internal_id is not None and external_id is not None:
+                issues.append(
+                    ContractValidationIssue(
+                        "error",
+                        text_attr,
+                        f"{label} cannot carry both an internal registry link and an external identifier link.",
+                    )
+                )
+            if resolved_mode == CATALOG_MODE_INTERNAL and internal_id is None and not clean_value:
+                issues.append(
+                    ContractValidationIssue(
+                        "error",
+                        text_attr,
+                        f"{label} is set to Internal Registry but no value is selected.",
+                    )
+                )
+            if registry_service is None:
+                continue
+            if internal_id is not None:
+                entry = registry_service.fetch_entry(int(internal_id))
+                if entry is None:
+                    issues.append(
+                        ContractValidationIssue(
+                            "error",
+                            text_attr,
+                            f"{label} entry #{int(internal_id)} was not found.",
+                        )
+                    )
+                elif str(entry.category_system_key or "").strip() != system_key:
+                    issues.append(
+                        ContractValidationIssue(
+                            "error",
+                            text_attr,
+                            f"{label} entry #{int(internal_id)} belongs to a different registry category.",
+                        )
+                    )
+            if external_id is not None:
+                record = registry_service.fetch_external_code_identifier(int(external_id))
+                if record is None:
+                    issues.append(
+                        ContractValidationIssue(
+                            "error",
+                            text_attr,
+                            f"{label} external identifier #{int(external_id)} was not found.",
+                        )
+                    )
+                elif str(record.category_system_key or "").strip() != system_key:
+                    issues.append(
+                        ContractValidationIssue(
+                            "error",
+                            text_attr,
+                            f"{label} external identifier #{int(external_id)} belongs to a different identifier type.",
+                        )
+                    )
         return issues
 
     def create_contract(
@@ -1314,18 +1459,42 @@ class ContractService:
             self._delete_document_if_unreferenced(stale_path, cursor=cursor)
 
     def fetch_contract(self, contract_id: int) -> ContractRecord | None:
+        contract_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER, "c"
+        )
+        contract_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER, "c"
+        )
+        license_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
+        )
+        license_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
+        )
+        key_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
+        )
+        key_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
+        )
         row = self.conn.execute(
-            """
+            f"""
             SELECT
                 c.id,
                 c.title,
                 c.contract_type,
                 c.contract_number,
-                c.license_number,
-                c.registry_sha256_key,
+                {contract_mode_sql} AS contract_number_mode,
                 c.contract_registry_entry_id,
+                {contract_external_sql} AS contract_external_code_identifier_id,
+                c.license_number,
+                {license_mode_sql} AS license_number_mode,
                 c.license_registry_entry_id,
+                {license_external_sql} AS license_external_code_identifier_id,
+                c.registry_sha256_key,
+                {key_mode_sql} AS registry_sha256_key_mode,
                 c.registry_sha256_key_entry_id,
+                {key_external_sql} AS registry_sha256_key_external_code_identifier_id,
                 c.draft_date,
                 c.signature_date,
                 c.effective_date,
@@ -1480,6 +1649,24 @@ class ContractService:
             clauses.append("c.status=?")
             params.append(self._clean_status(clean_status))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        contract_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER, "c"
+        )
+        contract_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER, "c"
+        )
+        license_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
+        )
+        license_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
+        )
+        key_external_sql = self._contract_identifier_select_sql(
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
+        )
+        key_mode_sql = self._contract_identifier_mode_sql(
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
+        )
         rows = self.conn.execute(
             f"""
             SELECT
@@ -1487,11 +1674,17 @@ class ContractService:
                 c.title,
                 c.contract_type,
                 c.contract_number,
-                c.license_number,
-                c.registry_sha256_key,
+                {contract_mode_sql} AS contract_number_mode,
                 c.contract_registry_entry_id,
+                {contract_external_sql} AS contract_external_code_identifier_id,
+                c.license_number,
+                {license_mode_sql} AS license_number_mode,
                 c.license_registry_entry_id,
+                {license_external_sql} AS license_external_code_identifier_id,
+                c.registry_sha256_key,
+                {key_mode_sql} AS registry_sha256_key_mode,
                 c.registry_sha256_key_entry_id,
+                {key_external_sql} AS registry_sha256_key_external_code_identifier_id,
                 c.draft_date,
                 c.signature_date,
                 c.effective_date,

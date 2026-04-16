@@ -463,9 +463,12 @@ class ReleaseEditorDialog(QDialog):
         self.label_edit.setCurrentText(release.label or "")
         self.sublabel_edit.setCurrentText(release.sublabel or "")
         self.catalog_number_edit.set_value(
-            catalog_number=release.catalog_number,
-            catalog_registry_entry_id=release.catalog_registry_entry_id,
-            external_catalog_identifier_id=release.external_catalog_identifier_id,
+            value=release.catalog_number,
+            mode=release.catalog_number_mode,
+            registry_entry_id=release.catalog_registry_entry_id,
+            external_identifier_id=release.catalog_external_code_identifier_id
+            if release.catalog_external_code_identifier_id is not None
+            else release.external_catalog_identifier_id,
         )
         self.upc_edit.setCurrentText(release.upc or "")
         self.territory_edit.setText(release.territory or "")
@@ -645,9 +648,11 @@ class ReleaseEditorDialog(QDialog):
             original_release_date=self.original_release_date_edit.text().strip() or None,
             label=self.label_edit.currentText().strip() or None,
             sublabel=self.sublabel_edit.currentText().strip() or None,
-            catalog_number=self.catalog_number_edit.catalog_number(),
-            catalog_registry_entry_id=self.catalog_number_edit.catalog_registry_entry_id(),
-            external_catalog_identifier_id=self.catalog_number_edit.external_catalog_identifier_id(),
+            catalog_number=self.catalog_number_edit.identifier_value(),
+            catalog_number_mode=self.catalog_number_edit.identifier_mode(),
+            catalog_registry_entry_id=self.catalog_number_edit.registry_entry_id(),
+            catalog_external_code_identifier_id=self.catalog_number_edit.external_code_identifier_id(),
+            external_catalog_identifier_id=self.catalog_number_edit.external_code_identifier_id(),
             upc=self.upc_edit.currentText().strip() or None,
             territory=self.territory_edit.text().strip() or None,
             explicit_flag=self.explicit_checkbox.isChecked(),

@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import sqlite3
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Callable
 
@@ -81,7 +82,7 @@ class DatabaseSchemaService:
                 track_title TEXT NOT NULL,
                 catalog_number TEXT,
                 catalog_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
-                external_catalog_identifier_id INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL,
+                catalog_external_code_identifier_id INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL,
                 album_art_path TEXT,
                 album_art_storage_mode TEXT,
                 album_art_blob BLOB,
@@ -110,7 +111,104 @@ class DatabaseSchemaService:
                 FOREIGN KEY (main_artist_party_id) REFERENCES Parties(id) ON DELETE RESTRICT,
                 FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL,
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE SET NULL,
-                FOREIGN KEY (parent_track_id) REFERENCES Tracks(id) ON DELETE SET NULL
+                FOREIGN KEY (parent_track_id) REFERENCES Tracks(id) ON DELETE SET NULL,
+                CHECK (
+                    catalog_registry_entry_id IS NULL
+                    OR catalog_external_code_identifier_id IS NULL
+                )
+            )
+            """
+        )
+
+    def _create_current_releases_table(self, table_name: str = "Releases") -> None:
+        self.cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                version_subtitle TEXT,
+                primary_artist TEXT,
+                album_artist TEXT,
+                release_type TEXT NOT NULL DEFAULT 'album',
+                release_date TEXT,
+                original_release_date TEXT,
+                label TEXT,
+                sublabel TEXT,
+                catalog_number TEXT,
+                catalog_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                catalog_external_code_identifier_id INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL,
+                upc TEXT,
+                barcode_validation_status TEXT NOT NULL DEFAULT 'missing',
+                territory TEXT,
+                explicit_flag INTEGER NOT NULL DEFAULT 0,
+                release_notes TEXT,
+                artwork_path TEXT,
+                artwork_storage_mode TEXT,
+                artwork_blob BLOB,
+                artwork_filename TEXT,
+                artwork_mime_type TEXT,
+                artwork_size_bytes INTEGER NOT NULL DEFAULT 0,
+                profile_name TEXT,
+                repertoire_status TEXT,
+                metadata_complete INTEGER NOT NULL DEFAULT 0,
+                contract_signed INTEGER NOT NULL DEFAULT 0,
+                rights_verified INTEGER NOT NULL DEFAULT 0,
+                CHECK (
+                    catalog_registry_entry_id IS NULL
+                    OR catalog_external_code_identifier_id IS NULL
+                )
+            )
+            """
+        )
+
+    def _create_current_contracts_table(self, table_name: str = "Contracts") -> None:
+        self.cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                contract_type TEXT,
+                contract_number TEXT,
+                contract_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                contract_external_code_identifier_id INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL,
+                license_number TEXT,
+                license_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                license_external_code_identifier_id INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL,
+                registry_sha256_key TEXT,
+                registry_sha256_key_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                registry_sha256_key_external_code_identifier_id INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL,
+                draft_date TEXT,
+                signature_date TEXT,
+                effective_date TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                renewal_date TEXT,
+                notice_deadline TEXT,
+                option_periods TEXT,
+                reversion_date TEXT,
+                termination_date TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                supersedes_contract_id INTEGER,
+                superseded_by_contract_id INTEGER,
+                summary TEXT,
+                notes TEXT,
+                profile_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (supersedes_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL,
+                FOREIGN KEY (superseded_by_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL,
+                CHECK (
+                    contract_registry_entry_id IS NULL
+                    OR contract_external_code_identifier_id IS NULL
+                ),
+                CHECK (
+                    license_registry_entry_id IS NULL
+                    OR license_external_code_identifier_id IS NULL
+                ),
+                CHECK (
+                    registry_sha256_key_entry_id IS NULL
+                    OR registry_sha256_key_external_code_identifier_id IS NULL
+                )
             )
             """
         )
@@ -393,6 +491,50 @@ class DatabaseSchemaService:
             """
         )
 
+    def _ensure_migration_diagnostics(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS _MigrationDiagnostics (
+                migration_version INTEGER NOT NULL,
+                category_system_key TEXT NOT NULL,
+                diagnostic_key TEXT NOT NULL,
+                diagnostic_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (migration_version, category_system_key, diagnostic_key)
+            )
+            """
+        )
+
+    def _write_migration_diagnostics(
+        self,
+        *,
+        migration_version: int,
+        rows: dict[tuple[str, str], int],
+    ) -> None:
+        self._ensure_migration_diagnostics()
+        self.cursor.execute(
+            "DELETE FROM _MigrationDiagnostics WHERE migration_version=?",
+            (int(migration_version),),
+        )
+        for (category_system_key, diagnostic_key), diagnostic_count in sorted(rows.items()):
+            self.cursor.execute(
+                """
+                INSERT INTO _MigrationDiagnostics(
+                    migration_version,
+                    category_system_key,
+                    diagnostic_key,
+                    diagnostic_count
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    int(migration_version),
+                    str(category_system_key or ""),
+                    str(diagnostic_key or ""),
+                    int(diagnostic_count or 0),
+                ),
+            )
+
     def _record_audit(
         self, action: str, entity: str, ref_id: str | int | None, details: str | None
     ) -> None:
@@ -433,6 +575,7 @@ class DatabaseSchemaService:
 
     def migrate_schema(self) -> None:
         self._ensure_migration_log()
+        self._ensure_migration_diagnostics()
 
         version = self.get_db_version()
         if version == 0:
@@ -556,6 +699,9 @@ class DatabaseSchemaService:
             elif version == 38:
                 self._apply_migration(38, self._mig_38_to_39)
                 version = 39
+            elif version == 39:
+                self._apply_migration(39, self._mig_39_to_40)
+                version = 40
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -886,6 +1032,7 @@ class DatabaseSchemaService:
         self._ensure_optional_isrc_constraints()
 
     def _mig_18_to_19(self) -> None:
+        self._ensure_code_registry_tables(backfill_catalog_links=False)
         self._ensure_current_track_columns()
         self._ensure_release_tables()
         self._migrate_legacy_releases()
@@ -1001,6 +1148,457 @@ class DatabaseSchemaService:
 
     def _mig_38_to_39(self) -> None:
         self._migrate_tracks_artist_authority_to_parties()
+
+    def _mig_39_to_40(self) -> None:
+        try:
+            from isrc_manager.code_registry.models import (
+                BUILTIN_CATEGORY_CATALOG_NUMBER,
+                BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                BUILTIN_CATEGORY_LICENSE_NUMBER,
+                BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                CLASSIFICATION_INTERNAL,
+                CLASSIFICATION_MISMATCH,
+                ENTRY_KIND_IMPORTED,
+            )
+            from isrc_manager.code_registry.service import CodeRegistryService
+        except Exception:
+            self._ensure_code_registry_tables(backfill_catalog_links=False)
+            return
+
+        self._ensure_code_registry_tables(backfill_catalog_links=False)
+        service = CodeRegistryService(self.conn)
+        metrics = (
+            "internal_authority",
+            "external_authority",
+            "legacy_text_conflict",
+            "mismatch_external",
+            "blank_value",
+            "legacy_external_rows",
+        )
+        diagnostics: defaultdict[tuple[str, str], int] = defaultdict(int)
+        for system_key in (
+            BUILTIN_CATEGORY_CATALOG_NUMBER,
+            BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            BUILTIN_CATEGORY_LICENSE_NUMBER,
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        ):
+            for metric in metrics:
+                diagnostics[(system_key, metric)] += 0
+
+        def _table_rows(table_name: str) -> list[dict[str, object]]:
+            column_names = [
+                str(column[1] or "")
+                for column in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+            ]
+            return [
+                dict(zip(column_names, row))
+                for row in self.cursor.execute(f"SELECT * FROM {table_name}").fetchall()
+            ]
+
+        legacy_external_rows: list[tuple] = []
+        if self._table_exists("ExternalCatalogIdentifiers"):
+            legacy_external_rows = self.cursor.execute(
+                """
+                SELECT
+                    id,
+                    subject_kind,
+                    subject_id,
+                    value,
+                    normalized_value,
+                    provenance_kind,
+                    classification_status,
+                    classification_reason,
+                    source_label,
+                    created_at,
+                    updated_at
+                FROM ExternalCatalogIdentifiers
+                ORDER BY id
+                """
+            ).fetchall()
+            for row in legacy_external_rows:
+                self.cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO ExternalCodeIdentifiers(
+                        id,
+                        category_system_key,
+                        value,
+                        normalized_value,
+                        origin_record_kind,
+                        origin_record_id,
+                        provenance_kind,
+                        classification_status,
+                        classification_reason,
+                        source_label,
+                        matched_registry_entry_id,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                    """,
+                    (
+                        int(row[0]),
+                        BUILTIN_CATEGORY_CATALOG_NUMBER,
+                        str(row[3] or "").strip(),
+                        str(row[4] or "").strip(),
+                        str(row[1] or "").strip() or None,
+                        int(row[2]) if row[2] is not None else None,
+                        str(row[5] or "migration"),
+                        str(row[6] or "external"),
+                        str(row[7] or "").strip() or None,
+                        str(row[8] or "").strip() or None,
+                        row[9],
+                        row[10],
+                    ),
+                )
+            diagnostics[(BUILTIN_CATEGORY_CATALOG_NUMBER, "legacy_external_rows")] = len(
+                legacy_external_rows
+            )
+
+        def _resolve_authority(
+            *,
+            system_key: str,
+            owner_kind: str,
+            owner_id: int,
+            text_value: object | None,
+            internal_id: object | None = None,
+            external_id: object | None = None,
+        ) -> tuple[str | None, int | None, int | None]:
+            clean_value = str(text_value or "").strip() or None
+            clean_internal_id = int(internal_id) if internal_id is not None else None
+            clean_external_id = int(external_id) if external_id is not None else None
+            if clean_internal_id is not None:
+                entry = service.fetch_entry(clean_internal_id)
+                authoritative_value = entry.value if entry is not None else clean_value
+                if (
+                    clean_value
+                    and authoritative_value
+                    and str(clean_value).strip() != str(authoritative_value).strip()
+                ):
+                    diagnostics[(system_key, "legacy_text_conflict")] += 1
+                diagnostics[(system_key, "internal_authority")] += 1
+                return authoritative_value, clean_internal_id, None
+            if clean_external_id is not None:
+                record = service.fetch_external_code_identifier(clean_external_id)
+                if record is not None:
+                    authoritative_value = record.value
+                    if (
+                        clean_value
+                        and authoritative_value
+                        and str(clean_value).strip() != str(authoritative_value).strip()
+                    ):
+                        diagnostics[(system_key, "legacy_text_conflict")] += 1
+                    diagnostics[(system_key, "external_authority")] += 1
+                    return authoritative_value, None, clean_external_id
+                if clean_value:
+                    diagnostics[(system_key, "legacy_text_conflict")] += 1
+            if not clean_value:
+                diagnostics[(system_key, "blank_value")] += 1
+                return None, None, None
+            classification = service.classify_identifier_value(
+                system_key=system_key,
+                value=clean_value,
+                allow_existing_internal_match=False,
+            )
+            if (
+                classification.classification == CLASSIFICATION_INTERNAL
+                and system_key != BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+            ):
+                entry = service.capture_value_for_category(
+                    system_key=system_key,
+                    value=clean_value,
+                    created_via="migration.schema_40",
+                    entry_kind=ENTRY_KIND_IMPORTED,
+                    cursor=self.cursor,
+                )
+                diagnostics[(system_key, "internal_authority")] += 1
+                return entry.value, int(entry.id), None
+            external_identifier_id = service._upsert_external_code_identifier(
+                system_key=system_key,
+                owner_kind=owner_kind,
+                owner_id=int(owner_id),
+                value=clean_value,
+                provenance_kind="migration",
+                classification_status=classification.classification,
+                classification_reason=classification.reason,
+                source_label="schema_40_migration",
+                cursor=self.cursor,
+            )
+            diagnostics[(system_key, "external_authority")] += 1
+            if classification.classification == CLASSIFICATION_MISMATCH:
+                diagnostics[(system_key, "mismatch_external")] += 1
+            return clean_value, None, int(external_identifier_id)
+
+        track_rows = _table_rows("Tracks") if self._table_exists("Tracks") else []
+        release_rows = _table_rows("Releases") if self._table_exists("Releases") else []
+        contract_rows = _table_rows("Contracts") if self._table_exists("Contracts") else []
+
+        original_foreign_keys = int(
+            self.conn.execute("PRAGMA foreign_keys").fetchone()[0] or 0
+        )
+        self.cursor.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
+            self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
+            if track_rows:
+                self.cursor.execute("DROP TABLE IF EXISTS Tracks__mig40")
+                self._create_current_tracks_table("Tracks__mig40")
+                track_insert_columns = [
+                    "id",
+                    "isrc",
+                    "isrc_compact",
+                    "db_entry_date",
+                    "audio_file_path",
+                    "audio_file_storage_mode",
+                    "audio_file_blob",
+                    "audio_file_filename",
+                    "audio_file_mime_type",
+                    "audio_file_size_bytes",
+                    "track_title",
+                    "catalog_number",
+                    "catalog_registry_entry_id",
+                    "catalog_external_code_identifier_id",
+                    "album_art_path",
+                    "album_art_storage_mode",
+                    "album_art_blob",
+                    "album_art_filename",
+                    "album_art_mime_type",
+                    "album_art_size_bytes",
+                    "main_artist_party_id",
+                    "buma_work_number",
+                    "album_id",
+                    "work_id",
+                    "parent_track_id",
+                    "relationship_type",
+                    "release_date",
+                    "track_length_sec",
+                    "iswc",
+                    "upc",
+                    "genre",
+                    "composer",
+                    "publisher",
+                    "comments",
+                    "lyrics",
+                    "repertoire_status",
+                    "metadata_complete",
+                    "contract_signed",
+                    "rights_verified",
+                ]
+                track_defaults: dict[str, object] = {
+                    "audio_file_size_bytes": 0,
+                    "album_art_size_bytes": 0,
+                    "relationship_type": "original",
+                    "track_length_sec": 0,
+                    "metadata_complete": 0,
+                    "contract_signed": 0,
+                    "rights_verified": 0,
+                }
+                for payload in track_rows:
+                    catalog_value, catalog_entry_id, catalog_external_id = _resolve_authority(
+                        system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                        owner_kind="track",
+                        owner_id=int(payload.get("id") or 0),
+                        text_value=payload.get("catalog_number"),
+                        internal_id=payload.get("catalog_registry_entry_id"),
+                        external_id=payload.get("catalog_external_code_identifier_id")
+                        if payload.get("catalog_external_code_identifier_id") is not None
+                        else payload.get("external_catalog_identifier_id"),
+                    )
+                    insert_payload = dict(payload)
+                    insert_payload["catalog_number"] = catalog_value
+                    insert_payload["catalog_registry_entry_id"] = catalog_entry_id
+                    insert_payload["catalog_external_code_identifier_id"] = catalog_external_id
+                    values: list[object] = []
+                    for column_name in track_insert_columns:
+                        value = insert_payload.get(column_name)
+                        if value is None and column_name in track_defaults:
+                            value = track_defaults[column_name]
+                        values.append(value)
+                    self.cursor.execute(
+                        f"""
+                        INSERT INTO Tracks__mig40 ({", ".join(track_insert_columns)})
+                        VALUES ({", ".join("?" for _ in track_insert_columns)})
+                        """,
+                        values,
+                    )
+                self.cursor.execute("DROP TABLE Tracks")
+                self.cursor.execute("ALTER TABLE Tracks__mig40 RENAME TO Tracks")
+                self._ensure_current_track_columns()
+                self._ensure_current_track_indexes_and_triggers()
+
+            if release_rows:
+                self.cursor.execute("DROP TABLE IF EXISTS Releases__mig40")
+                self._create_current_releases_table("Releases__mig40")
+                release_insert_columns = [
+                    "id",
+                    "title",
+                    "version_subtitle",
+                    "primary_artist",
+                    "album_artist",
+                    "release_type",
+                    "release_date",
+                    "original_release_date",
+                    "label",
+                    "sublabel",
+                    "catalog_number",
+                    "catalog_registry_entry_id",
+                    "catalog_external_code_identifier_id",
+                    "upc",
+                    "barcode_validation_status",
+                    "territory",
+                    "explicit_flag",
+                    "release_notes",
+                    "artwork_path",
+                    "artwork_storage_mode",
+                    "artwork_blob",
+                    "artwork_filename",
+                    "artwork_mime_type",
+                    "artwork_size_bytes",
+                    "profile_name",
+                    "repertoire_status",
+                    "metadata_complete",
+                    "contract_signed",
+                    "rights_verified",
+                ]
+                release_defaults: dict[str, object] = {
+                    "release_type": "album",
+                    "barcode_validation_status": "missing",
+                    "explicit_flag": 0,
+                    "artwork_size_bytes": 0,
+                    "metadata_complete": 0,
+                    "contract_signed": 0,
+                    "rights_verified": 0,
+                }
+                for payload in release_rows:
+                    catalog_value, catalog_entry_id, catalog_external_id = _resolve_authority(
+                        system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                        owner_kind="release",
+                        owner_id=int(payload.get("id") or 0),
+                        text_value=payload.get("catalog_number"),
+                        internal_id=payload.get("catalog_registry_entry_id"),
+                        external_id=payload.get("catalog_external_code_identifier_id")
+                        if payload.get("catalog_external_code_identifier_id") is not None
+                        else payload.get("external_catalog_identifier_id"),
+                    )
+                    insert_payload = dict(payload)
+                    insert_payload["catalog_number"] = catalog_value
+                    insert_payload["catalog_registry_entry_id"] = catalog_entry_id
+                    insert_payload["catalog_external_code_identifier_id"] = catalog_external_id
+                    values: list[object] = []
+                    for column_name in release_insert_columns:
+                        value = insert_payload.get(column_name)
+                        if value is None and column_name in release_defaults:
+                            value = release_defaults[column_name]
+                        values.append(value)
+                    self.cursor.execute(
+                        f"""
+                        INSERT INTO Releases__mig40 ({", ".join(release_insert_columns)})
+                        VALUES ({", ".join("?" for _ in release_insert_columns)})
+                        """,
+                        values,
+                    )
+                self.cursor.execute("DROP TABLE Releases")
+                self.cursor.execute("ALTER TABLE Releases__mig40 RENAME TO Releases")
+                self._ensure_release_tables()
+
+            if contract_rows:
+                self.cursor.execute("DROP TABLE IF EXISTS Contracts__mig40")
+                self._create_current_contracts_table("Contracts__mig40")
+                contract_insert_columns = [
+                    "id",
+                    "title",
+                    "contract_type",
+                    "contract_number",
+                    "contract_registry_entry_id",
+                    "contract_external_code_identifier_id",
+                    "license_number",
+                    "license_registry_entry_id",
+                    "license_external_code_identifier_id",
+                    "registry_sha256_key",
+                    "registry_sha256_key_entry_id",
+                    "registry_sha256_key_external_code_identifier_id",
+                    "draft_date",
+                    "signature_date",
+                    "effective_date",
+                    "start_date",
+                    "end_date",
+                    "renewal_date",
+                    "notice_deadline",
+                    "option_periods",
+                    "reversion_date",
+                    "termination_date",
+                    "status",
+                    "supersedes_contract_id",
+                    "superseded_by_contract_id",
+                    "summary",
+                    "notes",
+                    "profile_name",
+                    "created_at",
+                    "updated_at",
+                ]
+                contract_defaults: dict[str, object] = {"status": "draft"}
+                for payload in contract_rows:
+                    contract_value, contract_entry_id, contract_external_id = _resolve_authority(
+                        system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                        owner_kind="contract",
+                        owner_id=int(payload.get("id") or 0),
+                        text_value=payload.get("contract_number"),
+                        internal_id=payload.get("contract_registry_entry_id"),
+                        external_id=payload.get("contract_external_code_identifier_id"),
+                    )
+                    license_value, license_entry_id, license_external_id = _resolve_authority(
+                        system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+                        owner_kind="contract",
+                        owner_id=int(payload.get("id") or 0),
+                        text_value=payload.get("license_number"),
+                        internal_id=payload.get("license_registry_entry_id"),
+                        external_id=payload.get("license_external_code_identifier_id"),
+                    )
+                    key_value, key_entry_id, key_external_id = _resolve_authority(
+                        system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                        owner_kind="contract",
+                        owner_id=int(payload.get("id") or 0),
+                        text_value=payload.get("registry_sha256_key"),
+                        internal_id=payload.get("registry_sha256_key_entry_id"),
+                        external_id=payload.get("registry_sha256_key_external_code_identifier_id"),
+                    )
+                    insert_payload = dict(payload)
+                    insert_payload["contract_number"] = contract_value
+                    insert_payload["contract_registry_entry_id"] = contract_entry_id
+                    insert_payload["contract_external_code_identifier_id"] = contract_external_id
+                    insert_payload["license_number"] = license_value
+                    insert_payload["license_registry_entry_id"] = license_entry_id
+                    insert_payload["license_external_code_identifier_id"] = license_external_id
+                    insert_payload["registry_sha256_key"] = key_value
+                    insert_payload["registry_sha256_key_entry_id"] = key_entry_id
+                    insert_payload["registry_sha256_key_external_code_identifier_id"] = (
+                        key_external_id
+                    )
+                    values: list[object] = []
+                    for column_name in contract_insert_columns:
+                        value = insert_payload.get(column_name)
+                        if value is None and column_name in contract_defaults:
+                            value = contract_defaults[column_name]
+                        values.append(value)
+                    self.cursor.execute(
+                        f"""
+                        INSERT INTO Contracts__mig40 ({", ".join(contract_insert_columns)})
+                        VALUES ({", ".join("?" for _ in contract_insert_columns)})
+                        """,
+                        values,
+                    )
+                self.cursor.execute("DROP TABLE Contracts")
+                self.cursor.execute("ALTER TABLE Contracts__mig40 RENAME TO Contracts")
+                self._ensure_repertoire_tables()
+
+        finally:
+            self.cursor.execute(
+                f"PRAGMA foreign_keys={'ON' if original_foreign_keys else 'OFF'}"
+            )
+
+        self._ensure_license_columns()
+        self._ensure_code_registry_tables(backfill_catalog_links=False)
+        self._ensure_code_registry_entry_immutability_triggers()
+        self._write_migration_diagnostics(migration_version=40, rows=dict(diagnostics))
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -1587,7 +2185,7 @@ class DatabaseSchemaService:
             "track_title",
             "catalog_number",
             "catalog_registry_entry_id",
-            "external_catalog_identifier_id",
+            "catalog_external_code_identifier_id",
             "album_art_path",
             "album_art_storage_mode",
             "album_art_blob",
@@ -1626,7 +2224,13 @@ class DatabaseSchemaService:
         for payload in migrated_track_rows:
             insert_values: list[object] = []
             for column_name in track_insert_columns:
-                value = payload.get(column_name)
+                if (
+                    column_name == "catalog_external_code_identifier_id"
+                    and payload.get(column_name) is None
+                ):
+                    value = payload.get("external_catalog_identifier_id")
+                else:
+                    value = payload.get(column_name)
                 if value is None and column_name in track_insert_defaults:
                     value = track_insert_defaults[column_name]
                 insert_values.append(value)
@@ -1930,39 +2534,7 @@ class DatabaseSchemaService:
                 )
 
     def _ensure_release_tables(self) -> None:
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS Releases (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                version_subtitle TEXT,
-                primary_artist TEXT,
-                album_artist TEXT,
-                release_type TEXT NOT NULL DEFAULT 'album',
-                release_date TEXT,
-                original_release_date TEXT,
-                label TEXT,
-                sublabel TEXT,
-                catalog_number TEXT,
-                upc TEXT,
-                barcode_validation_status TEXT NOT NULL DEFAULT 'missing',
-                territory TEXT,
-                explicit_flag INTEGER NOT NULL DEFAULT 0,
-                release_notes TEXT,
-                artwork_path TEXT,
-                artwork_storage_mode TEXT,
-                artwork_blob BLOB,
-                artwork_filename TEXT,
-                artwork_mime_type TEXT,
-                artwork_size_bytes INTEGER NOT NULL DEFAULT 0,
-                profile_name TEXT,
-                repertoire_status TEXT,
-                metadata_complete INTEGER NOT NULL DEFAULT 0,
-                contract_signed INTEGER NOT NULL DEFAULT 0,
-                rights_verified INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
+        self._create_current_releases_table()
         release_columns = self._table_columns("Releases")
         release_additions = (
             ("artwork_storage_mode", "TEXT"),
@@ -1972,6 +2544,14 @@ class DatabaseSchemaService:
             ("metadata_complete", "INTEGER NOT NULL DEFAULT 0"),
             ("contract_signed", "INTEGER NOT NULL DEFAULT 0"),
             ("rights_verified", "INTEGER NOT NULL DEFAULT 0"),
+            (
+                "catalog_registry_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+            (
+                "catalog_external_code_identifier_id",
+                "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
+            ),
         )
         for column_name, column_sql in release_additions:
             if column_name not in release_columns:
@@ -2020,6 +2600,23 @@ class DatabaseSchemaService:
             ON Releases(catalog_number)
             """
         )
+        if "catalog_registry_entry_id" in release_columns or "catalog_registry_entry_id" in self._table_columns("Releases"):
+            self.cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
+                ON Releases(catalog_registry_entry_id)
+                """
+            )
+        if (
+            "catalog_external_code_identifier_id" in release_columns
+            or "catalog_external_code_identifier_id" in self._table_columns("Releases")
+        ):
+            self.cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_releases_catalog_external_code_identifier_id
+                ON Releases(catalog_external_code_identifier_id)
+                """
+            )
         self.cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_releases_release_date
@@ -2033,7 +2630,7 @@ class DatabaseSchemaService:
             """
         )
 
-    def _ensure_code_registry_tables(self) -> None:
+    def _ensure_code_registry_tables(self, *, backfill_catalog_links: bool = True) -> None:
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS CodeRegistryCategories (
@@ -2081,6 +2678,25 @@ class DatabaseSchemaService:
                 created_via TEXT,
                 notes TEXT,
                 FOREIGN KEY (category_id) REFERENCES CodeRegistryCategories(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ExternalCodeIdentifiers (
+                id INTEGER PRIMARY KEY,
+                category_system_key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                normalized_value TEXT NOT NULL,
+                origin_record_kind TEXT,
+                origin_record_id INTEGER,
+                provenance_kind TEXT NOT NULL DEFAULT 'manual',
+                classification_status TEXT NOT NULL DEFAULT 'external',
+                classification_reason TEXT,
+                source_label TEXT,
+                matched_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
@@ -2136,6 +2752,19 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_external_code_identifiers_status
+            ON ExternalCodeIdentifiers(category_system_key, classification_status, updated_at DESC)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_external_code_identifiers_normalized_value
+            ON ExternalCodeIdentifiers(category_system_key, normalized_value)
+            WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
+            """
+        )
+        self.cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_external_catalog_identifiers_status
             ON ExternalCatalogIdentifiers(classification_status, updated_at DESC)
             """
@@ -2157,8 +2786,8 @@ class DatabaseSchemaService:
                 "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
             ),
             (
-                "external_catalog_identifier_id",
-                "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
+                "catalog_external_code_identifier_id",
+                "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
             ),
         ):
             if column_name not in track_columns:
@@ -2171,8 +2800,8 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_tracks_external_catalog_identifier_id
-            ON Tracks(external_catalog_identifier_id)
+            CREATE INDEX IF NOT EXISTS idx_tracks_catalog_external_code_identifier_id
+            ON Tracks(catalog_external_code_identifier_id)
             """
         )
 
@@ -2184,8 +2813,8 @@ class DatabaseSchemaService:
                     "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
                 ),
                 (
-                    "external_catalog_identifier_id",
-                    "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
+                    "catalog_external_code_identifier_id",
+                    "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
                 ),
             ):
                 if column_name not in release_columns:
@@ -2200,8 +2829,8 @@ class DatabaseSchemaService:
             )
             self.cursor.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_releases_external_catalog_identifier_id
-                ON Releases(external_catalog_identifier_id)
+                CREATE INDEX IF NOT EXISTS idx_releases_catalog_external_code_identifier_id
+                ON Releases(catalog_external_code_identifier_id)
                 """
             )
 
@@ -2216,12 +2845,24 @@ class DatabaseSchemaService:
                     "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
                 ),
                 (
+                    "contract_external_code_identifier_id",
+                    "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
+                ),
+                (
                     "license_registry_entry_id",
                     "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
                 ),
                 (
+                    "license_external_code_identifier_id",
+                    "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
+                ),
+                (
                     "registry_sha256_key_entry_id",
                     "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+                ),
+                (
+                    "registry_sha256_key_external_code_identifier_id",
+                    "INTEGER REFERENCES ExternalCodeIdentifiers(id) ON DELETE SET NULL",
                 ),
             )
             for column_name, column_sql in contract_additions:
@@ -2252,11 +2893,15 @@ class DatabaseSchemaService:
             )
 
         self._seed_code_registry_categories()
-        self._backfill_catalog_registry_links()
+        if backfill_catalog_links:
+            self._backfill_catalog_registry_links()
 
     def _ensure_code_registry_entry_immutability_triggers(self) -> None:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_update")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
+        tables = {str(row[0] or "") for row in self.cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
         self.cursor.execute(
             """
             CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_update
@@ -2268,36 +2913,57 @@ class DatabaseSchemaService:
             END
             """
         )
-        self.cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_delete
-            BEFORE DELETE ON CodeRegistryEntries
-            FOR EACH ROW
-            WHEN OLD.immutable_flag = 1
-              AND (
+        delete_checks: list[str] = []
+        if "Tracks" in tables:
+            delete_checks.append(
+                """
                 EXISTS(
                     SELECT 1
                     FROM Tracks t
                     WHERE t.catalog_registry_entry_id = OLD.id
                 )
-                OR EXISTS(
+                """
+            )
+        if "Releases" in tables:
+            delete_checks.append(
+                """
+                EXISTS(
                     SELECT 1
                     FROM Releases r
                     WHERE r.catalog_registry_entry_id = OLD.id
                 )
-                OR EXISTS(
+                """
+            )
+        if "Contracts" in tables:
+            delete_checks.append(
+                """
+                EXISTS(
                     SELECT 1
                     FROM Contracts c
                     WHERE c.contract_registry_entry_id = OLD.id
                        OR c.license_registry_entry_id = OLD.id
                        OR c.registry_sha256_key_entry_id = OLD.id
                 )
-                OR EXISTS(
+                """
+            )
+        if "ContractTemplateDraftRegistryAssignments" in tables:
+            delete_checks.append(
+                """
+                EXISTS(
                     SELECT 1
                     FROM ContractTemplateDraftRegistryAssignments a
                     WHERE a.registry_entry_id = OLD.id
                 )
-              )
+                """
+            )
+        delete_guard = " OR ".join(check.strip() for check in delete_checks) or "0"
+        self.cursor.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_delete
+            BEFORE DELETE ON CodeRegistryEntries
+            FOR EACH ROW
+            WHEN OLD.immutable_flag = 1
+              AND ({delete_guard})
             BEGIN
                 SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
             END
@@ -2394,13 +3060,21 @@ class DatabaseSchemaService:
         for owner_kind, table_name in (("track", "Tracks"), ("release", "Releases")):
             if not self._table_exists(table_name):
                 continue
+            table_columns = self._table_columns(table_name)
+            if "catalog_external_code_identifier_id" in table_columns:
+                external_column = "catalog_external_code_identifier_id"
+            elif "external_catalog_identifier_id" in table_columns:
+                external_column = "external_catalog_identifier_id"
+            else:
+                external_column = None
+            external_clause = f"AND {external_column} IS NULL" if external_column else ""
             rows = self.cursor.execute(
                 f"""
                 SELECT id, catalog_number
                 FROM {table_name}
                 WHERE COALESCE(trim(catalog_number), '') != ''
                   AND catalog_registry_entry_id IS NULL
-                  AND external_catalog_identifier_id IS NULL
+                  {external_clause}
                 ORDER BY id
                 """
             ).fetchall()
@@ -2641,41 +3315,34 @@ class DatabaseSchemaService:
             """
         )
 
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS Contracts (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                contract_type TEXT,
-                draft_date TEXT,
-                signature_date TEXT,
-                effective_date TEXT,
-                start_date TEXT,
-                end_date TEXT,
-                renewal_date TEXT,
-                notice_deadline TEXT,
-                option_periods TEXT,
-                reversion_date TEXT,
-                termination_date TEXT,
-                status TEXT NOT NULL DEFAULT 'draft',
-                supersedes_contract_id INTEGER,
-                superseded_by_contract_id INTEGER,
-                summary TEXT,
-                notes TEXT,
-                profile_name TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY (supersedes_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL,
-                FOREIGN KEY (superseded_by_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
-            )
-            """
-        )
+        self._create_current_contracts_table()
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_contracts_status ON Contracts(status)")
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_contracts_notice_deadline ON Contracts(notice_deadline)"
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON Contracts(end_date)"
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
+            ON Contracts(contract_registry_entry_id)
+            WHERE contract_registry_entry_id IS NOT NULL
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
+            ON Contracts(license_registry_entry_id)
+            WHERE license_registry_entry_id IS NOT NULL
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
+            ON Contracts(registry_sha256_key_entry_id)
+            WHERE registry_sha256_key_entry_id IS NOT NULL
+            """
         )
         self.cursor.execute(
             """

@@ -21,6 +21,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from openpyxl import Workbook, load_workbook
 
 from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
     CLASSIFICATION_INTERNAL,
     CLASSIFICATION_MISMATCH,
     CodeRegistryService,
@@ -42,7 +46,8 @@ from isrc_manager.services.tracks import TrackCreatePayload, TrackService, Track
 from isrc_manager.works import WorkService
 
 from .models import (
-    ExchangeCatalogClassificationOutcome,
+    ExchangeIdentifierClassificationOutcome,
+    ExchangeIdentifierReviewRow,
     ExchangeImportOptions,
     ExchangeImportReport,
     ExchangeInspection,
@@ -51,6 +56,22 @@ from .models import (
 JSON_SCHEMA_VERSION = 1
 CSV_SNIFF_SAMPLE_SIZE = 4096
 AUTO_CSV_DELIMITERS = ",;\t|"
+
+_IDENTIFIER_FIELD_TO_SYSTEM_KEY = {
+    "catalog_number": BUILTIN_CATEGORY_CATALOG_NUMBER,
+    "release_catalog_number": BUILTIN_CATEGORY_CATALOG_NUMBER,
+    "contract_number": BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    "license_number": BUILTIN_CATEGORY_LICENSE_NUMBER,
+    "registry_sha256_key": BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+}
+_UNBOUND_IDENTIFIER_IMPORT_FIELDS = frozenset(
+    {
+        "contract_number",
+        "license_number",
+        "registry_sha256_key",
+    }
+)
+_SUPPORTED_IMPORT_ONLY_TARGETS = tuple(_UNBOUND_IDENTIFIER_IMPORT_FIELDS)
 
 
 class ExchangeService:
@@ -975,6 +996,10 @@ class ExchangeService:
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
             resolved_delimiter=resolved_delimiter,
+            identifier_review_rows=self._build_identifier_review_rows(
+                preview_rows,
+                self._suggest_mapping(headers),
+            ),
         )
 
     def inspect_xlsx(
@@ -997,6 +1022,10 @@ class ExchangeService:
             headers=headers,
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
+            identifier_review_rows=self._build_identifier_review_rows(
+                preview_rows,
+                self._suggest_mapping(headers),
+            ),
         )
 
     def inspect_json(
@@ -1017,6 +1046,10 @@ class ExchangeService:
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
             warnings=warnings,
+            identifier_review_rows=self._build_identifier_review_rows(
+                preview_rows,
+                self._suggest_mapping(headers),
+            ),
         )
 
     def inspect_package(
@@ -1046,6 +1079,10 @@ class ExchangeService:
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
             warnings=warnings,
+            identifier_review_rows=self._build_identifier_review_rows(
+                preview_rows,
+                self._suggest_mapping(headers),
+            ),
         )
 
     def inspect_xml(self, path: str | Path) -> ExchangeInspection:
@@ -1062,7 +1099,10 @@ class ExchangeService:
         return exchange_inspection
 
     def _suggest_mapping(self, headers: list[str]) -> dict[str, str]:
-        supported = {self._normalize_header_name(name): name for name in self.BASE_EXPORT_COLUMNS}
+        supported = {
+            self._normalize_header_name(name): name
+            for name in self._supported_import_targets()
+        }
         mapping: dict[str, str] = {}
         for header in headers:
             normalized = self._normalize_header_name(header)
@@ -1072,10 +1112,72 @@ class ExchangeService:
                 mapping[header] = header
         return mapping
 
+    def _supported_import_targets(self) -> tuple[str, ...]:
+        return (*self.BASE_EXPORT_COLUMNS, *_SUPPORTED_IMPORT_ONLY_TARGETS)
+
+    @staticmethod
+    def _identifier_system_key_for_field(field_name: str | None) -> str | None:
+        return _IDENTIFIER_FIELD_TO_SYSTEM_KEY.get(str(field_name or "").strip())
+
+    @staticmethod
+    def _identifier_review_key(
+        *,
+        row_index: int,
+        source_header: str,
+        target_field_name: str,
+        value: str,
+    ) -> str:
+        return "|".join(
+            (
+                str(int(row_index)),
+                str(source_header or "").strip(),
+                str(target_field_name or "").strip(),
+                str(value or "").strip(),
+            )
+        )
+
+    def _build_identifier_review_rows(
+        self,
+        preview_rows: list[dict[str, object]],
+        mapping: dict[str, str],
+    ) -> list[ExchangeIdentifierReviewRow]:
+        review_rows: list[ExchangeIdentifierReviewRow] = []
+        for row_index, row in enumerate(preview_rows, start=1):
+            for source_header, target_name in mapping.items():
+                clean_target = str(target_name or "").strip()
+                if clean_target not in _UNBOUND_IDENTIFIER_IMPORT_FIELDS:
+                    continue
+                value = str(row.get(source_header) or "").strip()
+                if not value:
+                    continue
+                category_system_key = self._identifier_system_key_for_field(clean_target)
+                if not category_system_key:
+                    continue
+                review_rows.append(
+                    ExchangeIdentifierReviewRow(
+                        review_key=self._identifier_review_key(
+                            row_index=row_index,
+                            source_header=source_header,
+                            target_field_name=clean_target,
+                            value=value,
+                        ),
+                        row_index=int(row_index),
+                        source_header=str(source_header),
+                        target_field_name=clean_target,
+                        suggested_category_system_key=category_system_key,
+                        value=value,
+                        reason=(
+                            "These imported identifier values stay staged until apply. "
+                            "Choose the external type Codespace should store."
+                        ),
+                    )
+                )
+        return review_rows
+
     def supported_import_targets(self) -> list[str]:
         targets: list[str] = []
         seen: set[str] = set()
-        for name in self.BASE_EXPORT_COLUMNS:
+        for name in self._supported_import_targets():
             if name in seen:
                 continue
             seen.add(name)
@@ -1657,29 +1759,53 @@ class ExchangeService:
             return None
         return CodeRegistryService(self.conn)
 
-    def _record_catalog_classification(
+    @staticmethod
+    def _empty_identifier_totals() -> dict[str, dict[str, int]]:
+        return {}
+
+    @staticmethod
+    def _increment_identifier_total(
+        totals: dict[str, dict[str, int]],
+        *,
+        category_system_key: str,
+        bucket: str,
+    ) -> None:
+        category_key = str(category_system_key or "").strip()
+        if not category_key:
+            return
+        category_totals = totals.setdefault(category_key, {})
+        category_totals[str(bucket or "").strip()] = int(category_totals.get(bucket) or 0) + 1
+
+    def _record_identifier_classification(
         self,
         *,
         row_index: int,
         field_name: str,
+        category_system_key: str,
         value: str | None,
-        outcomes: list[ExchangeCatalogClassificationOutcome],
-        counters: dict[str, int],
+        outcomes: list[ExchangeIdentifierClassificationOutcome],
+        totals: dict[str, dict[str, int]],
         outcome_override: str | None = None,
-    ) -> None:
+    ) -> ExchangeIdentifierClassificationOutcome | None:
         clean_value = str(value or "").strip()
         if not clean_value:
-            return
+            return None
         service = self._code_registry_service()
         classification = (
-            service.classify_catalog_identifier(clean_value) if service is not None else None
+            service.classify_identifier_value(
+                system_key=category_system_key,
+                value=clean_value,
+                allow_existing_internal_match=False,
+            )
+            if service is not None
+            else None
         )
         classification_name = (
             str(classification.classification or "").strip()
             if classification is not None
             else "external"
         )
-        category_name = (
+        category_label = (
             str(classification.category_display_name or "").strip()
             if classification is not None and classification.category_display_name
             else None
@@ -1695,27 +1821,157 @@ class ExchangeService:
             )
         )
         if outcome == "accepted_internal":
-            counters["internal"] += 1
-        elif outcome == "stored_external":
-            counters["external"] += 1
-        elif outcome == "flagged_mismatch":
-            counters["mismatch"] += 1
-        elif outcome.startswith("skipped"):
-            counters["skipped"] += 1
-        elif outcome.startswith("merged"):
-            counters["merged"] += 1
-        elif outcome.startswith("conflicted"):
-            counters["conflicted"] += 1
-        outcomes.append(
-            ExchangeCatalogClassificationOutcome(
-                row_index=int(row_index),
-                field_name=str(field_name or "").strip(),
-                value=clean_value,
-                classification=classification_name or "external",
-                outcome=outcome,
-                category=category_name,
-                reason=reason,
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="internal",
             )
+        elif outcome == "stored_external":
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="external",
+            )
+        elif outcome == "flagged_mismatch":
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="mismatch",
+            )
+        elif outcome.startswith("skipped"):
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="skipped",
+            )
+        elif outcome.startswith("merged"):
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="merged",
+            )
+        elif outcome.startswith("conflicted"):
+            self._increment_identifier_total(
+                totals,
+                category_system_key=category_system_key,
+                bucket="conflicted",
+            )
+        outcome_row = ExchangeIdentifierClassificationOutcome(
+            row_index=int(row_index),
+            field_name=str(field_name or "").strip(),
+            category_system_key=str(category_system_key or "").strip(),
+            value=clean_value,
+            classification=classification_name or "external",
+            outcome=outcome,
+            category_label=category_label,
+            reason=reason,
+        )
+        outcomes.append(outcome_row)
+        return outcome_row
+
+    def _record_catalog_classification(
+        self,
+        *,
+        row_index: int,
+        field_name: str,
+        value: str | None,
+        outcomes: list[ExchangeIdentifierClassificationOutcome],
+        counters: dict[str, dict[str, int]],
+        outcome_override: str | None = None,
+    ) -> ExchangeIdentifierClassificationOutcome | None:
+        return self._record_identifier_classification(
+            row_index=row_index,
+            field_name=field_name,
+            category_system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=value,
+            outcomes=outcomes,
+            totals=counters,
+            outcome_override=outcome_override,
+        )
+
+    def _store_unbound_external_identifier(
+        self,
+        *,
+        row_index: int,
+        source_header: str,
+        field_name: str,
+        value: str | None,
+        options: ExchangeImportOptions,
+        outcomes: list[ExchangeIdentifierClassificationOutcome],
+        totals: dict[str, dict[str, int]],
+        cursor: sqlite3.Cursor | None,
+    ) -> None:
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            return
+        suggested_system_key = self._identifier_system_key_for_field(field_name)
+        if suggested_system_key is None:
+            return
+        review_key = self._identifier_review_key(
+            row_index=row_index,
+            source_header=source_header,
+            target_field_name=field_name,
+            value=clean_value,
+        )
+        system_key = str(
+            options.identifier_overrides.get(review_key) or suggested_system_key
+        ).strip()
+        service = self._code_registry_service()
+        classification = (
+            service.classify_identifier_value(
+                system_key=system_key,
+                value=clean_value,
+                allow_existing_internal_match=False,
+            )
+            if service is not None
+            else None
+        )
+        category_label = (
+            str(classification.category_display_name or "").strip()
+            if classification is not None and classification.category_display_name
+            else None
+        )
+        reason = (
+            (
+                service._classification_reason_for_external_storage(
+                    system_key=system_key,
+                    classification=classification,
+                )
+                if service is not None and classification is not None
+                else "Stored in External Identifiers from exchange import."
+            )
+            or "Stored in External Identifiers from exchange import."
+        )
+        outcome = ExchangeIdentifierClassificationOutcome(
+            row_index=int(row_index),
+            field_name=str(field_name or "").strip(),
+            category_system_key=system_key,
+            value=clean_value,
+            classification=(
+                str(classification.classification or "").strip()
+                if classification is not None
+                else "external"
+            ),
+            outcome="stored_external",
+            category_label=category_label,
+            reason=reason,
+        )
+        outcomes.append(outcome)
+        self._increment_identifier_total(
+            totals,
+            category_system_key=system_key,
+            bucket="external",
+        )
+        if options.mode == "dry_run" or service is None:
+            return
+        service.store_external_code_identifier(
+            system_key=system_key,
+            value=clean_value,
+            provenance_kind="import",
+            source_label="exchange.import",
+            owner_kind="import",
+            owner_id=0,
+            cursor=cursor,
         )
 
     def _upsert_release_from_row(
@@ -1727,8 +1983,8 @@ class ExchangeService:
         source_release_map: dict[str, int] | None = None,
         preserve_source_release_identity: bool = False,
         cursor: sqlite3.Cursor | None = None,
-        catalog_outcomes: list[ExchangeCatalogClassificationOutcome] | None = None,
-        catalog_counters: dict[str, int] | None = None,
+        catalog_outcomes: list[ExchangeIdentifierClassificationOutcome] | None = None,
+        catalog_counters: dict[str, dict[str, int]] | None = None,
         row_index: int | None = None,
     ) -> None:
         release_title = str(row.get("release_title") or "").strip()
@@ -1849,12 +2105,19 @@ class ExchangeService:
         normalized_rows = [
             self._normalize_row_text_targets(self._apply_mapping(row, mapping)) for row in rows
         ]
+        source_headers_by_target: dict[str, list[str]] = {}
+        for source_header, target_name in (mapping or {}).items():
+            clean_target = str(target_name or "").strip()
+            if not clean_target:
+                continue
+            source_headers_by_target.setdefault(clean_target, []).append(str(source_header))
         unknown_fields = sorted(
             {
                 key
                 for row in normalized_rows
                 for key in row
-                if key not in self.BASE_EXPORT_COLUMNS and not str(key).startswith("custom::")
+                if key not in self._supported_import_targets()
+                and not str(key).startswith("custom::")
             }
         )
         missing_custom_fields = self._ensure_custom_headers(
@@ -1873,15 +2136,8 @@ class ExchangeService:
         would_update_tracks = 0
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
-        catalog_outcomes: list[ExchangeCatalogClassificationOutcome] = []
-        catalog_counters = {
-            "internal": 0,
-            "external": 0,
-            "mismatch": 0,
-            "skipped": 0,
-            "merged": 0,
-            "conflicted": 0,
-        }
+        catalog_outcomes: list[ExchangeIdentifierClassificationOutcome] = []
+        catalog_counters = self._empty_identifier_totals()
         total_rows = max(len(normalized_rows), 1)
         package_create_mode = format_name == "package" and (
             effective_mode == "create" or opts.preserve_source_package_identity
@@ -2050,6 +2306,19 @@ class ExchangeService:
                     outcomes=catalog_outcomes,
                     counters=catalog_counters,
                 )
+                for field_name in _UNBOUND_IDENTIFIER_IMPORT_FIELDS:
+                    self._store_unbound_external_identifier(
+                        row_index=index,
+                        source_header=(
+                            source_headers_by_target.get(field_name, [field_name])[0]
+                        ),
+                        field_name=field_name,
+                        value=row.get(field_name),
+                        options=opts,
+                        outcomes=catalog_outcomes,
+                        totals=catalog_counters,
+                        cursor=None,
+                    )
                 if existing_track_id is None:
                     would_create_tracks += 1
                 else:
@@ -2281,6 +2550,19 @@ class ExchangeService:
                         catalog_counters=catalog_counters,
                         row_index=index,
                     )
+                    for field_name in _UNBOUND_IDENTIFIER_IMPORT_FIELDS:
+                        self._store_unbound_external_identifier(
+                            row_index=index,
+                            source_header=(
+                                source_headers_by_target.get(field_name, [field_name])[0]
+                            ),
+                            field_name=field_name,
+                            value=row.get(field_name),
+                            options=opts,
+                            outcomes=catalog_outcomes,
+                            totals=catalog_counters,
+                            cursor=cur,
+                        )
                     if repair_entry_id is not None:
                         self.repair_queue_service.mark_resolved(
                             int(repair_entry_id),
@@ -2340,11 +2622,6 @@ class ExchangeService:
                 for key, value in source_release_map.items()
                 if str(key).strip().isdigit()
             },
-            internal_catalog_identifiers=int(catalog_counters["internal"]),
-            external_catalog_identifiers=int(catalog_counters["external"]),
-            mismatched_catalog_identifiers=int(catalog_counters["mismatch"]),
-            skipped_catalog_identifiers=int(catalog_counters["skipped"]),
-            merged_catalog_identifiers=int(catalog_counters["merged"]),
-            conflicted_catalog_identifiers=int(catalog_counters["conflicted"]),
-            catalog_classifications=catalog_outcomes,
+            identifier_totals=catalog_counters,
+            identifier_classifications=catalog_outcomes,
         )
