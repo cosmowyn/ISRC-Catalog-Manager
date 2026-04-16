@@ -8,6 +8,7 @@ from unittest import mock
 from PySide6.QtCore import QDate, QEvent, QPoint, QSize, Qt, QUrl
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QMainWindow,
     QScrollArea,
@@ -206,6 +207,41 @@ class _FakeWheelEvent:
 
     def accept(self):
         self.accepted = True
+
+
+class _FakePointF:
+    def __init__(self, point):
+        self._point = QPoint(point)
+
+    def toPoint(self):
+        return QPoint(self._point)
+
+
+class _FakeDockDragEvent:
+    def __init__(self, point, *, button=Qt.NoButton, buttons=Qt.NoButton):
+        self._point = QPoint(point)
+        self._button = button
+        self._buttons = buttons
+        self.accepted = False
+        self.ignored = False
+
+    def button(self):
+        return self._button
+
+    def buttons(self):
+        return self._buttons
+
+    def position(self):
+        return _FakePointF(self._point)
+
+    def pos(self):
+        return QPoint(self._point)
+
+    def accept(self):
+        self.accepted = True
+
+    def ignore(self):
+        self.ignored = True
 
 
 class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanelTests):
@@ -912,7 +948,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.assertLess(automatic_dock.geometry().x(), preview_dock.geometry().x())
         host.set_locked(False)
         pump_events(app=self.app, cycles=2)
-        self.assertFalse(
+        self.assertTrue(
             bool(preview_dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable),
         )
         self.assertTrue(
@@ -920,12 +956,36 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         )
         host.float_dock(preview_dock)
         pump_events(app=self.app, cycles=2)
+        self.assertTrue(preview_dock.isFloating())
+        host.move_dock_to_area(preview_dock, Qt.RightDockWidgetArea)
+        pump_events(app=self.app, cycles=2)
         self.assertFalse(preview_dock.isFloating())
         host.float_dock(revision_dock)
         pump_events(app=self.app, cycles=2)
         self.assertTrue(revision_dock.isFloating())
         revision_dock.setFloating(False)
         host.set_locked(True)
+
+    def test_fill_workspace_docking_back_left_does_not_leave_empty_right_gap(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock for dock in host._docks if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=2)
+
+        host.move_dock_to_area(preview_dock, Qt.RightDockWidgetArea)
+        pump_events(app=self.app, cycles=3)
+        host.move_dock_to_area(preview_dock, Qt.LeftDockWidgetArea)
+        pump_events(app=self.app, cycles=3)
+
+        self.assertFalse(host._has_exposed_central_canvas())
+        self.assertGreaterEqual(
+            preview_dock.geometry().right(),
+            host.contentsRect().right() - 12,
+        )
 
     def test_locked_layout_preserves_tabified_dock_switching(self):
         self._focus_fill()
@@ -2054,7 +2114,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             view.deleteLater()
             pump_events(app=self.app, cycles=2)
 
-    def test_fill_preview_dock_remains_non_floatable_with_live_html_loaded(self):
+    def test_fill_preview_dock_rebuilds_live_html_surface_when_floated(self):
         if QWebEnginePage is None:
             self.skipTest("Qt WebEngine is unavailable")
         host = self._fill_host()
@@ -2083,12 +2143,48 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         host.set_locked(False)
         pump_events(app=self.app, cycles=3)
 
-        self.assertFalse(
+        self.assertTrue(
             bool(preview_dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         )
+        view_before_float = self.panel.fill_html_preview_view
         host.float_dock(preview_dock)
         pump_events(app=self.app, cycles=3)
+        self.assertTrue(preview_dock.isFloating())
+        self.assertIsNotNone(self.panel.fill_html_preview_view)
+        self.assertIsNot(self.panel.fill_html_preview_view, view_before_float)
+
+        view_after_float = self.panel.fill_html_preview_view
+        host.move_dock_to_area(preview_dock, Qt.RightDockWidgetArea)
+        pump_events(app=self.app, cycles=3)
         self.assertFalse(preview_dock.isFloating())
+        self.assertIsNotNone(self.panel.fill_html_preview_view)
+        self.assertIsNot(self.panel.fill_html_preview_view, view_after_float)
+
+    def test_fill_preview_title_bar_drag_floats_dock_when_unlocked(self):
+        host = self._fill_host()
+        preview_dock = self._fill_dock("contractTemplateHtmlPreviewDock")
+        title_bar = preview_dock.titleBarWidget()
+        self.assertIsNotNone(title_bar)
+
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=2)
+
+        press_event = _FakeDockDragEvent(
+            QPoint(8, 8),
+            button=Qt.LeftButton,
+            buttons=Qt.LeftButton,
+        )
+        move_event = _FakeDockDragEvent(
+            QPoint(QApplication.startDragDistance() + 24, 8),
+            buttons=Qt.LeftButton,
+        )
+        title_bar.mousePressEvent(press_event)
+        title_bar.mouseMoveEvent(move_event)
+        pump_events(app=self.app, cycles=3)
+
+        self.assertTrue(press_event.accepted)
+        self.assertTrue(move_event.accepted)
+        self.assertTrue(preview_dock.isFloating())
 
     def test_plain_wheel_without_modifier_does_not_enter_zoom_path(self):
         if QWebEngineView is None:

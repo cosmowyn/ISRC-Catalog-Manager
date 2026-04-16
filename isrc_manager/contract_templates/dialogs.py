@@ -176,6 +176,22 @@ def _layout_state_has_saved_dock_topology(state: dict[str, object] | None) -> bo
     return bool(_normalized_dock_object_names(state.get("dock_object_names")))
 
 
+def _invoke_dock_floating_transition_hook(
+    dock: QDockWidget,
+    hook_name: str,
+    floating: bool,
+) -> None:
+    if not isinstance(dock, QDockWidget):
+        return
+    hook = getattr(dock, hook_name, None)
+    if not callable(hook):
+        return
+    try:
+        hook(bool(floating))
+    except Exception:
+        pass
+
+
 def _normalized_workspace_layout_state(state: dict[str, object] | None) -> dict[str, object]:
     payload = dict(state or {})
     dock_object_names = _normalized_dock_object_names(payload.get("dock_object_names"))
@@ -747,6 +763,7 @@ class _WorkspaceDockTitleBar(QWidget):
         self._reset_action = self.options_menu.addAction("Reset Workspace Layout")
         self._reset_action.triggered.connect(self.host.reset_to_default_layout)
         self.options_menu.aboutToShow.connect(self._refresh_menu_state)
+        self._drag_start_pos: QPoint | None = None
 
         dock.windowTitleChanged.connect(self.title_label.setText)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -774,19 +791,61 @@ class _WorkspaceDockTitleBar(QWidget):
         self._refresh_menu_state()
         self.options_menu.exec(self.mapToGlobal(position))
 
+    @staticmethod
+    def _event_pos(event) -> QPoint:
+        position_getter = getattr(event, "position", None)
+        if callable(position_getter):
+            try:
+                return position_getter().toPoint()
+            except Exception:
+                pass
+        pos_getter = getattr(event, "pos", None)
+        if callable(pos_getter):
+            try:
+                return pos_getter()
+            except Exception:
+                pass
+        return QPoint()
+
+    def _safe_drag_to_float_enabled(self) -> bool:
+        return (
+            not bool(self.host._locked)
+            and bool(self.dock.property("workspaceSafeDragToFloat"))
+            and self.host._dock_allows_floating(self.dock)
+            and not self.dock.isFloating()
+        )
+
     def mousePressEvent(self, event):  # pragma: no cover - drag passthrough
+        if self._safe_drag_to_float_enabled() and event.button() == Qt.LeftButton:
+            self._drag_start_pos = self._event_pos(event)
+            event.accept()
+            return
+        self._drag_start_pos = None
         event.ignore()
         return
 
     def mouseMoveEvent(self, event):  # pragma: no cover - drag passthrough
+        if self._drag_start_pos is not None:
+            if not bool(event.buttons() & Qt.LeftButton):
+                self._drag_start_pos = None
+                event.ignore()
+                return
+            drag_distance = (self._event_pos(event) - self._drag_start_pos).manhattanLength()
+            if drag_distance >= QApplication.startDragDistance():
+                self._drag_start_pos = None
+                self.host.float_dock(self.dock)
+            event.accept()
+            return
         event.ignore()
         return
 
     def mouseReleaseEvent(self, event):  # pragma: no cover - drag passthrough
+        self._drag_start_pos = None
         event.ignore()
         return
 
     def mouseDoubleClickEvent(self, event):  # pragma: no cover - drag passthrough
+        self._drag_start_pos = None
         event.ignore()
         return
 
@@ -860,10 +919,8 @@ class _DockableWorkspaceTab(QMainWindow):
             Qt.BottomDockWidgetArea,
         ):
             self.setTabPosition(area, QTabWidget.North)
-        central = QWidget(self)
-        central.setObjectName(f"{host_object_name}Central")
-        central.setProperty("role", "workspaceCanvas")
-        self.setCentralWidget(central)
+        # Leave the nested host without a central widget so Qt can collapse
+        # opposing dock areas edge-to-edge instead of reserving an empty canvas.
 
         self._compact_layout_timer = QTimer(self)
         self._compact_layout_timer.setSingleShot(True)
@@ -1391,11 +1448,29 @@ class _DockableWorkspaceTab(QMainWindow):
         if callable(self._layout_changed_handler):
             self._layout_changed_handler()
 
+    def _set_dock_floating_state(self, dock: QDockWidget, floating: bool) -> None:
+        if dock not in self._docks:
+            return
+        target_state = bool(floating)
+        if bool(dock.isFloating()) == target_state:
+            return
+        _invoke_dock_floating_transition_hook(
+            dock,
+            "_workspace_before_floating_change",
+            target_state,
+        )
+        dock.setFloating(target_state)
+        _invoke_dock_floating_transition_hook(
+            dock,
+            "_workspace_after_floating_change",
+            target_state,
+        )
+
     def move_dock_to_area(self, dock: QDockWidget, area) -> None:
         if self._locked or dock not in self._docks:
             return
         if dock.isFloating():
-            dock.setFloating(False)
+            self._set_dock_floating_state(dock, False)
         dock.show()
         self.addDockWidget(area, dock)
         dock.setProperty("lastDockArea", _dock_area_value(area))
@@ -1412,7 +1487,7 @@ class _DockableWorkspaceTab(QMainWindow):
         if self._locked or dock not in self._docks or not self._dock_allows_floating(dock):
             return
         dock.show()
-        dock.setFloating(True)
+        self._set_dock_floating_state(dock, True)
         self._notify_layout_changed()
 
     def hide_dock(self, dock: QDockWidget) -> None:
@@ -1595,7 +1670,7 @@ class _DockableWorkspaceTab(QMainWindow):
             for dock in group:
                 dock.show()
                 if dock.isFloating():
-                    dock.setFloating(False)
+                    self._set_dock_floating_state(dock, False)
         first_group = groups[0]
         self.addDockWidget(area, first_group[0])
         previous = first_group[0]
@@ -2019,6 +2094,10 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_html_preview_view = None
         self.fill_preview_stale_label = None
         self.fill_preview_zoom_label = None
+        self._fill_preview_host: _DockableWorkspaceTab | None = None
+        self._fill_preview_surface: QWidget | None = None
+        self._fill_preview_layout: QVBoxLayout | None = None
+        self._fill_preview_rebuild_pending = False
         self.selector_widgets: dict[str, QWidget] = {}
         self.manual_widgets: dict[str, QWidget] = {}
         self._tab_pages: dict[str, QWidget] = {}
@@ -2061,9 +2140,96 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.refresh()
 
     def closeEvent(self, event):  # pragma: no cover - QWidget lifecycle
+        self._dispose_fill_html_preview_runtime()
+        super().closeEvent(event)
+
+    def _dispose_fill_html_preview_runtime(self) -> None:
+        self._fill_preview_rebuild_pending = False
         if self._fill_preview_controller is not None:
             self._fill_preview_controller.cleanup()
-        super().closeEvent(event)
+            self._fill_preview_controller.deleteLater()
+            self._fill_preview_controller = None
+        self._destroy_fill_html_preview_view()
+
+    def _destroy_fill_html_preview_view(self) -> None:
+        view = self.fill_html_preview_view
+        if view is None:
+            return
+        layout = self._fill_preview_layout
+        self.fill_html_preview_view = None
+        if layout is not None:
+            try:
+                layout.removeWidget(view)
+            except Exception:
+                pass
+        try:
+            view.hide()
+        except Exception:
+            pass
+        try:
+            view.setParent(None)
+        except Exception:
+            pass
+        view.deleteLater()
+
+    def _create_fill_html_preview_view(self) -> None:
+        if QWebEngineView is None:
+            self.fill_html_preview_view = None
+            return
+        if not isinstance(self._fill_preview_surface, QWidget) or self._fill_preview_layout is None:
+            self.fill_html_preview_view = None
+            return
+        view = _InteractiveHtmlPreviewView(self._fill_preview_surface)
+        view.setObjectName("contractTemplateHtmlPreviewView")
+        view.setMinimumHeight(420)
+        view.zoom_percent_changed.connect(
+            lambda value: self.fill_preview_zoom_label.setText(f"{int(value)}%")
+        )
+        self.fill_html_preview_view = view
+        self._fill_preview_layout.addWidget(view, 1)
+
+    def _reset_fill_html_preview_to_fit(self) -> None:
+        view = self.fill_html_preview_view
+        if view is not None:
+            view.reset_to_fit()
+
+    def _step_fill_html_preview_zoom(self, delta_percent: int) -> None:
+        view = self.fill_html_preview_view
+        if view is None:
+            return
+        view.set_zoom_percent(
+            view.current_zoom_percent() + int(delta_percent),
+            user_initiated=True,
+        )
+
+    def _rebuild_fill_html_preview_runtime(self) -> None:
+        self._fill_preview_rebuild_pending = False
+        host = self._fill_preview_host
+        if host is None:
+            return
+        self._dispose_fill_html_preview_runtime()
+        self._create_fill_html_preview_view()
+        self._fill_preview_controller = _FillHtmlPreviewController(self, host)
+        self._fill_preview_controller.initialize()
+        self._sync_html_preview_state(self._selected_fill_revision_id())
+
+    def _schedule_fill_html_preview_runtime_rebuild(self) -> None:
+        if self._fill_preview_rebuild_pending:
+            return
+        self._fill_preview_rebuild_pending = True
+        QTimer.singleShot(0, self._rebuild_fill_html_preview_runtime)
+
+    def _prepare_fill_html_preview_for_window_transition(self, floating: bool) -> None:
+        if QWebEngineView is None:
+            return
+        self._dispose_fill_html_preview_runtime()
+        if isinstance(self.fill_preview_zoom_label, QLabel):
+            self.fill_preview_zoom_label.setText("100%")
+
+    def _finalize_fill_html_preview_after_window_transition(self, floating: bool) -> None:
+        if QWebEngineView is None:
+            return
+        self._schedule_fill_html_preview_runtime_rebuild()
 
     def _debug_layout_log(self, event: str, **payload) -> None:
         workspace_debug_log(
@@ -2178,7 +2344,17 @@ class ContractTemplateWorkspacePanel(QWidget):
             dock.show()
             dock.raise_()
             if dock.isFloating():
+                _invoke_dock_floating_transition_hook(
+                    dock,
+                    "_workspace_before_floating_change",
+                    False,
+                )
                 dock.setFloating(False)
+                _invoke_dock_floating_transition_hook(
+                    dock,
+                    "_workspace_after_floating_change",
+                    False,
+                )
 
     @staticmethod
     def _resize_visible_docks(window: QMainWindow, docks, sizes, orientation) -> None:
@@ -3137,26 +3313,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_preview_stale_label.setProperty("role", "secondary")
         self.fill_preview_stale_label.setVisible(False)
         preview_layout.addWidget(self.fill_preview_stale_label)
+        self._fill_preview_host = host
+        self._fill_preview_surface = preview_surface
+        self._fill_preview_layout = preview_layout
         if QWebEngineView is not None:
-            self.fill_html_preview_view = _InteractiveHtmlPreviewView(preview_surface)
-            self.fill_html_preview_view.setMinimumHeight(420)
-            self.fill_html_preview_view.zoom_percent_changed.connect(
-                lambda value: self.fill_preview_zoom_label.setText(f"{int(value)}%")
-            )
-            fit_preview_button.clicked.connect(self.fill_html_preview_view.reset_to_fit)
-            zoom_out_button.clicked.connect(
-                lambda: self.fill_html_preview_view.set_zoom_percent(
-                    self.fill_html_preview_view.current_zoom_percent() - 10,
-                    user_initiated=True,
-                )
-            )
-            zoom_in_button.clicked.connect(
-                lambda: self.fill_html_preview_view.set_zoom_percent(
-                    self.fill_html_preview_view.current_zoom_percent() + 10,
-                    user_initiated=True,
-                )
-            )
-            preview_layout.addWidget(self.fill_html_preview_view, 1)
+            fit_preview_button.clicked.connect(self._reset_fill_html_preview_to_fit)
+            zoom_out_button.clicked.connect(lambda: self._step_fill_html_preview_zoom(-10))
+            zoom_in_button.clicked.connect(lambda: self._step_fill_html_preview_zoom(10))
+            self._create_fill_html_preview_view()
         else:
             self.fill_preview_unavailable_label = QLabel(
                 "Qt WebEngine is unavailable in this runtime, so the HTML working-draft preview cannot be shown here.",
@@ -3216,8 +3380,15 @@ class ContractTemplateWorkspacePanel(QWidget):
             object_name="contractTemplateHtmlPreviewDock",
             content=preview_surface,
             scrollable=False,
-            allow_floating=False,
+            allow_floating=True,
         )
+        preview_dock._workspace_before_floating_change = (
+            self._prepare_fill_html_preview_for_window_transition
+        )
+        preview_dock._workspace_after_floating_change = (
+            self._finalize_fill_html_preview_after_window_transition
+        )
+        preview_dock.setProperty("workspaceSafeDragToFloat", True)
         host.register_docks(
             [
                 revision_dock,
