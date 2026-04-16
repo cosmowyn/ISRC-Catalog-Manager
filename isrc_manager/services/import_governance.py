@@ -301,19 +301,35 @@ class GovernedImportCoordinator:
         *,
         cursor: sqlite3.Cursor | None = None,
         profile_name: str | None = None,
+        progress_callback=None,
     ) -> list[GovernedTrackCreateResult]:
         batch_cache: dict[str, int] = {}
 
         def _create(cur: sqlite3.Cursor) -> list[GovernedTrackCreateResult]:
-            return [
-                self.create_governed_track(
+            total = max(1, len(payloads))
+            results: list[GovernedTrackCreateResult] = []
+            for index, payload in enumerate(payloads, start=1):
+                if callable(progress_callback):
+                    progress_callback(
+                        index - 1,
+                        total,
+                        f"Creating album track {index} of {total}...",
+                    )
+                results.append(
+                    self.create_governed_track(
                     payload,
                     cursor=cur,
                     batch_cache=batch_cache,
                     profile_name=profile_name,
+                    )
                 )
-                for payload in payloads
-            ]
+                if callable(progress_callback):
+                    progress_callback(
+                        index,
+                        total,
+                        f"Created album track {index} of {total}.",
+                    )
+            return results
 
         if cursor is not None:
             return _create(cursor)

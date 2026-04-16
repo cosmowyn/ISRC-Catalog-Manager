@@ -1263,6 +1263,241 @@ class TrackService:
                     return fallback_meta
         return self._get_track_row_media_meta(track_id, media_key, cursor=cur)
 
+    def get_media_meta_map(
+        self,
+        track_ids: Iterable[int],
+        media_keys: Iterable[str] | None = None,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> dict[tuple[int, str], dict[str, str | int | bool | object]]:
+        normalized_track_ids: list[int] = []
+        seen_track_ids: set[int] = set()
+        for raw_track_id in track_ids:
+            try:
+                track_id = int(raw_track_id)
+            except Exception:
+                continue
+            if track_id in seen_track_ids:
+                continue
+            seen_track_ids.add(track_id)
+            normalized_track_ids.append(track_id)
+        if not normalized_track_ids:
+            return {}
+
+        requested_media_keys = tuple(
+            media_key
+            for media_key in ("audio_file", "album_art")
+            if media_key in set(str(key or "").strip() for key in (media_keys or self.MEDIA_FIELDS))
+        )
+        if not requested_media_keys:
+            return {}
+
+        cur = cursor or self.conn.cursor()
+        placeholders = ",".join("?" for _ in normalized_track_ids)
+        rows = cur.execute(
+            f"""
+            SELECT
+                t.id,
+                t.album_id,
+                COALESCE(al.title, '') AS album_title,
+                t.audio_file_path,
+                t.audio_file_storage_mode,
+                t.audio_file_filename,
+                t.audio_file_mime_type,
+                t.audio_file_size_bytes,
+                CASE WHEN t.audio_file_blob IS NOT NULL THEN 1 ELSE 0 END AS audio_blob_present,
+                t.album_art_path,
+                t.album_art_storage_mode,
+                t.album_art_filename,
+                t.album_art_mime_type,
+                t.album_art_size_bytes,
+                CASE WHEN t.album_art_blob IS NOT NULL THEN 1 ELSE 0 END AS art_blob_present
+            FROM Tracks t
+            LEFT JOIN Albums al ON al.id = t.album_id
+            WHERE t.id IN ({placeholders})
+            """,
+            tuple(normalized_track_ids),
+        ).fetchall()
+        row_by_track_id = {int(row[0]): row for row in rows if row and row[0] is not None}
+        result: dict[tuple[int, str], dict[str, str | int | bool | object]] = {}
+
+        if "audio_file" in requested_media_keys:
+            for track_id in normalized_track_ids:
+                row = row_by_track_id.get(track_id)
+                if row is None:
+                    result[(track_id, "audio_file")] = self._normalize_media_meta(
+                        "",
+                        None,
+                        None,
+                        "",
+                        0,
+                        owner_scope="track",
+                        owner_id=int(track_id),
+                    )
+                    continue
+                result[(track_id, "audio_file")] = self._normalize_media_meta(
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7],
+                    blob_present=bool(row[8]),
+                    owner_scope="track",
+                    owner_id=int(track_id),
+                )
+
+        if "album_art" not in requested_media_keys:
+            return result
+
+        shared_album_ids: set[int] = set()
+        for track_id in normalized_track_ids:
+            row = row_by_track_id.get(track_id)
+            if row is None:
+                result[(track_id, "album_art")] = self._normalize_media_meta(
+                    "",
+                    None,
+                    None,
+                    "",
+                    0,
+                    owner_scope="track",
+                    owner_id=int(track_id),
+                )
+                continue
+            album_id = int(row[1]) if row[1] is not None else None
+            album_title = str(row[2] or "")
+            if self._album_supports_shared_art(album_id, album_title):
+                shared_album_ids.add(int(album_id))
+                continue
+            result[(track_id, "album_art")] = self._normalize_media_meta(
+                row[9],
+                row[10],
+                row[11],
+                row[12],
+                row[13],
+                blob_present=bool(row[14]),
+                owner_scope="track",
+                owner_id=int(track_id),
+            )
+
+        album_meta_by_id: dict[int, dict[str, str | int | bool | object]] = {}
+        fallback_meta_by_album_id: dict[int, dict[str, str | int | bool | object]] = {}
+        if shared_album_ids:
+            album_placeholders = ",".join("?" for _ in shared_album_ids)
+            album_rows = cur.execute(
+                f"""
+                SELECT
+                    id,
+                    album_art_path,
+                    album_art_storage_mode,
+                    album_art_filename,
+                    album_art_mime_type,
+                    album_art_size_bytes,
+                    CASE WHEN album_art_blob IS NOT NULL THEN 1 ELSE 0 END AS blob_present
+                FROM Albums
+                WHERE id IN ({album_placeholders})
+                """,
+                tuple(sorted(shared_album_ids)),
+            ).fetchall()
+            for row in album_rows:
+                album_id = int(row[0])
+                album_meta_by_id[album_id] = self._normalize_media_meta(
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    blob_present=bool(row[6]),
+                    owner_scope="album",
+                    owner_id=album_id,
+                )
+
+            fallback_rows = cur.execute(
+                f"""
+                SELECT
+                    t.album_id,
+                    t.id,
+                    t.album_art_path,
+                    t.album_art_storage_mode,
+                    t.album_art_filename,
+                    t.album_art_mime_type,
+                    t.album_art_size_bytes,
+                    CASE WHEN t.album_art_blob IS NOT NULL THEN 1 ELSE 0 END AS blob_present
+                FROM Tracks t
+                JOIN (
+                    SELECT album_id, MIN(id) AS first_track_id
+                    FROM Tracks
+                    WHERE album_id IN ({album_placeholders})
+                      AND (
+                          (album_art_path IS NOT NULL AND album_art_path != '')
+                          OR album_art_blob IS NOT NULL
+                      )
+                    GROUP BY album_id
+                ) first_track
+                    ON first_track.first_track_id = t.id
+                """,
+                tuple(sorted(shared_album_ids)),
+            ).fetchall()
+            for row in fallback_rows:
+                album_id = int(row[0])
+                fallback_meta_by_album_id[album_id] = self._normalize_media_meta(
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    blob_present=bool(row[7]),
+                    owner_scope="album_track",
+                    owner_id=int(row[1]),
+                    album_id=album_id,
+                )
+
+        for track_id in normalized_track_ids:
+            if (track_id, "album_art") in result:
+                continue
+            row = row_by_track_id.get(track_id)
+            if row is None:
+                result[(track_id, "album_art")] = self._normalize_media_meta(
+                    "",
+                    None,
+                    None,
+                    "",
+                    0,
+                    owner_scope="track",
+                    owner_id=int(track_id),
+                )
+                continue
+            album_id = int(row[1]) if row[1] is not None else None
+            if album_id is None:
+                result[(track_id, "album_art")] = self._normalize_media_meta(
+                    "",
+                    None,
+                    None,
+                    "",
+                    0,
+                    owner_scope="track",
+                    owner_id=int(track_id),
+                )
+                continue
+            shared_meta = album_meta_by_id.get(album_id)
+            if shared_meta is not None and bool(shared_meta.get("has_media")):
+                result[(track_id, "album_art")] = shared_meta
+                continue
+            fallback_meta = fallback_meta_by_album_id.get(album_id)
+            if fallback_meta is not None:
+                result[(track_id, "album_art")] = fallback_meta
+                continue
+            result[(track_id, "album_art")] = self._normalize_media_meta(
+                "",
+                None,
+                None,
+                "",
+                0,
+                owner_scope="album_track",
+                owner_id=None,
+                album_id=album_id,
+            )
+        return result
+
     def has_media(
         self, track_id: int, media_key: str, *, cursor: sqlite3.Cursor | None = None
     ) -> bool:

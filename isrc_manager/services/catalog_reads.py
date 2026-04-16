@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .track_artist_sql import track_additional_artists_expr, track_main_artist_join_sql
+
+if TYPE_CHECKING:
+    from .custom_fields import CustomFieldValueService
+    from .tracks import TrackService
 
 
 class CatalogReadService:
@@ -115,6 +120,78 @@ class CatalogReadService:
             progress_callback(4, 4, "Prepared catalog row payload for the UI.")
 
         return base_rows, custom_field_map
+
+    def fetch_blob_badge_payload(
+        self,
+        track_ids,
+        active_custom_fields: list[dict[str, object]],
+        *,
+        track_service: TrackService | None,
+        custom_field_values: CustomFieldValueService | None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> dict[str, object]:
+        normalized_track_ids: list[int] = []
+        seen_track_ids: set[int] = set()
+        for raw_track_id in track_ids or []:
+            try:
+                track_id = int(raw_track_id)
+            except Exception:
+                continue
+            if track_id in seen_track_ids:
+                continue
+            seen_track_ids.add(track_id)
+            normalized_track_ids.append(track_id)
+        if not normalized_track_ids:
+            if callable(progress_callback):
+                progress_callback(1, 1, "No catalog media badges needed preparation.")
+            return {"standard_media": {}, "custom_fields": {}}
+
+        if callable(progress_callback):
+            progress_callback(
+                1,
+                4,
+                f"Preparing media badges for {len(normalized_track_ids)} catalog rows.",
+            )
+        standard_media = (
+            track_service.get_media_meta_map(
+                normalized_track_ids,
+                media_keys=("audio_file", "album_art"),
+            )
+            if track_service is not None
+            else {}
+        )
+        if callable(progress_callback):
+            progress_callback(
+                2,
+                4,
+                f"Loaded standard media badge metadata for {len(standard_media)} catalog cells.",
+            )
+        blob_field_ids = [
+            int(field["id"])
+            for field in active_custom_fields
+            if str(field.get("field_type") or "").strip().lower() in {"blob_audio", "blob_image"}
+            and field.get("id") is not None
+        ]
+        custom_fields = (
+            custom_field_values.get_value_meta_map(
+                blob_field_ids,
+                track_ids=normalized_track_ids,
+                include_storage_details=True,
+            )
+            if custom_field_values is not None and blob_field_ids
+            else {}
+        )
+        if callable(progress_callback):
+            progress_callback(
+                3,
+                4,
+                f"Loaded custom media badge metadata for {len(custom_fields)} catalog cells.",
+            )
+            progress_callback(4, 4, "Prepared catalog media badge payload.")
+        return {
+            "standard_media": standard_media,
+            "custom_fields": custom_fields,
+        }
 
     def find_album_metadata(self, title: str) -> tuple[str | None, str | None, str | None] | None:
         clean_title = (title or "").strip()

@@ -800,6 +800,96 @@ class CustomFieldValueService:
             meta["filename"] = filename
         return meta
 
+    def get_value_meta_map(
+        self,
+        field_def_ids,
+        *,
+        track_ids=None,
+        include_storage_details: bool = False,
+    ) -> dict[tuple[int, int], dict]:
+        normalized_field_ids: list[int] = []
+        seen_field_ids: set[int] = set()
+        for raw_field_id in field_def_ids or []:
+            try:
+                field_id = int(raw_field_id)
+            except Exception:
+                continue
+            if field_id in seen_field_ids:
+                continue
+            seen_field_ids.add(field_id)
+            normalized_field_ids.append(field_id)
+        if not normalized_field_ids:
+            return {}
+
+        query_parts = [
+            """
+            SELECT
+                track_id,
+                field_def_id,
+                value,
+                blob_value,
+                managed_file_path,
+                storage_mode,
+                filename,
+                size_bytes,
+                mime_type
+            FROM CustomFieldValues
+            WHERE field_def_id IN ({field_placeholders})
+            """
+        ]
+        params: list[int] = list(normalized_field_ids)
+        normalized_track_ids: list[int] = []
+        if track_ids is not None:
+            seen_track_ids: set[int] = set()
+            for raw_track_id in track_ids:
+                try:
+                    track_id = int(raw_track_id)
+                except Exception:
+                    continue
+                if track_id in seen_track_ids:
+                    continue
+                seen_track_ids.add(track_id)
+                normalized_track_ids.append(track_id)
+            if not normalized_track_ids:
+                return {}
+            query_parts.append("AND track_id IN ({track_placeholders})")
+            params.extend(normalized_track_ids)
+
+        query = "".join(query_parts).format(
+            field_placeholders=",".join("?" for _ in normalized_field_ids),
+            track_placeholders=",".join("?" for _ in normalized_track_ids),
+        )
+        rows = self.conn.execute(query, tuple(params)).fetchall()
+        result: dict[tuple[int, int], dict] = {}
+        for row in rows:
+            track_id = int(row[0])
+            field_def_id = int(row[1])
+            value, blob_value, managed_file_path, storage_mode, filename, size_bytes, mime_type = (
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[7],
+                row[8],
+            )
+            effective_mode = infer_storage_mode(
+                explicit_mode=storage_mode,
+                stored_path=managed_file_path,
+                blob_value=blob_value,
+            )
+            meta = {
+                "value": value,
+                "has_blob": bool(blob_value is not None or str(managed_file_path or "").strip()),
+                "size_bytes": int(size_bytes or 0) if size_bytes is not None else 0,
+                "mime_type": mime_type or None,
+            }
+            if include_storage_details:
+                meta["storage_mode"] = effective_mode
+                meta["filename"] = filename
+            result[(track_id, field_def_id)] = meta
+        return result
+
     def has_blob(self, track_id: int, field_def_id: int) -> bool:
         meta = self.get_value_meta(track_id, field_def_id)
         return bool(meta["has_blob"])

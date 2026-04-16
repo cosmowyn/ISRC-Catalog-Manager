@@ -24,6 +24,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_track_editor_open_master_action_opens_owner_editor = (
         AppShellTestCase.case_track_editor_open_master_action_opens_owner_editor
     )
+    test_track_editor_save_succeeds_without_album_propagation = (
+        AppShellTestCase.case_track_editor_save_succeeds_without_album_propagation
+    )
     test_export_catalog_audio_copies_exports_managed_and_database_wav_sources = (
         AppShellTestCase.case_export_catalog_audio_copies_exports_managed_and_database_wav_sources
     )
@@ -63,6 +66,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_album_entry_can_mix_existing_and_new_work_governance_per_row = (
         AppShellTestCase.case_album_entry_can_mix_existing_and_new_work_governance_per_row
     )
+    test_add_track_save_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_add_track_save_progress_reaches_100_only_after_final_ui_refresh
+    )
+    test_album_save_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_album_save_progress_reaches_100_only_after_final_ui_refresh
+    )
     test_gs1_dialog_uses_top_level_workflow_tabs = (
         AppShellTestCase.case_gs1_dialog_uses_top_level_workflow_tabs
     )
@@ -86,6 +95,15 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     )
     test_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage = (
         AppShellTestCase.case_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
+    test_blob_badge_icon_generation_is_cached_during_refresh = (
+        AppShellTestCase.case_blob_badge_icon_generation_is_cached_during_refresh
+    )
+    test_catalog_refresh_uses_prepared_blob_badges_without_live_meta_queries = (
+        AppShellTestCase.case_catalog_refresh_uses_prepared_blob_badges_without_live_meta_queries
+    )
+    test_catalog_refresh_reenables_table_updates_before_final_repaint_flush = (
+        AppShellTestCase.case_catalog_refresh_reenables_table_updates_before_final_repaint_flush
     )
     test_standard_media_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_standard_media_context_menu_groups_file_and_storage_actions

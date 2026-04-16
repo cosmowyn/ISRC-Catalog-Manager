@@ -331,6 +331,30 @@ class AppShellTestCase(unittest.TestCase):
                 description="app shell background tasks to finish",
             )
 
+    def _wait_for_background_tasks(
+        self,
+        window=None,
+        *,
+        timeout_ms: int = 5000,
+        description: str = "app shell background tasks to finish",
+    ) -> None:
+        target_window = window or self.window
+        if target_window is None:
+            return
+        task_manager = getattr(target_window, "background_tasks", None)
+        if task_manager is None:
+            return
+        if not task_manager.has_running_tasks():
+            self._drain_events(cycles=2)
+            return
+        wait_for(
+            lambda: not task_manager.has_running_tasks(),
+            timeout_ms=timeout_ms,
+            interval_ms=25,
+            app=self.app,
+            description=description,
+        )
+
     def _close_window(self) -> str:
         window = getattr(self, "window", None)
         if window is None:
@@ -610,6 +634,23 @@ class AppShellTestCase(unittest.TestCase):
             "worker_progress": worker_progress,
             "ui_progress": ui_progress,
         }
+
+    def _assert_ui_ready_progress(self, progress: dict[str, object], *, worker_terminal: int):
+        worker_values = [
+            int(value)
+            for value, _maximum, _message in progress["worker_progress"]
+            if value is not None
+        ]
+        ui_values = [
+            int(value) for value, _maximum, _message in progress["ui_progress"] if value is not None
+        ]
+        self.assertTrue(worker_values)
+        self.assertTrue(ui_values)
+        self.assertLess(max(worker_values), 100)
+        self.assertEqual(worker_values[-1], int(worker_terminal))
+        self.assertTrue(all(value < 100 for value in ui_values[:-1]))
+        self.assertEqual(ui_values[-1], 100)
+        return worker_values, ui_values
 
     def _set_first_launch_prompt_pending(self, pending: bool) -> None:
         settings = self._settings()
@@ -2930,8 +2971,8 @@ class AppShellTestCase(unittest.TestCase):
             mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
         ):
             self.window.delete_entry()
+            self._wait_for_background_tasks(description="delete-entry history test to finish")
 
-        self.app.processEvents()
         critical_mock.assert_not_called()
         self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
         self.assertEqual(
@@ -3275,7 +3316,9 @@ class AppShellTestCase(unittest.TestCase):
             return_value=app_module.QMessageBox.Ok,
         ):
             self.window.save()
-        self.app.processEvents()
+            self._wait_for_background_tasks(
+                description="work-manager governed child track save to finish",
+            )
 
         row = self.window.conn.execute(
             """
@@ -3491,6 +3534,9 @@ class AppShellTestCase(unittest.TestCase):
             second_section.track_title.setText("Unified Governed Dub")
             second_section.artist_name.setCurrentText("Moonwake")
             dialog.save_album()
+            self._wait_for_background_tasks(
+                description="work-manager governed album save to finish",
+            )
             return dialog.result()
 
         with mock.patch.object(
@@ -3535,6 +3581,9 @@ class AppShellTestCase(unittest.TestCase):
             second_section.artist_name.setCurrentText("Moonwake")
             second_section.iswc.setText("T-123.456.780-0")
             dialog.save_album()
+            self._wait_for_background_tasks(
+                description="unified governed album save to finish",
+            )
             return dialog.result()
 
         with mock.patch.object(
@@ -6534,7 +6583,7 @@ class AppShellTestCase(unittest.TestCase):
             second_section.track_title.setText("Governed Album Dub")
             second_section.artist_name.setCurrentText("Moonwake")
             dialog.save_album()
-            self.app.processEvents()
+            self._wait_for_background_tasks(description="album save under selected work to finish")
 
             created_rows = self.window.conn.execute(
                 """
@@ -6573,7 +6622,9 @@ class AppShellTestCase(unittest.TestCase):
             second_section.artist_name.setCurrentText("Moonwake")
             second_section.iswc.setText("T-123.456.780-0")
             dialog.save_album()
-            self.app.processEvents()
+            self._wait_for_background_tasks(
+                description="auto-governed album save without selected work to finish"
+            )
 
             rows = self.window.conn.execute(
                 """
@@ -6661,7 +6712,7 @@ class AppShellTestCase(unittest.TestCase):
             return_value=app_module.QMessageBox.Ok,
         ):
             self.window.save()
-            self.app.processEvents()
+            self._wait_for_background_tasks(description="governed add-track save to finish")
 
         track_id = self.window.conn.execute(
             "SELECT id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
@@ -6758,7 +6809,7 @@ class AppShellTestCase(unittest.TestCase):
             return_value=app_module.QMessageBox.Ok,
         ):
             self.window.save()
-            self.app.processEvents()
+            self._wait_for_background_tasks(description="typed-artist add-track save to finish")
 
         party_id = self.window.party_service.find_artist_party_id_by_name(typed_artist)
         self.assertIsNotNone(party_id)
@@ -6800,7 +6851,9 @@ class AppShellTestCase(unittest.TestCase):
             second_section.buma_work_number.setText("WRK-711")
 
             dialog.save_album()
-            self.app.processEvents()
+            self._wait_for_background_tasks(
+                description="mixed-governance album batch save to finish"
+            )
 
             rows = self.window.conn.execute(
                 """
@@ -6834,6 +6887,248 @@ class AppShellTestCase(unittest.TestCase):
             )
         finally:
             dialog.close()
+
+    def case_add_track_save_progress_reaches_100_only_after_final_ui_refresh(self):
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        self.window.open_add_track_entry()
+        self.app.processEvents()
+        self.window.track_title_field.setText("Progress Governed Track")
+        self.window.artist_field.setCurrentText("Moonwake")
+        self.window.album_title_field.setCurrentText("Progress Album")
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_bundle_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            self.window.save()
+
+        self.assertEqual(submitted.get("worker_completion_progress"), (89, "Finalizing background track save..."))
+        self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+        self.assertIsNone(submitted.get("on_success"))
+        self.assertTrue(callable(submitted.get("on_success_after_cleanup")))
+
+        with mock.patch.object(
+            app_module.QMessageBox,
+            "information",
+            return_value=app_module.QMessageBox.Ok,
+        ):
+            progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
+        ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
+        self.assertTrue(
+            any("Painting refreshed catalog icons and widgets" in message for message in ui_messages)
+        )
+        self.assertIn(98, ui_values)
+        track_row = self.window.conn.execute(
+            "SELECT id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
+            ("Progress Governed Track",),
+        ).fetchone()
+        self.assertIsNotNone(track_row)
+
+    def case_album_save_progress_reaches_100_only_after_final_ui_refresh(self):
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        dialog = app_module.AlbumEntryDialog(self.window)
+        try:
+            dialog.album_title.setCurrentText("Progress Governed Album")
+            first_section = dialog._track_sections[0]
+            second_section = dialog._track_sections[1]
+            first_section.track_title.setText("Progress Governed One")
+            first_section.artist_name.setCurrentText("Moonwake")
+            second_section.track_title.setText("Progress Governed Two")
+            second_section.artist_name.setCurrentText("Moonwake")
+
+            with mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_capture_submit,
+            ):
+                dialog.save_album()
+
+            self.assertEqual(
+                submitted.get("worker_completion_progress"),
+                (89, "Finalizing background album save..."),
+            )
+            self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+            self.assertIsNone(submitted.get("on_success"))
+            self.assertTrue(callable(submitted.get("on_success_after_cleanup")))
+
+            progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+            _worker_values, ui_values = self._assert_ui_ready_progress(
+                progress,
+                worker_terminal=89,
+            )
+            ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
+            self.assertTrue(
+                any(
+                    "Painting refreshed catalog icons and widgets" in message
+                    for message in ui_messages
+                )
+            )
+            self.assertIn(98, ui_values)
+            self.assertEqual(dialog.result(), app_module.QDialog.Accepted)
+            created_rows = self.window.conn.execute(
+                """
+                SELECT track_title
+                FROM Tracks
+                WHERE album_id = (
+                    SELECT id FROM Albums WHERE title=? ORDER BY id DESC LIMIT 1
+                )
+                ORDER BY track_title
+                """,
+                ("Progress Governed Album",),
+            ).fetchall()
+            self.assertEqual(
+                created_rows,
+                [("Progress Governed One",), ("Progress Governed Two",)],
+            )
+        finally:
+            dialog.close()
+
+    def case_track_delete_progress_reaches_100_only_after_final_ui_refresh(self):
+        track_id = self._create_track(index=401, title="Progress Delete Track")
+        self.window.refresh_table()
+        row = self.window._row_for_id(track_id)
+        self.assertGreaterEqual(row, 0)
+        self.window.table.setCurrentCell(row, 0)
+        self.app.processEvents()
+
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_capture_submit,
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "exec",
+                return_value=app_module.QMessageBox.Yes,
+            ),
+        ):
+            self.window.delete_entry()
+
+        self.assertEqual(
+            submitted.get("worker_completion_progress"),
+            (89, "Finalizing background track deletion..."),
+        )
+        self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+        self.assertIsNone(submitted.get("on_success"))
+
+        progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
+        ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
+        self.assertTrue(
+            any("Painting refreshed catalog icons and widgets" in message for message in ui_messages)
+        )
+        self.assertIn(98, ui_values)
+        self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+
+    def case_work_delete_progress_reaches_100_only_after_final_ui_refresh(self):
+        track_id = self._create_track(index=402, title="Progress Work Delete Track")
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(
+                title="Progress Work Delete",
+                iswc="T-123.456.712-0",
+                track_ids=[track_id],
+            )
+        )
+        detail = self.window.work_service.fetch_work_detail(work_id)
+        self.assertIsNotNone(detail)
+
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_bundle_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            self.window.delete_work(work_id)
+
+        self.assertEqual(
+            submitted.get("worker_completion_progress"),
+            (89, "Finalizing background work deletion..."),
+        )
+        self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+        self.assertIsNone(submitted.get("on_success"))
+
+        progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
+        self.assertIn(96, ui_values)
+        self.assertIsNone(self.window.work_service.fetch_work_detail(work_id))
+        track_row = self.window.conn.execute(
+            "SELECT work_id FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(track_row, (None,))
+
+    def case_album_cleanup_progress_reaches_100_only_after_final_ui_refresh(self):
+        album_one = self.window.track_service.get_or_create_album("Progress Cleanup Album One")
+        album_two = self.window.track_service.get_or_create_album("Progress Cleanup Album Two")
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_bundle_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            self.window._delete_unused_albums_in_background(
+                [album_one, album_two],
+                owner=self.window,
+                title="Delete Albums",
+                description="Deleting selected unused album titles and refreshing lookup values...",
+                action_label="Delete Unused Albums: 2",
+                action_type="catalog.albums_delete",
+            )
+
+        self.assertEqual(
+            submitted.get("worker_completion_progress"),
+            (89, "Finalizing background album cleanup..."),
+        )
+        self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+        self.assertIsNone(submitted.get("on_success"))
+
+        progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
+        self.assertIn(90, ui_values)
+        remaining = self.window.conn.execute(
+            "SELECT COUNT(*) FROM Albums WHERE id IN (?, ?)",
+            (album_one, album_two),
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
 
     def case_add_data_comboboxes_include_release_level_catalog_values(self):
         with self.window.conn:
@@ -7194,6 +7489,133 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Managed-file storage", managed_item.toolTip())
         self.assertIn("Database storage", database_item.toolTip())
         self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
+
+    def case_blob_badge_icon_generation_is_cached_during_refresh(self):
+        track_ids = [
+            self._create_track(index=360 + offset, title=f"Cached Badge {offset}")
+            for offset in range(3)
+        ]
+        for offset, track_id in enumerate(track_ids, start=1):
+            self.window.track_service.set_media_path(
+                track_id,
+                "audio_file",
+                self._create_wav_file(f"cached-badge-{offset}.wav"),
+            )
+
+        with mock.patch.object(
+            app_module,
+            "icon_from_blob_icon_spec",
+            wraps=app_module.icon_from_blob_icon_spec,
+        ) as icon_factory:
+            self.window.refresh_table()
+
+        self.assertLessEqual(icon_factory.call_count, 1)
+        audio_col = self.window._column_index_by_header("Audio File")
+        cache_keys = []
+        for track_id in track_ids:
+            item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
+            self.assertIsNotNone(item)
+            assert item is not None
+            cache_keys.append(item.icon().cacheKey())
+        self.assertTrue(all(key == cache_keys[0] for key in cache_keys))
+
+    def case_catalog_refresh_uses_prepared_blob_badges_without_live_meta_queries(self):
+        track_id = self._create_track(index=364, title="Prepared Badge Track")
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            self._create_wav_file("prepared-badge.wav"),
+        )
+        self.assertTrue(
+            self.window._apply_custom_field_configuration(
+                [
+                    {
+                        "id": None,
+                        "name": "Prepared Artwork",
+                        "field_type": "blob_image",
+                        "options": None,
+                        "blob_icon_payload": {"mode": "inherit"},
+                    }
+                ],
+                action_label="Add Custom Column: Prepared Artwork",
+                action_type="fields.add",
+            )
+        )
+        field = next(
+            field
+            for field in self.window.active_custom_fields
+            if field.get("name") == "Prepared Artwork"
+        )
+        self.window.cf_save_value(
+            track_id,
+            int(field["id"]),
+            blob_path=str(self._create_media_file("prepared-art.png", b"\x89PNGprepared-art")),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        dataset = self.window._load_catalog_ui_dataset()
+        blob_badges = dict(dataset.get("blob_badges") or {})
+        standard_media = dict(blob_badges.get("standard_media") or {})
+        custom_media = dict(blob_badges.get("custom_fields") or {})
+        self.assertIn((track_id, "audio_file"), standard_media)
+        self.assertIn((track_id, int(field["id"])), custom_media)
+
+        with (
+            mock.patch.object(
+                self.window,
+                "track_media_meta",
+                side_effect=AssertionError("live standard-media lookup should not run"),
+            ),
+            mock.patch.object(
+                self.window,
+                "cf_get_value_meta",
+                side_effect=AssertionError("live custom-field lookup should not run"),
+            ),
+        ):
+            self.window._apply_catalog_ui_dataset(dataset)
+
+        audio_col = self.window._column_index_by_header("Audio File")
+        custom_col = self.window._column_index_by_header("Prepared Artwork")
+        audio_item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
+        custom_item = self.window.table.item(self._table_row_for_track_id(track_id), custom_col)
+        self.assertIsNotNone(audio_item)
+        self.assertIsNotNone(custom_item)
+        assert audio_item is not None
+        assert custom_item is not None
+        self.assertNotEqual(audio_item.text(), "—")
+        self.assertNotEqual(custom_item.text(), "—")
+        self.assertFalse(audio_item.icon().isNull())
+        self.assertFalse(custom_item.icon().isNull())
+
+    def case_catalog_refresh_reenables_table_updates_before_final_repaint_flush(self):
+        track_id = self._create_track(index=365, title="Catalog Flush Visibility")
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            self._create_wav_file("catalog-flush-visibility.wav"),
+        )
+        dataset = self.window._load_catalog_ui_dataset()
+        refresh_request = self.window._capture_catalog_refresh_request(focus_id=track_id)
+
+        def _assert_updates_enabled(*args, **kwargs):
+            del args, kwargs
+            self.assertTrue(self.window.table.updatesEnabled())
+            self.assertTrue(self.window.table.viewport().updatesEnabled())
+            self.assertTrue(self.window.table.horizontalHeader().updatesEnabled())
+            self.assertTrue(self.window.table.verticalHeader().updatesEnabled())
+
+        with mock.patch.object(
+            self.window,
+            "_flush_pending_catalog_repaints",
+            side_effect=_assert_updates_enabled,
+        ) as repaint_flush:
+            self.window._apply_catalog_refresh_request(dataset, refresh_request)
+
+        self.assertEqual(repaint_flush.call_count, 1)
+        audio_col = self.window._column_index_by_header("Audio File")
+        item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertFalse(item.icon().isNull())
 
     def case_standard_media_context_menu_groups_file_and_storage_actions(self):
         track_id = self._create_track(index=339, title="Managed Media Track")

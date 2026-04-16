@@ -29,6 +29,9 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_delete_entry_history_stays_a_single_visible_user_action = (
         AppShellTestCase.case_delete_entry_history_stays_a_single_visible_user_action
     )
+    test_track_delete_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_track_delete_progress_reaches_100_only_after_final_ui_refresh
+    )
     test_programmatic_header_resize_does_not_record_history = (
         AppShellTestCase.case_programmatic_header_resize_does_not_record_history
     )

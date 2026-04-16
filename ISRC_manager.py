@@ -28,6 +28,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QByteArray,
+    QCoreApplication,
     QDate,
     QEvent,
     QEventLoop,
@@ -144,6 +145,7 @@ from isrc_manager.blob_icons import (
     describe_blob_icon_spec,
     finalize_blob_icon_spec,
     icon_from_blob_icon_spec,
+    normalize_blob_icon_spec,
     normalize_blob_icon_settings,
 )
 from isrc_manager.catalog_workspace import (
@@ -4371,18 +4373,19 @@ class _ManageAlbumsDialog(QDialog):
         ):
             return
         app = self.parentWidget()
-        if app is not None and hasattr(app, "_run_snapshot_history_action"):
-            app._run_snapshot_history_action(
+        if app is not None and hasattr(app, "_delete_unused_albums_in_background"):
+            app._delete_unused_albums_in_background(
+                ids,
+                owner=self,
+                title="Delete Albums",
+                description="Deleting selected unused albums and refreshing lookup values...",
                 action_label=f"Delete Unused Albums: {len(ids)}",
                 action_type="catalog.albums_delete",
-                entity_type="Album",
-                entity_id="batch",
-                payload={"album_ids": ids, "count": len(ids)},
-                mutation=lambda: self.catalog_service.delete_albums(ids),
+                on_ui_ready=self._load,
             )
         else:
             self.catalog_service.delete_albums(ids)
-        self._load()
+            self._load()
 
     def _purge_unused(self):
         to_del = [
@@ -4399,18 +4402,19 @@ class _ManageAlbumsDialog(QDialog):
         ):
             return
         app = self.parentWidget()
-        if app is not None and hasattr(app, "_run_snapshot_history_action"):
-            app._run_snapshot_history_action(
+        if app is not None and hasattr(app, "_delete_unused_albums_in_background"):
+            app._delete_unused_albums_in_background(
+                to_del,
+                owner=self,
+                title="Purge Albums",
+                description="Purging unused albums and refreshing lookup values...",
                 action_label=f"Purge Unused Albums: {len(to_del)}",
                 action_type="catalog.albums_purge",
-                entity_type="Album",
-                entity_id="batch",
-                payload={"album_ids": to_del, "count": len(to_del)},
-                mutation=lambda: self.catalog_service.delete_albums(to_del),
+                on_ui_ready=self._load,
             )
         else:
             self.catalog_service.delete_albums(to_del)
-        self._load()
+            self._load()
 
 
 # =============================================================================
@@ -5734,20 +5738,23 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
         ):
             return
 
-        if hasattr(self.app, "_run_snapshot_history_action"):
-            self.app._run_snapshot_history_action(
+        if hasattr(self.app, "_delete_unused_albums_in_background"):
+            self.app._delete_unused_albums_in_background(
+                album_ids,
+                owner=self,
+                title="Delete Albums",
+                description="Deleting selected unused album titles and refreshing lookup values...",
                 action_label=f"Delete Unused Albums: {len(album_ids)}",
                 action_type="catalog.albums_delete",
-                entity_type="Album",
-                entity_id="batch",
-                payload={"album_ids": album_ids, "count": len(album_ids)},
-                mutation=lambda: self.catalog_service.delete_albums(album_ids),
+                on_ui_ready=lambda: (
+                    self.reload(),
+                    self._after_mutation(),
+                ),
             )
         else:
             self.catalog_service.delete_albums(album_ids)
-
-        self.reload()
-        self._after_mutation()
+            self.reload()
+            self._after_mutation()
 
     def _purge_unused(self):
         if self.catalog_service is None:
@@ -5772,20 +5779,23 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
         ):
             return
 
-        if hasattr(self.app, "_run_snapshot_history_action"):
-            self.app._run_snapshot_history_action(
+        if hasattr(self.app, "_delete_unused_albums_in_background"):
+            self.app._delete_unused_albums_in_background(
+                album_ids,
+                owner=self,
+                title="Purge Unused Albums",
+                description="Purging unused album titles and refreshing lookup values...",
                 action_label=f"Purge Unused Albums: {len(album_ids)}",
                 action_type="catalog.albums_purge",
-                entity_type="Album",
-                entity_id="batch",
-                payload={"album_ids": album_ids, "count": len(album_ids)},
-                mutation=lambda: self.catalog_service.delete_albums(album_ids),
+                on_ui_ready=lambda: (
+                    self.reload(),
+                    self._after_mutation(),
+                ),
             )
         else:
             self.catalog_service.delete_albums(album_ids)
-
-        self.reload()
-        self._after_mutation()
+            self.reload()
+            self._after_mutation()
 
 
 class DiagnosticsCatalogCleanupPanel(QWidget):
@@ -9841,7 +9851,11 @@ class App(QMainWindow):
                 self.blob_icon_settings_service.save_settings(normalized)
             )
         self.blob_icon_settings = normalized
+        self._reset_blob_badge_render_cache()
         return normalized
+
+    def _reset_blob_badge_render_cache(self) -> None:
+        self._blob_badge_icon_cache: dict[tuple[str, int, str], QIcon] = {}
 
     def _active_custom_qss(self) -> str:
         return str((self.theme_settings or {}).get("custom_qss") or "")
@@ -9880,6 +9894,7 @@ class App(QMainWindow):
             getattr(task_manager, "refresh_active_progress_dialogs", None)
         ):
             task_manager.refresh_active_progress_dialogs()
+        self._reset_blob_badge_render_cache()
         self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
 
@@ -9922,6 +9937,7 @@ class App(QMainWindow):
             getattr(task_manager, "refresh_active_progress_dialogs", None)
         ):
             task_manager.refresh_active_progress_dialogs()
+        self._reset_blob_badge_render_cache()
         self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
 
@@ -11629,6 +11645,28 @@ class App(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.processEvents()
+
+    def _scaled_ui_progress_callback(self, ui_progress, *, start: int, end: int):
+        span = max(0, int(end) - int(start))
+
+        def _report(value=None, maximum=None, message=None):
+            numeric_value = int(start)
+            try:
+                if value is not None and maximum not in (None, 0):
+                    ratio = min(max(float(value) / float(maximum), 0.0), 1.0)
+                    numeric_value = int(round(int(start) + (ratio * span)))
+                elif value is not None:
+                    numeric_value = min(max(int(value), int(start)), int(end))
+            except Exception:
+                numeric_value = int(start)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=numeric_value,
+                maximum=100,
+                message=str(message or ""),
+            )
+
+        return _report
 
     def _submit_background_task(
         self,
@@ -16323,6 +16361,8 @@ class App(QMainWindow):
         *,
         custom_field_definitions: CustomFieldDefinitionService | None = None,
         catalog_reads: CatalogReadService | None = None,
+        track_service: TrackService | None = None,
+        custom_field_values: CustomFieldValueService | None = None,
         conn: sqlite3.Connection | None = None,
         progress_callback=None,
     ) -> dict[str, object]:
@@ -16353,24 +16393,41 @@ class App(QMainWindow):
                 else None
             ),
         )
+        track_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+        blob_badges = active_catalog_reads.fetch_blob_badge_payload(
+            track_ids,
+            active_custom_fields,
+            track_service=track_service or self.track_service,
+            custom_field_values=custom_field_values or self.custom_field_values,
+            progress_callback=(
+                self._scaled_progress_callback(
+                    progress_callback,
+                    start=46,
+                    end=64,
+                )
+                if callable(progress_callback)
+                else None
+            ),
+        )
         combo_values = self._catalog_combo_values_from_connection(
             active_conn,
             progress_callback=(
                 self._scaled_progress_callback(
                     progress_callback,
-                    start=48,
-                    end=68,
+                    start=68,
+                    end=84,
                 )
                 if callable(progress_callback)
                 else None
             ),
         )
         if callable(progress_callback):
-            progress_callback(72, 100, f"Prepared catalog dataset with {len(rows)} rows.")
+            progress_callback(88, 100, f"Prepared catalog dataset with {len(rows)} rows.")
         return {
             "active_custom_fields": active_custom_fields,
             "rows": rows,
             "cf_map": cf_map,
+            "blob_badges": blob_badges,
             "combo_values": combo_values,
         }
 
@@ -16459,6 +16516,7 @@ class App(QMainWindow):
         if callable(progress_callback):
             progress_callback(95, 100, "Updated catalog counts and duration.")
         self._apply_blob_badges(
+            prepared_payload=dict(dataset.get("blob_badges") or {}),
             progress_callback=(
                 self._scaled_progress_callback(
                     progress_callback,
@@ -16469,6 +16527,249 @@ class App(QMainWindow):
                 else None
             ),
         )
+
+    def _capture_catalog_refresh_request(
+        self,
+        *,
+        focus_id: int | None = None,
+        select_path: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "view_state": self._capture_view_state(),
+            "sort_enabled": bool(self.table.isSortingEnabled()),
+            "focus_id": int(focus_id) if focus_id is not None else None,
+            "select_path": str(select_path) if select_path else None,
+        }
+
+    def _load_catalog_ui_dataset_from_bundle(
+        self,
+        bundle,
+        ctx,
+        *,
+        progress_start: int,
+        progress_end: int,
+    ) -> dict[str, object]:
+        return self._load_catalog_ui_dataset(
+            custom_field_definitions=bundle.custom_field_definitions,
+            catalog_reads=bundle.catalog_reads,
+            track_service=bundle.track_service,
+            custom_field_values=bundle.custom_field_values,
+            conn=bundle.conn,
+            progress_callback=self._scaled_progress_callback(
+                ctx.report_progress,
+                start=progress_start,
+                end=progress_end,
+            ),
+        )
+
+    def _apply_catalog_refresh_request(
+        self,
+        dataset: dict[str, object],
+        refresh_request: dict[str, object],
+        *,
+        progress_callback=None,
+        refresh_history_actions: bool = True,
+        refresh_add_track_controls: bool = True,
+    ) -> None:
+        state = dict(refresh_request.get("view_state") or {})
+        sort_enabled = bool(refresh_request.get("sort_enabled"))
+        focus_id = refresh_request.get("focus_id")
+        select_path = refresh_request.get("select_path")
+        current_sort_enabled = bool(self.table.isSortingEnabled())
+
+        with self._suspend_table_layout_history():
+            with self._suspend_catalog_view_updates():
+                if current_sort_enabled:
+                    self.table.setSortingEnabled(False)
+
+                self._apply_catalog_ui_dataset(
+                    dataset,
+                    progress_callback=(
+                        self._scaled_progress_callback(
+                            progress_callback,
+                            start=0,
+                            end=74,
+                        )
+                        if callable(progress_callback)
+                        else None
+                    ),
+                )
+
+                if callable(progress_callback):
+                    progress_callback(76, 100, "Restoring saved catalog headers and view state...")
+                try:
+                    self._load_header_state()
+                except Exception as exc:
+                    self.logger.warning("Failed to load header state: %s", exc)
+
+                self._restore_view_state(state)
+                if focus_id is not None:
+                    self._select_row_by_id(int(focus_id))
+                if select_path:
+                    self._reload_profiles_list(select_path=str(select_path))
+                if sort_enabled:
+                    self.table.setSortingEnabled(True)
+                    try:
+                        self.table.sortItems(self._last_sort_col, self._last_sort_order)
+                    except Exception:
+                        pass
+                elif current_sort_enabled:
+                    self.table.setSortingEnabled(True)
+
+                if callable(progress_callback):
+                    progress_callback(90, 100, "Refreshing generated fields and history state...")
+                self._update_add_data_generated_fields()
+                if refresh_history_actions:
+                    self._refresh_history_actions()
+
+                if refresh_add_track_controls:
+                    if callable(progress_callback):
+                        progress_callback(96, 100, "Refreshing add-track governance controls...")
+                    self._refresh_add_track_artist_party_choices()
+                    self._refresh_work_track_creation_context_ui()
+            self._flush_pending_catalog_repaints(
+                progress_callback=progress_callback,
+                value=98,
+                maximum=100,
+                message="Painting refreshed catalog icons and widgets...",
+            )
+
+    @contextmanager
+    def _suspend_catalog_view_updates(self):
+        table = getattr(self, "table", None)
+        widgets: list[QWidget] = []
+        for candidate in (
+            table,
+            getattr(table, "viewport", lambda: None)(),
+            getattr(table, "horizontalHeader", lambda: None)(),
+            getattr(getattr(table, "horizontalHeader", lambda: None)(), "viewport", lambda: None)(),
+            getattr(table, "verticalHeader", lambda: None)(),
+            getattr(getattr(table, "verticalHeader", lambda: None)(), "viewport", lambda: None)(),
+        ):
+            if isinstance(candidate, QWidget):
+                widgets.append(candidate)
+
+        previous_states: list[tuple[QWidget, bool]] = []
+        for widget in widgets:
+            try:
+                previous_states.append((widget, widget.updatesEnabled()))
+            except Exception:
+                continue
+        for widget, _previous_state in previous_states:
+            try:
+                widget.setUpdatesEnabled(False)
+            except Exception:
+                continue
+        try:
+            yield
+        finally:
+            for widget, previous_state in previous_states:
+                try:
+                    widget.setUpdatesEnabled(previous_state)
+                    widget.updateGeometry()
+                    widget.update()
+                except Exception:
+                    continue
+
+    def _catalog_repaint_targets(self) -> list[QWidget]:
+        seen: set[int] = set()
+        targets: list[QWidget] = []
+
+        def _add_target(widget) -> None:
+            if not isinstance(widget, QWidget):
+                return
+            widget_id = id(widget)
+            if widget_id in seen:
+                return
+            seen.add(widget_id)
+            targets.append(widget)
+
+        _add_target(self)
+        _add_target(self.centralWidget())
+        _add_target(self.table)
+        try:
+            _add_target(self.table.viewport())
+        except Exception:
+            pass
+        try:
+            header = self.table.horizontalHeader()
+            _add_target(header)
+            _add_target(header.viewport())
+        except Exception:
+            pass
+        try:
+            header = self.table.verticalHeader()
+            _add_target(header)
+            _add_target(header.viewport())
+        except Exception:
+            pass
+        try:
+            _add_target(self.statusBar())
+        except Exception:
+            pass
+        for dock in self.findChildren(QDockWidget):
+            _add_target(dock)
+            try:
+                _add_target(dock.widget())
+            except Exception:
+                continue
+        return targets
+
+    def _flush_pending_catalog_repaints(
+        self,
+        *,
+        progress_callback=None,
+        value: int | None = None,
+        maximum: int | None = None,
+        message: str = "Painting refreshed catalog icons and widgets...",
+        passes: int = 3,
+    ) -> None:
+        if callable(progress_callback):
+            progress_callback(value, maximum, message)
+        app = QApplication.instance()
+        if app is None:
+            return
+        targets = self._catalog_repaint_targets()
+        for _ in range(max(1, int(passes))):
+            for widget in targets:
+                try:
+                    if not widget.isVisible():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    widget.updateGeometry()
+                except Exception:
+                    pass
+                try:
+                    widget.update()
+                except Exception:
+                    pass
+            try:
+                app.processEvents()
+            except Exception:
+                pass
+            if QCoreApplication is not None:
+                for event_type in (
+                    int(QEvent.LayoutRequest),
+                    int(QEvent.UpdateRequest),
+                    int(QEvent.Paint),
+                    int(QEvent.DeferredDelete),
+                ):
+                    try:
+                        QCoreApplication.sendPostedEvents(None, event_type)
+                    except Exception:
+                        continue
+            for widget in targets:
+                try:
+                    if widget.isVisible():
+                        widget.repaint()
+                except Exception:
+                    continue
+            try:
+                app.processEvents()
+            except Exception:
+                pass
 
     def _refresh_catalog_ui_in_background(
         self,
@@ -16486,9 +16787,11 @@ class App(QMainWindow):
             if on_complete is not None:
                 on_complete()
             return None
-        state = self._capture_view_state()
-        sort_enabled = self.table.isSortingEnabled()
-        if sort_enabled:
+        refresh_request = self._capture_catalog_refresh_request(
+            focus_id=focus_id,
+            select_path=select_path,
+        )
+        if bool(refresh_request.get("sort_enabled")):
             self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         self._update_count_label()
@@ -16504,16 +16807,12 @@ class App(QMainWindow):
                 on_complete()
 
         def _worker(bundle, ctx):
-            ctx.set_status("Loading catalog rows and lookup values...")
-            return self._load_catalog_ui_dataset(
-                custom_field_definitions=bundle.custom_field_definitions,
-                catalog_reads=bundle.catalog_reads,
-                conn=bundle.conn,
-                progress_callback=lambda value, maximum, message: ctx.report_progress(
-                    value=value,
-                    maximum=maximum,
-                    message=message,
-                ),
+            ctx.set_status("Loading catalog rows, media badges, and lookup values...")
+            return self._load_catalog_ui_dataset_from_bundle(
+                bundle,
+                ctx,
+                progress_start=0,
+                progress_end=74,
             )
 
         def _before_cleanup(dataset: dict[str, object], ui_progress):
@@ -16521,50 +16820,28 @@ class App(QMainWindow):
                 self.conn.commit()
             except Exception:
                 pass
-            with self._suspend_table_layout_history():
-                self._apply_catalog_ui_dataset(
-                    dataset,
-                    progress_callback=lambda value, maximum, message: ui_progress.report_progress(
-                        value=value,
-                        maximum=maximum,
-                        message=message,
-                    ),
-                )
-                try:
-                    ui_progress.report_progress(
-                        value=99,
-                        maximum=100,
-                        message="Restoring saved catalog headers and view state...",
-                    )
-                    self._load_header_state()
-                except Exception as e:
-                    self.logger.warning("Failed to load header state: %s", e)
-                self._restore_view_state(state)
-                if focus_id is not None:
-                    self._select_row_by_id(focus_id)
-                if select_path:
-                    self._reload_profiles_list(select_path=select_path)
-                if sort_enabled:
-                    self.table.setSortingEnabled(True)
-                    try:
-                        self.table.sortItems(self._last_sort_col, self._last_sort_order)
-                    except Exception:
-                        pass
-                self._update_add_data_generated_fields()
-                self._refresh_history_actions()
-                ui_progress.report_progress(
-                    value=100,
-                    maximum=100,
-                    message="Catalog view fully restored and ready.",
-                )
-                if on_finished is not None:
-                    on_finished()
+            self._apply_catalog_refresh_request(
+                dataset,
+                refresh_request,
+                progress_callback=self._scaled_ui_progress_callback(
+                    ui_progress,
+                    start=76,
+                    end=99,
+                ),
+            )
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Catalog view fully restored and ready.",
+            )
+            if on_finished is not None:
+                on_finished()
 
         def _after_cleanup(_dataset: dict[str, object]) -> None:
             _notify_complete()
 
         def _finished():
-            if not sort_enabled:
+            if not bool(refresh_request.get("sort_enabled")):
                 self.table.setSortingEnabled(False)
 
         def _handle_error(failure: TaskFailure) -> None:
@@ -16594,7 +16871,7 @@ class App(QMainWindow):
 
         task_id = self._submit_background_bundle_task(
             title="Load Catalog",
-            description="Loading catalog rows and lookup values...",
+            description="Loading catalog rows, media badges, and lookup values...",
             task_fn=_worker,
             kind="read",
             unique_key=unique_key,
@@ -16737,9 +17014,6 @@ class App(QMainWindow):
 
             if focus_id is not None:
                 self._select_row_by_id(focus_id)
-
-            # Re-apply blob markers
-            self._apply_blob_badges()
 
             # Restore sorting after refresh
             if _prev_sort_enabled:
@@ -17084,74 +17358,164 @@ class App(QMainWindow):
                 return
             payload.audio_file_storage_mode, payload.album_art_storage_mode = media_modes
 
-            if self.governed_track_creation_service is None:
-                raise ValueError("Governed track creation service is unavailable.")
+            refresh_request = self._capture_catalog_refresh_request()
+            action_label = (
+                f"Create Work + Track: {payload.track_title}"
+                if governance_mode == "create_new_work"
+                else f"Create Track: {payload.track_title}"
+            )
+            action_type = (
+                "track.create_governed"
+                if governance_mode == "create_new_work"
+                else "track.create"
+            )
+            profile_name = self._current_profile_name()
 
-            work_id_for_refresh: int | None = None
+            def _worker(bundle, ctx):
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message="Saving track, media, and work governance...",
+                )
+                governed_service = GovernedImportCoordinator(
+                    bundle.conn,
+                    track_service=bundle.track_service,
+                    party_service=bundle.party_service,
+                    work_service=bundle.work_service,
+                    profile_name=profile_name,
+                )
 
-            def mutation():
-                with self.conn:
-                    cur = self.conn.cursor()
-                    result = self.governed_track_creation_service.create_governed_track(
+                def _mutation():
+                    cur = bundle.conn.cursor()
+                    result = governed_service.create_governed_track(
                         payload,
                         cursor=cur,
                         governance_mode=governance_mode,
-                        profile_name=self._current_profile_name(),
+                        profile_name=profile_name,
                     )
                     created_track_id = int(result.track_id)
-                    release_ids = self._sync_releases_for_tracks([created_track_id])
-                    return int(result.work_id), created_track_id, release_ids
+                    ctx.report_progress(
+                        value=34,
+                        maximum=100,
+                        message="Synchronizing release records for the saved track...",
+                    )
+                    release_ids = self._sync_releases_for_tracks(
+                        [created_track_id],
+                        cursor=cur,
+                        track_service=bundle.track_service,
+                        release_service=bundle.release_service,
+                        profile_name=profile_name,
+                    )
+                    return {
+                        "work_id": int(result.work_id),
+                        "track_id": created_track_id,
+                        "release_ids": list(release_ids),
+                    }
 
-            work_id_for_refresh, track_id, release_ids = self._run_snapshot_history_action(
-                action_label=(
-                    f"Create Work + Track: {payload.track_title}"
-                    if governance_mode == "create_new_work"
-                    else f"Create Track: {payload.track_title}"
-                ),
-                action_type=(
-                    "track.create_governed"
-                    if governance_mode == "create_new_work"
-                    else "track.create"
-                ),
-                entity_type="Track",
-                entity_id=payload.track_title,
-                payload={
-                    "track_title": payload.track_title,
-                    "artist_name": payload.artist_name,
-                    "album_title": payload.album_title,
-                    "created_work_from_track": governance_mode == "create_new_work",
-                },
-                mutation=mutation,
-            )
-            if governance_mode == "create_new_work":
-                self._audit(
-                    "CREATE",
-                    "Work",
-                    ref_id=work_id_for_refresh,
-                    details=f"title={payload.track_title}",
+                result_payload = run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=action_label,
+                    action_type=action_type,
+                    entity_type="Track",
+                    entity_id=payload.track_title,
+                    payload={
+                        "track_title": payload.track_title,
+                        "artist_name": payload.artist_name,
+                        "album_title": payload.album_title,
+                        "created_work_from_track": governance_mode == "create_new_work",
+                    },
+                    mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(48, "Capturing track-save history snapshot..."),
+                    record_progress=(56, "Recording track-save history..."),
+                    logger=self.logger,
                 )
-            self._log_event(
-                "track.create",
-                "Track created",
-                track_id=track_id,
-                isrc=generated_iso,
-                track_title=self.track_title_field.text().strip(),
-                release_ids=release_ids,
-            )
-            self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
-            self._audit_commit()
+                ctx.report_progress(
+                    value=60,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=62,
+                    progress_end=88,
+                )
+                return result_payload
 
-            self.refresh_table_preserve_view(focus_id=track_id)
-            self.populate_all_comboboxes()
-            self.clear_form_fields()
-            if governance_mode == "create_new_work":
-                self._set_pending_work_track_context()
-            self._refresh_work_track_creation_context_ui()
-            if work_id_for_refresh is not None:
+            def _before_cleanup(result_payload: dict[str, object], ui_progress) -> None:
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                refresh_payload = dict(refresh_request)
+                refresh_payload["focus_id"] = int(result_payload["track_id"])
+                self._apply_catalog_refresh_request(
+                    dict(result_payload.get("dataset") or {}),
+                    refresh_payload,
+                    progress_callback=self._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=90,
+                        end=97,
+                    ),
+                )
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=98,
+                    message="Refreshing work manager and draft controls...",
+                )
+                self.clear_form_fields()
+                if governance_mode == "create_new_work":
+                    self._set_pending_work_track_context()
+                self._refresh_work_track_creation_context_ui()
                 self._refresh_work_manager_panel()
-                self._focus_work_in_manager(int(work_id_for_refresh))
-            self._refresh_history_actions()
-            QMessageBox.information(self, "Success", "Track info saved successfully!")
+                if governance_mode == "create_new_work":
+                    self._focus_work_in_manager(int(result_payload["work_id"]))
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Track saved and catalog UI is ready.",
+                )
+
+            def _after_cleanup(result_payload: dict[str, object]) -> None:
+                work_id_for_refresh = int(result_payload["work_id"])
+                track_id = int(result_payload["track_id"])
+                release_ids = list(result_payload.get("release_ids") or [])
+                if governance_mode == "create_new_work":
+                    self._audit(
+                        "CREATE",
+                        "Work",
+                        ref_id=work_id_for_refresh,
+                        details=f"title={payload.track_title}",
+                    )
+                self._log_event(
+                    "track.create",
+                    "Track created",
+                    track_id=track_id,
+                    isrc=generated_iso,
+                    track_title=payload.track_title,
+                    release_ids=release_ids,
+                )
+                self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
+                self._audit_commit()
+                QMessageBox.information(self, "Success", "Track info saved successfully!")
+
+            self._submit_background_bundle_task(
+                title="Save Track",
+                description="Saving track, media, and work governance...",
+                task_fn=_worker,
+                kind="write",
+                unique_key=f"track.create.{payload.track_title.strip().casefold()}",
+                owner=self,
+                worker_completion_progress=(89, "Finalizing background track save..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_after_cleanup,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Save Track",
+                    failure,
+                    user_message="Failed to save record:",
+                ),
+            )
         except sqlite3.IntegrityError as e:
             self.conn.rollback()
             self.logger.exception(f"Save failed (integrity): {e}")
@@ -20534,14 +20898,111 @@ class App(QMainWindow):
                 return owner
         return self
 
+    def _delete_unused_albums_in_background(
+        self,
+        album_ids: list[int],
+        *,
+        owner: QWidget | None,
+        title: str,
+        description: str,
+        action_label: str,
+        action_type: str,
+        on_ui_ready=None,
+    ) -> None:
+        target_ids = [int(album_id) for album_id in album_ids if int(album_id) > 0]
+        if not target_ids:
+            return
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message=description,
+            )
+            catalog_service = CatalogAdminService(bundle.conn)
+            run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=action_label,
+                action_type=action_type,
+                entity_type="Album",
+                entity_id="batch",
+                payload={"album_ids": target_ids, "count": len(target_ids)},
+                mutation=lambda: catalog_service.delete_albums(target_ids),
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing album-cleanup history snapshot..."),
+                record_progress=(56, "Recording album-cleanup history..."),
+                logger=self.logger,
+            )
+            ctx.report_progress(
+                value=60,
+                maximum=100,
+                message="Loading refreshed album lookup values...",
+            )
+            return {
+                "combo_values": self._catalog_combo_values_from_connection(
+                    bundle.conn,
+                    progress_callback=self._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=62,
+                        end=88,
+                    ),
+                )
+            }
+
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=90,
+                message="Applying refreshed album lookup values...",
+            )
+            self._apply_catalog_combo_values(dict(result.get("combo_values") or {}))
+            self._refresh_add_track_artist_party_choices()
+            self._refresh_work_track_creation_context_ui()
+            self._refresh_history_actions()
+            if callable(on_ui_ready):
+                on_ui_ready()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Album cleanup complete and UI is ready.",
+            )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=description,
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"{action_type}.{','.join(str(album_id) for album_id in target_ids)}",
+            owner=owner or self,
+            worker_completion_progress=(89, "Finalizing background album cleanup..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not update the stored album list:",
+            ),
+        )
+
     def create_work(self, payload: WorkPayload):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
             return
         payload.profile_name = payload.profile_name or self._current_profile_name()
+        needs_catalog_refresh = bool(payload.track_ids)
+        refresh_request = self._capture_catalog_refresh_request(
+            focus_id=(payload.track_ids[0] if payload.track_ids else None)
+        )
 
         def _worker(bundle, ctx):
-            ctx.set_status("Saving work metadata, contributors, and linked tracks...")
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Saving work metadata, contributors, and linked tracks...",
+            )
             work_id = run_snapshot_history_action(
                 history_manager=bundle.history_manager,
                 action_label=f"Create Work: {payload.title or 'Untitled Work'}",
@@ -20553,22 +21014,66 @@ class App(QMainWindow):
                     "track_count": len(payload.track_ids),
                 },
                 mutation=lambda: bundle.work_service.create_work(payload),
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing work-save history snapshot..."),
+                record_progress=(56, "Recording work-save history..."),
                 logger=self.logger,
             )
-            return {
+            result_payload = {
                 "work_id": int(work_id),
                 "title": payload.title,
                 "track_ids": list(payload.track_ids),
             }
+            if needs_catalog_refresh:
+                ctx.report_progress(
+                    value=60,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=62,
+                    progress_end=88,
+                )
+            return result_payload
 
-        def _success(result: dict[str, object]) -> None:
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
             work_id = int(result["work_id"])
-            track_ids = list(result.get("track_ids") or [])
             try:
                 self.conn.commit()
             except Exception:
                 pass
-            self._refresh_history_actions()
+            if needs_catalog_refresh:
+                self._apply_catalog_refresh_request(
+                    dict(result.get("dataset") or {}),
+                    refresh_request,
+                    progress_callback=self._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=90,
+                        end=97,
+                    ),
+                )
+            else:
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=96,
+                    message="Refreshing work manager and governance controls...",
+                )
+                self._refresh_history_actions()
+                self._refresh_add_track_artist_party_choices()
+                self._refresh_work_track_creation_context_ui()
+            self._refresh_work_manager_panel()
+            self._focus_work_in_manager(work_id)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Work saved and UI is ready.",
+            )
+
+        def _after_cleanup(result: dict[str, object]) -> None:
+            work_id = int(result["work_id"])
+            track_ids = list(result.get("track_ids") or [])
             self._log_event(
                 "work.create",
                 "Work created",
@@ -20578,8 +21083,6 @@ class App(QMainWindow):
             )
             self._audit("CREATE", "Work", ref_id=work_id, details=f"title={payload.title}")
             self._audit_commit()
-            self._refresh_work_manager_panel()
-            self._focus_work_in_manager(work_id)
             if track_ids:
                 return
             response = QMessageBox.question(
@@ -20599,7 +21102,9 @@ class App(QMainWindow):
             kind="write",
             unique_key=f"work.create.{str(payload.title or 'untitled').strip().casefold()}",
             owner=self._work_manager_task_owner(),
-            on_success=_success,
+            worker_completion_progress=(89, "Finalizing background work save..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
             on_error=lambda failure: self._show_background_task_error(
                 "Work Manager",
                 failure,
@@ -20652,6 +21157,36 @@ class App(QMainWindow):
                     return int(value)
         return None
 
+    def _adjacent_work_id_in_manager(self, work_id: int) -> int | None:
+        for attr in ("work_manager_panel", "work_browser_dialog"):
+            panel = getattr(self, attr, None)
+            if panel is None or not getattr(panel, "isVisible", lambda: False)():
+                continue
+            table = getattr(panel, "table", None)
+            if table is None:
+                continue
+            work_ids: list[int] = []
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item is None:
+                    continue
+                try:
+                    work_ids.append(int(item.text()))
+                except Exception:
+                    continue
+            if not work_ids:
+                continue
+            try:
+                index = work_ids.index(int(work_id))
+            except ValueError:
+                index = -1
+            if index >= 0:
+                if index + 1 < len(work_ids):
+                    return int(work_ids[index + 1])
+                if index > 0:
+                    return int(work_ids[index - 1])
+        return None
+
     def update_work(self, work_id: int, payload: WorkPayload):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
@@ -20661,9 +21196,21 @@ class App(QMainWindow):
         if detail is None:
             QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
             return
+        existing_track_ids = list(detail.track_ids)
+        needs_catalog_refresh = set(existing_track_ids) != set(payload.track_ids)
+        focus_track_id = (
+            payload.track_ids[0]
+            if payload.track_ids
+            else (existing_track_ids[0] if existing_track_ids else None)
+        )
+        refresh_request = self._capture_catalog_refresh_request(focus_id=focus_track_id)
 
         def _worker(bundle, ctx):
-            ctx.set_status("Updating work metadata, contributors, and linked tracks...")
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Updating work metadata, contributors, and linked tracks...",
+            )
             run_snapshot_history_action(
                 history_manager=bundle.history_manager,
                 action_label=f"Update Work: {payload.title or detail.work.title}",
@@ -20676,20 +21223,63 @@ class App(QMainWindow):
                     "track_count": len(payload.track_ids),
                 },
                 mutation=lambda: bundle.work_service.update_work(int(work_id), payload),
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing work-update history snapshot..."),
+                record_progress=(56, "Recording work-update history..."),
                 logger=self.logger,
             )
-            return {
+            result_payload = {
                 "work_id": int(work_id),
                 "title": payload.title,
                 "track_ids": list(payload.track_ids),
             }
+            if needs_catalog_refresh:
+                ctx.report_progress(
+                    value=60,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=62,
+                    progress_end=88,
+                )
+            return result_payload
 
-        def _success(result: dict[str, object]) -> None:
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
             try:
                 self.conn.commit()
             except Exception:
                 pass
-            self._refresh_history_actions()
+            if needs_catalog_refresh:
+                self._apply_catalog_refresh_request(
+                    dict(result.get("dataset") or {}),
+                    refresh_request,
+                    progress_callback=self._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=90,
+                        end=97,
+                    ),
+                )
+            else:
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=96,
+                    message="Refreshing work manager and governance controls...",
+                )
+                self._refresh_history_actions()
+                self._refresh_add_track_artist_party_choices()
+                self._refresh_work_track_creation_context_ui()
+            self._refresh_work_manager_panel()
+            self._focus_work_in_manager(int(result["work_id"]))
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Work update complete and UI is ready.",
+            )
+
+        def _after_cleanup(result: dict[str, object]) -> None:
             self._log_event(
                 "work.update",
                 "Work updated",
@@ -20699,8 +21289,6 @@ class App(QMainWindow):
             )
             self._audit("UPDATE", "Work", ref_id=work_id, details=f"title={payload.title}")
             self._audit_commit()
-            self._refresh_work_manager_panel()
-            self._focus_work_in_manager(int(result["work_id"]))
 
         self._submit_background_bundle_task(
             title="Update Work",
@@ -20709,7 +21297,9 @@ class App(QMainWindow):
             kind="write",
             unique_key=f"work.update.{int(work_id)}",
             owner=self._work_manager_task_owner(),
-            on_success=_success,
+            worker_completion_progress=(89, "Finalizing background work update..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
             on_error=lambda failure: self._show_background_task_error(
                 "Work Manager",
                 failure,
@@ -20803,15 +21393,83 @@ class App(QMainWindow):
         if detail is None:
             QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
             return
-        try:
-            self._run_snapshot_history_action(
+        needs_catalog_refresh = bool(detail.track_ids)
+        refresh_request = self._capture_catalog_refresh_request(
+            focus_id=(detail.track_ids[0] if detail.track_ids else None)
+        )
+        next_work_id = self._adjacent_work_id_in_manager(int(work_id))
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Deleting the selected work and linked governance state...",
+            )
+            run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Delete Work: {detail.work.title}",
                 action_type="work.delete",
                 entity_type="Work",
                 entity_id=work_id,
                 payload={"work_id": int(work_id), "title": detail.work.title},
-                mutation=lambda: self.work_service.delete_work(int(work_id)),
+                mutation=lambda: bundle.work_service.delete_work(int(work_id)),
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing work-delete history snapshot..."),
+                record_progress=(56, "Recording work-delete history..."),
+                logger=self.logger,
             )
+            result_payload = {
+                "work_id": int(work_id),
+                "next_work_id": int(next_work_id) if next_work_id is not None else None,
+            }
+            if needs_catalog_refresh:
+                ctx.report_progress(
+                    value=60,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=62,
+                    progress_end=88,
+                )
+            return result_payload
+
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            if needs_catalog_refresh:
+                self._apply_catalog_refresh_request(
+                    dict(result.get("dataset") or {}),
+                    refresh_request,
+                    progress_callback=self._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=90,
+                        end=97,
+                    ),
+                )
+            else:
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=96,
+                    message="Refreshing work manager and governance controls...",
+                )
+                self._refresh_history_actions()
+                self._refresh_add_track_artist_party_choices()
+                self._refresh_work_track_creation_context_ui()
+            self._refresh_work_manager_panel()
+            if result.get("next_work_id") is not None:
+                self._focus_work_in_manager(int(result["next_work_id"]))
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Work deleted and UI is ready.",
+            )
+
+        def _after_cleanup(_result: dict[str, object]) -> None:
             self._log_event(
                 "work.delete",
                 "Work deleted",
@@ -20820,13 +21478,23 @@ class App(QMainWindow):
             )
             self._audit("DELETE", "Work", ref_id=work_id, details=f"title={detail.work.title}")
             self._audit_commit()
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Delete work failed: {exc}")
-            QMessageBox.critical(self, "Work Manager", f"Could not delete the work:\n{exc}")
-            return
-        self._refresh_history_actions()
-        self._refresh_work_manager_panel()
+
+        self._submit_background_bundle_task(
+            title="Delete Work",
+            description="Deleting the selected work and refreshing dependent views...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"work.delete.{int(work_id)}",
+            owner=self._work_manager_task_owner(),
+            worker_completion_progress=(89, "Finalizing background work deletion..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                "Work Manager",
+                failure,
+                user_message="Could not delete the work:",
+            ),
+        )
 
     def duplicate_release(self, release_id: int):
         if self.release_service is None:
@@ -23946,42 +24614,128 @@ class App(QMainWindow):
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         if msg_box.exec() == QMessageBox.Yes:
             try:
+                visible_track_ids: list[int] = []
+                for row in range(self.table.rowCount()):
+                    if self.table.isRowHidden(row):
+                        continue
+                    item = self.table.item(row, 0)
+                    if item is None:
+                        continue
+                    try:
+                        visible_track_ids.append(int(item.text()))
+                    except Exception:
+                        continue
                 row_id_item = self.table.item(current_row, 0)
                 if not row_id_item:
                     QMessageBox.warning(self, "Delete", "Could not determine record ID.")
                     return
                 row_id = int(row_id_item.text())
+                next_focus_id = None
+                try:
+                    current_index = visible_track_ids.index(int(row_id))
+                except ValueError:
+                    current_index = -1
+                if current_index >= 0:
+                    remaining_ids = [
+                        track_id for track_id in visible_track_ids if track_id != int(row_id)
+                    ]
+                    if current_index < len(remaining_ids):
+                        next_focus_id = int(remaining_ids[current_index])
+                    elif remaining_ids:
+                        next_focus_id = int(remaining_ids[-1])
                 before_snapshot = self.track_service.fetch_track_snapshot(row_id)
                 if before_snapshot is None:
                     QMessageBox.warning(
                         self, "Delete", "Could not load the selected track for deletion."
                     )
                     return
-                self._run_snapshot_history_action(
-                    action_label=f"Delete Track: {before_snapshot.track_title}",
-                    action_type="track.delete",
-                    entity_type="Track",
-                    entity_id=row_id,
-                    payload={
-                        "track_id": row_id,
-                        "track_title": before_snapshot.track_title,
-                        "isrc": before_snapshot.isrc,
-                    },
-                    mutation=lambda: self.track_service.delete_track(row_id),
+                refresh_request = self._capture_catalog_refresh_request(focus_id=next_focus_id)
+
+                def _worker(bundle, ctx):
+                    ctx.report_progress(
+                        value=0,
+                        maximum=100,
+                        message="Deleting the selected track and related history state...",
+                    )
+                    run_snapshot_history_action(
+                        history_manager=bundle.history_manager,
+                        action_label=f"Delete Track: {before_snapshot.track_title}",
+                        action_type="track.delete",
+                        entity_type="Track",
+                        entity_id=row_id,
+                        payload={
+                            "track_id": row_id,
+                            "track_title": before_snapshot.track_title,
+                            "isrc": before_snapshot.isrc,
+                        },
+                        mutation=lambda: bundle.track_service.delete_track(row_id),
+                        progress_callback=ctx.report_progress,
+                        post_mutation_progress=(48, "Capturing track-delete history snapshot..."),
+                        record_progress=(56, "Recording track-delete history..."),
+                        logger=self.logger,
+                    )
+                    ctx.report_progress(
+                        value=60,
+                        maximum=100,
+                        message="Loading refreshed catalog rows, media badges, and lookup values...",
+                    )
+                    return {
+                        "dataset": self._load_catalog_ui_dataset_from_bundle(
+                            bundle,
+                            ctx,
+                            progress_start=62,
+                            progress_end=88,
+                        )
+                    }
+
+                def _before_cleanup(result: dict[str, object], ui_progress) -> None:
+                    try:
+                        self.conn.commit()
+                    except Exception:
+                        pass
+                    self._apply_catalog_refresh_request(
+                        dict(result.get("dataset") or {}),
+                        refresh_request,
+                        progress_callback=self._scaled_ui_progress_callback(
+                            ui_progress,
+                            start=90,
+                            end=99,
+                        ),
+                    )
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=100,
+                        message="Track deleted and catalog UI is ready.",
+                    )
+
+                def _after_cleanup(_result: dict[str, object]) -> None:
+                    self._log_event(
+                        "track.delete",
+                        "Track deleted",
+                        level=logging.WARNING,
+                        track_id=row_id,
+                        isrc=before_snapshot.isrc,
+                        track_title=before_snapshot.track_title,
+                    )
+                    self._audit("DELETE", "Track", ref_id=row_id, details="delete_entry")
+                    self._audit_commit()
+
+                self._submit_background_bundle_task(
+                    title="Delete Track",
+                    description="Deleting the selected track and refreshing the catalog...",
+                    task_fn=_worker,
+                    kind="write",
+                    unique_key=f"track.delete.{int(row_id)}",
+                    owner=self,
+                    worker_completion_progress=(89, "Finalizing background track deletion..."),
+                    on_success_before_cleanup=_before_cleanup,
+                    on_success_after_cleanup=_after_cleanup,
+                    on_error=lambda failure: self._show_background_task_error(
+                        "Delete Track",
+                        failure,
+                        user_message="Failed to delete:",
+                    ),
                 )
-                self.refresh_table_preserve_view()
-                self.populate_all_comboboxes()
-                self._log_event(
-                    "track.delete",
-                    "Track deleted",
-                    level=logging.WARNING,
-                    track_id=row_id,
-                    isrc=before_snapshot.isrc,
-                    track_title=before_snapshot.track_title,
-                )
-                self._audit("DELETE", "Track", ref_id=row_id, details="delete_entry")
-                self._audit_commit()
-                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Delete failed: {e}")
@@ -27988,18 +28742,53 @@ class App(QMainWindow):
         *,
         spec: dict[str, object] | None,
         kind: str,
+        size: int = 18,
     ) -> QIcon:
         settings = normalize_blob_icon_settings(
             getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
         )
-        return icon_from_blob_icon_spec(
-            spec,
+        normalized_spec = normalize_blob_icon_spec(spec, kind=kind, allow_inherit=True)
+        fallback_spec = normalize_blob_icon_spec(
+            settings.get(kind),
+            kind=kind,
+            allow_inherit=False,
+        )
+        try:
+            cache_key = (
+                str(kind or ""),
+                int(size),
+                json.dumps(
+                    {
+                        "spec": normalized_spec,
+                        "fallback": fallback_spec,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        except Exception:
+            cache_key = (str(kind or ""), int(size), repr((normalized_spec, fallback_spec)))
+        cache = getattr(self, "_blob_badge_icon_cache", None)
+        if cache is None:
+            self._reset_blob_badge_render_cache()
+            cache = self._blob_badge_icon_cache
+        cached_icon = cache.get(cache_key)
+        if isinstance(cached_icon, QIcon) and not cached_icon.isNull():
+            return cached_icon
+        icon = icon_from_blob_icon_spec(
+            normalized_spec,
             kind=kind,
             style=self.style() if hasattr(self, "style") else None,
-            fallback_spec=settings.get(kind),
+            fallback_spec=fallback_spec,
             allow_inherit=True,
-            size=18,
+            size=int(size),
         )
+        if not icon.isNull():
+            warmed_pixmap = icon.pixmap(int(size), int(size))
+            if not warmed_pixmap.isNull():
+                icon = QIcon(warmed_pixmap)
+        cache[cache_key] = icon
+        return icon
 
     def _row_for_id(self, track_id: int) -> int:
         for r in range(self.table.rowCount()):
@@ -28088,8 +28877,8 @@ class App(QMainWindow):
         except Exception:
             return None
 
-    def _apply_blob_badges(self, *, progress_callback=None):
-        """Deterministically compute blob badges from source, not cached meta."""
+    def _apply_blob_badges(self, *, prepared_payload=None, progress_callback=None):
+        """Apply blob badges from prepared payload when available, else live services."""
         base = len(self.BASE_HEADERS)
         total_rows = self.table.rowCount()
         if total_rows <= 0:
@@ -28097,6 +28886,9 @@ class App(QMainWindow):
                 progress_callback(1, 1, "No media badges needed recalculation.")
             return
         batch_size = max(1, min(100, total_rows // 20 or 1))
+        prepared_standard_meta = dict((prepared_payload or {}).get("standard_media") or {})
+        prepared_custom_meta = dict((prepared_payload or {}).get("custom_fields") or {})
+        using_prepared_payload = bool(prepared_standard_meta or prepared_custom_meta)
         standard_media_columns = {
             header: self.BASE_HEADERS.index(header)
             for header in self._standard_media_header_map()
@@ -28118,10 +28910,12 @@ class App(QMainWindow):
                 col = standard_media_columns.get(header)
                 if col is None:
                     continue
-                try:
-                    meta = self.track_media_meta(pk, media_key)
-                except Exception:
-                    meta = {"has_media": False, "mime_type": None, "size_bytes": 0}
+                meta = prepared_standard_meta.get((pk, media_key))
+                if meta is None:
+                    try:
+                        meta = self.track_media_meta(pk, media_key)
+                    except Exception:
+                        meta = {"has_media": False, "mime_type": None, "size_bytes": 0}
                 display = (
                     self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
                     if meta.get("has_media")
@@ -28154,14 +28948,16 @@ class App(QMainWindow):
                 if ftype not in ("blob_image", "blob_audio"):
                     continue
 
-                try:
-                    meta = self.cf_get_value_meta(
-                        pk,
-                        cf["id"],
-                        include_storage_details=True,
-                    )
-                except Exception:
-                    meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
+                meta = prepared_custom_meta.get((pk, int(cf["id"])))
+                if meta is None:
+                    try:
+                        meta = self.cf_get_value_meta(
+                            pk,
+                            cf["id"],
+                            include_storage_details=True,
+                        )
+                    except Exception:
+                        meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
                 has_blob = bool(meta.get("has_blob"))
                 display = (
                     self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
@@ -28198,7 +28994,11 @@ class App(QMainWindow):
                 progress_callback(
                     row_idx + 1,
                     total_rows,
-                    f"Recomputed media badges for {row_idx + 1} of {total_rows} rows.",
+                    (
+                        f"Applied prepared media badges for {row_idx + 1} of {total_rows} rows."
+                        if using_prepared_payload
+                        else f"Recomputed media badges for {row_idx + 1} of {total_rows} rows."
+                    ),
                 )
 
     def _make_default_export_filename(self, track_id: int, field_def: dict, mime: str) -> str:
@@ -29360,49 +30160,58 @@ class AlbumEntryDialog(QDialog):
         if payloads is None:
             return
 
-        created_track_ids: list[int] = []
-        created_work_ids: list[int] = []
         album_title = payloads[0].album_title or "Album"
+        refresh_request = self.app._capture_catalog_refresh_request()
+        profile_name = self.app._current_profile_name()
 
-        def mutation():
-            nonlocal created_track_ids
-            nonlocal created_work_ids
-            created_track_ids = []
-            created_work_ids = []
-            if self.app.governed_track_creation_service is None:
-                raise ValueError("Governed track creation service is unavailable.")
-            cur = self.app.conn.cursor()
-            results = self.app.governed_track_creation_service.create_governed_tracks_batch(
-                payloads,
-                cursor=cur,
-                profile_name=self.app._current_profile_name(),
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Saving album tracks, media, and work governance...",
             )
-            created_track_ids = [int(result.track_id) for result in results]
-            created_work_ids = [int(result.work_id) for result in results]
-            release_ids = self.app._sync_releases_for_tracks(created_track_ids)
+            governed_service = GovernedImportCoordinator(
+                bundle.conn,
+                track_service=bundle.track_service,
+                party_service=bundle.party_service,
+                work_service=bundle.work_service,
+                profile_name=profile_name,
+            )
 
-            try:
-                self.app._log_event(
-                    "album.create",
-                    "Album created",
-                    album_title=album_title,
-                    track_ids=created_track_ids,
-                    track_count=len(created_track_ids),
-                    release_ids=release_ids,
+            def _mutation():
+                cur = bundle.conn.cursor()
+                results = governed_service.create_governed_tracks_batch(
+                    payloads,
+                    cursor=cur,
+                    profile_name=profile_name,
+                    progress_callback=self.app._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=4,
+                        end=40,
+                    ),
                 )
-                for track_id, payload in zip(created_track_ids, payloads):
-                    self.app._audit(
-                        "CREATE", "Track", ref_id=track_id, details=f"isrc={payload.isrc}"
-                    )
-                self.app._audit_commit()
-            except Exception as audit_err:
-                self.app.logger.warning(f"Album create audit failed: {audit_err}")
+                created_track_ids = [int(result.track_id) for result in results]
+                created_work_ids = [int(result.work_id) for result in results]
+                ctx.report_progress(
+                    value=44,
+                    maximum=100,
+                    message="Synchronizing release records for the saved album...",
+                )
+                release_ids = self.app._sync_releases_for_tracks(
+                    created_track_ids,
+                    cursor=cur,
+                    track_service=bundle.track_service,
+                    release_service=bundle.release_service,
+                    profile_name=profile_name,
+                )
+                return {
+                    "track_ids": created_track_ids,
+                    "work_ids": created_work_ids,
+                    "release_ids": list(release_ids),
+                }
 
-            safe_wal_checkpoint(self.app.conn, logger=self.app.logger)
-            return list(created_track_ids)
-
-        try:
-            result_ids = self.app._run_snapshot_history_action(
+            result_payload = run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Create Album Batch: {album_title}",
                 action_type="album.create",
                 entity_type="Album",
@@ -29411,26 +30220,97 @@ class AlbumEntryDialog(QDialog):
                     "album_title": album_title,
                     "track_count": len(payloads),
                 },
-                mutation=mutation,
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(50, "Capturing album-save history snapshot..."),
+                record_progress=(58, "Recording album-save history..."),
+                logger=self.app.logger,
             )
-        except Exception as exc:
-            self.app.logger.exception(f"Album create failed: {exc}")
-            QMessageBox.critical(self, "Save Album", f"Could not save the album:\n{exc}")
-            return
+            ctx.report_progress(
+                value=60,
+                maximum=100,
+                message="Loading refreshed catalog rows, media badges, and lookup values...",
+            )
+            result_payload["dataset"] = self.app._load_catalog_ui_dataset_from_bundle(
+                bundle,
+                ctx,
+                progress_start=62,
+                progress_end=88,
+            )
+            return result_payload
 
-        self.created_track_ids = list(result_ids or created_track_ids)
-        focus_id = self.created_track_ids[0] if self.created_track_ids else None
-        self.app.refresh_table_preserve_view(focus_id=focus_id)
-        self.app.populate_all_comboboxes()
-        if created_work_ids:
-            self.app._refresh_work_manager_panel()
-            self.app._focus_work_in_manager(int(created_work_ids[0]))
-        if hasattr(self.app, "statusBar"):
-            self.app.statusBar().showMessage(
-                f"Saved album '{album_title}' with {len(self.created_track_ids)} track{'s' if len(self.created_track_ids) != 1 else ''}.",
-                5000,
+        def _before_cleanup(result_payload: dict[str, object], ui_progress) -> None:
+            try:
+                self.app.conn.commit()
+            except Exception:
+                pass
+            focus_id = None
+            track_ids = list(result_payload.get("track_ids") or [])
+            if track_ids:
+                focus_id = int(track_ids[0])
+            refresh_payload = dict(refresh_request)
+            refresh_payload["focus_id"] = focus_id
+            self.app._apply_catalog_refresh_request(
+                dict(result_payload.get("dataset") or {}),
+                refresh_payload,
+                progress_callback=self.app._scaled_ui_progress_callback(
+                    ui_progress,
+                    start=90,
+                    end=97,
+                ),
             )
-        self.accept()
+            self.created_track_ids = track_ids
+            self.app._advance_task_ui_progress(
+                ui_progress,
+                value=98,
+                message="Refreshing work manager and final album state...",
+            )
+            if result_payload.get("work_ids"):
+                self.app._refresh_work_manager_panel()
+                self.app._focus_work_in_manager(int(result_payload["work_ids"][0]))
+            self.app._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Album saved and catalog UI is ready.",
+            )
+
+        def _after_cleanup(result_payload: dict[str, object]) -> None:
+            track_ids = list(result_payload.get("track_ids") or [])
+            release_ids = list(result_payload.get("release_ids") or [])
+            self.app._log_event(
+                "album.create",
+                "Album created",
+                album_title=album_title,
+                track_ids=track_ids,
+                track_count=len(track_ids),
+                release_ids=release_ids,
+            )
+            for track_id, track_payload in zip(track_ids, payloads):
+                self.app._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={track_payload.isrc}")
+            self.app._audit_commit()
+            if hasattr(self.app, "statusBar"):
+                self.app.statusBar().showMessage(
+                    f"Saved album '{album_title}' with {len(track_ids)} track{'s' if len(track_ids) != 1 else ''}.",
+                    5000,
+                )
+            self.accept()
+
+        self.app._submit_background_bundle_task(
+            title="Save Album",
+            description="Saving album tracks, media, and work governance...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"album.create.{album_title.strip().casefold()}",
+            owner=self.app,
+            worker_completion_progress=(89, "Finalizing background album save..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self.app._show_background_task_error(
+                "Save Album",
+                failure,
+                user_message="Could not save the album:",
+            ),
+        )
 
 
 class EditDialog(QDialog):
@@ -30801,69 +31681,13 @@ class EditDialog(QDialog):
                     album_shared_fields_changed
                 )
 
-                def mutation():
-                    with parent.conn:
-                        cur = parent.conn.cursor()
-                        parent.track_service.update_track(source_payload, cursor=cur)
-                        if needs_peer_album_metadata_update:
-                            parent.track_service.apply_album_metadata_to_tracks(
-                                propagated_track_ids,
-                                field_updates=album_field_updates,
-                                cursor=cur,
-                            )
-                        parent._sync_releases_for_tracks(
-                            [row_id, *propagated_track_ids], cursor=cur
-                        )
-
-                    safe_wal_checkpoint(parent.conn, logger=parent.logger)
-                    try:
-                        parent._log_event(
-                            "track.update",
-                            "Track updated with album-level propagation",
-                            track_id=row_id,
-                            isrc=iso_isrc,
-                            track_title=new_track_title,
-                            propagated_track_ids=propagated_track_ids,
-                            propagated_fields=propagated_field_labels,
-                        )
-                        parent._audit(
-                            "UPDATE",
-                            "Track",
-                            ref_id=row_id,
-                            details=(
-                                f"isrc={iso_isrc}; "
-                                f"propagated_track_ids={','.join(str(track_id) for track_id in propagated_track_ids)}; "
-                                f"propagated_fields={','.join(propagated_field_labels)}"
-                            ),
-                        )
-                        parent._audit_commit()
-                    except Exception as audit_err:
-                        parent.logger.warning(f"Audit failed: {audit_err}")
-
-                parent._run_snapshot_history_action(
-                    action_label=f"Update Album Metadata: {new_track_title}",
-                    action_type="track.update_album_metadata",
-                    entity_type="Track",
-                    entity_id=row_id,
-                    payload={
-                        "track_id": row_id,
-                        "track_title": new_track_title,
-                        "propagated_track_ids": propagated_track_ids,
-                        "propagated_fields": propagated_field_labels,
-                    },
-                    mutation=mutation,
-                )
-                parent.populate_all_comboboxes()
-                parent.refresh_table_preserve_view(focus_id=row_id)
-                self.accept()
-                return
-
             cleanup_artist_names, cleanup_album_titles = parent._collect_catalog_cleanup_targets(
                 artist_name=new_artist_name,
                 additional_artists=new_additional_artist,
                 album_title=new_album_title,
             )
             profile_name = parent._current_profile_name()
+            refresh_request = parent._capture_catalog_refresh_request(focus_id=row_id)
             action_label = (
                 f"Update Album Metadata: {new_track_title}"
                 if propagated_mode
@@ -30924,7 +31748,7 @@ class EditDialog(QDialog):
                         "propagated_fields": list(propagated_field_labels),
                     }
 
-                return run_snapshot_history_action(
+                result_payload = run_snapshot_history_action(
                     history_manager=bundle.history_manager,
                     action_label=action_label,
                     action_type=action_type,
@@ -30932,15 +31756,45 @@ class EditDialog(QDialog):
                     entity_id=row_id,
                     payload=history_payload,
                     mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(48, "Capturing track-update history snapshot..."),
+                    record_progress=(56, "Recording track-update history..."),
                     logger=parent.logger,
                 )
+                ctx.report_progress(
+                    value=60,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = parent._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=62,
+                    progress_end=88,
+                )
+                return result_payload
 
-            def _success(result: dict[str, object]):
+            def _before_cleanup(result: dict[str, object], ui_progress) -> None:
                 try:
                     parent.conn.commit()
                 except Exception:
                     pass
-                parent._refresh_history_actions()
+                parent._apply_catalog_refresh_request(
+                    dict(result.get("dataset") or {}),
+                    refresh_request,
+                    progress_callback=parent._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=90,
+                        end=98,
+                    ),
+                )
+                parent._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Track changes saved and catalog UI is ready.",
+                )
+
+            def _after_cleanup(result: dict[str, object]) -> None:
                 if propagated_mode:
                     parent._log_event(
                         "track.update",
@@ -30971,8 +31825,6 @@ class EditDialog(QDialog):
                     )
                     parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
                 parent._audit_commit()
-                parent.populate_all_comboboxes()
-                parent.refresh_table_preserve_view(focus_id=row_id)
                 self.accept()
 
             parent._submit_background_bundle_task(
@@ -30982,7 +31834,9 @@ class EditDialog(QDialog):
                 kind="write",
                 unique_key=f"track.update.{row_id}",
                 owner=self,
-                on_success=_success,
+                worker_completion_progress=(89, "Finalizing background track update..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_after_cleanup,
                 on_error=lambda failure: parent._show_background_task_error(
                     "Update Error",
                     failure,
@@ -31229,6 +32083,9 @@ class EditDialog(QDialog):
             for snapshot in self._bulk_snapshots
         ]
         self._deduplicate_bulk_album_art_updates(update_payloads)
+        refresh_request = parent._capture_catalog_refresh_request(
+            focus_id=(self.batch_track_ids[0] if self.batch_track_ids else None)
+        )
 
         def _worker(bundle, ctx):
             total = max(1, len(update_payloads))
@@ -31258,7 +32115,7 @@ class EditDialog(QDialog):
                 ctx.report_progress(total + 1, total + 1, message="Bulk update complete.")
                 return {"focus_id": self.batch_track_ids[0] if self.batch_track_ids else None}
 
-            return run_snapshot_history_action(
+            result_payload = run_snapshot_history_action(
                 history_manager=bundle.history_manager,
                 action_label=f"Bulk Edit Tracks ({len(self.batch_track_ids)})",
                 action_type="track.bulk_update",
@@ -31266,15 +32123,48 @@ class EditDialog(QDialog):
                 entity_id="batch",
                 payload={"track_ids": self.batch_track_ids, "fields": changed_fields},
                 mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing bulk track history snapshot..."),
+                record_progress=(56, "Recording bulk track history..."),
                 logger=parent.logger,
             )
+            ctx.report_progress(
+                value=60,
+                maximum=100,
+                message="Loading refreshed catalog rows, media badges, and lookup values...",
+            )
+            result_payload["dataset"] = parent._load_catalog_ui_dataset_from_bundle(
+                bundle,
+                ctx,
+                progress_start=62,
+                progress_end=88,
+            )
+            return result_payload
 
-        def _success(result: dict[str, object]):
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
             try:
                 parent.conn.commit()
             except Exception:
                 pass
-            parent._refresh_history_actions()
+            refresh_payload = dict(refresh_request)
+            if result.get("focus_id") is not None:
+                refresh_payload["focus_id"] = int(result["focus_id"])
+            parent._apply_catalog_refresh_request(
+                dict(result.get("dataset") or {}),
+                refresh_payload,
+                progress_callback=parent._scaled_ui_progress_callback(
+                    ui_progress,
+                    start=90,
+                    end=98,
+                ),
+            )
+            parent._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Bulk track changes saved and catalog UI is ready.",
+            )
+
+        def _after_cleanup(result: dict[str, object]) -> None:
             parent._log_event(
                 "track.bulk_update",
                 "Bulk updated tracks",
@@ -31291,8 +32181,6 @@ class EditDialog(QDialog):
                 ),
             )
             parent._audit_commit()
-            parent.populate_all_comboboxes()
-            parent.refresh_table_preserve_view(focus_id=result.get("focus_id"))
             self.accept()
 
         try:
@@ -31303,7 +32191,9 @@ class EditDialog(QDialog):
                 kind="write",
                 unique_key=f"track.bulk_update.{','.join(str(track_id) for track_id in self.batch_track_ids)}",
                 owner=self,
-                on_success=_success,
+                worker_completion_progress=(89, "Finalizing background bulk track update..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_after_cleanup,
                 on_error=lambda failure: parent._show_background_task_error(
                     "Update Error",
                     failure,

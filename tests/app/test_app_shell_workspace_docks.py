@@ -29,6 +29,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_update_runs_in_background_bundle_task = (
         AppShellTestCase.case_work_manager_update_runs_in_background_bundle_task
     )
+    test_work_delete_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_work_delete_progress_reaches_100_only_after_final_ui_refresh
+    )
     test_work_manager_opens_album_dialog_for_selected_work = (
         AppShellTestCase.case_work_manager_opens_album_dialog_for_selected_work
     )
@@ -52,6 +55,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     )
     test_catalog_cleanup_legacy_route_opens_diagnostics_cleanup_tab = (
         AppShellTestCase.case_catalog_cleanup_legacy_route_opens_diagnostics_cleanup_tab
+    )
+    test_album_cleanup_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_album_cleanup_progress_reaches_100_only_after_final_ui_refresh
     )
     test_diagnostics_catalog_cleanup_tabs_keep_bottom_actions_inside_themed_scroll_surfaces = (
         AppShellTestCase.case_diagnostics_catalog_cleanup_tabs_keep_bottom_actions_inside_themed_scroll_surfaces
