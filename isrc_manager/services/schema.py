@@ -53,6 +53,13 @@ class DatabaseSchemaService:
             if row and row[0]
         }
 
+    def _ordered_table_columns(self, table_name: str) -> list[str]:
+        return [
+            str(row[1])
+            for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+            if row and row[1]
+        ]
+
     def _table_exists(self, table_name: str) -> bool:
         row = self.cursor.execute(
             """
@@ -64,6 +71,48 @@ class DatabaseSchemaService:
             (table_name,),
         ).fetchone()
         return row is not None
+
+    def _snapshot_rows_for_tables_referencing(
+        self, parent_tables: set[str]
+    ) -> dict[str, tuple[list[str], list[tuple[object, ...]]]]:
+        snapshots: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {}
+        for table_name in sorted(self._table_names()):
+            if table_name in parent_tables or table_name.startswith("sqlite_"):
+                continue
+            foreign_keys = self.cursor.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
+            if not any(str(row[2] or "") in parent_tables for row in foreign_keys):
+                continue
+            columns = self._ordered_table_columns(table_name)
+            if not columns:
+                continue
+            rows = self.cursor.execute(f"SELECT * FROM {table_name}").fetchall()
+            if not rows:
+                continue
+            snapshots[table_name] = (columns, rows)
+        return snapshots
+
+    def _restore_snapshotted_rows(
+        self, snapshots: dict[str, tuple[list[str], list[tuple[object, ...]]]]
+    ) -> None:
+        if not snapshots:
+            return
+        self.cursor.execute("PRAGMA defer_foreign_keys=ON")
+        for table_name in sorted(snapshots):
+            if not self._table_exists(table_name):
+                continue
+            source_columns, rows = snapshots[table_name]
+            live_columns = set(self._ordered_table_columns(table_name))
+            insert_columns = [column for column in source_columns if column in live_columns]
+            if not insert_columns:
+                continue
+            placeholders = ", ".join("?" for _ in insert_columns)
+            sql = (
+                f"INSERT OR IGNORE INTO {table_name} ({', '.join(insert_columns)}) "
+                f"VALUES ({placeholders})"
+            )
+            for row in rows:
+                payload = dict(zip(source_columns, row))
+                self.cursor.execute(sql, [payload.get(column) for column in insert_columns])
 
     def _create_current_tracks_table(self, table_name: str = "Tracks") -> None:
         self.cursor.execute(
@@ -1368,6 +1417,12 @@ class DatabaseSchemaService:
         track_rows = _table_rows("Tracks") if self._table_exists("Tracks") else []
         release_rows = _table_rows("Releases") if self._table_exists("Releases") else []
         contract_rows = _table_rows("Contracts") if self._table_exists("Contracts") else []
+        # Migrations run under a SAVEPOINT, so dropping rebuilt parent tables cannot rely on
+        # PRAGMA foreign_keys=OFF to protect dependent rows. Snapshot child tables up front and
+        # restore them after the parent tables have been rebuilt.
+        child_row_snapshots = self._snapshot_rows_for_tables_referencing(
+            {"Tracks", "Releases", "Contracts"}
+        )
 
         original_foreign_keys = int(self.conn.execute("PRAGMA foreign_keys").fetchone()[0] or 0)
         self.cursor.execute("PRAGMA foreign_keys=OFF")
@@ -1643,6 +1698,7 @@ class DatabaseSchemaService:
         self._ensure_license_columns()
         self._ensure_code_registry_tables(backfill_catalog_links=False)
         self._ensure_code_registry_entry_immutability_triggers()
+        self._restore_snapshotted_rows(child_row_snapshots)
         self._write_migration_diagnostics(migration_version=40, rows=dict(diagnostics))
 
     def _ensure_current_custom_field_value_schema(self) -> None:

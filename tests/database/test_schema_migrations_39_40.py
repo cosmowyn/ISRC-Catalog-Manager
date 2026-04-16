@@ -11,7 +11,7 @@ from isrc_manager.code_registry import (
     CodeRegistryService,
 )
 from isrc_manager.constants import SCHEMA_TARGET
-from isrc_manager.parties import PartyService
+from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.services import DatabaseSchemaService
 
 
@@ -362,6 +362,283 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                 )
                 self.assertEqual(
                     diagnostics[(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "external_authority")], 1
+                )
+            finally:
+                conn.close()
+
+    def test_migrate_39_to_40_preserves_child_rows_when_parent_tables_are_rebuilt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            conn.execute("PRAGMA foreign_keys = ON")
+            try:
+                service = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                service.init_db()
+
+                party_service = PartyService(conn)
+                artist_id = int(party_service.ensure_artist_party_by_name("Migration Artist"))
+                counterparty_id = int(
+                    party_service.create_party(
+                        PartyPayload(
+                            legal_name="Migration Counterparty",
+                            display_name="Migration Counterparty",
+                            party_type="organization",
+                        )
+                    )
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Works(
+                        id,
+                        title,
+                        metadata_complete,
+                        contract_signed,
+                        rights_verified
+                    )
+                    VALUES (1, 'Migration Work', 1, 0, 0)
+                    """
+                )
+
+                conn.commit()
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute("DROP TABLE IF EXISTS ExternalCodeIdentifiers")
+                conn.execute("DROP TABLE IF EXISTS Tracks")
+                conn.execute("DROP TABLE IF EXISTS Releases")
+                conn.execute("DROP TABLE IF EXISTS Contracts")
+                conn.execute(
+                    """
+                    CREATE TABLE Tracks (
+                        id INTEGER PRIMARY KEY,
+                        isrc TEXT NOT NULL,
+                        isrc_compact TEXT,
+                        db_entry_date DATE,
+                        track_title TEXT NOT NULL,
+                        catalog_number TEXT,
+                        catalog_registry_entry_id INTEGER,
+                        external_catalog_identifier_id INTEGER,
+                        main_artist_party_id INTEGER NOT NULL,
+                        track_length_sec INTEGER NOT NULL DEFAULT 0,
+                        work_id INTEGER
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE Releases (
+                        id INTEGER PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        primary_artist TEXT,
+                        release_type TEXT NOT NULL DEFAULT 'album',
+                        catalog_number TEXT,
+                        catalog_registry_entry_id INTEGER,
+                        external_catalog_identifier_id INTEGER
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE Contracts (
+                        id INTEGER PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        contract_type TEXT,
+                        contract_number TEXT,
+                        license_number TEXT,
+                        registry_sha256_key TEXT,
+                        contract_registry_entry_id INTEGER,
+                        license_registry_entry_id INTEGER,
+                        registry_sha256_key_entry_id INTEGER,
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        profile_name TEXT,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        id,
+                        isrc,
+                        isrc_compact,
+                        db_entry_date,
+                        track_title,
+                        catalog_number,
+                        catalog_registry_entry_id,
+                        external_catalog_identifier_id,
+                        main_artist_party_id,
+                        track_length_sec,
+                        work_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        1,
+                        "NL-TST-26-90001",
+                        "NLTST2690001",
+                        "2026-04-16",
+                        "Legacy Track",
+                        None,
+                        None,
+                        None,
+                        artist_id,
+                        201,
+                        1,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Releases(
+                        id,
+                        title,
+                        primary_artist,
+                        release_type,
+                        catalog_number,
+                        catalog_registry_entry_id,
+                        external_catalog_identifier_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        1,
+                        "Legacy Release",
+                        "Migration Artist",
+                        "album",
+                        None,
+                        None,
+                        None,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Contracts(
+                        id,
+                        title,
+                        contract_type,
+                        contract_number,
+                        license_number,
+                        registry_sha256_key,
+                        status,
+                        profile_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        1,
+                        "Legacy Contract",
+                        "license",
+                        None,
+                        None,
+                        None,
+                        "active",
+                        "AeonCosmowyn",
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO TrackArtists(track_id, party_id, role)
+                    VALUES (1, ?, 'additional')
+                    """,
+                    (counterparty_id,),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ReleaseTracks(
+                        release_id,
+                        track_id,
+                        disc_number,
+                        track_number,
+                        sequence_number
+                    )
+                    VALUES (1, 1, 1, 1, 1)
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO WorkTrackLinks(work_id, track_id, is_primary, notes)
+                    VALUES (1, 1, 1, 'migration work link')
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ContractParties(contract_id, party_id, role_label, is_primary, notes)
+                    VALUES (1, ?, 'counterparty', 1, 'migration party')
+                    """,
+                    (counterparty_id,),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ContractDocuments(
+                        id,
+                        contract_id,
+                        title,
+                        document_type,
+                        version_label,
+                        active_flag,
+                        filename,
+                        storage_mode,
+                        uploaded_at
+                    )
+                    VALUES (
+                        1,
+                        1,
+                        'Signed PDF',
+                        'signed_agreement',
+                        'v1',
+                        1,
+                        'signed.pdf',
+                        'managed_file',
+                        '2026-04-16 08:00:00'
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ContractWorkLinks(contract_id, work_id)
+                    VALUES (1, 1)
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ContractTrackLinks(contract_id, track_id)
+                    VALUES (1, 1)
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ContractReleaseLinks(contract_id, release_id)
+                    VALUES (1, 1)
+                    """
+                )
+                conn.execute("PRAGMA user_version = 39")
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.commit()
+
+                service.migrate_schema()
+
+                counts = {
+                    table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in (
+                        "TrackArtists",
+                        "ReleaseTracks",
+                        "WorkTrackLinks",
+                        "ContractParties",
+                        "ContractDocuments",
+                        "ContractWorkLinks",
+                        "ContractTrackLinks",
+                        "ContractReleaseLinks",
+                    )
+                }
+                self.assertEqual(
+                    counts,
+                    {
+                        "TrackArtists": 1,
+                        "ReleaseTracks": 1,
+                        "WorkTrackLinks": 1,
+                        "ContractParties": 1,
+                        "ContractDocuments": 1,
+                        "ContractWorkLinks": 1,
+                        "ContractTrackLinks": 1,
+                        "ContractReleaseLinks": 1,
+                    },
                 )
             finally:
                 conn.close()
