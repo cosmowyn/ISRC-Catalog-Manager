@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from isrc_manager.blob_icons import normalize_blob_icon_settings
 from isrc_manager.file_storage import (

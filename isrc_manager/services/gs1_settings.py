@@ -7,6 +7,7 @@ import io
 import json
 import sqlite3
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QSettings
 
@@ -534,13 +535,14 @@ class GS1SettingsService:
         return tuple(contracts)
 
     def _stored_contracts_row(self) -> tuple[object, ...] | None:
-        return self.conn.execute(
+        row = self.conn.execute(
             f"""
             SELECT filename, source_path, csv_blob, mime_type, size_bytes, created_at, updated_at
             FROM {self.CONTRACTS_STORAGE_TABLE}
             WHERE id = 1
             """
         ).fetchone()
+        return cast(tuple[object, ...] | None, row)
 
     def _contracts_filename(
         self,
@@ -603,7 +605,7 @@ class GS1SettingsService:
             return self._serialize_contracts_csv(normalized_contracts)
         row = self._stored_contracts_row()
         if row and row[2] is not None:
-            return bytes(row[2])
+            return cast(bytes, row[2])
         legacy_source_path = self.load_contracts_csv_path()
         if legacy_source_path:
             legacy_path = Path(legacy_source_path)
