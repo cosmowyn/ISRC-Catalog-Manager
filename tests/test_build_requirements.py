@@ -2,6 +2,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -29,6 +30,14 @@ class BuildMetadataTests(unittest.TestCase):
             version = build._project_version(pyproject)
 
         self.assertEqual(version, "9.8.7")
+
+    def test_build_splash_version_label_appends_integer_date(self):
+        label = build._build_splash_version_label(
+            "3.1.1",
+            build_timestamp=datetime(2026, 4, 17, 1, 2, 3),
+        )
+
+        self.assertEqual(label, "Version: 3.1.1-17042026.3723")
 
 
 class PyInstallerDiscoveryTests(unittest.TestCase):
@@ -291,6 +300,55 @@ class SplashResolutionTests(unittest.TestCase):
         self.assertIsNone(resolved.path)
         self.assertEqual(resolved.kind, "missing")
         self.assertIn("no splash asset found", resolved.detail)
+
+    def test_locate_splash_divider_returns_longest_title_band_run(self):
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGBA", (900, 600), (255, 255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        draw.line((364, 329, 726, 329), fill=(188, 215, 247, 255), width=1)
+
+        line_start, line_end, line_y = build._locate_splash_divider(image)
+
+        self.assertEqual((line_start, line_end, line_y), (364, 726, 329))
+
+    def test_stamp_runtime_splash_asset_writes_generated_png_above_divider(self):
+        from PIL import Image, ImageChops, ImageDraw
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            splash_path = root / "build_assets" / "splash.png"
+            splash_path.parent.mkdir(parents=True, exist_ok=True)
+
+            source_image = Image.new("RGBA", (900, 600), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(source_image)
+            draw.line((364, 329, 726, 329), fill=(188, 215, 247, 255), width=1)
+            source_image.save(splash_path, format="PNG")
+
+            stamped = build._stamp_runtime_splash_asset(
+                root,
+                build.ResolutionResult(
+                    path=splash_path.resolve(),
+                    kind="canonical",
+                    source_label="build_assets",
+                    detail="selected canonical splash asset build_assets/splash.png",
+                ),
+                app_version="3.1.1",
+                build_timestamp=datetime(2026, 4, 17, 1, 2, 3),
+            )
+
+            original = Image.open(splash_path).convert("RGB")
+            generated = Image.open(stamped.path).convert("RGB")
+            difference_bbox = ImageChops.difference(original, generated).getbbox()
+
+        self.assertEqual(
+            stamped.path,
+            (root / "build" / "generated_assets" / "splash.png").resolve(),
+        )
+        self.assertIsNotNone(difference_bbox)
+        self.assertLessEqual(difference_bbox[0], 364)
+        self.assertLess(difference_bbox[3], 329)
+        self.assertIn("Version: 3.1.1-17042026.3723", stamped.detail)
 
 
 class CommandConstructionTests(unittest.TestCase):

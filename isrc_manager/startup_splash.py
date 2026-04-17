@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QRect, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import QObject, QRect, QRectF, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from .paths import RES_DIR
@@ -14,6 +14,7 @@ from .startup_progress import StartupPhase, startup_phase_label
 
 SPLASH_BASENAME = "splash"
 SPLASH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
+SPLASH_PROGRESS_TEXT_COLOR = QColor(85, 100, 117)
 
 
 class StartupFeedbackProtocol(Protocol):
@@ -57,13 +58,15 @@ def resolve_runtime_splash_asset(*, resource_root: str | Path | None = None) -> 
 class _ReadableSplashScreen(QSplashScreen):
     """Small QSplashScreen variant that improves text readability."""
 
-    _BAND_HEIGHT = 78
-    _TEXT_MARGIN = 18
-    _TOP_PADDING = 10
-    _BOTTOM_PADDING = 12
-    _PROGRESS_HEIGHT = 10
-    _PROGRESS_MARGIN_TOP = 9
-    _PROGRESS_RADIUS = 5
+    _PANEL_HEIGHT = 88
+    _PANEL_SIDE_MARGIN = 26
+    _PANEL_BOTTOM_MARGIN = 16
+    _PANEL_TEXT_MARGIN = 20
+    _PANEL_TOP_PADDING = 14
+    _PANEL_BOTTOM_PADDING = 16
+    _PROGRESS_HEIGHT = 8
+    _PROGRESS_MARGIN_TOP = 10
+    _PROGRESS_RADIUS = 4
 
     def __init__(self, pixmap: QPixmap):
         super().__init__(pixmap)
@@ -73,74 +76,87 @@ class _ReadableSplashScreen(QSplashScreen):
         self._progress = max(0, min(100, int(value)))
         self.update()
 
+    def _overlay_panel_rect(self) -> QRectF:
+        width = max(160, self.width() - (self._PANEL_SIDE_MARGIN * 2))
+        top = self.height() - self._PANEL_HEIGHT - self._PANEL_BOTTOM_MARGIN
+        return QRectF(
+            self._PANEL_SIDE_MARGIN,
+            max(8, top),
+            width,
+            self._PANEL_HEIGHT,
+        )
+
+    def _message_rect(self, panel_rect: QRectF) -> QRectF:
+        return panel_rect.adjusted(
+            self._PANEL_TEXT_MARGIN,
+            self._PANEL_TOP_PADDING,
+            -self._PANEL_TEXT_MARGIN,
+            -(self._PANEL_BOTTOM_PADDING + self._PROGRESS_HEIGHT + self._PROGRESS_MARGIN_TOP),
+        )
+
+    def _progress_rect(self, panel_rect: QRectF) -> QRectF:
+        return QRectF(
+            panel_rect.left() + self._PANEL_TEXT_MARGIN,
+            panel_rect.bottom() - self._PANEL_BOTTOM_PADDING - self._PROGRESS_HEIGHT,
+            panel_rect.width() - (self._PANEL_TEXT_MARGIN * 2),
+            self._PROGRESS_HEIGHT,
+        )
+
     def drawContents(self, painter: QPainter) -> None:
         message = self.message()
         if not message and self._progress <= 0:
             return
 
         painter.save()
-        band_rect = QRect(0, self.height() - self._BAND_HEIGHT, self.width(), self._BAND_HEIGHT)
-        painter.fillRect(band_rect, QColor(0, 0, 0, 152))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
 
-        text_rect = band_rect.adjusted(
-            self._TEXT_MARGIN,
-            self._TOP_PADDING,
-            -self._TEXT_MARGIN,
-            -(self._BOTTOM_PADDING + self._PROGRESS_HEIGHT + self._PROGRESS_MARGIN_TOP),
-        )
+        panel_rect = self._overlay_panel_rect()
+        text_rect = self._message_rect(panel_rect)
         font = painter.font()
         font.setPointSizeF(max(font.pointSizeF(), 10.5))
         painter.setFont(font)
-        painter.setPen(QColor("#f7f7f7"))
+        painter.setPen(SPLASH_PROGRESS_TEXT_COLOR)
         progress_text = f"{self._progress}%"
         reserved_width = painter.fontMetrics().horizontalAdvance(progress_text) + 24
-        message_width = max(120, text_rect.width() - reserved_width)
+        message_width = max(120, round(text_rect.width()) - reserved_width)
         rendered_message = painter.fontMetrics().elidedText(
             message,
             Qt.ElideRight,
             message_width,
         )
         painter.drawText(
-            text_rect,
+            text_rect.toRect(),
             int(Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine),
             rendered_message,
         )
+        painter.setPen(SPLASH_PROGRESS_TEXT_COLOR)
         painter.drawText(
-            text_rect,
+            text_rect.toRect(),
             int(Qt.AlignRight | Qt.AlignVCenter | Qt.TextSingleLine),
             progress_text,
         )
 
-        progress_rect = QRect(
-            band_rect.left() + self._TEXT_MARGIN,
-            band_rect.bottom() - self._BOTTOM_PADDING - self._PROGRESS_HEIGHT + 1,
-            band_rect.width() - (self._TEXT_MARGIN * 2),
-            self._PROGRESS_HEIGHT,
-        )
+        progress_rect = self._progress_rect(panel_rect)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#1f1f1f"))
-        painter.drawRoundedRect(
-            progress_rect,
-            self._PROGRESS_RADIUS,
-            self._PROGRESS_RADIUS,
-        )
+        painter.setBrush(QColor(17, 24, 31, 112))
+        painter.drawRoundedRect(progress_rect, self._PROGRESS_RADIUS, self._PROGRESS_RADIUS)
         if self._progress > 0:
             chunk_width = max(
                 self._PROGRESS_RADIUS * 2,
                 round(progress_rect.width() * (self._progress / 100.0)),
             )
-            chunk_rect = QRect(
+            chunk_rect = QRectF(
                 progress_rect.left(),
                 progress_rect.top(),
                 min(progress_rect.width(), chunk_width),
                 progress_rect.height(),
             )
-            painter.setBrush(QColor("#f0b35c"))
-            painter.drawRoundedRect(
-                chunk_rect,
-                self._PROGRESS_RADIUS,
-                self._PROGRESS_RADIUS,
-            )
+            fill_gradient = QLinearGradient(chunk_rect.topLeft(), chunk_rect.topRight())
+            fill_gradient.setColorAt(0.0, QColor(117, 190, 255, 235))
+            fill_gradient.setColorAt(1.0, QColor(191, 229, 255, 245))
+            painter.setBrush(fill_gradient)
+            painter.drawRoundedRect(chunk_rect, self._PROGRESS_RADIUS, self._PROGRESS_RADIUS)
         painter.restore()
 
 

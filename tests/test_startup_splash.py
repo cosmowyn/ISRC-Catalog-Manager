@@ -122,6 +122,21 @@ class StartupSplashHelperTests(unittest.TestCase):
             splash.close()
         self.assertEqual(fake_app.process_events_calls, 3)
 
+    def test_readable_splash_overlay_panel_is_inset_and_contains_progress_track(self):
+        pixmap = QPixmap(900, 600)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+
+        panel_rect = splash._overlay_panel_rect()
+        progress_rect = splash._progress_rect(panel_rect)
+
+        self.assertGreater(panel_rect.left(), 0)
+        self.assertLess(panel_rect.right(), splash.width())
+        self.assertLess(panel_rect.bottom(), splash.height())
+        self.assertGreater(progress_rect.left(), panel_rect.left())
+        self.assertLess(progress_rect.right(), panel_rect.right())
+        self.assertGreater(progress_rect.top(), panel_rect.top())
+
     def test_finish_is_idempotent_and_closes_without_window_handle(self):
         fake_app = _FakeApplication()
         pixmap = QPixmap(32, 18)

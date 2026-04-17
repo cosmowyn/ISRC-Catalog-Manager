@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 try:
@@ -46,6 +47,9 @@ SPLASH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 WINDOWS_ICON_EXTENSIONS = (".ico", ".png", ".jpg", ".jpeg", ".bmp")
 MACOS_ICON_EXTENSIONS = (".icns", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif")
 LINUX_ICON_EXTENSIONS = (".png", ".ico", ".icns")
+SPLASH_VERSION_FONT_SIZE = 12
+SPLASH_VERSION_COLOR = (186, 214, 245)
+SPLASH_VERSION_TEXT_GAP = 4
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,21 @@ def _project_version(pyproject_path: Path) -> str:
 
 def _release_basename(version: str) -> str:
     return f"{APP_NAME}-{version}-{_platform_tag()}"
+
+
+def _build_splash_version_label(
+    version: str,
+    build_timestamp: datetime | date | None = None,
+) -> str:
+    stamp = build_timestamp or datetime.now()
+    if isinstance(stamp, datetime):
+        seconds_since_midnight = (
+            (stamp.hour * 3600)
+            + (stamp.minute * 60)
+            + stamp.second
+        )
+        return f"Version: {version}-{stamp:%d%m%Y}.{seconds_since_midnight}"
+    return f"Version: {version}-{stamp:%d%m%Y}.0"
 
 
 def _resolve_build_python() -> Path:
@@ -522,6 +541,134 @@ def _resolve_runtime_splash_asset(project_root: Path) -> ResolutionResult:
     )
 
 
+def _load_splash_version_font(font_size: int):
+    try:
+        from PIL import ImageFont
+    except Exception as exc:
+        raise RuntimeError("Could not import Pillow to load the splash version font.") from exc
+
+    font_candidates = (
+        "DejaVuSans.ttf",
+        "Arial.ttf",
+        "LiberationSans-Regular.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    )
+    for candidate in font_candidates:
+        try:
+            return ImageFont.truetype(candidate, font_size)
+        except OSError:
+            continue
+
+    fallback_font = ImageFont.load_default()
+    font_variant = getattr(fallback_font, "font_variant", None)
+    if callable(font_variant):
+        try:
+            return fallback_font.font_variant(size=font_size)
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+    return fallback_font
+
+
+def _is_splash_divider_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    red, green, blue, alpha = pixel
+    return (
+        alpha > 0
+        and 170 <= red <= 249
+        and 205 <= green <= 252
+        and 235 <= blue <= 255
+        and green >= red + 2
+        and blue >= green - 10
+    )
+
+
+def _locate_splash_divider(image) -> tuple[int, int, int]:
+    width, height = image.size
+    search_x_start = round(width * 0.20)
+    search_x_stop = round(width * 0.95)
+    search_y_start = round(height * 0.35)
+    search_y_stop = round(height * 0.65)
+    minimum_run = round(width * 0.15)
+    best_run: tuple[int, int, int, int] | None = None
+
+    for y in range(search_y_start, search_y_stop):
+        run_start: int | None = None
+        for x in range(search_x_start, search_x_stop):
+            if _is_splash_divider_pixel(image.getpixel((x, y))):
+                if run_start is None:
+                    run_start = x
+                continue
+
+            if run_start is None:
+                continue
+
+            run_end = x - 1
+            run_length = run_end - run_start + 1
+            if run_length >= minimum_run and (best_run is None or run_length > best_run[0]):
+                best_run = (run_length, run_start, run_end, y)
+            run_start = None
+
+        if run_start is not None:
+            run_end = search_x_stop - 1
+            run_length = run_end - run_start + 1
+            if run_length >= minimum_run and (best_run is None or run_length > best_run[0]):
+                best_run = (run_length, run_start, run_end, y)
+
+    if best_run is not None:
+        _, run_start, run_end, y = best_run
+        return run_start, run_end, y
+
+    fallback_start = round(width * 0.404)
+    fallback_end = round(width * 0.807)
+    fallback_y = round(height * 0.548)
+    return fallback_start, fallback_end, fallback_y
+
+
+def _stamp_runtime_splash_asset(
+    project_root: Path,
+    splash_result: ResolutionResult,
+    *,
+    app_version: str,
+    build_timestamp: datetime | date | None = None,
+) -> ResolutionResult:
+    if splash_result.path is None:
+        return splash_result
+
+    try:
+        from PIL import Image, ImageDraw
+    except Exception as exc:
+        raise RuntimeError("Could not import Pillow to stamp the runtime splash.") from exc
+
+    version_label = _build_splash_version_label(app_version, build_timestamp)
+    output_path = (_generated_assets_dir(project_root) / f"{SPLASH_BASENAME}.png").resolve()
+
+    with Image.open(splash_result.path) as source_image:
+        image = source_image.convert("RGBA")
+
+    line_start, _, line_y = _locate_splash_divider(image)
+    draw = ImageDraw.Draw(image)
+    font = _load_splash_version_font(SPLASH_VERSION_FONT_SIZE)
+    text_bbox = draw.textbbox((0, 0), version_label, font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_x = max(0, min(line_start - text_bbox[0], image.width - text_width - 12))
+    text_y = max(0, line_y - text_bbox[3] - SPLASH_VERSION_TEXT_GAP)
+    draw.text((text_x, text_y), version_label, fill=SPLASH_VERSION_COLOR, font=font)
+    image.save(output_path, format="PNG")
+
+    return ResolutionResult(
+        path=output_path,
+        kind=splash_result.kind,
+        source_label=splash_result.source_label,
+        detail=(
+            f"{splash_result.detail}; stamped {version_label!r} above the divider at "
+            f"x={line_start}, y={line_y} and wrote "
+            f"{_display_path(output_path, project_root)}"
+        ),
+    )
+
+
 def _diag(name: str, value: str) -> None:
     print(f"[diag] {name}: {value}")
 
@@ -713,6 +860,16 @@ def main() -> int:
 
     try:
         splash_result = _resolve_runtime_splash_asset(project_root)
+    except Exception as exc:
+        print(f"ERROR [splash]: {exc}")
+        return 1
+
+    try:
+        splash_result = _stamp_runtime_splash_asset(
+            project_root,
+            splash_result,
+            app_version=app_version,
+        )
     except Exception as exc:
         print(f"ERROR [splash]: {exc}")
         return 1
