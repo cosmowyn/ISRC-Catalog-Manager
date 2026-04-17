@@ -270,10 +270,7 @@ def _pyinstaller_discovery_error(
     lines.extend(
         [
             "Windows discovery order:" if _is_windows() else "Discovery order:",
-            *[
-                f"{index}. {path}"
-                for index, (_, path) in enumerate(local_executables, start=1)
-            ],
+            *[f"{index}. {path}" for index, (_, path) in enumerate(local_executables, start=1)],
             f"{len(local_executables) + 1}. {build_python} -m PyInstaller",
             f"{len(local_executables) + 2}. pyinstaller (PATH fallback)",
             "Action: install PyInstaller in the repo-local or parent-directory .venv, "
