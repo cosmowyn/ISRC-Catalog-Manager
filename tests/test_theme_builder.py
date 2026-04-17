@@ -73,6 +73,7 @@ class _ThemeApplyHost(QWidget):
         self.theme_settings = {}
         self.submissions = []
         self.boundary_refresh_count = 0
+        self.blob_badge_reset_count = 0
         self.progress_dialog_refresh_count = 0
         self.menu_bar = QMenuBar(self)
         self.menu_bar.setNativeMenuBar(False)
@@ -84,6 +85,9 @@ class _ThemeApplyHost(QWidget):
 
     def refresh_active_progress_dialogs(self):
         self.progress_dialog_refresh_count += 1
+
+    def _reset_blob_badge_render_cache(self):
+        self.blob_badge_reset_count += 1
 
     def _submit_background_task(self, **kwargs):
         self.submissions.append(dict(kwargs))
@@ -859,6 +863,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(submission["unique_key"], "theme.apply.prepare")
             self.assertEqual(self.app.font().pointSize(), 13)
             self.assertTrue(self.app.styleSheet())
+            self.assertGreater(host.blob_badge_reset_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
             self.app.setStyleSheet(previous_stylesheet)
@@ -919,6 +924,7 @@ class ThemeBuilderTests(unittest.TestCase):
             )
             self.assertEqual(self.app.style().pixelMetric(QStyle.PM_MenuButtonIndicator), 14)
             self.assertIn("#F97316", self.app.styleSheet().upper())
+            self.assertGreater(host.blob_badge_reset_count, 0)
             self.assertGreater(host.progress_dialog_refresh_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid as _qt_object_is_valid
 
 from isrc_manager.parties import PartyRecord, party_authority_notifier
 from isrc_manager.parties.dialogs import PartyEditorDialog
@@ -937,6 +938,8 @@ class WorkBrowserPanel(QWidget):
         self._schedule_control_height_sync()
 
     def _schedule_control_height_sync(self) -> None:
+        if not _qt_object_is_valid(self):
+            return
         if getattr(self, "_control_height_sync_pending", False):
             return
         if not hasattr(self, "manage_actions_cluster") or not hasattr(self, "selection_banner"):
@@ -946,24 +949,29 @@ class WorkBrowserPanel(QWidget):
 
     def _sync_control_height_constraints(self) -> None:
         self._control_height_sync_pending = False
+        if not _qt_object_is_valid(self):
+            return
         for widget in (
             getattr(self, "manage_actions_cluster", None),
             getattr(self, "selection_banner", None),
             getattr(self, "_controls_box", None),
         ):
-            if not isinstance(widget, QWidget):
+            if not isinstance(widget, QWidget) or not _qt_object_is_valid(widget):
                 continue
-            widget.ensurePolished()
-            layout = widget.layout()
-            if layout is not None:
-                layout.activate()
-            target_height = max(
-                int(widget.minimumSizeHint().height()),
-                int(widget.sizeHint().height()),
-            )
-            if widget.minimumHeight() != target_height:
-                widget.setMinimumHeight(target_height)
-            widget.updateGeometry()
+            try:
+                widget.ensurePolished()
+                layout = widget.layout()
+                if layout is not None:
+                    layout.activate()
+                target_height = max(
+                    int(widget.minimumSizeHint().height()),
+                    int(widget.sizeHint().height()),
+                )
+                if widget.minimumHeight() != target_height:
+                    widget.setMinimumHeight(target_height)
+                widget.updateGeometry()
+            except RuntimeError:
+                continue
 
     def event(self, event) -> bool:
         result = super().event(event)

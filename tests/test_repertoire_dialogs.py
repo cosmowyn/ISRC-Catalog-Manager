@@ -1458,6 +1458,19 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_work_browser_height_sync_skips_deleted_control_widgets(self):
+        dialog = WorkBrowserDialog(
+            work_service=_EmptyWorkService(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            dialog.manage_actions_cluster.deleteLater()
+            self.app.processEvents()
+            dialog._sync_control_height_constraints()
+        finally:
+            dialog.close()
+
     def test_global_search_dialog_uses_results_and_relationship_tabs(self):
         dialog = GlobalSearchDialog(
             search_service=_EmptySearchService(),

@@ -82,10 +82,10 @@ class SelectionScopeBanner(QWidget):
 
     def __init__(self, *, chooser_label: str = "Choose Tracks", parent=None):
         super().__init__(parent)
+        self._syncing_height = False
         self.setObjectName("selectionScopeBanner")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         _apply_standard_widget_chrome(self, "selectionScopeBanner")
-        self._syncing_height = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -135,7 +135,7 @@ class SelectionScopeBanner(QWidget):
         self._sync_layout_height()
 
     def _sync_layout_height(self) -> None:
-        if self._syncing_height:
+        if getattr(self, "_syncing_height", False):
             return
         self._syncing_height = True
         try:
@@ -143,6 +143,7 @@ class SelectionScopeBanner(QWidget):
             if layout is not None:
                 layout.activate()
             target_height = max(
+                0,
                 int(self.minimumSizeHint().height()),
                 int(self.sizeHint().height()),
             )
