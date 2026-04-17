@@ -119,11 +119,7 @@ def _build_splash_version_label(
 ) -> str:
     stamp = build_timestamp or datetime.now()
     if isinstance(stamp, datetime):
-        seconds_since_midnight = (
-            (stamp.hour * 3600)
-            + (stamp.minute * 60)
-            + stamp.second
-        )
+        seconds_since_midnight = (stamp.hour * 3600) + (stamp.minute * 60) + stamp.second
         return f"Version: {version}-{stamp:%d%m%Y}.{seconds_since_midnight}"
     return f"Version: {version}-{stamp:%d%m%Y}.0"
 

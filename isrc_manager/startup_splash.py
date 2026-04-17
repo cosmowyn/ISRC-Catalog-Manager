@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QRect, QRectF, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
