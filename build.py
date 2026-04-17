@@ -124,11 +124,70 @@ def _build_splash_version_label(
     return f"Version: {version}-{stamp:%d%m%Y}.0"
 
 
-def _resolve_build_python() -> Path:
-    build_python = Path(sys.executable).resolve()
-    if not build_python.exists():
-        raise FileNotFoundError(f"Current Python interpreter does not exist:\n  {build_python}")
-    return build_python
+def _venv_directories(project_root: Path) -> list[tuple[str, Path]]:
+    candidates = [
+        ("repo-local", project_root / VENV_DIR),
+        ("parent-directory", project_root.parent / VENV_DIR),
+    ]
+    ordered: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for label, candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append((label, candidate))
+    return ordered
+
+
+def _venv_python_candidates(project_root: Path) -> list[tuple[str, Path]]:
+    python_subpath = Path("Scripts/python.exe" if _is_windows() else "bin/python")
+    # Keep the venv launcher path intact instead of resolving symlinks back to the
+    # base interpreter. On macOS/Linux, resolving `.venv/bin/python` can escape the
+    # virtual environment and make module discovery behave like the global Python.
+    return [
+        (label, venv_dir / python_subpath) for label, venv_dir in _venv_directories(project_root)
+    ]
+
+
+def _resolve_build_python(project_root: Path) -> Path:
+    candidates = [candidate for _, candidate in _venv_python_candidates(project_root)]
+    candidates.append(Path(sys.executable).resolve())
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists():
+            return candidate
+
+    checked = "\n".join(f"  - {candidate}" for candidate in candidates)
+    raise FileNotFoundError(
+        "Could not resolve a usable Python interpreter.\nChecked in order:\n" f"{checked}"
+    )
+
+
+def _venv_pyinstaller_candidates(project_root: Path) -> list[tuple[str, Path]]:
+    if _is_windows():
+        launcher_subpath = Path("Scripts/pyinstaller.exe")
+        label_map = {
+            "repo-local": "repo-local Windows executable",
+            "parent-directory": "parent-directory Windows executable",
+        }
+    else:
+        launcher_subpath = Path("bin/pyinstaller")
+        label_map = {
+            "repo-local": "repo-local venv executable",
+            "parent-directory": "parent-directory venv executable",
+        }
+
+    return [
+        (
+            label_map.get(label, f"{label} venv executable"),
+            venv_dir / launcher_subpath,
+        )
+        for label, venv_dir in _venv_directories(project_root)
+    ]
 
 
 def _display_path(path: Path, project_root: Path) -> str:
@@ -183,10 +242,6 @@ def _resolve_entry_script(project_root: Path) -> Path:
     raise FileNotFoundError("\n".join(lines))
 
 
-def _windows_pyinstaller_executable(project_root: Path) -> Path:
-    return (project_root / VENV_DIR / "Scripts" / "pyinstaller.exe").resolve()
-
-
 def _pyinstaller_discovery_error(
     project_root: Path,
     build_python: Path,
@@ -211,74 +266,87 @@ def _pyinstaller_discovery_error(
             lines.append("  stderr:")
             lines.extend(_indented_lines(stderr, prefix="    "))
 
-    if _is_windows():
-        lines.extend(
-            [
-                "Windows discovery order:",
-                f"1. {_windows_pyinstaller_executable(project_root)}",
-                f"2. {build_python} -m PyInstaller",
-                "3. pyinstaller (PATH fallback)",
-                "Action: install PyInstaller in the repo-local .venv, install it into the "
-                "interpreter running build.py, or expose pyinstaller on PATH.",
-            ]
-        )
-    else:
-        lines.append(
-            "Action: install PyInstaller into the interpreter running build.py "
-            f"({build_python})."
-        )
+    local_executables = _venv_pyinstaller_candidates(project_root)
+    lines.extend(
+        [
+            "Windows discovery order:" if _is_windows() else "Discovery order:",
+            *[
+                f"{index}. {path}"
+                for index, (_, path) in enumerate(local_executables, start=1)
+            ],
+            f"{len(local_executables) + 1}. {build_python} -m PyInstaller",
+            f"{len(local_executables) + 2}. pyinstaller (PATH fallback)",
+            "Action: install PyInstaller in the repo-local or parent-directory .venv, "
+            "install it into the interpreter running build.py, "
+            "or expose pyinstaller on PATH.",
+        ]
+    )
 
     return RuntimeError("\n".join(lines))
+
+
+def _pyinstaller_missing_module_output(*texts: str) -> bool:
+    patterns = (
+        "No module named PyInstaller",
+        "No module named 'PyInstaller'",
+        'No module named "PyInstaller"',
+        "ModuleNotFoundError: No module named 'PyInstaller'",
+        'ModuleNotFoundError: No module named "PyInstaller"',
+    )
+    return any(pattern in text for text in texts if text for pattern in patterns)
 
 
 def _select_pyinstaller(project_root: Path, build_python: Path) -> PyInstallerSelection:
     attempts: list[dict[str, str]] = []
     candidates: list[dict[str, object]] = []
-
-    if _is_windows():
-        local_executable = _windows_pyinstaller_executable(project_root)
+    local_executables = _venv_pyinstaller_candidates(project_root)
+    for index, (label, local_executable) in enumerate(local_executables):
+        fallback_reason = None
+        if index > 0:
+            earlier_labels = [earlier_label for earlier_label, _ in local_executables[:index]]
+            fallback_reason = f"{', '.join(earlier_labels)} were unavailable or failed verification"
         candidates.append(
             {
-                "label": "repo-local Windows executable",
+                "label": label,
                 "launcher_prefix": (str(local_executable),),
                 "verify_cmd": (str(local_executable), "--version"),
-                "fallback_reason": None,
+                "fallback_reason": fallback_reason,
                 "available": local_executable.is_file(),
                 "missing_status": f"missing file: {local_executable}",
             }
         )
-        candidates.append(
-            {
-                "label": "current interpreter module",
-                "launcher_prefix": (str(build_python), "-m", "PyInstaller"),
-                "verify_cmd": (str(build_python), "-m", "PyInstaller", "--version"),
-                "fallback_reason": "repo-local Windows executable was unavailable or failed verification",
-                "available": True,
-                "missing_status": "",
-            }
-        )
-        path_pyinstaller = shutil.which("pyinstaller")
-        candidates.append(
-            {
-                "label": "PATH fallback",
-                "launcher_prefix": ("pyinstaller",),
-                "verify_cmd": ("pyinstaller", "--version"),
-                "fallback_reason": "repo-local Windows executable and current interpreter module were unavailable or failed verification",
-                "available": bool(path_pyinstaller),
-                "missing_status": "not found on PATH",
-            }
-        )
-    else:
-        candidates.append(
-            {
-                "label": "current interpreter module",
-                "launcher_prefix": (str(build_python), "-m", "PyInstaller"),
-                "verify_cmd": (str(build_python), "-m", "PyInstaller", "--version"),
-                "fallback_reason": None,
-                "available": True,
-                "missing_status": "",
-            }
-        )
+
+    candidates.append(
+        {
+            "label": "current interpreter module",
+            "launcher_prefix": (str(build_python), "-m", "PyInstaller"),
+            "verify_cmd": (str(build_python), "-m", "PyInstaller", "--version"),
+            "fallback_reason": (
+                f"{', '.join(label for label, _ in local_executables)} "
+                "were unavailable or failed verification"
+                if local_executables
+                else None
+            ),
+            "available": True,
+            "missing_status": "",
+        }
+    )
+    path_pyinstaller = shutil.which("pyinstaller")
+    candidates.append(
+        {
+            "label": "PATH fallback",
+            "launcher_prefix": ("pyinstaller",),
+            "verify_cmd": ("pyinstaller", "--version"),
+            "fallback_reason": (
+                f"{', '.join(label for label, _ in local_executables)}, "
+                "and current interpreter module were unavailable or failed verification"
+                if local_executables
+                else "current interpreter module was unavailable or failed verification"
+            ),
+            "available": bool(path_pyinstaller),
+            "missing_status": "not found on PATH",
+        }
+    )
 
     for candidate in candidates:
         label = str(candidate["label"])
@@ -300,7 +368,11 @@ def _select_pyinstaller(project_root: Path, build_python: Path) -> PyInstallerSe
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0:
+        missing_module_output = _pyinstaller_missing_module_output(
+            result.stdout or "",
+            result.stderr or "",
+        )
+        if result.returncode == 0 and not missing_module_output:
             version_text = (result.stdout or result.stderr or "").strip() or "unknown"
             return PyInstallerSelection(
                 launcher_prefix=launcher_prefix,
@@ -317,7 +389,11 @@ def _select_pyinstaller(project_root: Path, build_python: Path) -> PyInstallerSe
         attempts.append(
             {
                 "label": label,
-                "status": f"verification failed with exit code {result.returncode}",
+                "status": (
+                    "verification output indicates missing PyInstaller module"
+                    if missing_module_output
+                    else f"verification failed with exit code {result.returncode}"
+                ),
                 "command": _format_cmd(list(verify_cmd)),
                 "stdout": result.stdout or "",
                 "stderr": result.stderr or "",
@@ -832,7 +908,7 @@ def main() -> int:
         return 1
 
     try:
-        build_python = _resolve_build_python()
+        build_python = _resolve_build_python(project_root)
     except Exception as exc:
         print(f"ERROR [python]: {exc}")
         return 1
@@ -907,6 +983,9 @@ def main() -> int:
         print(result.stdout)
     if result.stderr:
         print(result.stderr)
+    if _pyinstaller_missing_module_output(result.stdout or "", result.stderr or ""):
+        print("\nERROR [build]: PyInstaller launcher reported a missing module.")
+        return 1
     if result.returncode != 0:
         print("\nERROR [build]: PyInstaller returned a non-zero exit code.")
         print(f"Return code: {result.returncode}")

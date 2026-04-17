@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -40,11 +41,101 @@ class BuildMetadataTests(unittest.TestCase):
         self.assertEqual(label, "Version: 3.1.1-17042026.3723")
 
 
+class BuildPythonResolutionTests(unittest.TestCase):
+    def test_prefers_repo_local_venv_python_before_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            repo_local = root / ".venv" / "bin" / "python"
+            parent = root.parent / ".venv" / "bin" / "python"
+            repo_local.parent.mkdir(parents=True, exist_ok=True)
+            parent.parent.mkdir(parents=True, exist_ok=True)
+            repo_local.write_text("", encoding="utf-8")
+            parent.write_text("", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build.sys, "executable", "/system/python"),
+            ):
+                resolved = build._resolve_build_python(root)
+
+        self.assertEqual(resolved, repo_local)
+
+    def test_falls_back_to_parent_directory_venv_python(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            parent = root.parent / ".venv" / "bin" / "python"
+            parent.parent.mkdir(parents=True, exist_ok=True)
+            parent.write_text("", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build.sys, "executable", "/system/python"),
+            ):
+                resolved = build._resolve_build_python(root)
+
+        self.assertEqual(resolved, parent)
+
+    def test_preserves_repo_local_symlink_path_instead_of_resolving_base_interpreter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            system_python = root / "python3.14"
+            system_python.write_text("", encoding="utf-8")
+            repo_local = root / ".venv" / "bin" / "python"
+            repo_local.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.symlink(system_python, repo_local)
+            except (AttributeError, NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlinks unavailable in test environment: {exc}")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build.sys, "executable", str(system_python.resolve())),
+            ):
+                resolved = build._resolve_build_python(root)
+
+        self.assertEqual(resolved, repo_local)
+
+
 class PyInstallerDiscoveryTests(unittest.TestCase):
+    def test_posix_prefers_repo_local_venv_executable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            local_exe = root / ".venv" / "bin" / "pyinstaller"
+            local_exe.parent.mkdir(parents=True, exist_ok=True)
+            local_exe.write_text("", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+                mock.patch.object(build.shutil, "which", return_value=None),
+                mock.patch.object(
+                    build.subprocess,
+                    "run",
+                    return_value=_completed_process(
+                        [str(local_exe), "--version"],
+                        stdout="6.15.0\n",
+                    ),
+                ) as run,
+            ):
+                selection = build._select_pyinstaller(root, Path("/python"))
+
+        self.assertEqual(selection.launcher_prefix, (str(local_exe),))
+        self.assertEqual(selection.label, "repo-local venv executable")
+        self.assertEqual(selection.version_text, "6.15.0")
+        self.assertIsNone(selection.fallback_reason)
+        run.assert_called_once_with(
+            [str(local_exe), "--version"],
+            capture_output=True,
+            text=True,
+        )
+
     def test_windows_prefers_repo_local_executable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            local_exe = (root / ".venv" / "Scripts" / "pyinstaller.exe").resolve()
+            local_exe = root / ".venv" / "Scripts" / "pyinstaller.exe"
             local_exe.parent.mkdir(parents=True, exist_ok=True)
             local_exe.write_bytes(b"exe")
 
@@ -69,6 +160,38 @@ class PyInstallerDiscoveryTests(unittest.TestCase):
         self.assertIsNone(selection.fallback_reason)
         run.assert_called_once_with(
             [str(local_exe), "--version"],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_windows_falls_back_to_parent_directory_executable_before_module(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "project"
+            root.mkdir()
+            parent_exe = root.parent / ".venv" / "Scripts" / "pyinstaller.exe"
+            parent_exe.parent.mkdir(parents=True, exist_ok=True)
+            parent_exe.write_bytes(b"exe")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=True),
+                mock.patch.object(build, "_is_macos", return_value=False),
+                mock.patch.object(build.shutil, "which", return_value=None),
+                mock.patch.object(
+                    build.subprocess,
+                    "run",
+                    return_value=_completed_process(
+                        [str(parent_exe), "--version"],
+                        stdout="6.15.0\n",
+                    ),
+                ) as run,
+            ):
+                selection = build._select_pyinstaller(root, Path("/python"))
+
+        self.assertEqual(selection.launcher_prefix, (str(parent_exe),))
+        self.assertEqual(selection.label, "parent-directory Windows executable")
+        self.assertIn("repo-local Windows executable", selection.fallback_reason)
+        run.assert_called_once_with(
+            [str(parent_exe), "--version"],
             capture_output=True,
             text=True,
         )
@@ -492,6 +615,64 @@ class MainFlowTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         resolve_icon_mock.assert_called_once_with(root)
+
+    def test_main_stops_on_missing_pyinstaller_module_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            selection = build.PyInstallerSelection(
+                launcher_prefix=("pyinstaller",),
+                verify_cmd=("pyinstaller", "--version"),
+                label="repo-local venv executable",
+                version_text="6.15.0",
+                fallback_reason=None,
+            )
+
+            with (
+                mock.patch.object(build, "PROJECT_ROOT", root),
+                mock.patch.object(
+                    build, "_resolve_entry_script", return_value=root / build.ENTRY_SCRIPT
+                ),
+                mock.patch.object(build, "_project_version", return_value="3.1.1"),
+                mock.patch.object(build, "_resolve_build_python", return_value=Path("/python")),
+                mock.patch.object(build, "_select_pyinstaller", return_value=selection),
+                mock.patch.object(
+                    build,
+                    "_resolve_icon",
+                    return_value=build.ResolutionResult(
+                        path=None,
+                        kind="missing",
+                        source_label="not found",
+                        detail="no icon asset found",
+                    ),
+                ),
+                mock.patch.object(
+                    build,
+                    "_resolve_runtime_splash_asset",
+                    return_value=build.ResolutionResult(
+                        path=None,
+                        kind="missing",
+                        source_label="not found",
+                        detail="no splash asset found",
+                    ),
+                ),
+                mock.patch.object(build, "_print_build_diagnostics"),
+                mock.patch.object(build.os, "chdir"),
+                mock.patch.object(
+                    build.subprocess,
+                    "run",
+                    return_value=_completed_process(
+                        ("pyinstaller",),
+                        stdout="",
+                        stderr="No module named PyInstaller",
+                    ),
+                ),
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+                mock.patch("builtins.print"),
+            ):
+                exit_code = build.main()
+
+        self.assertEqual(exit_code, 1)
 
 
 class ArtifactStagingTests(unittest.TestCase):
