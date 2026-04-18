@@ -1,14 +1,23 @@
-"""Dormant `QAbstractTableModel` seam for the staged catalog-table migration."""
+"""Pure `QAbstractTableModel` for catalog-table snapshot data."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt
 
-from .models import CatalogColumnSpec, CatalogSnapshot
+from .models import (
+    CatalogCellValue,
+    CatalogColumnSpec,
+    CatalogSnapshot,
+    ColumnKeyRole,
+    RawValueRole,
+    SearchTextRole,
+    SortRole,
+    TrackIdRole,
+)
 
 
 class CatalogTableModel(QAbstractTableModel):
-    """Snapshot-aware table-model scaffold kept intentionally inert in Phase A1."""
+    """Expose pure snapshot data through stable catalog-specific Qt roles."""
 
     def __init__(
         self,
@@ -32,8 +41,39 @@ class CatalogTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role: int = int(Qt.ItemDataRole.DisplayRole)):
         if not index.isValid():
             return None
-        # Phase A1 keeps the model structurally real but intentionally dormant.
-        # A2 will expose CatalogCellValue fields through Qt roles.
+
+        row = index.row()
+        column = index.column()
+        if not (
+            0 <= row < len(self._snapshot.rows) and 0 <= column < len(self._snapshot.column_specs)
+        ):
+            return None
+
+        column_spec = self._snapshot.column_specs[column]
+        row_snapshot = self._snapshot.rows[row]
+        cell_value = row_snapshot.cell(column_spec.key) or CatalogCellValue()
+
+        if role in (
+            int(Qt.ItemDataRole.DisplayRole),
+            int(Qt.ItemDataRole.EditRole),
+        ):
+            return cell_value.display_text
+        if role == int(Qt.ItemDataRole.ToolTipRole):
+            return cell_value.tooltip
+        if role == int(Qt.ItemDataRole.DecorationRole):
+            return cell_value.decoration_key
+        if role == int(Qt.ItemDataRole.TextAlignmentRole):
+            return cell_value.text_alignment
+        if role == SortRole:
+            return cell_value.sort_value
+        if role == SearchTextRole:
+            return cell_value.search_text
+        if role == TrackIdRole:
+            return row_snapshot.track_id
+        if role == ColumnKeyRole:
+            return column_spec.key
+        if role == RawValueRole:
+            return cell_value.raw_value
         return None
 
     def headerData(
@@ -44,13 +84,19 @@ class CatalogTableModel(QAbstractTableModel):
     ):
         if orientation != Qt.Orientation.Horizontal:
             return None
-        if role != int(Qt.ItemDataRole.DisplayRole):
-            return None
         spec = self.column_spec(section)
-        return spec.header_text if spec is not None else None
+        if spec is None:
+            return None
+        if role == int(Qt.ItemDataRole.DisplayRole):
+            return spec.header_text
+        if role == int(Qt.ItemDataRole.ToolTipRole):
+            return spec.notes
+        if role == ColumnKeyRole:
+            return spec.key
+        return None
 
     def set_snapshot(self, snapshot: CatalogSnapshot | None) -> None:
-        """Store the future source snapshot without wiring in live behavior yet."""
+        """Replace the pure source snapshot and reset role-backed row mappings."""
 
         self.beginResetModel()
         self._snapshot = snapshot or CatalogSnapshot.empty()
@@ -73,6 +119,19 @@ class CatalogTableModel(QAbstractTableModel):
     @staticmethod
     def _build_track_id_index(snapshot: CatalogSnapshot) -> dict[int, int]:
         return {row.track_id: source_row for source_row, row in enumerate(snapshot.rows)}
+
+    def roleNames(self) -> dict[int, bytes]:
+        role_names = dict(super().roleNames())
+        role_names.update(
+            {
+                SortRole: b"sortValue",
+                SearchTextRole: b"searchText",
+                TrackIdRole: b"trackId",
+                ColumnKeyRole: b"columnKey",
+                RawValueRole: b"rawValue",
+            }
+        )
+        return role_names
 
 
 __all__ = ["CatalogTableModel"]
