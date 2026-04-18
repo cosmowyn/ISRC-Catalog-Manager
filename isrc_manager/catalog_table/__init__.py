@@ -1,4 +1,4 @@
-"""Catalog-table scaffolding for the staged `QTableView` migration."""
+"""Catalog-table package surface for the staged `QTableView` migration."""
 
 from .controller import CatalogTableController
 from .filter_proxy import CatalogFilterProxyModel
@@ -17,6 +17,7 @@ from .models import (
 from .table_model import CatalogTableModel
 from .zoom import (
     CATALOG_ZOOM_DEFAULT_PERCENT,
+    CATALOG_ZOOM_LAYOUT_KEY,
     CATALOG_ZOOM_MAX_PERCENT,
     CATALOG_ZOOM_MIN_PERCENT,
     CATALOG_ZOOM_STEP_PERCENT,
@@ -25,6 +26,7 @@ from .zoom import (
 
 __all__ = [
     "CATALOG_ZOOM_DEFAULT_PERCENT",
+    "CATALOG_ZOOM_LAYOUT_KEY",
     "CATALOG_ZOOM_MAX_PERCENT",
     "CATALOG_ZOOM_MIN_PERCENT",
     "CATALOG_ZOOM_STEP_PERCENT",
