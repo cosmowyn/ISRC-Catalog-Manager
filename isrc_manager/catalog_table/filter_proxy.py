@@ -44,9 +44,18 @@ class CatalogFilterProxyModel(QSortFilterProxyModel):
         self.invalidateFilter()
 
     def set_explicit_track_ids(self, track_ids: Iterable[int] | None) -> None:
-        normalized = (
-            frozenset(int(track_id) for track_id in track_ids) if track_ids is not None else None
-        )
+        if track_ids is None:
+            normalized = None
+        else:
+            collected: set[int] = set()
+            for track_id in track_ids:
+                try:
+                    normalized_track_id = int(track_id)
+                except (TypeError, ValueError):
+                    continue
+                if normalized_track_id > 0:
+                    collected.add(normalized_track_id)
+            normalized = frozenset(collected)
         if normalized == self._explicit_track_ids:
             return
         self._explicit_track_ids = normalized

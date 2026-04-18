@@ -7409,6 +7409,90 @@ class AppShellTestCase(unittest.TestCase):
         self._select_track_ids([filtered_track_ids[1]])
         self.assertEqual(self.window._default_conversion_track_ids(), [filtered_track_ids[1]])
 
+    def case_catalog_table_uses_qtableview_model_proxy_live_path(self):
+        first_track_id = self._create_track(index=341, title="B3 Live One")
+        second_track_id = self._create_track(index=342, title="B3 Live Two")
+        self.window.refresh_table()
+
+        self.assertIsInstance(self.window.table, app_module.QTableView)
+        self.assertNotIsInstance(self.window.table, app_module.QTableWidget)
+        self.assertIsInstance(self.window._catalog_source_model(), app_module.CatalogTableModel)
+        self.assertIsInstance(
+            self.window._catalog_proxy_model(),
+            app_module.CatalogFilterProxyModel,
+        )
+        self.assertIs(self.window.table.model(), self.window._catalog_proxy_model())
+        self.assertEqual(self._visible_track_ids(), [first_track_id, second_track_id])
+
+        self.window.search_field.setText("B3 Live Two")
+        self.window.apply_search_filter()
+        self.app.processEvents()
+
+        self.assertEqual(self._visible_track_ids(), [second_track_id])
+        self.assertEqual(self.window.table.rowCount(), 1)
+        self.assertEqual(self.window.count_label.text(), "showing: 1 record")
+        self.assertEqual(self.window.duration_label.text(), "total: 00:08:42")
+
+    def case_catalog_model_view_restore_preserves_proxy_selection_and_filter(self):
+        first_track_id = self._create_track(index=343, title="B3 Restore One")
+        second_track_id = self._create_track(index=344, title="B3 Restore Two")
+        self.window.refresh_table()
+
+        self.window.search_field.setText("B3 Restore Two")
+        self.window.apply_search_filter()
+        self._select_track_ids([second_track_id])
+        state = self.window._capture_view_state()
+
+        self.window.search_field.clear()
+        self.window.apply_search_filter()
+        self.window.table.clearSelection()
+        self.app.processEvents()
+        self.assertEqual(self._visible_track_ids(), [first_track_id, second_track_id])
+
+        self.window._restore_view_state(state)
+        self.app.processEvents()
+
+        self.assertEqual(self.window.search_field.text(), "B3 Restore Two")
+        self.assertEqual(self._visible_track_ids(), [second_track_id])
+        self.assertEqual(self.window._selected_track_ids(), [second_track_id])
+        self.assertEqual(
+            self.window._catalog_table_controller().current_track_id(), second_track_id
+        )
+
+    def case_catalog_background_refresh_progress_completes_after_model_proxy_apply(self):
+        track_id = self._create_track(index=345, title="B3 Background Refresh")
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        refresh_patcher = next(
+            patcher
+            for patcher in self._patchers
+            if getattr(patcher, "attribute", "") == "_refresh_catalog_ui_in_background"
+        )
+        original_refresh = refresh_patcher.temp_original
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_bundle_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            task_id = original_refresh(self.window, show_dialog=False)
+
+        self.assertEqual(task_id, "captured-task")
+        self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
+        self.assertTrue(callable(submitted.get("on_success_after_cleanup")))
+
+        progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=65)
+        ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
+        self.assertIn(98, ui_values)
+        self.assertEqual(ui_messages[-1], "Catalog view fully restored and ready.")
+        self.assertIn(track_id, self._visible_track_ids())
+
     def case_audioless_row_context_menu_omits_audio_submenu(self):
         track_id = self._create_track(index=332, title="Metadata Only Track")
         self.window.refresh_table()

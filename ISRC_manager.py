@@ -148,9 +148,17 @@ from isrc_manager.blob_icons import (
     normalize_blob_icon_spec,
 )
 from isrc_manager.catalog_table import (
+    CatalogCellValue,
     CatalogColumnSpec,
+    CatalogFilterProxyModel,
     CatalogHeaderStateManager,
+    CatalogRowSnapshot,
+    CatalogSnapshot,
     CatalogTableController,
+    CatalogTableModel,
+    ColumnKeyRole,
+    RawValueRole,
+    TrackIdRole,
 )
 from isrc_manager.catalog_workspace import (
     CatalogWorkspaceDock,
@@ -15486,6 +15494,7 @@ class App(QMainWindow):
             )
             self.generated_isrc_field.setToolTip(message)
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.table_model.CatalogTableModel role-backed cell values; remove in final cleanup batch
     def _make_item(self, col_idx, text, *, custom_def=None):
         it = _SortItem("" if text is None else str(text))
         t = it.text()
@@ -15518,10 +15527,97 @@ class App(QMainWindow):
             it.setData(Qt.UserRole, key)
         return it
 
+    def _initialize_catalog_table_model_view(self) -> None:
+        table_model = CatalogTableModel(parent=self)
+        filter_proxy = CatalogFilterProxyModel(parent=self)
+        filter_proxy.setSourceModel(table_model)
+        self._catalog_table_model = table_model
+        self._catalog_filter_proxy_model = filter_proxy
+        self.table.setModel(filter_proxy)
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(0, Qt.AscendingOrder)
+        self._connect_catalog_selection_model()
+
+    def _connect_catalog_selection_model(self) -> None:
+        selection_model = self.table.selectionModel() if hasattr(self, "table") else None
+        if selection_model is None:
+            return
+        if getattr(self, "_catalog_selection_model_connection", None) is selection_model:
+            return
+        try:
+            selection_model.selectionChanged.connect(
+                lambda *_args: self._on_catalog_selection_changed()
+            )
+        except Exception:
+            pass
+        self._catalog_selection_model_connection = selection_model
+
+    def _catalog_source_model(self) -> CatalogTableModel | None:
+        model = getattr(self, "_catalog_table_model", None)
+        return model if isinstance(model, CatalogTableModel) else None
+
+    def _catalog_proxy_model(self) -> CatalogFilterProxyModel | None:
+        proxy = getattr(self, "_catalog_filter_proxy_model", None)
+        return proxy if isinstance(proxy, CatalogFilterProxyModel) else None
+
+    def _catalog_table_column_specs_for_fields(
+        self,
+        active_custom_fields: list[dict[str, object]] | None = None,
+    ) -> tuple[CatalogColumnSpec, ...]:
+        fields = (
+            list(active_custom_fields)
+            if active_custom_fields is not None
+            else list(getattr(self, "active_custom_fields", []) or [])
+        )
+        default_hidden_names = {str(name).strip() for name in DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES}
+        column_specs: list[CatalogColumnSpec] = []
+        for logical_index, header_text in enumerate(self.BASE_HEADERS):
+            standard_spec = standard_field_spec_for_label(header_text)
+            column_key = (
+                f"base:{standard_spec.key}"
+                if standard_spec is not None
+                else self._fallback_header_column_key(
+                    header_text,
+                    prefix="base",
+                    logical_index=logical_index,
+                )
+            )
+            column_specs.append(CatalogColumnSpec(key=column_key, header_text=header_text))
+
+        for field_index, field in enumerate(fields):
+            header_text = str(field.get("name") or "").strip() or f"Custom {field_index + 1}"
+            try:
+                field_id = int(field.get("id"))
+            except (TypeError, ValueError):
+                field_id = None
+            logical_index = len(self.BASE_HEADERS) + field_index
+            column_key = (
+                f"custom:{field_id}"
+                if field_id is not None and field_id > 0
+                else self._fallback_header_column_key(
+                    header_text,
+                    prefix="custom",
+                    logical_index=logical_index,
+                )
+            )
+            column_specs.append(
+                CatalogColumnSpec(
+                    key=column_key,
+                    header_text=header_text,
+                    hidden_by_default=header_text in default_hidden_names,
+                )
+            )
+        return tuple(column_specs)
+
     def _rebuild_table_headers(self):
-        headers = self.BASE_HEADERS + [f["name"] for f in self.active_custom_fields]
-        self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
+        source_model = self._catalog_source_model()
+        if source_model is not None:
+            source_model.set_snapshot(
+                CatalogSnapshot(
+                    column_specs=self._catalog_table_column_specs_for_fields(),
+                    rows=(),
+                )
+            )
         self._apply_saved_column_visibility()
         self._rebuild_search_column_choices()
         self._refresh_column_visibility_menu()
@@ -16297,39 +16393,44 @@ class App(QMainWindow):
         self.search_column_combo.clear()
         self.search_column_combo.addItem("All columns", -1)
 
-        headers = [
-            self.table.horizontalHeaderItem(idx).text()
-            for idx in range(self.table.columnCount())
-            if self.table.horizontalHeaderItem(idx) is not None
-        ]
-        for idx, name in enumerate(headers):
+        model = self.table.model()
+        column_count = model.columnCount() if model is not None else 0
+        for idx in range(column_count):
             if self.table.isColumnHidden(idx):
                 continue
-            self.search_column_combo.addItem(name, idx)
+            name = str(model.headerData(idx, Qt.Horizontal, Qt.DisplayRole) or "")
+            if not name:
+                continue
+            column_key = str(model.headerData(idx, Qt.Horizontal, ColumnKeyRole) or "")
+            self.search_column_combo.addItem(name, column_key or idx)
 
         restore = self.search_column_combo.findData(cur_data)
         self.search_column_combo.setCurrentIndex(restore if restore != -1 else 0)
         self.search_column_combo.blockSignals(False)
 
-    def apply_search_filter(self):
-        text = self.search_field.text().lower()
-        col_sel = self.search_column_combo.currentData()  # -1 = all
-        explicit_track_ids = getattr(self, "_explicit_row_filter_track_ids", None)
-        for row in range(self.table.rowCount()):
-            if col_sel == -1:
-                match = any(
-                    self.table.item(row, c) and text in self.table.item(row, c).text().lower()
-                    for c in range(self.table.columnCount())
-                )
-            else:
-                it = self.table.item(row, int(col_sel))
-                match = bool(it and text in it.text().lower())
-            if explicit_track_ids is not None:
-                row_track_id = self._track_id_for_table_row(row)
-                match = bool(match and row_track_id in explicit_track_ids)
-            self.table.setRowHidden(row, not match)
-        self._update_count_label()
+    def _selected_search_column_key(self) -> str | None:
+        data = self.search_column_combo.currentData()
+        if data in (-1, None, ""):
+            return None
+        if isinstance(data, str):
+            return data
+        try:
+            logical_index = int(data)
+        except (TypeError, ValueError):
+            return None
+        model = self.table.model()
+        if model is None or logical_index < 0 or logical_index >= model.columnCount():
+            return None
+        return str(model.headerData(logical_index, Qt.Horizontal, ColumnKeyRole) or "") or None
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.filter_proxy.CatalogFilterProxyModel; remove in final cleanup batch
+    def apply_search_filter(self):
+        proxy = self._catalog_proxy_model()
+        if proxy is not None:
+            proxy.set_search_text(self.search_field.text())
+            proxy.set_search_column_key(self._selected_search_column_key())
+            proxy.set_explicit_track_ids(getattr(self, "_explicit_row_filter_track_ids", None))
+        self._update_count_label()
         self._update_duration_label()
         self._refresh_workspace_selection_scopes()
 
@@ -16438,25 +16539,123 @@ class App(QMainWindow):
             "combo_values": combo_values,
         }
 
-    def _populate_table_from_dataset(
+    def _sort_value_for_catalog_cell(
+        self,
+        *,
+        header_text: str,
+        display_text: str,
+        raw_value,
+        custom_def: dict[str, object] | None = None,
+    ):
+        text = str(display_text or "")
+        try:
+            if header_text == "ID":
+                return int(raw_value if raw_value not in (None, "") else text)
+            if header_text == "Track Length (hh:mm:ss)":
+                return int(raw_value or parse_hms_text(text))
+            if header_text in ("Entry Date", "Release Date"):
+                return int(text.replace("-", "")) if text else 0
+            if custom_def and custom_def.get("field_type") == "date":
+                return int(text.replace("-", "")) if text else 0
+            if custom_def and custom_def.get("field_type") == "checkbox":
+                return 1 if text.lower() in ("1", "true", "yes", "y", "checked") else 0
+            return float(text) if "." in text else int(text)
+        except Exception:
+            return text
+
+    def _catalog_cell_value(
+        self,
+        value,
+        *,
+        header_text: str,
+        display_text: str | None = None,
+        custom_def: dict[str, object] | None = None,
+        tooltip: str | None = None,
+    ) -> CatalogCellValue:
+        resolved_display = "" if value is None else str(value)
+        if display_text is not None:
+            resolved_display = str(display_text)
+        return CatalogCellValue(
+            display_text=resolved_display,
+            sort_value=self._sort_value_for_catalog_cell(
+                header_text=header_text,
+                display_text=resolved_display,
+                raw_value=value,
+                custom_def=custom_def,
+            ),
+            search_text=resolved_display,
+            raw_value=value,
+            tooltip=tooltip,
+        )
+
+    def _media_badge_cell_value(
+        self,
+        meta: dict[str, object] | None,
+        *,
+        track_id: int,
+        header_text: str,
+        media_key: str | None = None,
+        field: dict[str, object] | None = None,
+    ) -> CatalogCellValue:
+        meta = dict(meta or {})
+        has_payload = bool(meta.get("has_media") or meta.get("has_blob"))
+        display = (
+            self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
+            if has_payload
+            else "—"
+        )
+        tooltip = ""
+        raw_value = ""
+        if has_payload and media_key:
+            tooltip = self._standard_media_badge_tooltip(media_key, meta, display)
+            raw_value = (int(track_id), media_key)
+        elif has_payload and field is not None:
+            field_type = str(field.get("field_type") or "").strip().lower()
+            kind = self._blob_icon_kind_for_storage(
+                "audio" if field_type == "blob_audio" else "image",
+                storage_mode=meta.get("storage_mode"),
+            )
+            tooltip = (
+                f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n"
+                f"{self._storage_mode_badge_label(meta.get('storage_mode'))}\n"
+                f"Stored size: {display}"
+            )
+            raw_value = (int(track_id), int(field["id"]))
+        return CatalogCellValue(
+            display_text=display,
+            sort_value=display,
+            search_text=display if has_payload else "",
+            raw_value=raw_value,
+            tooltip=tooltip or None,
+            decoration_key="media" if has_payload else None,
+        )
+
+    def _catalog_snapshot_from_dataset(
         self,
         rows: list[tuple],
         cf_map: dict[tuple[int, int], str],
         *,
+        blob_badges: dict[str, object] | None = None,
         progress_callback=None,
-    ) -> None:
+    ) -> CatalogSnapshot:
+        column_specs = self._catalog_table_column_specs_for_fields(self.active_custom_fields)
+        standard_meta = dict((blob_badges or {}).get("standard_media") or {})
+        custom_meta = dict((blob_badges or {}).get("custom_fields") or {})
         base_cols = len(self.BASE_HEADERS)
-        self.table.setRowCount(len(rows))
+        snapshot_rows: list[CatalogRowSnapshot] = []
         total_rows = len(rows)
         if total_rows <= 0:
             if callable(progress_callback):
                 progress_callback(1, 1, "No catalog rows needed to be applied.")
-            return
+            return CatalogSnapshot(column_specs=column_specs, rows=())
         batch_size = max(1, min(100, total_rows // 20 or 1))
 
         for row_idx, row_data in enumerate(rows):
+            track_id = int(row_data[0])
+            cells_by_key: dict[str, CatalogCellValue] = {}
             for col_idx in range(base_cols):
-                header = self.table.horizontalHeaderItem(col_idx).text()
+                column_spec = column_specs[col_idx]
+                header = column_spec.header_text
                 val_raw = row_data[col_idx]
                 if header == "Track Length (hh:mm:ss)":
                     secs = 0
@@ -16464,22 +16663,43 @@ class App(QMainWindow):
                         secs = int(val_raw or 0)
                     except Exception:
                         secs = parse_hms_text(str(val_raw))
-                    disp = seconds_to_hms(secs)
-                    it = self._make_item(col_idx, disp)
-                    it.setData(Qt.UserRole, secs)
-                    self.table.setItem(row_idx, col_idx, it)
+                    cells_by_key[column_spec.key] = self._catalog_cell_value(
+                        secs,
+                        header_text=header,
+                        display_text=seconds_to_hms(secs),
+                    )
+                elif header in self._standard_media_header_map():
+                    media_key = self._standard_media_key_for_header(header)
+                    cells_by_key[column_spec.key] = self._media_badge_cell_value(
+                        standard_meta.get((track_id, media_key)),
+                        track_id=track_id,
+                        header_text=header,
+                        media_key=media_key,
+                    )
                 else:
-                    val = "" if val_raw is None else str(val_raw)
-                    self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
+                    cells_by_key[column_spec.key] = self._catalog_cell_value(
+                        val_raw,
+                        header_text=header,
+                    )
 
-            track_id = row_data[0]
             for offset, field in enumerate(self.active_custom_fields):
-                val = cf_map.get((track_id, field["id"]), "")
-                self.table.setItem(
-                    row_idx,
-                    base_cols + offset,
-                    self._make_item(base_cols + offset, val, custom_def=field),
-                )
+                column_spec = column_specs[base_cols + offset]
+                field_type = str(field.get("field_type") or "").strip().lower()
+                if field_type in ("blob_image", "blob_audio"):
+                    cells_by_key[column_spec.key] = self._media_badge_cell_value(
+                        custom_meta.get((track_id, int(field["id"]))),
+                        track_id=track_id,
+                        header_text=column_spec.header_text,
+                        field=field,
+                    )
+                else:
+                    val = cf_map.get((track_id, field["id"]), "")
+                    cells_by_key[column_spec.key] = self._catalog_cell_value(
+                        val,
+                        header_text=column_spec.header_text,
+                        custom_def=field,
+                    )
+            snapshot_rows.append(CatalogRowSnapshot(track_id=track_id, cells_by_key=cells_by_key))
             if callable(progress_callback) and (
                 row_idx == total_rows - 1 or ((row_idx + 1) % batch_size) == 0
             ):
@@ -16488,7 +16708,27 @@ class App(QMainWindow):
                     total_rows,
                     f"Applied {row_idx + 1} of {total_rows} catalog rows.",
                 )
+        return CatalogSnapshot(column_specs=column_specs, rows=tuple(snapshot_rows))
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by _catalog_snapshot_from_dataset and CatalogTableModel.set_snapshot; remove in final cleanup batch
+    def _populate_table_from_dataset(
+        self,
+        rows: list[tuple],
+        cf_map: dict[tuple[int, int], str],
+        *,
+        progress_callback=None,
+    ) -> None:
+        snapshot = self._catalog_snapshot_from_dataset(
+            rows,
+            cf_map,
+            blob_badges={},
+            progress_callback=progress_callback,
+        )
+        source_model = self._catalog_source_model()
+        if source_model is not None:
+            source_model.set_snapshot(snapshot)
+
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel/CatalogFilterProxyModel live path; remove in final cleanup batch
     def _apply_catalog_ui_dataset(
         self,
         dataset: dict[str, object],
@@ -16499,9 +16739,10 @@ class App(QMainWindow):
         self._rebuild_table_headers()
         if callable(progress_callback):
             progress_callback(76, 100, "Rebuilt catalog table headers.")
-        self._populate_table_from_dataset(
+        snapshot = self._catalog_snapshot_from_dataset(
             list(dataset.get("rows") or []),
             dict(dataset.get("cf_map") or {}),
+            blob_badges=dict(dataset.get("blob_badges") or {}),
             progress_callback=(
                 self._scaled_progress_callback(
                     progress_callback,
@@ -16512,6 +16753,10 @@ class App(QMainWindow):
                 else None
             ),
         )
+        source_model = self._catalog_source_model()
+        if source_model is not None:
+            source_model.set_snapshot(snapshot)
+        self.apply_search_filter()
         self._apply_catalog_combo_values(dict(dataset.get("combo_values") or {}))
         if callable(progress_callback):
             progress_callback(91, 100, "Applied catalog lookup values.")
@@ -16522,18 +16767,8 @@ class App(QMainWindow):
         self._update_duration_label()
         if callable(progress_callback):
             progress_callback(95, 100, "Updated catalog counts and duration.")
-        self._apply_blob_badges(
-            prepared_payload=dict(dataset.get("blob_badges") or {}),
-            progress_callback=(
-                self._scaled_progress_callback(
-                    progress_callback,
-                    start=96,
-                    end=98,
-                )
-                if callable(progress_callback)
-                else None
-            ),
-        )
+        if callable(progress_callback):
+            progress_callback(98, 100, "Applied prepared media badges to catalog model.")
 
     def _capture_catalog_refresh_request(
         self,
@@ -16616,10 +16851,10 @@ class App(QMainWindow):
                     self._reload_profiles_list(select_path=str(select_path))
                 if sort_enabled:
                     self.table.setSortingEnabled(True)
-                    try:
-                        self.table.sortItems(self._last_sort_col, self._last_sort_order)
-                    except Exception:
-                        pass
+                    self._sort_catalog_table(
+                        state.get("sort_col", 0),
+                        state.get("sort_order", Qt.AscendingOrder),
+                    )
                 elif current_sort_enabled:
                     self.table.setSortingEnabled(True)
 
@@ -16800,7 +17035,7 @@ class App(QMainWindow):
         )
         if bool(refresh_request.get("sort_enabled")):
             self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
+        self._clear_catalog_table_model()
         self._update_count_label()
         self._update_duration_label()
         completion_notified = False
@@ -16906,56 +17141,62 @@ class App(QMainWindow):
         self._suspend_layout_history = True
         try:
             _prev_sort_enabled = self.table.isSortingEnabled()
+            header = self.table.horizontalHeader()
+            sort_col = header.sortIndicatorSection()
+            sort_order = header.sortIndicatorOrder()
             if _prev_sort_enabled:
                 self.table.setSortingEnabled(False)
-            self.table.setSortingEnabled(False)
-            self.table.setRowCount(0)
+            self._clear_catalog_table_model()
             self._apply_catalog_ui_dataset(dataset)
-            self.table.setSortingEnabled(True)
+            self.table.setSortingEnabled(_prev_sort_enabled)
             if _prev_sort_enabled:
-                self.table.setSortingEnabled(True)
-                try:
-                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
-                except Exception:
-                    pass
+                self._sort_catalog_table(sort_col, sort_order)
         finally:
             self._suspend_layout_history = previous_suspend_state
 
+    def _clear_catalog_table_model(self) -> None:
+        source_model = self._catalog_source_model()
+        if source_model is not None:
+            source_model.set_snapshot(
+                CatalogSnapshot(column_specs=self._catalog_table_column_specs_for_fields(), rows=())
+            )
+        proxy = self._catalog_proxy_model()
+        if proxy is not None:
+            proxy.set_explicit_track_ids(getattr(self, "_explicit_row_filter_track_ids", None))
+
+    def _sort_catalog_table(self, column: int | None, order: Qt.SortOrder) -> None:
+        try:
+            sort_column = int(column if column is not None else 0)
+        except (TypeError, ValueError):
+            sort_column = 0
+        if 0 <= sort_column < self.table.columnCount():
+            self.table.sortByColumn(sort_column, order)
+
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogFilterProxyModel.rowCount; remove in final cleanup batch
     def _update_count_label(self):
         # updates 'showing: N records'
         if not hasattr(self, "count_label") or self.count_label is None:
             return
-        visible = sum(not self.table.isRowHidden(r) for r in range(self.table.rowCount()))
+        visible = self.table.model().rowCount() if self.table.model() is not None else 0
         self.count_label.setText(f"showing: {visible} record{'s' if visible != 1 else ''}")
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogFilterProxyModel visible rows + CatalogTableModel role data; remove in final cleanup batch
     def _update_duration_label(self):
         if not hasattr(self, "duration_label") or self.duration_label is None:
             return
-        # find column index for Track Length
-        col_idx = -1
-        try:
-            for c in range(self.table.columnCount()):
-                if self.table.horizontalHeaderItem(c).text() == "Track Length (hh:mm:ss)":
-                    col_idx = c
-                    break
-        except Exception:
-            pass
+        col_idx = self._column_index_by_header("Track Length (hh:mm:ss)")
         if col_idx == -1:
             self.duration_label.setText("")
             return
         total_sec = 0
         try:
             for r in range(self.table.rowCount()):
-                if self.table.isRowHidden(r):
-                    continue
-                it = self.table.item(r, col_idx)
-                if not it:
-                    continue
-                v = it.data(Qt.UserRole)
+                index = self.table.model().index(r, col_idx)
+                v = self.table.model().data(index, RawValueRole)
                 if isinstance(v, (int, float)):
                     total_sec += int(v)
                 else:
-                    total_sec += parse_hms_text(it.text())
+                    total_sec += parse_hms_text(str(self.table.model().data(index) or ""))
         except Exception:
             pass
         self.duration_label.setText(f"total: {seconds_to_hms(total_sec)}")
@@ -16965,29 +17206,59 @@ class App(QMainWindow):
         hh = self.table.horizontalHeader()
         state = {
             "filter_text": self.search_field.text(),
+            "search_column_data": self.search_column_combo.currentData(),
             "sort_col": hh.sortIndicatorSection(),
             "sort_order": hh.sortIndicatorOrder(),
             "v_scroll": self.table.verticalScrollBar().value(),
             "h_scroll": self.table.horizontalScrollBar().value(),
+            "selected_track_ids": self._selected_track_ids(),
+            "current_track_id": self._catalog_table_controller().current_track_id(),
         }
         return state
 
     def _restore_view_state(self, state):
+        filter_text = str(state.get("filter_text") or "")
+        search_field_state = self.search_field.blockSignals(True)
+        try:
+            self.search_field.setText(filter_text)
+        finally:
+            self.search_field.blockSignals(search_field_state)
+
+        search_column_data = state.get("search_column_data", -1)
+        search_column_state = self.search_column_combo.blockSignals(True)
+        try:
+            column_index = self.search_column_combo.findData(search_column_data)
+            if column_index < 0:
+                column_index = self.search_column_combo.findData(-1)
+            self.search_column_combo.setCurrentIndex(column_index if column_index >= 0 else 0)
+        finally:
+            self.search_column_combo.blockSignals(search_column_state)
+
         sort_col = state.get("sort_col", 0)
         sort_order = state.get("sort_order", Qt.AscendingOrder)
-        if 0 <= sort_col < self.table.columnCount():
-            self.table.sortItems(sort_col, sort_order)
+        self._sort_catalog_table(sort_col, sort_order)
         self.apply_search_filter()
+        selected_track_ids = self._normalize_track_ids(state.get("selected_track_ids") or [])
+        if selected_track_ids:
+            self._select_track_ids_in_table(selected_track_ids)
+        current_track_id = state.get("current_track_id")
+        if current_track_id is not None:
+            self._select_row_by_id(int(current_track_id))
         self.table.verticalScrollBar().setValue(state.get("v_scroll", 0))
         self.table.horizontalScrollBar().setValue(state.get("h_scroll", 0))
 
     def _select_row_by_id(self, focus_id: int):
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            if it and it.text() == str(focus_id):
-                self.table.setCurrentCell(r, 0)
-                self.table.scrollToItem(it, QTableWidget.PositionAtCenter)
-                break
+        controller = self._catalog_table_controller()
+        index = controller.view_index_for_track_id(int(focus_id), column=0)
+        if not index.isValid():
+            return
+        self.table.setCurrentIndex(index)
+        selection_model = self.table.selectionModel()
+        if selection_model is not None:
+            selection_model.select(
+                index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+            )
+        self.table.scrollTo(index, QAbstractItemView.PositionAtCenter)
 
     def refresh_table_preserve_view(self, focus_id: int | None = None):
         with self._suspend_table_layout_history():
@@ -17025,10 +17296,10 @@ class App(QMainWindow):
             # Restore sorting after refresh
             if _prev_sort_enabled:
                 self.table.setSortingEnabled(True)
-                try:
-                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
-                except Exception:
-                    pass
+                self._sort_catalog_table(
+                    state.get("sort_col", 0),
+                    state.get("sort_order", Qt.AscendingOrder),
+                )
 
     # =============================================================================
     # Relational helpers
@@ -17624,6 +17895,16 @@ class App(QMainWindow):
         self.open_selected_editor(track_id)
 
     def _track_id_for_table_row(self, row_idx: int) -> int | None:
+        model = self.table.model() if hasattr(self, "table") else None
+        if model is not None:
+            try:
+                index = model.index(int(row_idx), 0)
+                if index.isValid():
+                    track_id = model.data(index, TrackIdRole)
+                    if track_id is not None and int(track_id) > 0:
+                        return int(track_id)
+            except Exception:
+                pass
         try:
             track_id = self._get_row_pk(int(row_idx))
         except Exception:
@@ -18296,14 +18577,12 @@ class App(QMainWindow):
             return
         if replace:
             self.table.clearSelection()
+        controller = self._catalog_table_controller()
         current_index = None
-        for row in range(self.table.rowCount()):
-            if self.table.isRowHidden(row):
+        for track_id in normalized_ids:
+            index = controller.view_index_for_track_id(track_id, column=0)
+            if not index.isValid():
                 continue
-            track_id = self._track_id_for_table_row(row)
-            if track_id not in normalized_ids:
-                continue
-            index = self.table.model().index(row, 0)
             selection_model.select(
                 index,
                 QItemSelectionModel.Select | QItemSelectionModel.Rows,
@@ -25394,10 +25673,15 @@ class App(QMainWindow):
     # Double-click editing: base vs custom fields
     # ============================================================
     # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.cell_target; remove in final cleanup batch
-    def _on_item_double_clicked(self, item: QTableWidgetItem):
+    def _on_item_double_clicked(self, item):
+        index = (
+            item
+            if hasattr(item, "isValid")
+            else self.table.model().index(item.row(), item.column())
+        )
         controller = self._catalog_table_controller()
         cell_target = controller.cell_target(
-            self.table.model().index(item.row(), item.column()),
+            index,
             base_column_count=len(self.BASE_HEADERS),
             custom_fields=self.active_custom_fields,
         )
@@ -26391,11 +26675,16 @@ class App(QMainWindow):
         if controller is None:
             controller = CatalogTableController(self)
             self._catalog_table_controller_instance = controller
+        table_model = self._catalog_source_model()
+        filter_proxy = self._catalog_proxy_model()
         controller.bind_view(getattr(self, "table", None))
+        controller.bind_models(table_model=table_model, filter_proxy=filter_proxy)
         controller.bind_widget_seams(
-            track_id_for_row=self._track_id_for_table_row,
+            track_id_for_row=None if table_model is not None else self._track_id_for_table_row,
             is_row_hidden=(
-                self.table.isRowHidden if hasattr(self, "table") else None
+                None
+                if filter_proxy is not None
+                else (self.table.isRowHidden if hasattr(self, "table") else None)
             ),
         )
         return controller
@@ -28770,6 +29059,10 @@ class App(QMainWindow):
         return icon
 
     def _row_for_id(self, track_id: int) -> int:
+        controller = self._catalog_table_controller()
+        index = controller.view_index_for_track_id(int(track_id), column=0)
+        if index.isValid():
+            return int(index.row())
         for r in range(self.table.rowCount()):
             it = self.table.item(r, 0)
             if it and it.text().isdigit() and int(it.text()) == track_id:
@@ -28783,6 +29076,11 @@ class App(QMainWindow):
         return -1
 
     def _column_index_by_header(self, header_text: str) -> int:
+        model = self.table.model() if hasattr(self, "table") else None
+        if model is not None:
+            for idx in range(model.columnCount()):
+                if str(model.headerData(idx, Qt.Horizontal, Qt.DisplayRole) or "") == header_text:
+                    return idx
         for idx in range(self.table.columnCount()):
             item = self.table.horizontalHeaderItem(idx)
             if item is not None and item.text() == header_text:
@@ -28845,6 +29143,15 @@ class App(QMainWindow):
 
     def _get_row_pk(self, row: int) -> int | None:
         """Return the primary key for a visual row, preferring Qt.UserRole on column 0."""
+        model = self.table.model() if hasattr(self, "table") else None
+        if model is not None:
+            try:
+                index = model.index(int(row), 0)
+                if index.isValid():
+                    value = model.data(index, TrackIdRole)
+                    return int(value) if value is not None and int(value) > 0 else None
+            except Exception:
+                pass
         it = self.table.item(row, 0)
         if not it:
             return None
@@ -28858,6 +29165,10 @@ class App(QMainWindow):
 
     def _apply_blob_badges(self, *, prepared_payload=None, progress_callback=None):
         """Apply blob badges from prepared payload when available, else live services."""
+        if self._catalog_source_model() is not None:
+            if callable(progress_callback):
+                progress_callback(1, 1, "Media badges already applied in catalog model snapshot.")
+            return
         base = len(self.BASE_HEADERS)
         total_rows = self.table.rowCount()
         if total_rows <= 0:

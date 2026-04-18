@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
-    QTableWidget,
+    QTableView,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -35,6 +36,151 @@ from isrc_manager.ui_common import (
     TwoDigitSpinBox,
     _create_round_help_button,
 )
+
+
+class _CatalogTableHeaderItem:
+    def __init__(self, text: str) -> None:
+        self._text = str(text or "")
+
+    def text(self) -> str:
+        return self._text
+
+
+class _CatalogTableCellItem:
+    def __init__(self, view: QTableView, row: int, column: int) -> None:
+        self._view = view
+        self._row = int(row)
+        self._column = int(column)
+
+    def row(self) -> int:
+        return self._row
+
+    def column(self) -> int:
+        return self._column
+
+    def _index(self):
+        model = self._view.model()
+        if model is None:
+            return None
+        index = model.index(self._row, self._column)
+        return index if index.isValid() else None
+
+    def text(self) -> str:
+        index = self._index()
+        if index is None:
+            return ""
+        model = self._view.model()
+        return str(model.data(index, Qt.DisplayRole) or "")
+
+    def data(self, role: int):
+        index = self._index()
+        if index is None:
+            return None
+        model = self._view.model()
+        return model.data(index, role)
+
+    def setData(self, _role: int, _value) -> None:
+        return None
+
+    def setText(self, _text: str) -> None:
+        return None
+
+    def icon(self) -> QIcon:
+        index = self._index()
+        if index is None:
+            return QIcon()
+        decoration = self._view.model().data(index, Qt.DecorationRole)
+        if isinstance(decoration, QIcon):
+            return decoration
+        if not decoration:
+            return QIcon()
+        tooltip = self.toolTip()
+        seed_parts = [str(decoration)]
+        if "Lossy primary audio" in tooltip:
+            seed_parts.append("lossy-primary-audio")
+        elif "Primary audio" in tooltip:
+            seed_parts.append("primary-audio")
+        if "Managed-file storage" in tooltip:
+            seed_parts.append("managed-file-storage")
+        elif "Database storage" in tooltip:
+            seed_parts.append("database-storage")
+        if len(seed_parts) == 1:
+            seed_parts.extend((self.text(), tooltip))
+        seed = "|".join(seed_parts)
+        cache = getattr(self._view, "_catalog_badge_icon_cache", None)
+        if cache is None:
+            cache = {}
+            self._view._catalog_badge_icon_cache = cache
+        cached_icon = cache.get(seed)
+        if isinstance(cached_icon, QIcon):
+            return cached_icon
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+        color = QColor(f"#{digest[:6]}")
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(color)
+        icon = QIcon(pixmap)
+        cache[seed] = icon
+        return icon
+
+    def setIcon(self, _icon: QIcon) -> None:
+        return None
+
+    def toolTip(self) -> str:
+        index = self._index()
+        if index is None:
+            return ""
+        return str(self._view.model().data(index, Qt.ToolTipRole) or "")
+
+    def setToolTip(self, _tooltip: str) -> None:
+        return None
+
+
+class CatalogTableView(QTableView):
+    """QTableView with narrow transitional helpers for existing catalog call sites."""
+
+    def rowCount(self) -> int:
+        model = self.model()
+        return int(model.rowCount()) if model is not None else 0
+
+    def columnCount(self) -> int:
+        model = self.model()
+        return int(model.columnCount()) if model is not None else 0
+
+    def item(self, row: int, column: int):
+        if row < 0 or column < 0 or row >= self.rowCount() or column >= self.columnCount():
+            return None
+        return _CatalogTableCellItem(self, row, column)
+
+    def horizontalHeaderItem(self, column: int):
+        model = self.model()
+        if model is None or column < 0 or column >= model.columnCount():
+            return None
+        return _CatalogTableHeaderItem(str(model.headerData(column, Qt.Horizontal) or ""))
+
+    def currentRow(self) -> int:
+        index = self.currentIndex()
+        return int(index.row()) if index.isValid() else -1
+
+    def setCurrentCell(self, row: int, column: int) -> None:
+        model = self.model()
+        if model is None:
+            return
+        index = model.index(int(row), int(column))
+        if index.isValid():
+            self.setCurrentIndex(index)
+
+    def sortItems(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
+        self.sortByColumn(int(column), order)
+
+    def scrollToItem(self, item, hint=QTableView.EnsureVisible) -> None:
+        row = item.row() if hasattr(item, "row") else -1
+        column = item.column() if hasattr(item, "column") else 0
+        model = self.model()
+        if model is None:
+            return
+        index = model.index(int(row), int(column))
+        if index.isValid():
+            self.scrollTo(index, hint)
 
 
 def build_main_window_shell(app: Any, *, last_db: str, movable: bool) -> None:
@@ -1347,9 +1493,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     right_panel.addLayout(app.search_layout)
 
-    app.table = QTableWidget()
+    app.table = CatalogTableView()
+    app._initialize_catalog_table_model_view()
     app._rebuild_table_headers()
-    app.table.setEditTriggers(QTableWidget.NoEditTriggers)
+    app.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     app.table.setSelectionBehavior(QAbstractItemView.SelectRows)
     app.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
     app.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1389,8 +1536,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.col_hint_label = None
     app.row_hint_label = None
 
-    app.table.itemDoubleClicked.connect(app._on_item_double_clicked)
-    app.table.itemSelectionChanged.connect(app._on_catalog_selection_changed)
+    app.table.doubleClicked.connect(app._on_item_double_clicked)
     app.table.setContextMenuPolicy(Qt.CustomContextMenu)
     app.table.customContextMenuRequested.connect(app._on_table_context_menu)
 
