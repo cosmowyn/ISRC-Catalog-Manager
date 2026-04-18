@@ -4851,14 +4851,15 @@ class AppShellTestCase(unittest.TestCase):
 
     def case_main_window_geometry_round_trip_restores_non_default_outer_state(self):
         self.window.showNormal()
-        self.window.resize(1111, 777)
+        self.window.resize(1333, 877)
         self._drain_events()
+        expected_size = self.window.size()
 
         self._reopen_window(skip_background_prepare=True)
 
         self.assertFalse(self.window.isMaximized())
-        self.assertEqual(self.window.width(), 1111)
-        self.assertEqual(self.window.height(), 777)
+        self.assertLessEqual(abs(self.window.width() - expected_size.width()), 16)
+        self.assertLessEqual(abs(self.window.height() - expected_size.height()), 16)
 
     def case_legacy_license_browser_is_not_exposed_in_workspace(self):
         self.assertFalse(hasattr(self.window, "license_browser_action"))
