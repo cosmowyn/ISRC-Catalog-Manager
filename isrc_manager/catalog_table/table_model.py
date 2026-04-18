@@ -72,10 +72,7 @@ class CatalogTableModel(QAbstractTableModel):
 
     @staticmethod
     def _build_track_id_index(snapshot: CatalogSnapshot) -> dict[int, int]:
-        return {
-            row.track_id: source_row
-            for source_row, row in enumerate(snapshot.rows)
-        }
+        return {row.track_id: source_row for source_row, row in enumerate(snapshot.rows)}
 
 
 __all__ = ["CatalogTableModel"]

@@ -4,11 +4,11 @@ from .controller import CatalogTableController
 from .filter_proxy import CatalogFilterProxyModel
 from .header_state import CatalogHeaderStateManager
 from .models import (
-    ColumnKeyRole,
     CatalogCellValue,
     CatalogColumnSpec,
     CatalogRowSnapshot,
     CatalogSnapshot,
+    ColumnKeyRole,
     RawValueRole,
     SearchTextRole,
     SortRole,
