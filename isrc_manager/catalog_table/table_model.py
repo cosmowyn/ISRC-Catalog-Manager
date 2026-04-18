@@ -61,7 +61,11 @@ class CatalogTableModel(QAbstractTableModel):
         if role == int(Qt.ItemDataRole.ToolTipRole):
             return cell_value.tooltip
         if role == int(Qt.ItemDataRole.DecorationRole):
-            return cell_value.decoration_key
+            return (
+                cell_value.decoration
+                if cell_value.decoration is not None
+                else cell_value.decoration_key
+            )
         if role == int(Qt.ItemDataRole.TextAlignmentRole):
             return cell_value.text_alignment
         if role == SortRole:

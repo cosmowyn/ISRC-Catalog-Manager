@@ -92,6 +92,7 @@ class CatalogCellValue:
     raw_value: object | None = None
     tooltip: str | None = None
     decoration_key: str | None = None
+    decoration: object | None = None
     text_alignment: int | None = None
 
     def __post_init__(self) -> None:
@@ -108,6 +109,7 @@ class CatalogCellValue:
         object.__setattr__(self, "sort_value", sort_value)
         object.__setattr__(self, "tooltip", tooltip)
         object.__setattr__(self, "decoration_key", decoration_key)
+        object.__setattr__(self, "decoration", self.decoration)
         object.__setattr__(self, "text_alignment", text_alignment)
 
     @classmethod
@@ -120,6 +122,7 @@ class CatalogCellValue:
         search_text: str | None = None,
         tooltip: str | None = None,
         decoration_key: str | None = None,
+        decoration: object | None = None,
         text_alignment: int | None = None,
     ) -> "CatalogCellValue":
         """Build a cell payload from one raw value while allowing overrides."""
@@ -133,6 +136,7 @@ class CatalogCellValue:
             raw_value=value,
             tooltip=tooltip,
             decoration_key=decoration_key,
+            decoration=decoration,
             text_alignment=text_alignment,
         )
 

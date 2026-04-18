@@ -11,6 +11,18 @@ class AppShellCatalogModelViewTests(AppShellTestCase):
     test_catalog_background_refresh_progress_completes_after_model_proxy_apply = (
         AppShellTestCase.case_catalog_background_refresh_progress_completes_after_model_proxy_apply
     )
+    test_catalog_badge_icons_are_served_from_model_roles_without_live_render_lookup = (
+        AppShellTestCase.case_catalog_badge_icons_are_served_from_model_roles_without_live_render_lookup
+    )
+    test_audio_preview_navigation_uses_proxy_order_and_model_media_roles = (
+        AppShellTestCase.case_audio_preview_navigation_uses_proxy_order_and_model_media_roles
+    )
+    test_focused_audio_export_uses_proxy_ordered_track_ids = (
+        AppShellTestCase.case_focused_audio_export_uses_proxy_ordered_track_ids
+    )
+    test_proxy_source_mapping_stays_correct_under_sort_filter_selection_for_media_roles = (
+        AppShellTestCase.case_proxy_source_mapping_stays_correct_under_sort_filter_selection_for_media_roles
+    )
 
 
 del AppShellTestCase

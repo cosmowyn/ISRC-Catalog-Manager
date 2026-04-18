@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, QModelIndex, QObject, QSortFilterProxyModel, Qt
 
-from isrc_manager.domain.standard_fields import standard_field_spec_for_label
+from isrc_manager.domain.standard_fields import STANDARD_FIELD_BY_KEY, standard_field_spec_for_label
 
 from .filter_proxy import CatalogFilterProxyModel
-from .models import TrackIdRole
+from .models import ColumnKeyRole, TrackIdRole
 from .table_model import CatalogTableModel
 
 if TYPE_CHECKING:
@@ -106,6 +106,32 @@ class CatalogTableController(QObject):
 
     def view_index_for_track_id(self, track_id: int, *, column: int = 0) -> QModelIndex:
         return self.map_from_source(self.source_index_for_track_id(track_id, column=column))
+
+    def column_for_key(self, column_key: str | None) -> int | None:
+        normalized_key = str(column_key or "").strip()
+        if not normalized_key:
+            return None
+        model = self.active_model()
+        if model is None:
+            return None
+        for column in range(model.columnCount()):
+            header_key = model.headerData(column, Qt.Horizontal, ColumnKeyRole)
+            if str(header_key or "") == normalized_key:
+                return column
+        return None
+
+    def visible_indexes(self, *, column: int = 0) -> tuple[QModelIndex, ...]:
+        model = self.active_model()
+        if model is None:
+            return ()
+        normalized_column = int(column)
+        if normalized_column < 0 or normalized_column >= model.columnCount():
+            return ()
+        return tuple(
+            model.index(row, normalized_column)
+            for row in range(model.rowCount())
+            if not self._row_is_hidden(row)
+        )
 
     def track_id_for_index(self, index: QModelIndex) -> int | None:
         if not index.isValid():
@@ -264,10 +290,15 @@ class CatalogTableController(QObject):
         column = int(index.column())
         track_id = self.track_id_for_index(index)
         header_text = self._header_text_for_column(column)
+        column_key = self._column_key_for_column(column)
         normalized_base_column_count = max(0, int(base_column_count))
 
         if column < normalized_base_column_count:
-            standard_spec = standard_field_spec_for_label(header_text)
+            standard_spec = None
+            if column_key.startswith("base:"):
+                standard_spec = STANDARD_FIELD_BY_KEY.get(column_key.split(":", 1)[1])
+            if standard_spec is None:
+                standard_spec = standard_field_spec_for_label(header_text)
             return CatalogCellTarget(
                 row=row,
                 column=column,
@@ -281,8 +312,23 @@ class CatalogTableController(QObject):
 
         field_index = column - normalized_base_column_count
         field = None
-        if custom_fields is not None and 0 <= field_index < len(custom_fields):
-            field = custom_fields[field_index]
+        if custom_fields is not None:
+            if column_key.startswith("custom:"):
+                try:
+                    column_field_id = int(column_key.split(":", 1)[1])
+                except (TypeError, ValueError):
+                    column_field_id = None
+                if column_field_id is not None:
+                    field = next(
+                        (
+                            candidate
+                            for candidate in custom_fields
+                            if int(candidate.get("id") or 0) == column_field_id
+                        ),
+                        None,
+                    )
+            if field is None and 0 <= field_index < len(custom_fields):
+                field = custom_fields[field_index]
         field_id = None
         if field is not None:
             try:
@@ -349,6 +395,14 @@ class CatalogTableController(QObject):
         if model is None:
             return ""
         return str(model.headerData(int(column), Qt.Horizontal, Qt.DisplayRole) or "")
+
+    def _column_key_for_column(self, column: int) -> str:
+        if column < 0:
+            return ""
+        model = self.active_model()
+        if model is None:
+            return ""
+        return str(model.headerData(int(column), Qt.Horizontal, ColumnKeyRole) or "")
 
     @staticmethod
     def _unique_track_ids(track_ids) -> tuple[int, ...]:

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap
+from PySide6.QtGui import QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -92,35 +91,7 @@ class _CatalogTableCellItem:
         decoration = self._view.model().data(index, Qt.DecorationRole)
         if isinstance(decoration, QIcon):
             return decoration
-        if not decoration:
-            return QIcon()
-        tooltip = self.toolTip()
-        seed_parts = [str(decoration)]
-        if "Lossy primary audio" in tooltip:
-            seed_parts.append("lossy-primary-audio")
-        elif "Primary audio" in tooltip:
-            seed_parts.append("primary-audio")
-        if "Managed-file storage" in tooltip:
-            seed_parts.append("managed-file-storage")
-        elif "Database storage" in tooltip:
-            seed_parts.append("database-storage")
-        if len(seed_parts) == 1:
-            seed_parts.extend((self.text(), tooltip))
-        seed = "|".join(seed_parts)
-        cache = getattr(self._view, "_catalog_badge_icon_cache", None)
-        if cache is None:
-            cache = {}
-            self._view._catalog_badge_icon_cache = cache
-        cached_icon = cache.get(seed)
-        if isinstance(cached_icon, QIcon):
-            return cached_icon
-        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
-        color = QColor(f"#{digest[:6]}")
-        pixmap = QPixmap(16, 16)
-        pixmap.fill(color)
-        icon = QIcon(pixmap)
-        cache[seed] = icon
-        return icon
+        return QIcon()
 
     def setIcon(self, _icon: QIcon) -> None:
         return None

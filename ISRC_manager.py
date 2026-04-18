@@ -16606,9 +16606,17 @@ class App(QMainWindow):
         )
         tooltip = ""
         raw_value = ""
+        icon = None
+        decoration_key = None
         if has_payload and media_key:
+            kind = self._blob_icon_kind_for_standard_media(media_key, meta=meta)
             tooltip = self._standard_media_badge_tooltip(media_key, meta, display)
             raw_value = (int(track_id), media_key)
+            icon = self._resolve_blob_badge_icon(
+                spec=self._blob_icon_spec_for_standard_media(media_key, meta=meta),
+                kind=kind,
+            )
+            decoration_key = kind
         elif has_payload and field is not None:
             field_type = str(field.get("field_type") or "").strip().lower()
             kind = self._blob_icon_kind_for_storage(
@@ -16621,13 +16629,19 @@ class App(QMainWindow):
                 f"Stored size: {display}"
             )
             raw_value = (int(track_id), int(field["id"]))
+            icon = self._resolve_blob_badge_icon(
+                spec=self._blob_icon_spec_for_custom_field_with_meta(field, meta=meta),
+                kind=kind,
+            )
+            decoration_key = kind
         return CatalogCellValue(
             display_text=display,
             sort_value=display,
             search_text=display if has_payload else "",
             raw_value=raw_value,
             tooltip=tooltip or None,
-            decoration_key="media" if has_payload else None,
+            decoration_key=decoration_key,
+            decoration=icon,
         )
 
     def _catalog_snapshot_from_dataset(
@@ -17894,6 +17908,7 @@ class App(QMainWindow):
             return
         self.open_selected_editor(track_id)
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.track_id_for_index; remove in final cleanup batch
     def _track_id_for_table_row(self, row_idx: int) -> int | None:
         model = self.table.model() if hasattr(self, "table") else None
         if model is not None:
@@ -25835,11 +25850,19 @@ class App(QMainWindow):
             return
         row = index.row()
         col = index.column()
+        cell_target = controller.cell_target(
+            index,
+            base_column_count=len(self.BASE_HEADERS),
+            custom_fields=self.active_custom_fields,
+        )
 
         menu = QMenu(self)
-        track_id = controller.track_id_for_index(index)
+        track_id = cell_target.track_id
         selected_ids = list(controller.selected_track_ids())
         effective_track_ids = self._effective_context_menu_track_ids(track_id, selected_ids)
+        ordered_effective_track_ids = (
+            self._proxy_ordered_track_ids(effective_track_ids) or effective_track_ids
+        )
         bulk_count = len(effective_track_ids) if effective_track_ids else 1
         edit_label = "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
         act_edit = QAction(edit_label, self)
@@ -25872,8 +25895,23 @@ class App(QMainWindow):
 
         if track_id:
             menu.addSeparator()
-            if self.track_has_media(track_id, "audio_file"):
-                export_track_ids = list(effective_track_ids or [track_id])
+            audio_column = controller.column_for_key(self._standard_media_column_key("audio_file"))
+            audio_index = (
+                controller.view_index_for_track_id(track_id, column=audio_column)
+                if audio_column is not None
+                else None
+            )
+            track_has_audio = (
+                self._media_cell_has_payload(audio_index, media_key="audio_file")
+                if audio_index is not None and audio_index.isValid()
+                else (
+                    self.track_has_media(track_id, "audio_file")
+                    if self._catalog_proxy_model() is None
+                    else False
+                )
+            )
+            if track_has_audio:
+                export_track_ids = list(ordered_effective_track_ids or [track_id])
                 audio_menu = menu.addMenu("Audio")
 
                 act_import_tags = QAction("Import Metadata from Audio Files…", self)
@@ -25943,8 +25981,8 @@ class App(QMainWindow):
                 audio_menu.addAction(act_verify_authenticity)
 
         menu.addSeparator()
-        cell_item = self.table.item(row, col)
-        cell_text = cell_item.text() if cell_item else ""
+        model = index.model()
+        cell_text = str(index.data(Qt.DisplayRole) or "")
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
         act_filter.triggered.connect(lambda: self.search_field.setText(cell_text))
         menu.addAction(act_filter)
@@ -25958,9 +25996,7 @@ class App(QMainWindow):
         act_copy_hdrs.triggered.connect(lambda: self._copy_selection_to_clipboard(True))
         menu.addAction(act_copy_hdrs)
 
-        header_item = self.table.horizontalHeaderItem(col)
-        header_text = header_item.text() if header_item is not None else ""
-        standard_media_key = self._standard_media_key_for_header(header_text)
+        standard_media_key = cell_target.standard_media_key
         file_menu = None
         storage_menu = None
 
@@ -25981,9 +26017,14 @@ class App(QMainWindow):
 
         if track_id and standard_media_key:
             standard_file_menu = ensure_file_menu()
-            focused_track_has_media = self.track_has_media(track_id, standard_media_key)
+            focused_track_has_media = self._media_cell_has_payload(
+                index,
+                media_key=standard_media_key,
+            )
+            if self._catalog_proxy_model() is None and not focused_track_has_media:
+                focused_track_has_media = self.track_has_media(track_id, standard_media_key)
             storage_scope = self._standard_media_storage_conversion_scope(
-                effective_track_ids,
+                ordered_effective_track_ids,
                 standard_media_key,
             )
             if focused_track_has_media:
@@ -26024,13 +26065,13 @@ class App(QMainWindow):
                 action = QAction(
                     self._storage_conversion_action_label(
                         target_mode,
-                        selection_count=len(effective_track_ids),
+                        selection_count=len(ordered_effective_track_ids),
                     ),
                     self,
                 )
                 action.triggered.connect(
                     lambda checked=False, track_ids=list(
-                        effective_track_ids
+                        ordered_effective_track_ids
                     ), key=standard_media_key, mode=target_mode: self._convert_standard_media_for_track(
                         track_ids,
                         key,
@@ -26039,135 +26080,114 @@ class App(QMainWindow):
                 )
                 ensure_storage_menu().addAction(action)
 
-        # Preview file action for custom blob columns
-        if col >= len(self.BASE_HEADERS):
-            field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
-            if self.cf_has_blob(int(self.table.item(row, 0).text()), field["id"]):
-                id_item = self.table.item(row, 0)
-                if id_item:
-                    track_id = int(id_item.text())
-                    custom_file_menu = ensure_file_menu()
-                    act_prev = QAction("Preview File…", self)
+        custom_field = cell_target.custom_field
+        custom_field_id = cell_target.custom_field_id
+        custom_field_type = str(cell_target.custom_field_type or "").strip().lower()
+        if (
+            track_id is not None
+            and custom_field is not None
+            and custom_field_id is not None
+            and custom_field_type in ("blob_image", "blob_audio")
+        ):
+            custom_file_menu = ensure_file_menu()
+            custom_cell_has_payload = self._media_cell_has_payload(index, field_id=custom_field_id)
+            title_column = self._column_index_by_header("Track Title")
+            title_index = index.siblingAtColumn(title_column) if title_column >= 0 else None
+            track_title = (
+                str(title_index.data(Qt.DisplayRole) or "").strip()
+                if title_index is not None and title_index.isValid()
+                else ""
+            )
+            if not track_title:
+                track_title = self._get_track_title(track_id) or f"track_{track_id}"
 
-                    def _do_prev():
-                        try:
-                            data = self.cf_fetch_blob(
-                                track_id, field["id"]
-                            )  # must return bytes or memoryview
-                            if not data:
-                                QMessageBox.information(
-                                    self, "Preview", "No data stored in this cell."
-                                )
-                                return
-                            # Use the actual track title for the preview dialog
-                            try:
-                                track_title = self._get_track_title(track_id) or f"track_{track_id}"
-                            except Exception:
-                                track_title = f"track_{track_id}"
-                            title = f"{track_title} — {field.get('label') or field.get('name') or 'File'}"
-                            self._preview_blob_bytes(data, title)
-                        except Exception as e:
-                            self.conn.rollback()
-                            self.logger.exception(f"Preview blob failed: {e}")
-                            QMessageBox.critical(
-                                self, "Custom Field Error", f"Failed to preview file:\n{e}"
-                            )
+            if custom_cell_has_payload:
+                act_prev = QAction("Preview File…", self)
+                act_prev.triggered.connect(lambda: self._preview_blob_for_cell(row, col))
+                custom_file_menu.addAction(act_prev)
 
-                    act_prev.triggered.connect(_do_prev)
-                    custom_file_menu.addAction(act_prev)
+            act_attach = QAction("Attach/Replace File…", self)
+            act_attach.triggered.connect(
+                lambda tid=track_id, fid=custom_field_id, ftype=custom_field_type, fname=str(
+                    custom_field.get("name") or ""
+                ): self._attach_blob_for_cell(tid, fid, ftype, fname)
+            )
+            custom_file_menu.addAction(act_attach)
 
-        # Blob field actions for custom columns
-        if col >= len(self.BASE_HEADERS):
-            field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
-            field_id = field["id"]
-            id_item = self.table.item(row, 0)
-            title_idx = self._column_index_by_header("Track Title")
-            title_item = self.table.item(row, title_idx) if title_idx >= 0 else None
-            if id_item and field.get("field_type") in ("blob_image", "blob_audio"):
-                track_id = int(id_item.text())
-                track_title = title_item.text() if title_item else f"track_{track_id}"
-                custom_file_menu = ensure_file_menu()
-                storage_scope = self._custom_blob_storage_conversion_scope(
-                    effective_track_ids,
-                    int(field_id),
-                )
-                act_attach = QAction("Attach/Replace File…", self)
-                act_attach.triggered.connect(
-                    lambda: self._attach_blob_for_cell(
-                        track_id, field_id, field.get("field_type"), field.get("name")
-                    )
-                )
-                custom_file_menu.addAction(act_attach)
-
-                # Use track title for export action label
+            if custom_cell_has_payload:
                 act_export = QAction(f"Export '{track_title}'…", self)
                 act_export.triggered.connect(
-                    lambda: self.cf_export_blob(track_id, field_id, self, track_title)
+                    lambda checked=False, tid=track_id, fid=custom_field_id, title=track_title: self.cf_export_blob(
+                        tid,
+                        fid,
+                        self,
+                        title,
+                    )
                 )
                 custom_file_menu.addAction(act_export)
-                for target_mode in storage_scope["allowed_targets"]:
-                    action = QAction(
-                        self._storage_conversion_action_label(
-                            target_mode,
-                            selection_count=len(effective_track_ids),
-                        ),
-                        self,
-                    )
-                    action.triggered.connect(
-                        lambda checked=False, track_ids=list(effective_track_ids), fid=int(
-                            field_id
-                        ), mode=target_mode: self._convert_custom_blob_storage_mode(
-                            track_ids,
-                            fid,
-                            mode,
+
+                def _do_del(
+                    tid=track_id,
+                    fid=custom_field_id,
+                    field_name=str(custom_field.get("name") or ""),
+                ):
+                    if (
+                        QMessageBox.question(
+                            self,
+                            "Delete File",
+                            "Remove the stored file from this cell?",
+                            QMessageBox.Yes | QMessageBox.No,
                         )
+                        != QMessageBox.Yes
+                    ):
+                        return
+                    try:
+                        self._run_snapshot_history_action(
+                            action_label=f"Delete Custom File: {field_name}",
+                            action_type="custom_field.blob_delete",
+                            entity_type="CustomFieldValue",
+                            entity_id=f"{tid}:{fid}",
+                            payload={
+                                "track_id": tid,
+                                "field_id": fid,
+                                "field_name": field_name,
+                            },
+                            mutation=lambda: self.cf_delete_blob(tid, fid),
+                        )
+                        self.refresh_table_preserve_view(focus_id=tid)
+                    except Exception as e:
+                        self.conn.rollback()
+                        self.logger.exception(f"Delete blob failed: {e}")
+                        QMessageBox.critical(
+                            self, "Custom Field Error", f"Failed to delete file:\n{e}"
+                        )
+
+                act_del = QAction("Delete File…", self)
+                act_del.triggered.connect(_do_del)
+                custom_file_menu.addAction(act_del)
+
+            storage_scope = self._custom_blob_storage_conversion_scope(
+                ordered_effective_track_ids,
+                int(custom_field_id),
+            )
+            for target_mode in storage_scope["allowed_targets"]:
+                action = QAction(
+                    self._storage_conversion_action_label(
+                        target_mode,
+                        selection_count=len(ordered_effective_track_ids),
+                    ),
+                    self,
+                )
+                action.triggered.connect(
+                    lambda checked=False, track_ids=list(
+                        ordered_effective_track_ids
+                    ), fid=int(custom_field_id), mode=target_mode: self._convert_custom_blob_storage_mode(
+                        track_ids,
+                        fid,
+                        mode,
                     )
-                    ensure_storage_menu().addAction(action)
-
-        # Delete blob action for custom blob columns
-        if col >= len(self.BASE_HEADERS):
-            field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
-            if self.cf_has_blob(int(self.table.item(row, 0).text()), field["id"]):
-                id_item = self.table.item(row, 0)
-                if id_item:
-                    track_id = int(id_item.text())
-                    if self.cf_has_blob(track_id, field["id"]):
-                        custom_file_menu = ensure_file_menu()
-                        act_del = QAction("Delete File…", self)
-
-                        def _do_del():
-                            if (
-                                QMessageBox.question(
-                                    self,
-                                    "Delete File",
-                                    "Remove the stored file from this cell?",
-                                    QMessageBox.Yes | QMessageBox.No,
-                                )
-                                == QMessageBox.Yes
-                            ):
-                                try:
-                                    self._run_snapshot_history_action(
-                                        action_label=f"Delete Custom File: {field['name']}",
-                                        action_type="custom_field.blob_delete",
-                                        entity_type="CustomFieldValue",
-                                        entity_id=f"{track_id}:{field['id']}",
-                                        payload={
-                                            "track_id": track_id,
-                                            "field_id": field["id"],
-                                            "field_name": field["name"],
-                                        },
-                                        mutation=lambda: self.cf_delete_blob(track_id, field["id"]),
-                                    )
-                                    self.refresh_table_preserve_view(focus_id=track_id)
-                                except Exception as e:
-                                    self.conn.rollback()
-                                    self.logger.exception(f"Delete blob failed: {e}")
-                                    QMessageBox.critical(
-                                        self, "Custom Field Error", f"Failed to delete file:\n{e}"
-                                    )
-
-                        act_del.triggered.connect(_do_del)
-                        custom_file_menu.addAction(act_del)
+                )
+                ensure_storage_menu().addAction(action)
 
         media_export_spec = self._focused_media_export_spec(col)
         if bulk_count > 1 and media_export_spec is not None:
@@ -26178,7 +26198,7 @@ class App(QMainWindow):
             )
             act_bulk_export.triggered.connect(
                 lambda checked=False, column=col, track_ids=list(
-                    selected_ids
+                    ordered_effective_track_ids or selected_ids
                 ): self._export_focused_media_column(
                     column,
                     track_ids=track_ids,
@@ -26371,10 +26391,144 @@ class App(QMainWindow):
             "field_name": str(field_name or "").strip(),
         }
 
+    def _standard_media_column_key(self, media_key: str) -> str | None:
+        clean_media_key = str(media_key or "").strip()
+        for header_text, candidate_media_key in self._standard_media_header_map().items():
+            if candidate_media_key != clean_media_key:
+                continue
+            standard_spec = standard_field_spec_for_label(header_text)
+            if standard_spec is not None:
+                return f"base:{standard_spec.key}"
+            return self._fallback_header_column_key(
+                header_text,
+                prefix="base",
+                logical_index=self.BASE_HEADERS.index(header_text)
+                if header_text in self.BASE_HEADERS
+                else 0,
+            )
+        return None
+
+    def _standard_media_key_for_column_key(self, column_key: str | None) -> str | None:
+        normalized_key = str(column_key or "").strip()
+        if not normalized_key.startswith("base:"):
+            return None
+        field_key = normalized_key.split(":", 1)[1]
+        for spec in standard_media_specs_by_label().values():
+            if spec.key == field_key:
+                return spec.media_key
+        return None
+
+    @staticmethod
+    def _custom_field_column_key(field_id: int) -> str:
+        return f"custom:{int(field_id)}"
+
+    def _custom_field_for_column_key(self, column_key: str | None) -> dict[str, object] | None:
+        normalized_key = str(column_key or "").strip()
+        if not normalized_key.startswith("custom:"):
+            return None
+        try:
+            field_id = int(normalized_key.split(":", 1)[1])
+        except (TypeError, ValueError):
+            return None
+        return next(
+            (
+                field
+                for field in self.active_custom_fields
+                if int(field.get("id") or 0) == field_id
+            ),
+            None,
+        )
+
+    def _model_data_for_index(self, index, role: int):
+        if index is None or not index.isValid():
+            return None
+        model = index.model()
+        return model.data(index, role) if model is not None else None
+
+    def _media_cell_has_payload(
+        self,
+        index,
+        *,
+        media_key: str | None = None,
+        field_id: int | None = None,
+    ) -> bool:
+        raw_value = self._model_data_for_index(index, RawValueRole)
+        if isinstance(raw_value, tuple) and len(raw_value) >= 2:
+            try:
+                raw_track_id = int(raw_value[0])
+            except (TypeError, ValueError):
+                raw_track_id = None
+            target_track_id = self._catalog_table_controller().track_id_for_index(index)
+            if (
+                raw_track_id is not None
+                and target_track_id is not None
+                and raw_track_id != int(target_track_id)
+            ):
+                return False
+            if media_key is not None:
+                return str(raw_value[1]) == str(media_key)
+            if field_id is not None:
+                try:
+                    return int(raw_value[1]) == int(field_id)
+                except (TypeError, ValueError):
+                    return False
+            return True
+        return False
+
+    def _media_column_for_audio_source_spec(
+        self,
+        source_spec: dict[str, object] | None,
+    ) -> int | None:
+        if not source_spec:
+            return None
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        controller = self._catalog_table_controller()
+        if kind == "custom":
+            try:
+                field_id = int(source_spec.get("field_id") or 0)
+            except (TypeError, ValueError):
+                return None
+            if field_id <= 0:
+                return None
+            return controller.column_for_key(self._custom_field_column_key(field_id))
+        media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+        return controller.column_for_key(self._standard_media_column_key(media_key))
+
+    def _media_cell_has_payload_for_source_spec(
+        self,
+        index,
+        source_spec: dict[str, object] | None,
+    ) -> bool:
+        if not source_spec:
+            return True
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        if kind == "custom":
+            try:
+                field_id = int(source_spec.get("field_id") or 0)
+            except (TypeError, ValueError):
+                return False
+            return self._media_cell_has_payload(index, field_id=field_id)
+        media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+        return self._media_cell_has_payload(index, media_key=media_key)
+
     def _audio_preview_navigation_track_ids(
         self,
         source_spec: dict[str, object] | None,
     ) -> list[int]:
+        controller = self._catalog_table_controller()
+        media_column = self._media_column_for_audio_source_spec(source_spec)
+        if source_spec is None:
+            return list(controller.visible_track_ids())
+        if media_column is not None:
+            ordered = []
+            for index in controller.visible_indexes(column=media_column):
+                if not self._media_cell_has_payload_for_source_spec(index, source_spec):
+                    continue
+                track_id = controller.track_id_for_index(index)
+                if track_id is not None:
+                    ordered.append(track_id)
+            return self._normalize_track_ids(ordered)
+
         visible_ids = self._current_visible_track_ids()
         if not visible_ids:
             visible_ids = self._normalize_track_ids(self._selected_track_ids())
@@ -28164,26 +28318,41 @@ class App(QMainWindow):
         return track_title
 
     def _focused_media_export_spec(self, column: int) -> dict[str, object] | None:
-        header_item = self.table.horizontalHeaderItem(column)
-        header_text = header_item.text() if header_item is not None else ""
-        media_key = self._standard_media_key_for_header(header_text)
+        model = self.table.model() if hasattr(self, "table") else None
+        header_text = ""
+        column_key = None
+        if model is not None and 0 <= int(column) < model.columnCount():
+            header_text = str(model.headerData(int(column), Qt.Horizontal, Qt.DisplayRole) or "")
+            column_key = str(model.headerData(int(column), Qt.Horizontal, ColumnKeyRole) or "")
+        if not header_text:
+            header_item = self.table.horizontalHeaderItem(column)
+            header_text = header_item.text() if header_item is not None else ""
+        media_key = self._standard_media_key_for_column_key(
+            column_key,
+        ) or self._standard_media_key_for_header(header_text)
         if media_key:
             return {
                 "kind": "standard",
+                "column": int(column),
+                "column_key": column_key or self._standard_media_column_key(media_key),
                 "column_label": header_text or media_key.replace("_", " ").title(),
                 "media_key": media_key,
             }
         if column < len(self.BASE_HEADERS):
             return None
         field_index = column - len(self.BASE_HEADERS)
-        if field_index < 0 or field_index >= len(self.active_custom_fields):
+        field = self._custom_field_for_column_key(column_key)
+        if field is None and 0 <= field_index < len(self.active_custom_fields):
+            field = self.active_custom_fields[field_index]
+        if field is None:
             return None
-        field = self.active_custom_fields[field_index]
         field_type = str(field.get("field_type") or "").strip()
         if field_type not in {"blob_audio", "blob_image"}:
             return None
         return {
             "kind": "custom_blob",
+            "column": int(column),
+            "column_key": column_key or self._custom_field_column_key(int(field["id"])),
             "column_label": header_text or str(field.get("name") or "File"),
             "field_id": int(field["id"]),
             "field_name": str(field.get("name") or "").strip(),
@@ -28303,6 +28472,52 @@ class App(QMainWindow):
             ),
         )
 
+    def _media_cell_has_payload_for_export_spec(self, index, spec: dict[str, object]) -> bool:
+        if str(spec.get("kind") or "") == "standard":
+            return self._media_cell_has_payload(index, media_key=str(spec.get("media_key") or ""))
+        try:
+            field_id = int(spec.get("field_id") or 0)
+        except (TypeError, ValueError):
+            return False
+        return self._media_cell_has_payload(index, field_id=field_id)
+
+    def _proxy_ordered_track_ids(
+        self,
+        track_ids,
+        *,
+        media_spec: dict[str, object] | None = None,
+        require_media_payload: bool = False,
+    ) -> list[int]:
+        requested = set(self._normalize_track_ids(track_ids or []))
+        controller = self._catalog_table_controller()
+        column = 0
+        if media_spec is not None:
+            try:
+                column = int(media_spec.get("column"))
+            except (TypeError, ValueError):
+                column_key = str(media_spec.get("column_key") or "")
+                resolved_column = controller.column_for_key(column_key)
+                column = resolved_column if resolved_column is not None else -1
+        ordered: list[int] = []
+        indexes = controller.visible_indexes(column=column if column >= 0 else 0)
+        for index in indexes:
+            if (
+                require_media_payload
+                and media_spec is not None
+                and column >= 0
+                and not self._media_cell_has_payload_for_export_spec(index, media_spec)
+            ):
+                continue
+            track_id = controller.track_id_for_index(index)
+            if track_id is None:
+                continue
+            if requested and int(track_id) not in requested:
+                continue
+            ordered.append(int(track_id))
+        if ordered or self._catalog_proxy_model() is not None:
+            return self._normalize_track_ids(ordered)
+        return self._normalize_track_ids(track_ids or [])
+
     def _export_focused_media_column(
         self,
         column: int,
@@ -28317,7 +28532,10 @@ class App(QMainWindow):
                 "Focus a stored audio, album art, or blob media column first.",
             )
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        selected_ids = self._proxy_ordered_track_ids(
+            track_ids or self._selected_track_ids(),
+            media_spec=spec,
+        )
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -29058,6 +29276,7 @@ class App(QMainWindow):
         cache[cache_key] = icon
         return icon
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.view_index_for_track_id; remove in final cleanup batch
     def _row_for_id(self, track_id: int) -> int:
         controller = self._catalog_table_controller()
         index = controller.view_index_for_track_id(int(track_id), column=0)
@@ -29075,6 +29294,7 @@ class App(QMainWindow):
                 return i
         return -1
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.column_for_key and model ColumnKeyRole headers; remove in final cleanup batch
     def _column_index_by_header(self, header_text: str) -> int:
         model = self.table.model() if hasattr(self, "table") else None
         if model is not None:
@@ -29093,6 +29313,7 @@ class App(QMainWindow):
     def _sanitize_filename(self, text: str) -> str:
         return sanitize_export_basename(text)
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel DecorationRole/ToolTipRole badge snapshot values; remove in final cleanup batch
     def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
         try:
             meta = self.cf_get_value_meta(
@@ -29141,6 +29362,7 @@ class App(QMainWindow):
             item.setToolTip("")
         item.setData(Qt.UserRole, (track_id, field_id) if meta.get("has_blob") else None)
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel TrackIdRole and CatalogTableController.track_id_for_index; remove in final cleanup batch
     def _get_row_pk(self, row: int) -> int | None:
         """Return the primary key for a visual row, preferring Qt.UserRole on column 0."""
         model = self.table.model() if hasattr(self, "table") else None
@@ -29163,6 +29385,7 @@ class App(QMainWindow):
         except Exception:
             return None
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel DecorationRole/ToolTipRole badge snapshot values; remove in final cleanup batch
     def _apply_blob_badges(self, *, prepared_payload=None, progress_callback=None):
         """Apply blob badges from prepared payload when available, else live services."""
         if self._catalog_source_model() is not None:

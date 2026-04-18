@@ -7493,6 +7493,156 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(ui_messages[-1], "Catalog view fully restored and ready.")
         self.assertIn(track_id, self._visible_track_ids())
 
+    def case_catalog_badge_icons_are_served_from_model_roles_without_live_render_lookup(self):
+        track_id = self._create_track(index=366, title="B4 Icon Role Track")
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            self._create_wav_file("b4-icon-role.wav"),
+        )
+        self.window.refresh_table()
+
+        audio_col = self.window._column_index_by_header("Audio File")
+        row = self._table_row_for_track_id(track_id)
+        model = self.window.table.model()
+        index = model.index(row, audio_col)
+        decoration = model.data(index, app_module.Qt.DecorationRole)
+
+        self.assertIsInstance(decoration, app_module.QIcon)
+        self.assertFalse(decoration.isNull())
+
+        with (
+            mock.patch.object(
+                self.window,
+                "track_media_meta",
+                side_effect=AssertionError("render path must not query standard media metadata"),
+            ),
+            mock.patch.object(
+                self.window,
+                "cf_get_value_meta",
+                side_effect=AssertionError("render path must not query custom blob metadata"),
+            ),
+        ):
+            item = self.window.table.item(row, audio_col)
+            self.assertIsNotNone(item)
+            assert item is not None
+            self.assertFalse(item.icon().isNull())
+            self.assertEqual(item.icon().cacheKey(), decoration.cacheKey())
+            self.assertIn("Primary audio", item.toolTip())
+
+    def case_audio_preview_navigation_uses_proxy_order_and_model_media_roles(self):
+        alpha_id = self._create_track(index=367, title="B4 Preview Alpha")
+        beta_id = self._create_track(index=368, title="B4 Preview Beta")
+        gamma_id = self._create_track(index=369, title="B4 Preview Gamma")
+        self.window.track_service.set_media_path(
+            alpha_id,
+            "audio_file",
+            self._create_wav_file("b4-preview-alpha.wav"),
+        )
+        self.window.track_service.set_media_path(
+            gamma_id,
+            "audio_file",
+            self._create_wav_file("b4-preview-gamma.wav"),
+        )
+        self.window.refresh_table()
+
+        title_column = self.window._column_index_by_header("Track Title")
+        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        self.app.processEvents()
+
+        source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
+        with mock.patch.object(
+            self.window,
+            "track_has_media",
+            side_effect=AssertionError("audio navigation must use model media roles"),
+        ):
+            order = self.window._audio_preview_navigation_track_ids(source_spec)
+
+        self.assertEqual(order, [gamma_id, alpha_id])
+        self.assertNotIn(beta_id, order)
+
+    def case_focused_audio_export_uses_proxy_ordered_track_ids(self):
+        alpha_id = self._create_track(index=370, title="B4 Export Alpha")
+        beta_id = self._create_track(index=371, title="B4 Export Beta")
+        gamma_id = self._create_track(index=372, title="B4 Export Gamma")
+        for track_id, filename in (
+            (alpha_id, "b4-export-alpha.wav"),
+            (beta_id, "b4-export-beta.wav"),
+            (gamma_id, "b4-export-gamma.wav"),
+        ):
+            self.window.track_service.set_media_path(
+                track_id,
+                "audio_file",
+                self._create_wav_file(filename),
+            )
+        self.window.refresh_table()
+
+        title_column = self.window._column_index_by_header("Track Title")
+        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        self.app.processEvents()
+
+        export_dir = self.root / "b4-export"
+        audio_col = self.window._column_index_by_header("Audio File")
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getExistingDirectory",
+                return_value=str(export_dir),
+            ),
+            mock.patch.object(self.window, "_submit_background_audio_column_export") as submit,
+            mock.patch.object(
+                self.window,
+                "track_has_media",
+                side_effect=AssertionError("focused audio export must use proxy order"),
+            ),
+        ):
+            self.window._export_focused_media_column(audio_col, track_ids=[alpha_id, gamma_id])
+
+        submit.assert_called_once()
+        self.assertEqual(submit.call_args.kwargs["track_ids"], [gamma_id, alpha_id])
+
+    def case_proxy_source_mapping_stays_correct_under_sort_filter_selection_for_media_roles(self):
+        alpha_id = self._create_track(index=373, title="B4 Mapping Alpha")
+        beta_id = self._create_track(index=374, title="B4 Mapping Beta")
+        outside_id = self._create_track(index=375, title="Outside Mapping Gamma")
+        for track_id, filename in (
+            (alpha_id, "b4-mapping-alpha.wav"),
+            (beta_id, "b4-mapping-beta.wav"),
+            (outside_id, "b4-mapping-outside.wav"),
+        ):
+            self.window.track_service.set_media_path(
+                track_id,
+                "audio_file",
+                self._create_wav_file(filename),
+            )
+        self.window.refresh_table()
+
+        self.window.search_field.setText("B4 Mapping")
+        self.window.apply_search_filter()
+        title_column = self.window._column_index_by_header("Track Title")
+        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        self.app.processEvents()
+
+        expected_visible = [beta_id, alpha_id]
+        self.assertEqual(self._visible_track_ids(), expected_visible)
+
+        self._select_track_ids([alpha_id, beta_id])
+        self.assertEqual(set(self.window._selected_track_ids()), {alpha_id, beta_id})
+
+        controller = self.window._catalog_table_controller()
+        audio_col = controller.column_for_key(self.window._standard_media_column_key("audio_file"))
+        self.assertIsNotNone(audio_col)
+        assert audio_col is not None
+
+        for track_id in expected_visible:
+            index = controller.view_index_for_track_id(track_id, column=audio_col)
+            self.assertTrue(index.isValid())
+            self.assertEqual(controller.track_id_for_index(index), track_id)
+            self.assertEqual(index.data(app_module.RawValueRole), (track_id, "audio_file"))
+            source_index = controller.map_to_source(index)
+            self.assertTrue(source_index.isValid())
+            self.assertEqual(source_index.data(app_module.RawValueRole), (track_id, "audio_file"))
+
     def case_audioless_row_context_menu_omits_audio_submenu(self):
         track_id = self._create_track(index=332, title="Metadata Only Track")
         self.window.refresh_table()
