@@ -37,7 +37,7 @@ from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
     from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, Qt
-    from PySide6.QtGui import QColor, QImage, QKeySequence
+    from PySide6.QtGui import QColor, QImage, QKeyEvent, QKeySequence
     from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
@@ -7365,6 +7365,50 @@ class AppShellTestCase(unittest.TestCase):
             sorted(self.window._selected_track_ids()), [first_track_id, second_track_id]
         )
 
+    def case_selected_or_visible_track_ids_prefer_visible_scope_when_filter_active(self):
+        selected_track_ids = [
+            self._create_track(index=335, title="Scope Selected One"),
+            self._create_track(index=336, title="Scope Selected Two"),
+            self._create_track(index=337, title="Visible Scope Track"),
+        ]
+        self.window.refresh_table()
+        self._select_track_ids(selected_track_ids[:2])
+
+        self.assertEqual(
+            sorted(self.window._selected_or_visible_track_ids()),
+            sorted(selected_track_ids[:2]),
+        )
+
+        self.window.search_field.setText("Visible Scope Track")
+        self.window.apply_search_filter()
+        self.app.processEvents()
+
+        self.assertEqual(self._visible_track_ids(), [selected_track_ids[2]])
+        self.assertEqual(self.window._selected_or_visible_track_ids(), [selected_track_ids[2]])
+
+    def case_default_conversion_track_ids_prefer_selection_before_filtered_scope(self):
+        filtered_track_ids = [
+            self._create_track(index=338, title="Conversion Scope One"),
+            self._create_track(index=339, title="Conversion Scope Two"),
+            self._create_track(index=340, title="Outside Filter Track"),
+        ]
+        self.window.refresh_table()
+        self.window.search_field.setText("Conversion Scope")
+        self.window.apply_search_filter()
+        self.app.processEvents()
+
+        self.assertEqual(
+            self._visible_track_ids(),
+            filtered_track_ids[:2],
+        )
+        self.assertEqual(
+            self.window._default_conversion_track_ids(),
+            filtered_track_ids[:2],
+        )
+
+        self._select_track_ids([filtered_track_ids[1]])
+        self.assertEqual(self.window._default_conversion_track_ids(), [filtered_track_ids[1]])
+
     def case_audioless_row_context_menu_omits_audio_submenu(self):
         track_id = self._create_track(index=332, title="Metadata Only Track")
         self.window.refresh_table()
@@ -7994,6 +8038,60 @@ class AppShellTestCase(unittest.TestCase):
         history_after = self.window.history_manager.list_entries(limit=50)
         self.assertEqual(len(history_after), history_before + 1)
         self.assertEqual(history_after[0].label, "Update Custom Field: Mood Notes")
+
+    def case_standard_table_double_click_opens_selected_editor(self):
+        track_id = self._create_track(index=353, title="Standard Double Click")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        row = self._table_row_for_track_id(track_id)
+        col = self.window._column_index_by_header("Track Title")
+
+        with mock.patch.object(self.window, "open_selected_editor") as open_selected_editor:
+            self.window._on_item_double_clicked(self.window.table.item(row, col))
+
+        open_selected_editor.assert_called_once_with(track_id)
+
+    def case_standard_media_table_double_click_routes_to_attach(self):
+        track_id = self._create_track(index=354, title="Media Double Click")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        row = self._table_row_for_track_id(track_id)
+        col = self.window._column_index_by_header("Audio File")
+
+        with mock.patch.object(
+            self.window,
+            "_attach_standard_media_for_track",
+        ) as attach_standard_media:
+            self.window._on_item_double_clicked(self.window.table.item(row, col))
+
+        attach_standard_media.assert_called_once_with(track_id, "audio_file")
+
+    def case_space_key_previews_current_standard_media_cell(self):
+        track_id = self._create_track(index=355, title="Space Preview Track")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        row = self._table_row_for_track_id(track_id)
+        col = self.window._column_index_by_header("Audio File")
+        self.window.table.setCurrentCell(row, col)
+        self.app.processEvents()
+        event = QKeyEvent(
+            app_module.QEvent.KeyPress,
+            app_module.Qt.Key_Space,
+            app_module.Qt.NoModifier,
+        )
+
+        with mock.patch.object(
+            self.window,
+            "_preview_standard_media_for_track",
+        ) as preview_standard_media:
+            handled = self.window.eventFilter(self.window.table, event)
+
+        self.assertTrue(handled)
+        self.assertTrue(event.isAccepted())
+        preview_standard_media.assert_called_once_with(track_id, "audio_file")
 
     def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
         track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")

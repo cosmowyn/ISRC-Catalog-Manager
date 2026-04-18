@@ -147,7 +147,11 @@ from isrc_manager.blob_icons import (
     normalize_blob_icon_settings,
     normalize_blob_icon_spec,
 )
-from isrc_manager.catalog_table import CatalogColumnSpec, CatalogHeaderStateManager
+from isrc_manager.catalog_table import (
+    CatalogColumnSpec,
+    CatalogHeaderStateManager,
+    CatalogTableController,
+)
 from isrc_manager.catalog_workspace import (
     CatalogWorkspaceDock,
     ensure_catalog_workspace_dock,
@@ -17636,52 +17640,9 @@ class App(QMainWindow):
             return None
         return track_id
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.selected_track_ids; remove in final cleanup batch
     def _selected_track_ids(self) -> list[int]:
-        track_ids: list[int] = []
-        seen: set[int] = set()
-        candidate_rows: list[int] = []
-        candidate_row_set: set[int] = set()
-        has_hidden_rows = any(self.table.isRowHidden(row) for row in range(self.table.rowCount()))
-
-        def _remember_row(row_idx: int) -> None:
-            normalized_row = int(row_idx)
-            if normalized_row < 0:
-                return
-            if has_hidden_rows and self.table.isRowHidden(normalized_row):
-                return
-            if normalized_row in candidate_row_set:
-                return
-            candidate_row_set.add(normalized_row)
-            candidate_rows.append(normalized_row)
-
-        sel_model = self.table.selectionModel()
-        if sel_model is not None:
-            for index in sel_model.selectedRows():
-                _remember_row(index.row())
-
-        for selection_range in self.table.selectedRanges():
-            for row_idx in range(selection_range.topRow(), selection_range.bottomRow() + 1):
-                _remember_row(row_idx)
-
-        selected_items = self.table.selectedItems()
-        for item in selected_items:
-            _remember_row(item.row())
-
-        if sel_model is not None:
-            for index in sel_model.selectedIndexes():
-                _remember_row(index.row())
-
-        current_row = self.table.currentRow()
-        if not candidate_rows and current_row >= 0:
-            _remember_row(current_row)
-
-        for row_idx in candidate_rows:
-            track_id = self._track_id_for_table_row(row_idx)
-            if track_id is None or track_id in seen:
-                continue
-            seen.add(track_id)
-            track_ids.append(track_id)
-        return track_ids
+        return list(self._catalog_table_controller().selected_track_ids())
 
     def open_gs1_dialog(self, track_id: int | None = None):
         if isinstance(track_id, bool):
@@ -17916,37 +17877,17 @@ class App(QMainWindow):
                 return value
         return None
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.selected_or_visible_track_ids; remove in final cleanup batch
     def _selected_or_visible_track_ids(self) -> list[int]:
-        row_count = self.table.rowCount()
-        visible_ids: list[int] = []
-        if any(self.table.isRowHidden(row) for row in range(row_count)):
-            for row in range(row_count):
-                if self.table.isRowHidden(row):
-                    continue
-                track_id = self._track_id_for_table_row(row)
-                if track_id is not None:
-                    visible_ids.append(track_id)
-            return self._normalize_track_ids(visible_ids)
-        return self._normalize_track_ids(self._selected_track_ids())
+        return list(self._catalog_table_controller().selected_or_visible_track_ids())
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.default_conversion_track_ids; remove in final cleanup batch
     def _default_conversion_track_ids(self) -> list[int]:
-        selected_ids = self._normalize_track_ids(self._selected_track_ids())
-        if selected_ids:
-            return selected_ids
-        row_count = self.table.rowCount()
-        if any(self.table.isRowHidden(row) for row in range(row_count)):
-            return self._current_visible_track_ids()
-        return []
+        return list(self._catalog_table_controller().default_conversion_track_ids())
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.visible_track_ids; remove in final cleanup batch
     def _current_visible_track_ids(self) -> list[int]:
-        visible_ids: list[int] = []
-        for row in range(self.table.rowCount()):
-            if self.table.isRowHidden(row):
-                continue
-            track_id = self._track_id_for_table_row(row)
-            if track_id is not None:
-                visible_ids.append(track_id)
-        return self._normalize_track_ids(visible_ids)
+        return list(self._catalog_table_controller().visible_track_ids())
 
     def _bulk_audio_attach_scope_track_ids(
         self, track_ids: list[int] | None = None
@@ -24864,29 +24805,11 @@ class App(QMainWindow):
 
     def export_selected_to_xml(self):
         """Export visible rows if a filter is active; otherwise export explicitly selected rows."""
-        # --- Collect Track IDs (prefer visible/filtered rows) ---
-        row_count = self.table.rowCount()
-        any_hidden = any(self.table.isRowHidden(r) for r in range(row_count))
-        if any_hidden:
-            rows = [r for r in range(row_count) if not self.table.isRowHidden(r)]
-        else:
-            sel = self.table.selectionModel()
-            if not sel or not sel.hasSelection():
-                QMessageBox.information(
-                    self, "Export Selected", "Select one or more rows (or apply a filter) first."
-                )
-                return
-            rows = [idx.row() for idx in sel.selectedRows()]
-
-        track_ids = sorted(
-            {
-                int(self.table.item(r, 0).text())
-                for r in rows
-                if self.table.item(r, 0) and self.table.item(r, 0).text().strip().isdigit()
-            }
-        )
+        track_ids = self._selected_or_visible_track_ids()
         if not track_ids:
-            QMessageBox.warning(self, "Export Selected", "No valid track IDs found to export.")
+            QMessageBox.information(
+                self, "Export Selected", "Select one or more rows (or apply a filter) first."
+            )
             return
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -25470,33 +25393,32 @@ class App(QMainWindow):
     # ============================================================
     # Double-click editing: base vs custom fields
     # ============================================================
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.cell_target; remove in final cleanup batch
     def _on_item_double_clicked(self, item: QTableWidgetItem):
-        col = item.column()
-        if col < len(self.BASE_HEADERS):
-            header_item = self.table.horizontalHeaderItem(col)
-            header_text = header_item.text() if header_item is not None else ""
-            standard_media_key = self._standard_media_key_for_header(header_text)
-            if standard_media_key:
-                id_item = self.table.item(item.row(), 0)
-                if not id_item:
+        controller = self._catalog_table_controller()
+        cell_target = controller.cell_target(
+            self.table.model().index(item.row(), item.column()),
+            base_column_count=len(self.BASE_HEADERS),
+            custom_fields=self.active_custom_fields,
+        )
+        track_id = cell_target.track_id
+        if cell_target.kind == "standard":
+            if cell_target.standard_media_key:
+                if track_id is None:
                     return
-                try:
-                    track_id = int(id_item.text())
-                except Exception:
-                    return
-                self._attach_standard_media_for_track(track_id, standard_media_key)
+                self._attach_standard_media_for_track(track_id, cell_target.standard_media_key)
                 return
-            self.edit_entry(item)
+            if track_id is None:
+                QMessageBox.warning(self, "Edit Track", "Could not determine the selected track.")
+                return
+            self.open_selected_editor(track_id)
             return
 
-        # --- Custom field context ---
-        field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
-        id_item = self.table.item(item.row(), 0)
-        if not id_item:
+        field = cell_target.custom_field
+        if field is None or track_id is None or cell_target.custom_field_id is None:
             return
-        track_id = int(id_item.text())
-        field_id = field["id"]
-        field_type = field.get("field_type", "text")
+        field_id = cell_target.custom_field_id
+        field_type = cell_target.custom_field_type or "text"
         options = json.loads(field.get("options") or "[]") if field_type == "dropdown" else None
 
         # --- BLOB fields -> file picker + save, then return ---
@@ -25621,30 +25543,18 @@ class App(QMainWindow):
     # =============================================================================
     # Table context menu
     # =============================================================================
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.prepare_context_menu_selection; remove in final cleanup batch
     def _on_table_context_menu(self, pos):
-        index = self.table.indexAt(pos)
+        controller = self._catalog_table_controller()
+        index = controller.prepare_context_menu_selection(self.table.indexAt(pos))
         if not index.isValid():
             return
         row = index.row()
         col = index.column()
-        sel_model = self.table.selectionModel()
-        if sel_model is not None:
-            selected_rows = {selected.row() for selected in sel_model.selectedRows()}
-            if not selected_rows:
-                selected_rows = {selected.row() for selected in sel_model.selectedIndexes()}
-            if row in selected_rows:
-                sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
-            else:
-                sel_model.select(
-                    index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
-                )
-                sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
-        else:
-            self.table.setCurrentCell(row, col)
 
         menu = QMenu(self)
-        track_id = self._track_id_for_table_row(row)
-        selected_ids = self._selected_track_ids()
+        track_id = controller.track_id_for_index(index)
+        selected_ids = list(controller.selected_track_ids())
         effective_track_ids = self._effective_context_menu_track_ids(track_id, selected_ids)
         bulk_count = len(effective_track_ids) if effective_track_ids else 1
         edit_label = "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
@@ -25653,7 +25563,7 @@ class App(QMainWindow):
         menu.addAction(act_edit)
 
         act_gs1 = QAction("GS1 Metadata…", self)
-        act_gs1.triggered.connect(lambda: self.open_gs1_dialog(self._track_id_for_table_row(row)))
+        act_gs1.triggered.connect(lambda tid=track_id: self.open_gs1_dialog(tid))
         menu.addAction(act_gs1)
 
         if track_id and self.release_service is not None:
@@ -25994,35 +25904,35 @@ class App(QMainWindow):
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.cell_target; remove in final cleanup batch
     def _preview_blob_for_cell(self, row: int, col: int):
         """Directly preview the blob in the given cell (image/audio)."""
-        if col < len(self.BASE_HEADERS):
-            header_item = self.table.horizontalHeaderItem(col)
-            header_text = header_item.text() if header_item is not None else ""
-            media_key = self._standard_media_key_for_header(header_text)
-            if not media_key:
+        controller = self._catalog_table_controller()
+        cell_target = controller.cell_target(
+            self.table.model().index(row, col),
+            base_column_count=len(self.BASE_HEADERS),
+            custom_fields=self.active_custom_fields,
+        )
+        track_id = cell_target.track_id
+        if cell_target.kind == "standard":
+            if track_id is None or not cell_target.standard_media_key:
                 return
-            id_item = self.table.item(row, 0)
-            if not id_item:
-                return
-            self._preview_standard_media_for_track(int(id_item.text()), media_key)
+            self._preview_standard_media_for_track(track_id, cell_target.standard_media_key)
             return
 
-        field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
-        id_item = self.table.item(row, 0)
-        if not id_item:
+        field = cell_target.custom_field
+        if field is None or track_id is None or cell_target.custom_field_id is None:
             return
 
         try:
-            track_id = int(id_item.text())
-            if not self.cf_has_blob(track_id, field["id"]):
+            if not self.cf_has_blob(track_id, cell_target.custom_field_id):
                 return
 
-            field_type = str(field.get("field_type") or "").strip().lower()
+            field_type = str(cell_target.custom_field_type or "").strip().lower()
             field_name = ""
             try:
                 field_name = (
-                    self.custom_field_definitions.get_field_name(field["id"])
+                    self.custom_field_definitions.get_field_name(cell_target.custom_field_id)
                     if self.custom_field_definitions is not None
                     else ""
                 )
@@ -26037,13 +25947,15 @@ class App(QMainWindow):
                 self._open_audio_preview_for_track(
                     track_id,
                     self._audio_preview_source_spec_for_custom_field(
-                        field["id"],
+                        cell_target.custom_field_id,
                         field_name=field_name,
                     ),
                     autoplay=True,
                 )
                 return
-            data = self.cf_fetch_blob(track_id, field["id"])  # must return bytes or memoryview
+            data = self.cf_fetch_blob(
+                track_id, cell_target.custom_field_id
+            )  # must return bytes or memoryview
             if not data:
                 QMessageBox.information(self, "Preview", "No data stored in this cell.")
                 return
@@ -26473,6 +26385,20 @@ class App(QMainWindow):
             self.settings,
             settings_prefix=self._table_settings_prefix_for_path(resolved_path or ""),
         )
+
+    def _catalog_table_controller(self) -> CatalogTableController:
+        controller = getattr(self, "_catalog_table_controller_instance", None)
+        if controller is None:
+            controller = CatalogTableController(self)
+            self._catalog_table_controller_instance = controller
+        controller.bind_view(getattr(self, "table", None))
+        controller.bind_widget_seams(
+            track_id_for_row=self._track_id_for_table_row,
+            is_row_hidden=(
+                self.table.isRowHidden if hasattr(self, "table") else None
+            ),
+        )
+        return controller
 
     def _header_label_for_logical_index(self, logical_index: int) -> str:
         if not hasattr(self, "table"):
@@ -27975,15 +27901,18 @@ class App(QMainWindow):
             "field_type": field_type,
         }
 
+    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.effective_context_menu_track_ids; remove in final cleanup batch
     def _effective_context_menu_track_ids(
         self,
         track_id: int | None,
         selected_ids: list[int] | None = None,
     ) -> list[int]:
-        normalized_selected = self._normalize_track_ids(selected_ids or [])
-        if track_id is not None and track_id in normalized_selected:
-            return normalized_selected
-        return [int(track_id)] if track_id is not None else []
+        return list(
+            self._catalog_table_controller().effective_context_menu_track_ids(
+                track_id,
+                selected_track_ids=tuple(selected_ids or ()),
+            )
+        )
 
     @staticmethod
     def _storage_conversion_action_label(target_mode: str, *, selection_count: int) -> str:
