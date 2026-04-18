@@ -1,0 +1,369 @@
+# Plan
+
+# Catalog Table `QTableView` Migration With Controlled De-Monolith Cutover
+
+## Summary
+- Use a governed two-phase migration:
+  - **Phase A:** build the full external `isrc_manager/catalog_table/` module surface without changing live behavior.
+  - **Phase B:** cut over live behavior family by family, then do a final cleanup pass.
+- Preserve user-visible behavior: theme fidelity, context menus, double-click actions, storage/media actions, selection semantics, truthful progress, and workspace/layout behavior.
+- Use the migration to move Catalog-table-specific logic out of `ISRC_manager.py` into dedicated modules, not to keep adding more catalog behavior to the monolith.
+- Add zoom only after the `QTableView` path is stable, and keep zoom as a pure view-density feature with layout-backed persistence and no data refresh.
+
+## 1. Current Architecture Audit
+- The Catalog table is built as a `QTableWidget` in `isrc_manager/main_window_shell.py` (line 1350).
+- The current runtime path in `ISRC_manager.py` is item-widget owned:
+  - population: `_populate_table_from_dataset()`, `_apply_catalog_ui_dataset()`, `refresh_table()`
+  - sorting: `_SortItem`, `_make_item()`
+  - filtering: `apply_search_filter()` via `setRowHidden()`
+  - row identity: `_track_id_for_table_row()`, `_get_row_pk()`, `_row_for_id()`
+  - interaction: `_on_item_double_clicked()`, `_on_table_context_menu()`, `_preview_blob_for_cell()`
+  - selection/export: `_selected_track_ids()`, `_selected_or_visible_track_ids()`, `_current_visible_track_ids()`, `export_selected_to_xml()`
+  - badges/icons: `_apply_blob_badges()`
+  - header/layout persistence: `_save_header_state()`, `_load_header_state()`, `_apply_saved_column_visibility()`
+- The good architectural seam already exists:
+  - background snapshot loading through `CatalogReadService.fetch_rows_with_customs()` and `fetch_blob_badge_payload()`
+  - prepared badge payloads already avoid UI-thread metadata lookups
+- Theming is already compatible with `QTableView`:
+  - `theme_builder.py` styles `QTableWidget` and `QTableView` together
+  - no Catalog-table-specific widget selector needs to be preserved
+- The strongest incorrect coupling today:
+  - display text, sort keys, icons, tooltips, and row identity are stored in `QTableWidgetItem`
+  - filtered state is inferred from hidden rows
+  - tests also assume `table.item(row, 0)` and `isRowHidden(row)`
+
+## 2. What Breaks and Why
+- **Immediate widget API breakage**
+  - `QTableView` has no `setItem`, `item`, `horizontalHeaderItem`, `itemDoubleClicked`, `selectedItems`, `selectedRanges`, `currentRow`, `setCurrentCell`, or `scrollToItem`.
+  - A direct class swap breaks shell construction, refresh, selection, edit, copy, export, preview, and context-menu flows.
+- **Selection and identity breakage**
+  - Current code repeatedly parses track IDs from column-0 item text.
+  - Under a proxy-backed `QTableView`, visual row and source row differ; row identity must come from model roles and proxy/source mapping.
+- **Filtering semantics breakage**
+  - Today, “filtered mode” means rows are hidden.
+  - Under `QSortFilterProxyModel`, filtered rows disappear instead of becoming hidden.
+  - After cutover, “visible rows” must mean proxy-visible rows only.
+- **Context-menu and column-specific behavior breakage**
+  - Menu routing depends on clicked row plus selected rows, header labels, and item lookups.
+  - Custom blob/media columns must be remapped to stable column keys plus `QModelIndex`.
+- **Header persistence fragility**
+  - Widths live in native header state; order and hidden columns use label-based fallback.
+  - Migration must not strand existing saved layouts.
+- **Coverage gaps**
+  - No direct test currently covers actual catalog Space preview signal flow.
+  - No direct test currently covers selected-vs-visible export branches.
+  - Current app-shell helpers are item/hidden-row based and will need migration too.
+
+## 3. Recommended Target Architecture
+- Create `isrc_manager/catalog_table/` with:
+  - `models.py`
+  - `table_model.py`
+  - `filter_proxy.py`
+  - `header_state.py`
+  - `controller.py`
+  - `zoom.py`
+  - plus `__init__.py` if needed
+- Module responsibilities:
+  - `models.py`
+    - `CatalogColumnSpec`
+    - `CatalogCellValue`
+    - `CatalogRowSnapshot`
+    - `CatalogSnapshot`
+    - Catalog role constants: `SortRole`, `SearchTextRole`, `TrackIdRole`, `ColumnKeyRole`, `RawValueRole`
+  - `table_model.py`
+    - `CatalogTableModel(QAbstractTableModel)`
+    - public methods: `set_snapshot()`, `column_spec()`, `track_id_for_source_row()`, `source_row_for_track_id()`
+  - `filter_proxy.py`
+    - `CatalogFilterProxyModel(QSortFilterProxyModel)`
+    - public methods: `set_search_text()`, `set_search_column_key()`, `set_explicit_track_ids()`
+  - `header_state.py`
+    - `CatalogHeaderStateManager`
+    - save/restore header state, hidden columns, column order, legacy fallback reads, new key-based writes
+  - `controller.py`
+    - `CatalogTableController(QObject)`
+    - bind view, resolve proxy/source mapping, selection helpers, context-menu targeting, double-click dispatch, selected-vs-visible export semantics
+  - `zoom.py`
+    - `CatalogZoomController(QObject)`
+    - one zoom source of truth, slider/wheel/pinch sync, throttled visual apply, layout persistence
+- Runtime design:
+  - `CatalogTableModel` becomes the source of truth for display/sort/tooltip/icon/identity data.
+  - `CatalogFilterProxyModel` owns search text, single-column vs all-column search, explicit track filter, and sort behavior.
+  - `CatalogColumnSpec` is the authoritative source for stable column behavior metadata. Header text is display-only and must not drive business behavior after cutover.
+- Keep the delegate thin in v1. Prefer model roles over custom painting unless a later fidelity gap requires a custom delegate.
+- Hard invariant:
+  - `CatalogTableModel.data()` must not perform service calls, file I/O, or uncached live metadata lookups.
+  - All badge/icon/tooltip/search/sort data must be present in the snapshot or in in-memory cached structures already owned by the model.
+- Header persistence:
+  - keep current settings keys readable
+  - add key-based writes alongside existing label-based persistence
+  - once key-based restore succeeds, it becomes the preferred restore source
+  - legacy label-based restore remains fallback-only
+  - preserve `columns_movable`, `display/interactive_col_width`, and `display/interactive_row_height`
+- Theming:
+  - preserve the existing QSS architecture
+  - keep `table_panel_widget[role="workspaceCanvas"]` and `catalogTableDock`
+  - avoid delegate painting that bypasses Qt’s normal QSS-driven selection/hover visuals
+- Monolith deprecation marker convention:
+  - above each obsolete `ISRC_manager.py` function, add:
+    - `# CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.<module>.<symbol>; remove in final cleanup batch`
+  - do not emit runtime warnings to users
+  - mark only after that responsibility is live on the new path
+
+## 4. Zoom Feasibility and Design
+- Zoom is feasible only as a view-density feature.
+- It must not:
+  - call `refresh_table()`
+  - call `refresh_table_preserve_view()`
+  - rebuild the dataset
+  - recompute blob metadata
+- Zoom controls:
+  - always-visible slider
+  - `Ctrl`/`Cmd` + wheel
+  - native pinch where Qt provides actual zoom gestures
+  - plain wheel remains scroll
+- Persistence rule locked:
+  - reset on profile change
+  - save and restore zoom as part of the active main-window layout payload
+- Zoom source of truth:
+  - `catalog_zoom_percent`
+  - default `100%`
+  - range `80%–160%`
+  - `5%` steps
+- Zoom changes only:
+  - table font
+  - header font/height
+  - row height / default section size
+  - badge/icon size
+  - optional size-hint padding if needed
+- Anti-stall controls:
+  - coalesce slider drags and pinch bursts to one visual apply per event loop or ~16–33ms
+  - final settle on slider release / gesture end
+  - never run `resizeColumnsToContents()` during interactive zoom
+  - do not use fit-to-view behavior
+- Magnifier is not the primary plan. Keep it only as a fallback if density zoom proves unacceptable after the migration.
+
+## 5. Batched Migration Plan
+
+### Phase A — External Module Build-Out Without Live Cutover
+- **A1 — Package and public surface creation**
+  - Goal: create `isrc_manager/catalog_table/` and all approved module files with class/function scaffolding.
+  - Area: new package only, plus minimal dormant imports if needed.
+  - Runtime behavior: unchanged.
+  - Constraint: live runtime must not depend on the new modules yet except for dormant imports, test seams, or non-invasive scaffolding.
+  - Risk: low
+  - Token cost: low-medium
+  - Validation:
+    - `py_compile` on new modules
+    - import smoke tests
+- **A2 — Pure data/model/proxy implementation without shell usage**
+  - Goal: implement `models.py`, `table_model.py`, and `filter_proxy.py` as testable standalone units.
+  - Area: new package only.
+  - Runtime behavior: unchanged.
+  - Constraint: no production path may depend on these modules yet.
+  - Risk: low-medium
+  - Token cost: medium
+  - Validation:
+    - focused unit tests for roles, sorting, search, explicit track filtering
+    - verify `CatalogTableModel.data()` stays pure and side-effect free
+- **A3 — Pure header/zoom/controller implementation without live wiring**
+  - Goal: implement `header_state.py`, `controller.py`, and `zoom.py` with real logic and test seams, but no production cutover yet.
+  - Area: new package only, plus optional type-only or dormant seam imports.
+  - Runtime behavior: unchanged.
+  - Constraint: no live runtime dependency on the new modules yet beyond dormant scaffolding.
+  - Risk: medium
+  - Token cost: medium
+  - Validation:
+    - focused unit tests for header-state compatibility helpers
+    - focused unit tests for zoom state machine and throttle behavior
+- **A4 — Structural audit gate**
+  - Goal: verify the new external module surface is complete, coherent, and ready for cutover.
+  - Area: review only.
+  - Runtime behavior: unchanged.
+  - Risk: low
+  - Token cost: low
+  - Validation:
+    - package compiles
+    - tests for pure modules pass
+    - no app-shell behavior changed yet
+
+### Phase B — Controlled Live Cutover
+- **B1 — Header-state cutover**
+  - Goal: route live header/order/hidden-column persistence through `CatalogHeaderStateManager` while still on `QTableWidget`.
+  - Monolith functions to mark when done:
+    - `_save_header_state`
+    - `_load_header_state`
+    - `_apply_saved_column_visibility`
+    - `_refresh_column_visibility_menu`
+    - related header payload helpers
+  - Risk: medium
+  - Token cost: medium
+  - Validation:
+    - programmatic vs interactive resize history behavior
+    - column reorder/hide/show persistence
+    - restart round-trip
+    - successful key-based restore preferred over legacy fallback
+- **B2 — Interaction/controller cutover on current widget**
+  - Goal: route live selection helpers, double-click routing, context-menu targeting, and selected-vs-visible export semantics through `CatalogTableController`, still using the current widget backend.
+  - Monolith functions to mark when done:
+    - `_selected_track_ids`
+    - `_selected_or_visible_track_ids`
+    - `_current_visible_track_ids`
+    - `_on_item_double_clicked`
+    - `_on_table_context_menu`
+    - `_preview_blob_for_cell`
+    - relevant export/selection helpers
+  - Risk: medium-high
+  - Token cost: high
+  - Validation:
+    - right-click inside selection preserves multi-select
+    - double-click standard/custom/media paths
+    - selected-vs-visible export semantics
+    - `Space` preview
+- **B3 — Live shell flip to `QTableView` + model/proxy**
+  - Goal: replace the live Catalog widget with `QTableView`, bind `CatalogTableModel` and `CatalogFilterProxyModel`, and move refresh/filter/sort/count/duration behavior to the new path.
+  - Monolith functions/classes to mark when done:
+    - `_SortItem`
+    - `_make_item`
+    - `_populate_table_from_dataset`
+    - `_apply_catalog_ui_dataset`
+    - `apply_search_filter`
+    - `_update_count_label`
+    - `_update_duration_label`
+    - row-ID parsing helpers that depend on cell items
+  - Risk: high
+  - Token cost: high
+  - Validation:
+    - full catalog view loads
+    - search/filter/count/duration correct
+    - selection and view-state restore correct
+    - truthful progress unchanged
+    - “visible rows” semantics now based on proxy-visible rows only
+  - If free-tier budget is tight, split B3 into:
+    - `B3a`: shell/view construction and signal rewiring
+    - `B3b`: refresh/filter/sort/badge live path
+- **B4 — Badge/icon and proxy-semantic parity pass**
+  - Goal: ensure all icon, tooltip, media export, and audio-preview order behavior reads through model roles and proxy ordering only.
+  - Monolith functions to mark when done:
+    - `_apply_blob_badges` catalog-owned path
+    - `_get_row_pk`
+    - `_row_for_id`
+    - `_column_index_by_header`
+    - any remaining item-text identity helpers
+  - Risk: high
+  - Token cost: high
+  - Validation:
+    - badge icon caching still works
+    - no live metadata lookups in render path
+    - audio preview navigation matches visible proxy order
+- **B5 — Zoom cutover**
+  - Goal: add the always-visible slider and `CatalogZoomController`, then persist zoom in layout payloads.
+  - Monolith functions to mark when done:
+    - any temporary in-monolith zoom glue added during earlier batches
+  - Risk: medium
+  - Token cost: medium
+  - Validation:
+    - slider, wheel, and pinch sync
+    - no data refresh during zoom
+    - reset on profile change, restore from layout
+- **B6 — Final cleanup**
+  - Goal: remove all functions marked `CATALOG_TABLE_CUTOVER_DEPRECATED`, dead imports, obsolete wrappers, and stale catalog `QTableWidget` paths.
+  - This is the only batch allowed to delete the marked monolith logic.
+  - Risk: medium
+  - Token cost: medium
+  - Validation:
+    - broad regression rerun
+    - dead-code review
+    - docs/help updated
+
+## 6. Token-Budget Strategy for Codex Free-Tier Usage
+- Do not ask Codex for a one-shot migration.
+- Keep each implementation pass to:
+  - `2–4` files
+  - `1` behavior family
+  - `1` focused test family
+- Recommended prompt scope:
+  - Phase A: one module cluster at a time
+  - Phase B: one cutover family at a time
+- Relative batch cost:
+  - `A1`: low
+  - `A2`: medium
+  - `A3`: medium
+  - `A4`: low
+  - `B1`: medium
+  - `B2`: high
+  - `B3`: high
+  - `B4`: high
+  - `B5`: medium
+  - `B6`: medium
+- Practical usage guidance:
+  - one high batch or two medium batches per day
+  - never load the full `ISRC_manager.py` catalog surface and the full `tests/app/_app_shell_support.py` in the same prompt
+  - use exact test wrapper slices instead of opening the full support file
+
+## 7. Risk Register
+- **Behavioral**
+  - filtered-vs-selected export semantics changing under proxy filtering
+  - right-click selection collapsing incorrectly
+  - audio preview next/previous order drifting from visible proxy order
+  - Space preview breaking due to eventFilter/view-current-index changes
+- **Performance**
+  - accidental live service calls in model `data()`
+  - reintroducing per-cell badge work on the UI thread
+  - running column auto-fit during zoom
+- **Layout**
+  - losing old header widths/order on existing profiles
+  - duplicate header-label ambiguity if key-based persistence is not added
+- **Theming**
+  - custom painting bypassing QSS selection/hover behavior
+- **Migration governance**
+  - mixing module creation, live cutover, and deletion in one batch
+  - deleting monolith code before the new path is proven stable
+  - allowing Phase A scaffolding to become a hidden runtime dependency
+- **Testing**
+  - current app-shell helpers themselves need migration to proxy-safe semantics
+
+## 8. Validation Plan
+- **Phase A**
+  - compile/import smoke checks
+  - focused unit tests for new modules
+  - confirm no app-shell behavior changed
+  - explicitly verify live runtime does not depend on the new modules yet
+- **After each Phase B batch**
+  - run only the suites relevant to the cutover family
+  - keep the application runnable after every batch
+- **Primary app-shell suites**
+  - `tests.app.test_app_shell_editor_surfaces`
+  - `tests.app.test_app_shell_profiles_and_selection`
+  - `tests.app.test_app_shell_workspace_docks`
+  - `tests.app.test_app_shell_layout_persistence`
+  - `tests.app.test_app_shell_startup_core`
+- **Manual signoff**
+  - filtering and selection
+  - context menus and storage/media actions
+  - double-click standard/custom/media behavior
+  - release/work-driven catalog filtering
+  - copy and copy-with-headers
+  - header reorder/hide/show/resize persistence
+  - theme switching
+  - startup restore and profile switch
+  - zoom slider/wheel/pinch behavior after B5
+- **Final cleanup gate**
+  - only proceed to B6 after the live `QTableView` path is stable and the relevant validation passes
+
+## 9. Final Recommendation / Migration Brief
+- Adopt the two-phase governance model exactly:
+  1. build the full external module surface
+  2. audit and validate structure
+  3. cut over live logic in bounded batches
+  4. validate application behavior
+  5. remove marked redundant monolith functions in a final cleanup pass
+- Treat this as both a `QTableView` migration and a controlled Catalog-table de-monolithization.
+- Do not keep expanding Catalog logic inside `ISRC_manager.py`.
+- Use thin temporary wrappers only as controlled cutover seams, not as a permanent hybrid architecture.
+- Keep the user experience unchanged except for improved responsiveness and, later, the new zoom affordance.
+- Enforce these invariants throughout the migration:
+  - `CatalogTableModel.data()` is pure and side-effect free.
+  - after cutover, visible-row semantics are proxy-only.
+  - `CatalogColumnSpec` is the source of truth for column behavior.
+  - key-based header restore is preferred once it succeeds.
+  - Phase A must remain structurally real but runtime-dormant.
