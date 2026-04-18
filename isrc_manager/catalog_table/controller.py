@@ -1,8 +1,8 @@
-"""Controller helpers for catalog-table cutover across widget and model/view paths."""
+"""Controller helpers for the model/view-backed catalog table."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -37,27 +37,16 @@ class CatalogCellTarget:
 
 
 class CatalogTableController(QObject):
-    """Resolve selection, routing, and proxy/source mappings across staged cutovers."""
+    """Resolve selection, routing, and proxy/source mappings for the live catalog view."""
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._view: QAbstractItemView | None = None
         self._table_model: CatalogTableModel | None = None
         self._filter_proxy: CatalogFilterProxyModel | None = None
-        self._track_id_for_row: Callable[[int], int | None] | None = None
-        self._is_row_hidden: Callable[[int], bool] | None = None
 
     def bind_view(self, view: "QAbstractItemView | None") -> None:
         self._view = view
-
-    def bind_widget_seams(
-        self,
-        *,
-        track_id_for_row: Callable[[int], int | None] | None = None,
-        is_row_hidden: Callable[[int], bool] | None = None,
-    ) -> None:
-        self._track_id_for_row = track_id_for_row
-        self._is_row_hidden = is_row_hidden
 
     def bind_models(
         self,
@@ -141,23 +130,13 @@ class CatalogTableController(QObject):
             return None
         model = source_index.model()
         track_id = model.data(source_index, TrackIdRole) if model is not None else None
-        if track_id is None and self._track_id_for_row is not None:
-            try:
-                track_id = self._track_id_for_row(int(source_index.row()))
-            except Exception:
-                track_id = None
         if track_id is None:
             return None
         return int(track_id)
 
     def track_id_for_source_row(self, source_row: int) -> int | None:
         if self._table_model is None:
-            if self._track_id_for_row is None:
-                return None
-            try:
-                return self._track_id_for_row(int(source_row))
-            except Exception:
-                return None
+            return None
         return self._table_model.track_id_for_source_row(source_row)
 
     def source_row_for_track_id(self, track_id: int) -> int | None:
@@ -357,11 +336,6 @@ class CatalogTableController(QObject):
         return int(model.rowCount()) if model is not None else 0
 
     def _row_is_hidden(self, row: int) -> bool:
-        if self._is_row_hidden is not None:
-            try:
-                return bool(self._is_row_hidden(int(row)))
-            except Exception:
-                return False
         view = self._view
         is_row_hidden = getattr(view, "isRowHidden", None)
         if callable(is_row_hidden):
@@ -385,12 +359,6 @@ class CatalogTableController(QObject):
     def _header_text_for_column(self, column: int) -> str:
         if column < 0:
             return ""
-        view = self._view
-        header_item_lookup = getattr(view, "horizontalHeaderItem", None)
-        if callable(header_item_lookup):
-            header_item = header_item_lookup(int(column))
-            if header_item is not None:
-                return str(header_item.text() or "")
         model = self.active_model()
         if model is None:
             return ""

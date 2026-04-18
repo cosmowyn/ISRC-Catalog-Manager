@@ -293,12 +293,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Catalog Table is the operational center of the app once data has been entered. It is built for browsing, cleaning, selecting, and acting on real catalog records at speed.</p>
         <ul>
           <li><strong>Search controls</strong>: choose a target column or search all columns, then enter search text to filter the list.</li>
+          <li><strong>Visible-row behavior</strong>: filtering is model-backed, so actions that use visible rows operate on the rows currently shown in the table.</li>
           <li><strong>Column visibility</strong>: use <strong>View &gt; Columns</strong> to show or hide visible columns without deleting them.</li>
+          <li><strong>Zoom</strong>: use the table zoom slider, Ctrl/Cmd + wheel, or supported pinch gestures to change density without reloading data.</li>
           <li><strong>Double click</strong>: edit a standard row, or open file pickers directly for standard media columns such as Audio File and Album Art.</li>
           <li><strong>Multi-row selection</strong>: select multiple rows and open <strong>Edit Selected</strong> or the context menu to launch bulk edit for the current batch.</li>
           <li><strong>Context menu and shortcuts</strong>: preview media, copy values, open GS1 metadata, and edit/delete the current selection. Right-clicking inside an existing multi-row selection keeps that batch selected.</li>
         </ul>
-        <p>Table layout, column widths, ordering, and visibility are remembered so the browser can feel tailored to your workflow rather than generic.</p>
+        <p>Table layout, column widths, ordering, visibility, and catalog zoom are remembered so the browser can feel tailored to your workflow rather than generic.</p>
         """,
     ),
     HelpChapter(

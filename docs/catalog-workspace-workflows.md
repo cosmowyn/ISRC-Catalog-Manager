@@ -9,6 +9,8 @@ Use `Help > Help Contents` for the integrated manual. This page is the repositor
 The main window is built as a working catalog surface rather than a sequence of blocking dialogs.
 
 - the catalog table stays central for browsing, filtering, and multi-selection
+- the catalog table is backed by the model/proxy view path, so filtering works on the visible proxy rows instead of hidden widget rows
+- the catalog zoom slider changes table density only; it does not reload catalog data, and saved layouts restore the zoom level
 - high-value tools open as docked workspace panels beside the table
 - tabbed docking keeps related managers available without taking over the window
 - saved layout state restores the workspace structure you actually use

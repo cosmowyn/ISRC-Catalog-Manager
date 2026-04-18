@@ -165,7 +165,6 @@ from isrc_manager.catalog_table import (
     CATALOG_ZOOM_STEP_PERCENT,
     ColumnKeyRole,
     RawValueRole,
-    TrackIdRole,
 )
 from isrc_manager.catalog_workspace import (
     CatalogWorkspaceDock,
@@ -4120,27 +4119,6 @@ class ApplicationSettingsDialog(QDialog):
             self.theme_custom_qss_edit.setFocus(Qt.OtherFocusReason)
             return
         self.accept()
-
-
-# =============================================================================
-# Subclas for natural sorting
-# =============================================================================
-class _SortItem(QTableWidgetItem):
-    """Sorts by a hidden key (Qt.UserRole) when present; otherwise natural text."""
-
-    def __lt__(self, other):
-        # Keyed (numeric/date) compare first
-        a = self.data(Qt.UserRole)
-        b = other.data(Qt.UserRole) if isinstance(other, QTableWidgetItem) else None
-        if a is not None and b is not None:
-            return a < b
-
-        # Fallback: natural text compare (no super().__lt__ to avoid recursion)
-        ta = self.text()
-        tb = other.text() if isinstance(other, QTableWidgetItem) else ""
-        na = [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", ta)]
-        nb = [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", tb)]
-        return na < nb
 
 
 class _ManageArtistsDialog(QDialog):
@@ -10713,7 +10691,6 @@ class App(QMainWindow):
                     )
                 changed_count += 1
                 if hasattr(self, "table"):
-                    self._apply_blob_badges()
                     self.table.viewport().update()
 
             if after_values["artist_code"] != before_values["artist_code"]:
@@ -12179,7 +12156,7 @@ class App(QMainWindow):
     def _apply_col_width_mode(self, enabled: bool):
         hh = self.table.horizontalHeader()
         if enabled:
-            for i in range(self.table.columnCount()):
+            for i in range(self._catalog_view_column_count()):
                 hh.setSectionResizeMode(i, QHeaderView.Interactive)
             hh.setStretchLastSection(False)
             if self._col_hint_signal_bound:
@@ -12191,7 +12168,7 @@ class App(QMainWindow):
             self.col_hint_label.show()
             self._apply_table_view_settings()
         else:
-            for i in range(self.table.columnCount()):
+            for i in range(self._catalog_view_column_count()):
                 hh.setSectionResizeMode(i, QHeaderView.ResizeToContents)
             hh.setStretchLastSection(True)
             if not self.col_width_action.isChecked():
@@ -12217,7 +12194,7 @@ class App(QMainWindow):
             self.row_hint_label.show()
         else:
             vh.setSectionResizeMode(QHeaderView.Fixed)
-            for i in range(self.table.rowCount()):
+            for i in range(self._catalog_view_row_count()):
                 self.table.setRowHeight(i, 24)
             if self._row_hint_signal_bound:
                 vh.sectionResized.disconnect(self._update_row_hint)
@@ -13315,7 +13292,9 @@ class App(QMainWindow):
         panel = ReleaseBrowserPanel(
             release_service_provider=lambda: self.release_service,
             track_title_resolver=self._get_track_title,
-            selected_track_ids_provider=self._selected_track_ids,
+            selected_track_ids_provider=lambda: list(
+                self._catalog_table_controller().selected_track_ids()
+            ),
             track_choice_provider=self._catalog_track_choices,
             parent=parent,
         )
@@ -13337,7 +13316,9 @@ class App(QMainWindow):
         panel = WorkBrowserPanel(
             work_service_provider=lambda: self.work_service,
             track_title_resolver=self._get_track_title,
-            selected_track_ids_provider=self._selected_track_ids,
+            selected_track_ids_provider=lambda: list(
+                self._catalog_table_controller().selected_track_ids()
+            ),
             track_choice_provider=self._catalog_track_choices,
             parent=parent,
         )
@@ -15510,39 +15491,6 @@ class App(QMainWindow):
             )
             self.generated_isrc_field.setToolTip(message)
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.table_model.CatalogTableModel role-backed cell values; remove in final cleanup batch
-    def _make_item(self, col_idx, text, *, custom_def=None):
-        it = _SortItem("" if text is None else str(text))
-        t = it.text()
-        key = None
-        header = self.table.horizontalHeaderItem(col_idx).text()
-
-        if header == "ID":
-            try:
-                key = int(t)
-            except:
-                pass
-        elif header in ("Entry Date", "Release Date"):
-            if t:  # stored as yyyy-MM-dd → yyyymmdd int
-                key = int(t.replace("-", ""))
-        elif custom_def and custom_def.get("field_type") == "date":
-            if t:
-                key = int(t.replace("-", ""))
-        elif custom_def and custom_def.get("field_type") == "checkbox":
-            key = 1 if t.lower() in ("1", "true", "yes", "y", "checked") else 0
-        elif header == "Track Length (hh:mm:ss)":
-            key = parse_hms_text(t)
-        else:
-            # numeric-looking strings sort numerically
-            try:
-                key = float(t) if "." in t else int(t)
-            except:
-                pass
-
-        if key is not None:
-            it.setData(Qt.UserRole, key)
-        return it
-
     def _initialize_catalog_table_model_view(self) -> None:
         table_model = CatalogTableModel(parent=self)
         filter_proxy = CatalogFilterProxyModel(parent=self)
@@ -15792,6 +15740,22 @@ class App(QMainWindow):
     def _catalog_proxy_model(self) -> CatalogFilterProxyModel | None:
         proxy = getattr(self, "_catalog_filter_proxy_model", None)
         return proxy if isinstance(proxy, CatalogFilterProxyModel) else None
+
+    def _catalog_view_row_count(self) -> int:
+        model = self.table.model() if hasattr(self, "table") else None
+        return int(model.rowCount()) if model is not None else 0
+
+    def _catalog_view_column_count(self) -> int:
+        model = self.table.model() if hasattr(self, "table") else None
+        return int(model.columnCount()) if model is not None else 0
+
+    def _catalog_header_text_for_column(self, column: int) -> str:
+        model = self.table.model() if hasattr(self, "table") else None
+        if model is None:
+            return ""
+        if column < 0 or column >= model.columnCount():
+            return ""
+        return str(model.headerData(int(column), Qt.Horizontal, Qt.DisplayRole) or "")
 
     def _catalog_table_column_specs_for_fields(
         self,
@@ -16656,15 +16620,14 @@ class App(QMainWindow):
             return None
         return str(model.headerData(logical_index, Qt.Horizontal, ColumnKeyRole) or "") or None
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.filter_proxy.CatalogFilterProxyModel; remove in final cleanup batch
-    def apply_search_filter(self):
+    def _apply_catalog_search_filter(self):
         proxy = self._catalog_proxy_model()
         if proxy is not None:
             proxy.set_search_text(self.search_field.text())
             proxy.set_search_column_key(self._selected_search_column_key())
             proxy.set_explicit_track_ids(getattr(self, "_explicit_row_filter_track_ids", None))
-        self._update_count_label()
-        self._update_duration_label()
+        self._sync_catalog_count_label()
+        self._sync_catalog_duration_label()
         self._refresh_workspace_selection_scopes()
 
     # =============================================================================
@@ -16695,7 +16658,7 @@ class App(QMainWindow):
         idx = self.search_column_combo.findData(-1)  # “All columns”
         self.search_column_combo.setCurrentIndex(idx if idx != -1 else 0)
         self.search_column_combo.blockSignals(False)
-        self.apply_search_filter()
+        self._apply_catalog_search_filter()
 
     def _load_catalog_ui_dataset(
         self,
@@ -16957,26 +16920,7 @@ class App(QMainWindow):
                 )
         return CatalogSnapshot(column_specs=column_specs, rows=tuple(snapshot_rows))
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by _catalog_snapshot_from_dataset and CatalogTableModel.set_snapshot; remove in final cleanup batch
-    def _populate_table_from_dataset(
-        self,
-        rows: list[tuple],
-        cf_map: dict[tuple[int, int], str],
-        *,
-        progress_callback=None,
-    ) -> None:
-        snapshot = self._catalog_snapshot_from_dataset(
-            rows,
-            cf_map,
-            blob_badges={},
-            progress_callback=progress_callback,
-        )
-        source_model = self._catalog_source_model()
-        if source_model is not None:
-            source_model.set_snapshot(snapshot)
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel/CatalogFilterProxyModel live path; remove in final cleanup batch
-    def _apply_catalog_ui_dataset(
+    def _apply_catalog_model_dataset(
         self,
         dataset: dict[str, object],
         *,
@@ -17003,15 +16947,15 @@ class App(QMainWindow):
         source_model = self._catalog_source_model()
         if source_model is not None:
             source_model.set_snapshot(snapshot)
-        self.apply_search_filter()
+        self._apply_catalog_search_filter()
         self._apply_catalog_combo_values(dict(dataset.get("combo_values") or {}))
         if callable(progress_callback):
             progress_callback(91, 100, "Applied catalog lookup values.")
         self.table.resizeColumnsToContents()
         if callable(progress_callback):
             progress_callback(93, 100, "Resized catalog table columns.")
-        self._update_count_label()
-        self._update_duration_label()
+        self._sync_catalog_count_label()
+        self._sync_catalog_duration_label()
         if callable(progress_callback):
             progress_callback(95, 100, "Updated catalog counts and duration.")
         if callable(progress_callback):
@@ -17071,7 +17015,7 @@ class App(QMainWindow):
                 if current_sort_enabled:
                     self.table.setSortingEnabled(False)
 
-                self._apply_catalog_ui_dataset(
+                self._apply_catalog_model_dataset(
                     dataset,
                     progress_callback=(
                         self._scaled_progress_callback(
@@ -17283,8 +17227,8 @@ class App(QMainWindow):
         if bool(refresh_request.get("sort_enabled")):
             self.table.setSortingEnabled(False)
         self._clear_catalog_table_model()
-        self._update_count_label()
-        self._update_duration_label()
+        self._sync_catalog_count_label()
+        self._sync_catalog_duration_label()
         completion_notified = False
 
         def _notify_complete() -> None:
@@ -17394,7 +17338,7 @@ class App(QMainWindow):
             if _prev_sort_enabled:
                 self.table.setSortingEnabled(False)
             self._clear_catalog_table_model()
-            self._apply_catalog_ui_dataset(dataset)
+            self._apply_catalog_model_dataset(dataset)
             self.table.setSortingEnabled(_prev_sort_enabled)
             if _prev_sort_enabled:
                 self._sort_catalog_table(sort_col, sort_order)
@@ -17416,28 +17360,28 @@ class App(QMainWindow):
             sort_column = int(column if column is not None else 0)
         except (TypeError, ValueError):
             sort_column = 0
-        if 0 <= sort_column < self.table.columnCount():
+        if 0 <= sort_column < self._catalog_view_column_count():
             self.table.sortByColumn(sort_column, order)
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogFilterProxyModel.rowCount; remove in final cleanup batch
-    def _update_count_label(self):
+    def _sync_catalog_count_label(self):
         # updates 'showing: N records'
         if not hasattr(self, "count_label") or self.count_label is None:
             return
         visible = self.table.model().rowCount() if self.table.model() is not None else 0
         self.count_label.setText(f"showing: {visible} record{'s' if visible != 1 else ''}")
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogFilterProxyModel visible rows + CatalogTableModel role data; remove in final cleanup batch
-    def _update_duration_label(self):
+    def _sync_catalog_duration_label(self):
         if not hasattr(self, "duration_label") or self.duration_label is None:
             return
-        col_idx = self._column_index_by_header("Track Length (hh:mm:ss)")
+        col_idx = self._catalog_table_controller().column_for_key("base:track_length_sec")
+        if col_idx is None:
+            col_idx = -1
         if col_idx == -1:
             self.duration_label.setText("")
             return
         total_sec = 0
         try:
-            for r in range(self.table.rowCount()):
+            for r in range(self._catalog_view_row_count()):
                 index = self.table.model().index(r, col_idx)
                 v = self.table.model().data(index, RawValueRole)
                 if isinstance(v, (int, float)):
@@ -17458,7 +17402,7 @@ class App(QMainWindow):
             "sort_order": hh.sortIndicatorOrder(),
             "v_scroll": self.table.verticalScrollBar().value(),
             "h_scroll": self.table.horizontalScrollBar().value(),
-            "selected_track_ids": self._selected_track_ids(),
+            "selected_track_ids": list(self._catalog_table_controller().selected_track_ids()),
             "current_track_id": self._catalog_table_controller().current_track_id(),
         }
         return state
@@ -17484,7 +17428,7 @@ class App(QMainWindow):
         sort_col = state.get("sort_col", 0)
         sort_order = state.get("sort_order", Qt.AscendingOrder)
         self._sort_catalog_table(sort_col, sort_order)
-        self.apply_search_filter()
+        self._apply_catalog_search_filter()
         selected_track_ids = self._normalize_track_ids(state.get("selected_track_ids") or [])
         if selected_track_ids:
             self._select_track_ids_in_table(selected_track_ids)
@@ -17535,7 +17479,7 @@ class App(QMainWindow):
             # Refresh data and restore view state
             self.refresh_table()
             self._restore_view_state(state)
-            self._update_count_label()
+            self._sync_catalog_count_label()
 
             if focus_id is not None:
                 self._select_row_by_id(focus_id)
@@ -18106,7 +18050,7 @@ class App(QMainWindow):
         if isinstance(track_id, bool):
             track_id = None
         if track_id is None:
-            selected_ids = self._selected_track_ids()
+            selected_ids = list(self._catalog_table_controller().selected_track_ids())
             if not selected_ids:
                 QMessageBox.warning(
                     self,
@@ -18128,56 +18072,29 @@ class App(QMainWindow):
                     "Could not determine the selected track. Select one or more catalog rows and try again.",
                 )
                 return
-            batch_ids = self._selected_track_ids()
+            batch_ids = list(self._catalog_table_controller().selected_track_ids())
             if track_id not in batch_ids:
                 batch_ids = [track_id]
         self.open_track_editor(int(track_id), batch_track_ids=batch_ids)
 
     def edit_entry(self, item):
         row_idx = item.row()
-        track_id = self._track_id_for_table_row(row_idx)
+        model = self.table.model()
+        track_id = (
+            self._catalog_table_controller().track_id_for_index(model.index(int(row_idx), 0))
+            if model is not None
+            else None
+        )
         if track_id is None:
             QMessageBox.warning(self, "Edit Track", "Could not determine the selected track.")
             return
         self.open_selected_editor(track_id)
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.track_id_for_index; remove in final cleanup batch
-    def _track_id_for_table_row(self, row_idx: int) -> int | None:
-        model = self.table.model() if hasattr(self, "table") else None
-        if model is not None:
-            try:
-                index = model.index(int(row_idx), 0)
-                if index.isValid():
-                    track_id = model.data(index, TrackIdRole)
-                    if track_id is not None and int(track_id) > 0:
-                        return int(track_id)
-            except Exception:
-                pass
-        try:
-            track_id = self._get_row_pk(int(row_idx))
-        except Exception:
-            track_id = None
-        if track_id is None:
-            row_id_item = self.table.item(int(row_idx), 0)
-            if row_id_item is None:
-                return None
-            text = (row_id_item.text() or "").strip()
-            if not text.isdigit():
-                return None
-            track_id = int(text)
-        if track_id <= 0:
-            return None
-        return track_id
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.selected_track_ids; remove in final cleanup batch
-    def _selected_track_ids(self) -> list[int]:
-        return list(self._catalog_table_controller().selected_track_ids())
-
     def open_gs1_dialog(self, track_id: int | None = None):
         if isinstance(track_id, bool):
             track_id = None
         if track_id is None:
-            selected_ids = self._selected_track_ids()
+            selected_ids = list(self._catalog_table_controller().selected_track_ids())
             if not selected_ids:
                 QMessageBox.information(
                     self,
@@ -18193,7 +18110,7 @@ class App(QMainWindow):
             except (TypeError, ValueError):
                 track_id = 0
             if track_id <= 0:
-                selected_ids = self._selected_track_ids()
+                selected_ids = list(self._catalog_table_controller().selected_track_ids())
                 if not selected_ids:
                     QMessageBox.warning(
                         self,
@@ -18202,7 +18119,7 @@ class App(QMainWindow):
                     )
                     return
                 track_id = selected_ids[0]
-            batch_ids = self._selected_track_ids()
+            batch_ids = list(self._catalog_table_controller().selected_track_ids())
             if track_id not in batch_ids:
                 batch_ids.insert(0, track_id)
         if int(track_id) <= 0:
@@ -18233,7 +18150,9 @@ class App(QMainWindow):
             export_callback=self._start_conversion_export,
             exports_dir=self.exports_dir,
             profile_available=bool(self.conn is not None and self.exchange_service is not None),
-            default_database_track_ids_provider=self._default_conversion_track_ids,
+            default_database_track_ids_provider=lambda: list(
+                self._catalog_table_controller().default_conversion_track_ids()
+            ),
             track_choices_provider=self._all_catalog_track_choices,
             parent=self,
         )
@@ -18406,63 +18325,55 @@ class App(QMainWindow):
                 return value
         return None
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.selected_or_visible_track_ids; remove in final cleanup batch
-    def _selected_or_visible_track_ids(self) -> list[int]:
-        return list(self._catalog_table_controller().selected_or_visible_track_ids())
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.default_conversion_track_ids; remove in final cleanup batch
-    def _default_conversion_track_ids(self) -> list[int]:
-        return list(self._catalog_table_controller().default_conversion_track_ids())
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.visible_track_ids; remove in final cleanup batch
-    def _current_visible_track_ids(self) -> list[int]:
-        return list(self._catalog_table_controller().visible_track_ids())
-
     def _bulk_audio_attach_scope_track_ids(
         self, track_ids: list[int] | None = None
     ) -> tuple[list[int], str]:
         explicit_ids = self._normalize_track_ids(track_ids)
         if explicit_ids:
             return explicit_ids, "selected tracks"
-        selected_ids = self._normalize_track_ids(self._selected_track_ids())
+        selected_ids = self._normalize_track_ids(
+            self._catalog_table_controller().selected_track_ids()
+        )
         if selected_ids:
             return selected_ids, "current selection"
-        visible_ids = self._current_visible_track_ids()
+        visible_ids = list(self._catalog_table_controller().visible_track_ids())
         if visible_ids:
             return visible_ids, "visible catalog rows"
         all_ids = [choice.track_id for choice in self._all_catalog_track_choices()]
         return self._normalize_track_ids(all_ids), "entire catalog"
 
     def _catalog_track_choices(self) -> list[TrackChoice]:
-        header_names = {
-            str(self.table.horizontalHeaderItem(column).text() or ""): column
-            for column in range(self.table.columnCount())
-            if self.table.horizontalHeaderItem(column) is not None
-        }
-        title_column = header_names.get("Track Title")
-        artist_column = header_names.get("Artist")
-        album_column = header_names.get("Album Title")
+        controller = self._catalog_table_controller()
+        model = controller.active_model()
+        if model is None:
+            return []
+        title_column = controller.column_for_key("base:track_title")
+        artist_column = controller.column_for_key("base:artist_name")
+        album_column = controller.column_for_key("base:album_title")
         choices: list[TrackChoice] = []
-        for row in range(self.table.rowCount()):
-            if self.table.isRowHidden(row):
-                continue
-            track_id = self._track_id_for_table_row(row)
+        for row in range(model.rowCount()):
+            row_index = model.index(row, 0)
+            track_id = controller.track_id_for_index(row_index)
             if track_id is None:
                 continue
-            title_item = self.table.item(row, title_column) if title_column is not None else None
-            artist_item = self.table.item(row, artist_column) if artist_column is not None else None
-            album_item = self.table.item(row, album_column) if album_column is not None else None
-            title = (
-                str(title_item.text() or "").strip()
-                if title_item is not None
-                else self._get_track_title(track_id)
+            title = ""
+            if title_column is not None:
+                title = str(model.data(model.index(row, title_column), Qt.DisplayRole) or "").strip()
+            if not title:
+                title = self._get_track_title(track_id)
+            artist = (
+                str(model.data(model.index(row, artist_column), Qt.DisplayRole) or "").strip()
+                if artist_column is not None
+                else ""
+            )
+            album = (
+                str(model.data(model.index(row, album_column), Qt.DisplayRole) or "").strip()
+                if album_column is not None
+                else ""
             )
             subtitle = " / ".join(
                 part
-                for part in (
-                    str(artist_item.text() or "").strip() if artist_item is not None else "",
-                    str(album_item.text() or "").strip() if album_item is not None else "",
-                )
+                for part in (artist, album)
                 if part
             )
             choices.append(TrackChoice(track_id=int(track_id), title=title, subtitle=subtitle))
@@ -18858,7 +18769,7 @@ class App(QMainWindow):
     ) -> None:
         normalized_ids = self._normalize_track_ids(track_ids)
         self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
-        self.apply_search_filter()
+        self._apply_catalog_search_filter()
         if source_label:
             count = len(normalized_ids)
             message = (
@@ -18883,10 +18794,10 @@ class App(QMainWindow):
         )
         self.search_column_combo.blockSignals(False)
         self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
-        self.apply_search_filter()
+        self._apply_catalog_search_filter()
         if normalized_ids:
             self._select_track_ids_in_table(normalized_ids)
-        elif self.table.rowCount():
+        elif self.table.model() is not None and self.table.model().rowCount() > 0:
             self.table.clearSelection()
         if source_label and self.statusBar() is not None:
             count = len(normalized_ids)
@@ -21159,7 +21070,7 @@ class App(QMainWindow):
             selected_track_ids_provider=(
                 (lambda: list(normalized_selection))
                 if normalized_selection
-                else self._selected_track_ids
+                else (lambda: list(self._catalog_table_controller().selected_track_ids()))
             ),
             release=summary.release if summary is not None else None,
             placements=list(summary.tracks) if summary is not None else None,
@@ -21243,7 +21154,9 @@ class App(QMainWindow):
         )
 
     def create_release_from_selection(self, track_ids: list[int] | None = None):
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -21282,7 +21195,9 @@ class App(QMainWindow):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(self, "Release Browser", "Select one or more tracks first.")
             return
@@ -22969,7 +22884,9 @@ class App(QMainWindow):
         if self.audio_tag_service is None or self.track_service is None:
             QMessageBox.warning(self, title, "Open a profile first.")
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(
                 self, title, "Select one or more tracks with attached audio first."
@@ -23243,7 +23160,9 @@ class App(QMainWindow):
     def _selected_track_ids_with_audio(self, track_ids: list[int] | None = None) -> list[int]:
         if self.track_service is None:
             return []
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_or_visible_track_ids()
+        )
         return [
             track_id
             for track_id in selected_ids
@@ -23761,7 +23680,9 @@ class App(QMainWindow):
         if self.tagged_audio_export_service is None or self.track_service is None:
             QMessageBox.warning(self, title, "Open a profile first.")
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_or_visible_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -23981,7 +23902,9 @@ class App(QMainWindow):
                 "Open a profile first.",
             )
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_or_visible_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -24131,7 +24054,9 @@ class App(QMainWindow):
                 "Open a profile first.",
             )
             return
-        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        selected_ids = self._normalize_track_ids(
+            track_ids or self._catalog_table_controller().selected_or_visible_track_ids()
+        )
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -24275,7 +24200,9 @@ class App(QMainWindow):
     def _selected_track_audio_verification_option(self):
         if self.track_service is None:
             return None
-        selected_ids = self._normalize_track_ids(self._selected_track_ids())
+        selected_ids = self._normalize_track_ids(
+            self._catalog_table_controller().selected_track_ids()
+        )
         if len(selected_ids) != 1:
             return None
         track_id = selected_ids[0]
@@ -24900,7 +24827,11 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Export Exchange", "Open a profile first.")
             return
         normalized_format = str(format_name or "").strip().lower()
-        track_ids = self._selected_or_visible_track_ids() if selected_only else None
+        track_ids = (
+            list(self._catalog_table_controller().selected_or_visible_track_ids())
+            if selected_only
+            else None
+        )
         if selected_only and not track_ids:
             QMessageBox.information(
                 self,
@@ -25074,8 +25005,8 @@ class App(QMainWindow):
             return
 
     def delete_entry(self):
-        current_row = self.table.currentRow()
-        if current_row == -1:
+        current_index = self.table.currentIndex()
+        if not current_index.isValid():
             QMessageBox.warning(self, "Warning", "No row selected for deletion!")
             return
         msg_box = QMessageBox(self)
@@ -25085,22 +25016,12 @@ class App(QMainWindow):
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         if msg_box.exec() == QMessageBox.Yes:
             try:
-                visible_track_ids: list[int] = []
-                for row in range(self.table.rowCount()):
-                    if self.table.isRowHidden(row):
-                        continue
-                    item = self.table.item(row, 0)
-                    if item is None:
-                        continue
-                    try:
-                        visible_track_ids.append(int(item.text()))
-                    except Exception:
-                        continue
-                row_id_item = self.table.item(current_row, 0)
-                if not row_id_item:
+                controller = self._catalog_table_controller()
+                visible_track_ids = list(controller.visible_track_ids())
+                row_id = controller.track_id_for_index(current_index)
+                if row_id is None:
                     QMessageBox.warning(self, "Delete", "Could not determine record ID.")
                     return
-                row_id = int(row_id_item.text())
                 next_focus_id = None
                 try:
                     current_index = visible_track_ids.index(int(row_id))
@@ -25332,7 +25253,7 @@ class App(QMainWindow):
 
     def export_selected_to_xml(self):
         """Export visible rows if a filter is active; otherwise export explicitly selected rows."""
-        track_ids = self._selected_or_visible_track_ids()
+        track_ids = list(self._catalog_table_controller().selected_or_visible_track_ids())
         if not track_ids:
             QMessageBox.information(
                 self, "Export Selected", "Select one or more rows (or apply a filter) first."
@@ -25914,19 +25835,13 @@ class App(QMainWindow):
                 self.logger.warning("Failed to save header state after custom fields change: %s", e)
 
             self.refresh_table()
-            self._update_count_label()
-            self._apply_blob_badges()
+            self._sync_catalog_count_label()
+            self.table.viewport().update()
 
     # ============================================================
     # Double-click editing: base vs custom fields
     # ============================================================
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.cell_target; remove in final cleanup batch
-    def _on_item_double_clicked(self, item):
-        index = (
-            item
-            if hasattr(item, "isValid")
-            else self.table.model().index(item.row(), item.column())
-        )
+    def _on_catalog_index_double_clicked(self, index):
         controller = self._catalog_table_controller()
         cell_target = controller.cell_target(
             index,
@@ -26075,8 +25990,7 @@ class App(QMainWindow):
     # =============================================================================
     # Table context menu
     # =============================================================================
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.prepare_context_menu_selection; remove in final cleanup batch
-    def _on_table_context_menu(self, pos):
+    def _on_catalog_table_context_menu(self, pos):
         controller = self._catalog_table_controller()
         index = controller.prepare_context_menu_selection(self.table.indexAt(pos))
         if not index.isValid():
@@ -26092,7 +26006,12 @@ class App(QMainWindow):
         menu = QMenu(self)
         track_id = cell_target.track_id
         selected_ids = list(controller.selected_track_ids())
-        effective_track_ids = self._effective_context_menu_track_ids(track_id, selected_ids)
+        effective_track_ids = list(
+            controller.effective_context_menu_track_ids(
+                track_id,
+                selected_track_ids=tuple(selected_ids),
+            )
+        )
         ordered_effective_track_ids = (
             self._proxy_ordered_track_ids(effective_track_ids) or effective_track_ids
         )
@@ -26324,8 +26243,8 @@ class App(QMainWindow):
         ):
             custom_file_menu = ensure_file_menu()
             custom_cell_has_payload = self._media_cell_has_payload(index, field_id=custom_field_id)
-            title_column = self._column_index_by_header("Track Title")
-            title_index = index.siblingAtColumn(title_column) if title_column >= 0 else None
+            title_column = controller.column_for_key("base:track_title")
+            title_index = index.siblingAtColumn(title_column) if title_column is not None else None
             track_title = (
                 str(title_index.data(Qt.DisplayRole) or "").strip()
                 if title_index is not None and title_index.isValid()
@@ -26336,7 +26255,7 @@ class App(QMainWindow):
 
             if custom_cell_has_payload:
                 act_prev = QAction("Preview File…", self)
-                act_prev.triggered.connect(lambda: self._preview_blob_for_cell(row, col))
+                act_prev.triggered.connect(lambda: self._preview_catalog_blob_for_cell(row, col))
                 custom_file_menu.addAction(act_prev)
 
             act_attach = QAction("Attach/Replace File…", self)
@@ -26441,8 +26360,7 @@ class App(QMainWindow):
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.cell_target; remove in final cleanup batch
-    def _preview_blob_for_cell(self, row: int, col: int):
+    def _preview_catalog_blob_for_cell(self, row: int, col: int):
         """Directly preview the blob in the given cell (image/audio)."""
         controller = self._catalog_table_controller()
         cell_target = controller.cell_target(
@@ -26509,7 +26427,7 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Custom Field Error", f"Failed to preview file:\n{e}")
 
     def _do_prev(self, row, col):
-        self._preview_blob_for_cell(
+        self._preview_catalog_blob_for_cell(
             row, col
         )  ############################################################################
 
@@ -26762,9 +26680,11 @@ class App(QMainWindow):
                     ordered.append(track_id)
             return self._normalize_track_ids(ordered)
 
-        visible_ids = self._current_visible_track_ids()
+        visible_ids = list(self._catalog_table_controller().visible_track_ids())
         if not visible_ids:
-            visible_ids = self._normalize_track_ids(self._selected_track_ids())
+            visible_ids = self._normalize_track_ids(
+                self._catalog_table_controller().selected_track_ids()
+            )
         if not visible_ids and self.catalog_reads is not None:
             try:
                 visible_ids = [
@@ -26977,35 +26897,14 @@ class App(QMainWindow):
     def _copy_selection_to_clipboard(self, include_headers: bool = False):
         view = self.table
         sel_model = view.selectionModel()
-        # If nothing selected, copy entire table
+        model = view.model()
+        if sel_model is None or model is None:
+            QApplication.clipboard().setText("")
+            return
         if not sel_model.hasSelection():
             view.selectAll()
-        # Try preferred rectangular ranges
+
         rows_out = []
-        ranges = getattr(view, "selectedRanges", lambda: [])()
-        if ranges:
-            for r in ranges:
-                r0, r1 = r.topRow(), r.bottomRow()
-                c0, c1 = r.leftColumn(), r.rightColumn()
-                if include_headers:
-                    header_texts = []
-                    for c in range(c0, c1 + 1):
-                        header_item = view.horizontalHeaderItem(c)
-                        header_texts.append(
-                            header_item.text()
-                            if header_item is not None
-                            else str(view.model().headerData(c, Qt.Horizontal))
-                        )
-                    rows_out.append("\t".join(header_texts))
-                for row in range(r0, r1 + 1):
-                    cells = []
-                    for col in range(c0, c1 + 1):
-                        item = view.item(row, col)
-                        cells.append("" if item is None else str(item.text()))
-                    rows_out.append("\t".join(cells))
-            QApplication.clipboard().setText("\n".join(rows_out))
-            return
-        # Generic path: fill rectangle from selected indexes
         indexes = sorted(sel_model.selectedIndexes(), key=lambda i: (i.row(), i.column()))
         if not indexes:
             QApplication.clipboard().setText("")
@@ -27016,12 +26915,7 @@ class App(QMainWindow):
         if include_headers:
             header_texts = []
             for c in range(c0, c1 + 1):
-                header_item = view.horizontalHeaderItem(c)
-                header_texts.append(
-                    header_item.text()
-                    if header_item is not None
-                    else str(view.model().headerData(c, Qt.Horizontal))
-                )
+                header_texts.append(str(model.headerData(c, Qt.Horizontal) or ""))
             rows_out.append("\t".join(header_texts))
         for r in range(r0, r1 + 1):
             line = []
@@ -27030,7 +26924,7 @@ class App(QMainWindow):
                 if idx is None:
                     line.append("")
                 else:
-                    line.append(view.model().data(idx, Qt.DisplayRole) or "")
+                    line.append(str(model.data(idx, Qt.DisplayRole) or ""))
             rows_out.append("\t".join(line))
         QApplication.clipboard().setText("\n".join(rows_out))
 
@@ -27066,22 +26960,11 @@ class App(QMainWindow):
         filter_proxy = self._catalog_proxy_model()
         controller.bind_view(getattr(self, "table", None))
         controller.bind_models(table_model=table_model, filter_proxy=filter_proxy)
-        controller.bind_widget_seams(
-            track_id_for_row=None if table_model is not None else self._track_id_for_table_row,
-            is_row_hidden=(
-                None
-                if filter_proxy is not None
-                else (self.table.isRowHidden if hasattr(self, "table") else None)
-            ),
-        )
         return controller
 
     def _header_label_for_logical_index(self, logical_index: int) -> str:
         if not hasattr(self, "table"):
             return ""
-        header_item = self.table.horizontalHeaderItem(logical_index)
-        if header_item is not None:
-            return str(header_item.text() or "")
         model = self.table.model()
         if model is None:
             return ""
@@ -27104,7 +26987,7 @@ class App(QMainWindow):
             return ()
 
         column_specs: list[CatalogColumnSpec] = []
-        table_column_count = self.table.columnCount()
+        table_column_count = self._catalog_view_column_count()
         base_column_count = min(len(self.BASE_HEADERS), table_column_count)
         default_hidden_names = {str(name).strip() for name in DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES}
 
@@ -27180,9 +27063,9 @@ class App(QMainWindow):
     def _apply_header_label_order(self, ordered_labels: list[str]) -> None:
         header = self.table.horizontalHeader()
         current_labels = [
-            self.table.horizontalHeaderItem(i).text()
-            for i in range(self.table.columnCount())
-            if self.table.horizontalHeaderItem(i) is not None
+            self._catalog_header_text_for_column(i)
+            for i in range(self._catalog_view_column_count())
+            if self._catalog_header_text_for_column(i)
         ]
         seen_pos: dict[str, int] = {}
         target_logicals: list[int] = []
@@ -27274,8 +27157,6 @@ class App(QMainWindow):
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
         try:
-            # B1 compatibility wrapper: live visibility restore now delegates to
-            # CatalogHeaderStateManager while the current QTableWidget shell remains.
             self._catalog_header_state_manager().restore_visibility(
                 self.table.horizontalHeader(),
                 column_specs=self._catalog_header_column_specs(),
@@ -27284,12 +27165,11 @@ class App(QMainWindow):
             self._suspend_layout_history = previous_suspend_state
 
     def _toggle_column_visibility(self, logical_index: int, visible: bool):
-        if logical_index < 0 or logical_index >= self.table.columnCount():
+        if logical_index < 0 or logical_index >= self._catalog_view_column_count():
             return
 
-        header_item = self.table.horizontalHeaderItem(logical_index)
-        column_name = (
-            header_item.text() if header_item is not None else f"Column {logical_index + 1}"
+        column_name = self._catalog_header_text_for_column(logical_index) or (
+            f"Column {logical_index + 1}"
         )
         action_label = f"{'Show' if visible else 'Hide'} Column: {column_name}"
 
@@ -27300,7 +27180,7 @@ class App(QMainWindow):
                 self.table.setColumnHidden(logical_index, not visible)
                 self._save_header_state(record_history=False)
                 self._rebuild_search_column_choices()
-                self.apply_search_filter()
+                self._apply_catalog_search_filter()
                 self._refresh_column_visibility_menu()
             finally:
                 self._suspend_layout_history = previous_suspend_state
@@ -27329,17 +27209,17 @@ class App(QMainWindow):
 
         header = self.table.horizontalHeader()
         logical_indices = sorted(
-            range(self.table.columnCount()),
+            range(self._catalog_view_column_count()),
             key=lambda idx: (
                 header.visualIndex(idx) if header.visualIndex(idx) >= 0 else 10_000 + idx
             ),
         )
 
         for logical_index in logical_indices:
-            header_item = self.table.horizontalHeaderItem(logical_index)
-            if header_item is None:
+            header_text = self._catalog_header_text_for_column(logical_index)
+            if not header_text:
                 continue
-            action = QAction(header_item.text(), self.columns_menu)
+            action = QAction(header_text, self.columns_menu)
             action.setCheckable(True)
             action.setChecked(not self.table.isColumnHidden(logical_index))
             action.toggled.connect(
@@ -27360,9 +27240,6 @@ class App(QMainWindow):
                 return
 
             def mutation():
-                # B1 compatibility wrapper: live header persistence now delegates
-                # to CatalogHeaderStateManager while keeping the current settings
-                # namespace and history bundling intact.
                 self._catalog_header_state_manager().save_state(
                     self.table.horizontalHeader(),
                     column_specs=self._catalog_header_column_specs(),
@@ -27851,7 +27728,7 @@ class App(QMainWindow):
             if event.key() == Qt.Key_Space:
                 idx = self.table.currentIndex()
                 if idx.isValid():
-                    self._preview_blob_for_cell(idx.row(), idx.column())
+                    self._preview_catalog_blob_for_cell(idx.row(), idx.column())
                 event.accept()
                 return True  # IMPORTANT: return bool to satisfy Qt
         # Defer to base for unhandled events
@@ -28560,9 +28437,6 @@ class App(QMainWindow):
         if model is not None and 0 <= int(column) < model.columnCount():
             header_text = str(model.headerData(int(column), Qt.Horizontal, Qt.DisplayRole) or "")
             column_key = str(model.headerData(int(column), Qt.Horizontal, ColumnKeyRole) or "")
-        if not header_text:
-            header_item = self.table.horizontalHeaderItem(column)
-            header_text = header_item.text() if header_item is not None else ""
         media_key = self._standard_media_key_for_column_key(
             column_key,
         ) or self._standard_media_key_for_header(header_text)
@@ -28594,19 +28468,6 @@ class App(QMainWindow):
             "field_name": str(field.get("name") or "").strip(),
             "field_type": field_type,
         }
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.effective_context_menu_track_ids; remove in final cleanup batch
-    def _effective_context_menu_track_ids(
-        self,
-        track_id: int | None,
-        selected_ids: list[int] | None = None,
-    ) -> list[int]:
-        return list(
-            self._catalog_table_controller().effective_context_menu_track_ids(
-                track_id,
-                selected_track_ids=tuple(selected_ids or ()),
-            )
-        )
 
     @staticmethod
     def _storage_conversion_action_label(target_mode: str, *, selection_count: int) -> str:
@@ -28769,7 +28630,7 @@ class App(QMainWindow):
             )
             return
         selected_ids = self._proxy_ordered_track_ids(
-            track_ids or self._selected_track_ids(),
+            track_ids or self._catalog_table_controller().selected_track_ids(),
             media_spec=spec,
         )
         if not selected_ids:
@@ -29308,7 +29169,6 @@ class App(QMainWindow):
             else:
                 self._refresh_history_actions()
                 if hasattr(self, "table"):
-                    self._apply_blob_badges()
                     self.table.viewport().update()
             self._refresh_history_actions()
             self._advance_task_ui_progress(
@@ -29512,35 +29372,10 @@ class App(QMainWindow):
         cache[cache_key] = icon
         return icon
 
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.view_index_for_track_id; remove in final cleanup batch
-    def _row_for_id(self, track_id: int) -> int:
-        controller = self._catalog_table_controller()
-        index = controller.view_index_for_track_id(int(track_id), column=0)
-        if index.isValid():
-            return int(index.row())
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            if it and it.text().isdigit() and int(it.text()) == track_id:
-                return r
-        return -1
-
     def _custom_field_index_by_id(self, field_id: int) -> int:
         for i, f in enumerate(self.active_custom_fields):
             if f.get("id") == field_id:
                 return i
-        return -1
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by isrc_manager.catalog_table.controller.CatalogTableController.column_for_key and model ColumnKeyRole headers; remove in final cleanup batch
-    def _column_index_by_header(self, header_text: str) -> int:
-        model = self.table.model() if hasattr(self, "table") else None
-        if model is not None:
-            for idx in range(model.columnCount()):
-                if str(model.headerData(idx, Qt.Horizontal, Qt.DisplayRole) or "") == header_text:
-                    return idx
-        for idx in range(self.table.columnCount()):
-            item = self.table.horizontalHeaderItem(idx)
-            if item is not None and item.text() == header_text:
-                return idx
         return -1
 
     def _get_track_title(self, track_id: int) -> str:
@@ -29548,207 +29383,6 @@ class App(QMainWindow):
 
     def _sanitize_filename(self, text: str) -> str:
         return sanitize_export_basename(text)
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel DecorationRole/ToolTipRole badge snapshot values; remove in final cleanup batch
-    def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
-        try:
-            meta = self.cf_get_value_meta(
-                track_id,
-                field_id,
-                include_storage_details=True,
-            )
-        except Exception:
-            meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
-        display = (
-            self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
-            if meta.get("has_blob")
-            else "—"
-        )
-        item = self.table.item(row, col)
-        if item is None:
-            item = QTableWidgetItem(display)
-            self.table.setItem(row, col, item)
-        else:
-            item.setText(display)
-        if meta.get("has_blob"):
-            field = next(
-                (
-                    candidate
-                    for candidate in self.active_custom_fields
-                    if candidate.get("id") == field_id
-                ),
-                None,
-            )
-            if field is not None:
-                kind = self._blob_icon_kind_for_storage(
-                    "audio" if field.get("field_type") == "blob_audio" else "image",
-                    storage_mode=meta.get("storage_mode"),
-                )
-                item.setIcon(
-                    self._resolve_blob_badge_icon(
-                        spec=self._blob_icon_spec_for_custom_field_with_meta(field, meta=meta),
-                        kind=kind,
-                    )
-                )
-                item.setToolTip(
-                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
-                )
-        else:
-            item.setIcon(QIcon())
-            item.setToolTip("")
-        item.setData(Qt.UserRole, (track_id, field_id) if meta.get("has_blob") else None)
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel TrackIdRole and CatalogTableController.track_id_for_index; remove in final cleanup batch
-    def _get_row_pk(self, row: int) -> int | None:
-        """Return the primary key for a visual row, preferring Qt.UserRole on column 0."""
-        model = self.table.model() if hasattr(self, "table") else None
-        if model is not None:
-            try:
-                index = model.index(int(row), 0)
-                if index.isValid():
-                    value = model.data(index, TrackIdRole)
-                    return int(value) if value is not None and int(value) > 0 else None
-            except Exception:
-                pass
-        it = self.table.item(row, 0)
-        if not it:
-            return None
-        val = it.data(Qt.UserRole)
-        if isinstance(val, int):
-            return val
-        try:
-            return int(str(it.text()).strip())
-        except Exception:
-            return None
-
-    # CATALOG_TABLE_CUTOVER_DEPRECATED: replaced by CatalogTableModel DecorationRole/ToolTipRole badge snapshot values; remove in final cleanup batch
-    def _apply_blob_badges(self, *, prepared_payload=None, progress_callback=None):
-        """Apply blob badges from prepared payload when available, else live services."""
-        if self._catalog_source_model() is not None:
-            if callable(progress_callback):
-                progress_callback(1, 1, "Media badges already applied in catalog model snapshot.")
-            return
-        base = len(self.BASE_HEADERS)
-        total_rows = self.table.rowCount()
-        if total_rows <= 0:
-            if callable(progress_callback):
-                progress_callback(1, 1, "No media badges needed recalculation.")
-            return
-        batch_size = max(1, min(100, total_rows // 20 or 1))
-        prepared_standard_meta = dict((prepared_payload or {}).get("standard_media") or {})
-        prepared_custom_meta = dict((prepared_payload or {}).get("custom_fields") or {})
-        using_prepared_payload = bool(prepared_standard_meta or prepared_custom_meta)
-        standard_media_columns = {
-            header: self.BASE_HEADERS.index(header)
-            for header in self._standard_media_header_map()
-            if header in self.BASE_HEADERS
-        }
-        for row_idx in range(total_rows):
-            # Resolve PK for this visual row
-            pk = self._get_row_pk(row_idx) if hasattr(self, "_get_row_pk") else None
-            if pk is None:
-                id_item = self.table.item(row_idx, 0)
-                if not id_item:
-                    continue
-                try:
-                    pk = int(id_item.text())
-                except Exception:
-                    continue
-
-            for header, media_key in self._standard_media_header_map().items():
-                col = standard_media_columns.get(header)
-                if col is None:
-                    continue
-                meta = prepared_standard_meta.get((pk, media_key))
-                if meta is None:
-                    try:
-                        meta = self.track_media_meta(pk, media_key)
-                    except Exception:
-                        meta = {"has_media": False, "mime_type": None, "size_bytes": 0}
-                display = (
-                    self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
-                    if meta.get("has_media")
-                    else "—"
-                )
-                item = self.table.item(row_idx, col)
-                if item is None:
-                    item = QTableWidgetItem(display)
-                    self.table.setItem(row_idx, col, item)
-                else:
-                    item.setText(display)
-                if meta.get("has_media"):
-                    kind = self._blob_icon_kind_for_standard_media(media_key, meta=meta)
-                    item.setIcon(
-                        self._resolve_blob_badge_icon(
-                            spec=self._blob_icon_spec_for_standard_media(media_key, meta=meta),
-                            kind=kind,
-                        )
-                    )
-                    item.setToolTip(self._standard_media_badge_tooltip(media_key, meta, display))
-                else:
-                    item.setIcon(QIcon())
-                    item.setToolTip("")
-                item.setData(Qt.UserRole, (pk, media_key) if meta.get("has_media") else None)
-
-            # Walk active custom fields by display order
-            for j, cf in enumerate(self.active_custom_fields):
-                col = base + j
-                ftype = str(cf.get("field_type", "")).lower()
-                if ftype not in ("blob_image", "blob_audio"):
-                    continue
-
-                meta = prepared_custom_meta.get((pk, int(cf["id"])))
-                if meta is None:
-                    try:
-                        meta = self.cf_get_value_meta(
-                            pk,
-                            cf["id"],
-                            include_storage_details=True,
-                        )
-                    except Exception:
-                        meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
-                has_blob = bool(meta.get("has_blob"))
-                display = (
-                    self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
-                    if has_blob
-                    else "—"
-                )
-                item = self.table.item(row_idx, col)
-                if item is None:
-                    item = QTableWidgetItem(display)
-                    self.table.setItem(row_idx, col, item)
-                else:
-                    item.setText(display)
-                if has_blob:
-                    kind = self._blob_icon_kind_for_storage(
-                        "audio" if ftype == "blob_audio" else "image",
-                        storage_mode=meta.get("storage_mode"),
-                    )
-                    item.setIcon(
-                        self._resolve_blob_badge_icon(
-                            spec=self._blob_icon_spec_for_custom_field_with_meta(cf, meta=meta),
-                            kind=kind,
-                        )
-                    )
-                    item.setToolTip(
-                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
-                    )
-                else:
-                    item.setIcon(QIcon())
-                    item.setToolTip("")
-                item.setData(Qt.UserRole, (pk, cf["id"]) if has_blob else None)
-            if callable(progress_callback) and (
-                row_idx == total_rows - 1 or ((row_idx + 1) % batch_size) == 0
-            ):
-                progress_callback(
-                    row_idx + 1,
-                    total_rows,
-                    (
-                        f"Applied prepared media badges for {row_idx + 1} of {total_rows} rows."
-                        if using_prepared_payload
-                        else f"Recomputed media badges for {row_idx + 1} of {total_rows} rows."
-                    ),
-                )
 
     def _make_default_export_filename(self, track_id: int, field_def: dict, mime: str) -> str:
         # Use track title only

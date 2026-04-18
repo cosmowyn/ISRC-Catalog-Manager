@@ -36,8 +36,8 @@ from tests.contract_templates._support import (
 from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
-    from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, Qt
-    from PySide6.QtGui import QColor, QImage, QKeyEvent, QKeySequence
+    from PySide6.QtCore import QBuffer, QDate, QIODevice, QModelIndex, QPoint, Qt
+    from PySide6.QtGui import QColor, QIcon, QImage, QKeyEvent, QKeySequence
     from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
@@ -792,31 +792,48 @@ class AppShellTestCase(unittest.TestCase):
         return [label.text() for label in widget.findChildren(app_module.QLabel)]
 
     def _table_row_for_track_id(self, track_id: int) -> int:
-        for row in range(self.window.table.rowCount()):
-            item = self.window.table.item(row, 0)
-            if item is None:
-                continue
-            try:
-                current_track_id = int(item.text())
-            except Exception:
-                continue
-            if current_track_id == int(track_id):
-                return row
+        index = self.window._catalog_table_controller().view_index_for_track_id(
+            int(track_id),
+            column=0,
+        )
+        if index.isValid():
+            return int(index.row())
         raise AssertionError(f"Track row not found: {track_id}")
 
     def _visible_track_ids(self) -> list[int]:
-        visible_track_ids: list[int] = []
-        for row in range(self.window.table.rowCount()):
-            if self.window.table.isRowHidden(row):
-                continue
-            item = self.window.table.item(row, 0)
-            if item is None:
-                continue
-            try:
-                visible_track_ids.append(int(item.text()))
-            except Exception:
-                continue
-        return visible_track_ids
+        return list(self.window._catalog_table_controller().visible_track_ids())
+
+    def _catalog_column_for_header(self, header_text: str) -> int:
+        model = self.window.table.model()
+        if model is None:
+            return -1
+        for column in range(model.columnCount()):
+            if str(model.headerData(column, app_module.Qt.Horizontal) or "") == header_text:
+                return column
+        return -1
+
+    def _catalog_model_index(self, row: int, column: int):
+        model = self.window.table.model()
+        if model is None:
+            return QModelIndex()
+        return model.index(int(row), int(column))
+
+    def _catalog_cell_text(self, row: int, column: int) -> str:
+        index = self._catalog_model_index(row, column)
+        return str(index.data(app_module.Qt.DisplayRole) or "") if index.isValid() else ""
+
+    def _catalog_cell_tooltip(self, row: int, column: int) -> str:
+        index = self._catalog_model_index(row, column)
+        return str(index.data(app_module.Qt.ToolTipRole) or "") if index.isValid() else ""
+
+    def _catalog_cell_icon(self, row: int, column: int):
+        index = self._catalog_model_index(row, column)
+        return index.data(app_module.Qt.DecorationRole) if index.isValid() else QIcon()
+
+    def _set_current_catalog_cell(self, row: int, column: int) -> None:
+        index = self._catalog_model_index(row, column)
+        if index.isValid():
+            self.window.table.setCurrentIndex(index)
 
     @staticmethod
     def _menu_action_texts(menu) -> list[str]:
@@ -894,7 +911,7 @@ class AppShellTestCase(unittest.TestCase):
             mock.patch.object(app_module, "QMenu", _CapturedMenu),
             mock.patch.object(self.window.table, "indexAt", return_value=index),
         ):
-            self.window._on_table_context_menu(app_module.QPoint(0, 0))
+            self.window._on_catalog_table_context_menu(app_module.QPoint(0, 0))
             self.app.processEvents()
 
         return captured.get("snapshot", {"texts": [], "submenus": {}})
@@ -948,20 +965,15 @@ class AppShellTestCase(unittest.TestCase):
         return self._flatten_menu_snapshot(snapshot)
 
     def _select_track_ids(self, track_ids: list[int]) -> None:
-        track_id_set = {int(track_id) for track_id in track_ids}
         self.window.table.clearSelection()
         selection_model = self.window.table.selectionModel()
-        for row in range(self.window.table.rowCount()):
-            item = self.window.table.item(row, 0)
-            if item is None:
+        if selection_model is None:
+            return
+        controller = self.window._catalog_table_controller()
+        for track_id in track_ids:
+            index = controller.view_index_for_track_id(int(track_id), column=0)
+            if not index.isValid():
                 continue
-            try:
-                current_track_id = int(item.text())
-            except Exception:
-                continue
-            if current_track_id not in track_id_set:
-                continue
-            index = self.window.table.model().index(row, 0)
             selection_model.select(
                 index,
                 app_module.QItemSelectionModel.Select | app_module.QItemSelectionModel.Rows,
@@ -1423,8 +1435,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(edit_actions["GS1 Metadata…"], self.window.gs1_metadata_action)
         self.assertTrue(self.window.gs1_metadata_action.isEnabled())
 
+        controller = self.window._catalog_table_controller()
         with (
-            mock.patch.object(self.window, "_selected_track_ids", return_value=[]),
+            mock.patch.object(controller, "selected_track_ids", return_value=()),
             mock.patch.object(app_module.QMessageBox, "information") as info_mock,
         ):
             self.window.gs1_metadata_action.trigger()
@@ -2877,21 +2890,17 @@ class AppShellTestCase(unittest.TestCase):
 
         self.window.refresh_table()
         self.window.search_field.setText("Crossroads of the Unwritten Self")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.app.processEvents()
 
-        visible_rows = [
-            row
-            for row in range(self.window.table.rowCount())
-            if not self.window.table.isRowHidden(row)
-        ]
-        self.assertEqual(len(visible_rows), 3)
+        visible_ids = self._visible_track_ids()
+        self.assertEqual(len(visible_ids), 3)
 
         self.window.table.selectAll()
         self.app.processEvents()
 
-        selected_ids = self.window._selected_track_ids()
-        self.assertEqual(len(selected_ids), len(visible_rows))
+        selected_ids = list(self.window._catalog_table_controller().selected_track_ids())
+        self.assertEqual(len(selected_ids), len(visible_ids))
 
     def case_reset_button_clears_filters_without_refreshing_catalog(self):
         track_ids = [
@@ -2978,9 +2987,9 @@ class AppShellTestCase(unittest.TestCase):
     def case_delete_entry_history_stays_a_single_visible_user_action(self):
         track_id = self._create_track(index=121, title="Delete History Song")
         self.window.refresh_table()
-        row = self.window._row_for_id(track_id)
+        row = self._table_row_for_track_id(track_id)
         self.assertGreaterEqual(row, 0)
-        self.window.table.setCurrentCell(row, 0)
+        self._set_current_catalog_cell(row, 0)
         self.app.processEvents()
 
         original_rebuild = self.window._rebuild_table_headers
@@ -3056,7 +3065,7 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         header = self.window.table.horizontalHeader()
-        title_column = self.window._column_index_by_header("Track Title")
+        title_column = self._catalog_column_for_header("Track Title")
         self.assertGreaterEqual(title_column, 0)
         history_before = self.window.history_manager.list_entries(limit=20)
 
@@ -3082,7 +3091,7 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         header = self.window.table.horizontalHeader()
-        title_column = self.window._column_index_by_header("Track Title")
+        title_column = self._catalog_column_for_header("Track Title")
         self.assertGreaterEqual(title_column, 0)
 
         with mock.patch.object(
@@ -3132,12 +3141,7 @@ class AppShellTestCase(unittest.TestCase):
         panel._emit_filter_current()
         self.app.processEvents()
 
-        visible_rows = [
-            row
-            for row in range(self.window.table.rowCount())
-            if not self.window.table.isRowHidden(row)
-        ]
-        self.assertEqual(len(visible_rows), 1)
+        self.assertEqual(len(self._visible_track_ids()), 1)
         self.assertFalse(dock.isHidden())
 
     def case_release_browser_filter_replaces_active_search_filter(self):
@@ -3165,13 +3169,9 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
         self.window.search_field.setText("Unrelated Search Match")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.app.processEvents()
-        visible_before = [
-            int(self.window.table.item(row, 0).text())
-            for row in range(self.window.table.rowCount())
-            if not self.window.table.isRowHidden(row)
-        ]
+        visible_before = self._visible_track_ids()
         self.assertEqual(visible_before, [other_track_id])
 
         self.window.open_release_browser()
@@ -3181,14 +3181,13 @@ class AppShellTestCase(unittest.TestCase):
         panel._emit_filter_current()
         self.app.processEvents()
 
-        visible_after = {
-            int(self.window.table.item(row, 0).text())
-            for row in range(self.window.table.rowCount())
-            if not self.window.table.isRowHidden(row)
-        }
+        visible_after = set(self._visible_track_ids())
         self.assertEqual(visible_after, set(release_track_ids))
         self.assertEqual(self.window.search_field.text(), "")
-        self.assertEqual(set(self.window._selected_track_ids()), set(release_track_ids))
+        self.assertEqual(
+            set(self.window._catalog_table_controller().selected_track_ids()),
+            set(release_track_ids),
+        )
 
     def case_release_browser_selection_scope_tracks_catalog_selection_and_override(self):
         track_ids = [
@@ -4226,17 +4225,19 @@ class AppShellTestCase(unittest.TestCase):
         self.assertFalse(suggested_filename.startswith("Comet Signal"))
 
         self._select_track_ids([track_one, track_two])
-        album_art_col = self.window._column_index_by_header("Album Art")
+        album_art_col = self._catalog_column_for_header("Album Art")
         self.assertGreaterEqual(album_art_col, 0)
         self.assertEqual(
             self.window._focused_media_export_spec(album_art_col),
             {
                 "kind": "standard",
+                "column": album_art_col,
+                "column_key": "base:album_art",
                 "column_label": "Album Art",
                 "media_key": "album_art",
             },
         )
-        track_title_col = self.window._column_index_by_header("Track Title")
+        track_title_col = self._catalog_column_for_header("Track Title")
         self.assertIsNone(self.window._focused_media_export_spec(track_title_col))
 
         output_dir = self.root / "album-art-export"
@@ -6492,11 +6493,12 @@ class AppShellTestCase(unittest.TestCase):
             database_audio,
             storage_mode=app_module.STORAGE_MODE_DATABASE,
         )
+        self.window.refresh_table()
         output_dir = self.root / "bulk-audio-column-export"
         output_dir.mkdir()
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         if audio_col < 0:
-            audio_col = self.window._column_index_by_header("Audio")
+            audio_col = self._catalog_column_for_header("Audio")
         self.assertGreaterEqual(audio_col, 0)
         submitted_tasks: list[dict[str, object]] = []
 
@@ -7044,9 +7046,9 @@ class AppShellTestCase(unittest.TestCase):
     def case_track_delete_progress_reaches_100_only_after_final_ui_refresh(self):
         track_id = self._create_track(index=401, title="Progress Delete Track")
         self.window.refresh_table()
-        row = self.window._row_for_id(track_id)
+        row = self._table_row_for_track_id(track_id)
         self.assertGreaterEqual(row, 0)
-        self.window.table.setCurrentCell(row, 0)
+        self._set_current_catalog_cell(row, 0)
         self.app.processEvents()
 
         submitted: dict[str, object] = {}
@@ -7369,20 +7371,19 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Inspect Forensic Watermark…", audio_texts)
         self.assertIn("Verify Audio Authenticity…", audio_texts)
         self.assertNotIn("Convert External Audio Files…", audio_texts)
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         self.assertGreaterEqual(audio_col, 0)
-        lossy_item = self.window.table.item(row, audio_col)
-        self.assertIsNotNone(lossy_item)
-        assert lossy_item is not None
-        self.assertIn("Lossy primary audio", lossy_item.toolTip())
-        self.assertIn("MP3", lossy_item.toolTip())
+        lossy_tooltip = self._catalog_cell_tooltip(row, audio_col)
+        self.assertIn("Lossy primary audio", lossy_tooltip)
+        self.assertIn("MP3", lossy_tooltip)
         lossless_row = self._table_row_for_track_id(lossless_track_id)
-        lossless_item = self.window.table.item(lossless_row, audio_col)
-        self.assertIsNotNone(lossless_item)
-        assert lossless_item is not None
-        self.assertIn("Primary audio", lossless_item.toolTip())
-        self.assertNotIn("Lossy primary audio", lossless_item.toolTip())
-        self.assertNotEqual(lossy_item.icon().cacheKey(), lossless_item.icon().cacheKey())
+        lossless_tooltip = self._catalog_cell_tooltip(lossless_row, audio_col)
+        self.assertIn("Primary audio", lossless_tooltip)
+        self.assertNotIn("Lossy primary audio", lossless_tooltip)
+        self.assertNotEqual(
+            self._catalog_cell_icon(row, audio_col).cacheKey(),
+            self._catalog_cell_icon(lossless_row, audio_col).cacheKey(),
+        )
 
     def case_table_context_menu_keeps_multi_selection_when_right_clicking_selected_row(self):
         first_track_id = self._create_track(index=330, title="Selection A")
@@ -7394,7 +7395,8 @@ class AppShellTestCase(unittest.TestCase):
         snapshot = self._table_context_menu_snapshot(first_row, 0)
         self.assertIn("Bulk Edit 2 Selected Tracks…", list(snapshot.get("texts") or []))
         self.assertEqual(
-            sorted(self.window._selected_track_ids()), [first_track_id, second_track_id]
+            sorted(self.window._catalog_table_controller().selected_track_ids()),
+            [first_track_id, second_track_id],
         )
 
     def case_selected_or_visible_track_ids_prefer_visible_scope_when_filter_active(self):
@@ -7407,16 +7409,19 @@ class AppShellTestCase(unittest.TestCase):
         self._select_track_ids(selected_track_ids[:2])
 
         self.assertEqual(
-            sorted(self.window._selected_or_visible_track_ids()),
+            sorted(self.window._catalog_table_controller().selected_or_visible_track_ids()),
             sorted(selected_track_ids[:2]),
         )
 
         self.window.search_field.setText("Visible Scope Track")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.app.processEvents()
 
         self.assertEqual(self._visible_track_ids(), [selected_track_ids[2]])
-        self.assertEqual(self.window._selected_or_visible_track_ids(), [selected_track_ids[2]])
+        self.assertEqual(
+            list(self.window._catalog_table_controller().selected_or_visible_track_ids()),
+            [selected_track_ids[2]],
+        )
 
     def case_default_conversion_track_ids_prefer_selection_before_filtered_scope(self):
         filtered_track_ids = [
@@ -7426,7 +7431,7 @@ class AppShellTestCase(unittest.TestCase):
         ]
         self.window.refresh_table()
         self.window.search_field.setText("Conversion Scope")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.app.processEvents()
 
         self.assertEqual(
@@ -7434,12 +7439,15 @@ class AppShellTestCase(unittest.TestCase):
             filtered_track_ids[:2],
         )
         self.assertEqual(
-            self.window._default_conversion_track_ids(),
+            list(self.window._catalog_table_controller().default_conversion_track_ids()),
             filtered_track_ids[:2],
         )
 
         self._select_track_ids([filtered_track_ids[1]])
-        self.assertEqual(self.window._default_conversion_track_ids(), [filtered_track_ids[1]])
+        self.assertEqual(
+            list(self.window._catalog_table_controller().default_conversion_track_ids()),
+            [filtered_track_ids[1]],
+        )
 
     def case_catalog_table_uses_qtableview_model_proxy_live_path(self):
         first_track_id = self._create_track(index=341, title="B3 Live One")
@@ -7457,11 +7465,11 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self._visible_track_ids(), [first_track_id, second_track_id])
 
         self.window.search_field.setText("B3 Live Two")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.app.processEvents()
 
         self.assertEqual(self._visible_track_ids(), [second_track_id])
-        self.assertEqual(self.window.table.rowCount(), 1)
+        self.assertEqual(self.window._catalog_view_row_count(), 1)
         self.assertEqual(self.window.count_label.text(), "showing: 1 record")
         self.assertEqual(self.window.duration_label.text(), "total: 00:08:42")
 
@@ -7471,12 +7479,12 @@ class AppShellTestCase(unittest.TestCase):
         self.window.refresh_table()
 
         self.window.search_field.setText("B3 Restore Two")
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self._select_track_ids([second_track_id])
         state = self.window._capture_view_state()
 
         self.window.search_field.clear()
-        self.window.apply_search_filter()
+        self.window._apply_catalog_search_filter()
         self.window.table.clearSelection()
         self.app.processEvents()
         self.assertEqual(self._visible_track_ids(), [first_track_id, second_track_id])
@@ -7486,7 +7494,10 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(self.window.search_field.text(), "B3 Restore Two")
         self.assertEqual(self._visible_track_ids(), [second_track_id])
-        self.assertEqual(self.window._selected_track_ids(), [second_track_id])
+        self.assertEqual(
+            list(self.window._catalog_table_controller().selected_track_ids()),
+            [second_track_id],
+        )
         self.assertEqual(
             self.window._catalog_table_controller().current_track_id(), second_track_id
         )
@@ -7534,7 +7545,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
 
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         row = self._table_row_for_track_id(track_id)
         model = self.window.table.model()
         index = model.index(row, audio_col)
@@ -7555,12 +7566,10 @@ class AppShellTestCase(unittest.TestCase):
                 side_effect=AssertionError("render path must not query custom blob metadata"),
             ),
         ):
-            item = self.window.table.item(row, audio_col)
-            self.assertIsNotNone(item)
-            assert item is not None
-            self.assertFalse(item.icon().isNull())
-            self.assertEqual(item.icon().cacheKey(), decoration.cacheKey())
-            self.assertIn("Primary audio", item.toolTip())
+            icon = self._catalog_cell_icon(row, audio_col)
+            self.assertFalse(icon.isNull())
+            self.assertEqual(icon.cacheKey(), decoration.cacheKey())
+            self.assertIn("Primary audio", self._catalog_cell_tooltip(row, audio_col))
 
     def case_audio_preview_navigation_uses_proxy_order_and_model_media_roles(self):
         alpha_id = self._create_track(index=367, title="B4 Preview Alpha")
@@ -7578,8 +7587,8 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
 
-        title_column = self.window._column_index_by_header("Track Title")
-        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        title_column = self._catalog_column_for_header("Track Title")
+        self.window.table.sortByColumn(title_column, app_module.Qt.DescendingOrder)
         self.app.processEvents()
 
         source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
@@ -7609,12 +7618,12 @@ class AppShellTestCase(unittest.TestCase):
             )
         self.window.refresh_table()
 
-        title_column = self.window._column_index_by_header("Track Title")
-        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        title_column = self._catalog_column_for_header("Track Title")
+        self.window.table.sortByColumn(title_column, app_module.Qt.DescendingOrder)
         self.app.processEvents()
 
         export_dir = self.root / "b4-export"
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         with (
             mock.patch.object(
                 app_module.QFileDialog,
@@ -7650,16 +7659,19 @@ class AppShellTestCase(unittest.TestCase):
         self.window.refresh_table()
 
         self.window.search_field.setText("B4 Mapping")
-        self.window.apply_search_filter()
-        title_column = self.window._column_index_by_header("Track Title")
-        self.window.table.sortItems(title_column, app_module.Qt.DescendingOrder)
+        self.window._apply_catalog_search_filter()
+        title_column = self._catalog_column_for_header("Track Title")
+        self.window.table.sortByColumn(title_column, app_module.Qt.DescendingOrder)
         self.app.processEvents()
 
         expected_visible = [beta_id, alpha_id]
         self.assertEqual(self._visible_track_ids(), expected_visible)
 
         self._select_track_ids([alpha_id, beta_id])
-        self.assertEqual(set(self.window._selected_track_ids()), {alpha_id, beta_id})
+        self.assertEqual(
+            set(self.window._catalog_table_controller().selected_track_ids()),
+            {alpha_id, beta_id},
+        )
 
         controller = self.window._catalog_table_controller()
         audio_col = controller.column_for_key(self.window._standard_media_column_key("audio_file"))
@@ -7685,7 +7697,7 @@ class AppShellTestCase(unittest.TestCase):
         controller = self.window._catalog_zoom_controller()
         self.assertEqual(slider.value(), app_module.CATALOG_ZOOM_DEFAULT_PERCENT)
         self.assertEqual(label.text(), "100%")
-        self.assertEqual(self.window.table.rowCount(), 30)
+        self.assertEqual(self.window._catalog_view_row_count(), 30)
 
         base_row_height = self.window.table.verticalHeader().defaultSectionSize()
         with (
@@ -7791,22 +7803,15 @@ class AppShellTestCase(unittest.TestCase):
             storage_mode=STORAGE_MODE_DATABASE,
         )
         self.window.refresh_table()
-        audio_col = self.window._column_index_by_header("Audio File")
-        managed_item = self.window.table.item(
-            self._table_row_for_track_id(managed_track_id),
-            audio_col,
+        audio_col = self._catalog_column_for_header("Audio File")
+        managed_row = self._table_row_for_track_id(managed_track_id)
+        database_row = self._table_row_for_track_id(database_track_id)
+        self.assertIn("Managed-file storage", self._catalog_cell_tooltip(managed_row, audio_col))
+        self.assertIn("Database storage", self._catalog_cell_tooltip(database_row, audio_col))
+        self.assertNotEqual(
+            self._catalog_cell_icon(managed_row, audio_col).cacheKey(),
+            self._catalog_cell_icon(database_row, audio_col).cacheKey(),
         )
-        database_item = self.window.table.item(
-            self._table_row_for_track_id(database_track_id),
-            audio_col,
-        )
-        self.assertIsNotNone(managed_item)
-        self.assertIsNotNone(database_item)
-        assert managed_item is not None
-        assert database_item is not None
-        self.assertIn("Managed-file storage", managed_item.toolTip())
-        self.assertIn("Database storage", database_item.toolTip())
-        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
 
     def case_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage(self):
         managed_track_id = self._create_track(
@@ -7832,22 +7837,15 @@ class AppShellTestCase(unittest.TestCase):
             storage_mode=STORAGE_MODE_DATABASE,
         )
         self.window.refresh_table()
-        art_col = self.window._column_index_by_header("Album Art")
-        managed_item = self.window.table.item(
-            self._table_row_for_track_id(managed_track_id),
-            art_col,
+        art_col = self._catalog_column_for_header("Album Art")
+        managed_row = self._table_row_for_track_id(managed_track_id)
+        database_row = self._table_row_for_track_id(database_track_id)
+        self.assertIn("Managed-file storage", self._catalog_cell_tooltip(managed_row, art_col))
+        self.assertIn("Database storage", self._catalog_cell_tooltip(database_row, art_col))
+        self.assertNotEqual(
+            self._catalog_cell_icon(managed_row, art_col).cacheKey(),
+            self._catalog_cell_icon(database_row, art_col).cacheKey(),
         )
-        database_item = self.window.table.item(
-            self._table_row_for_track_id(database_track_id),
-            art_col,
-        )
-        self.assertIsNotNone(managed_item)
-        self.assertIsNotNone(database_item)
-        assert managed_item is not None
-        assert database_item is not None
-        self.assertIn("Managed-file storage", managed_item.toolTip())
-        self.assertIn("Database storage", database_item.toolTip())
-        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
 
     def case_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage(self):
         managed_track_id = self._create_track(index=337, title="Managed Custom Blob")
@@ -7890,22 +7888,15 @@ class AppShellTestCase(unittest.TestCase):
             storage_mode=STORAGE_MODE_DATABASE,
         )
         self.window.refresh_table()
-        col = self.window._column_index_by_header("Session Artwork")
-        managed_item = self.window.table.item(
-            self._table_row_for_track_id(managed_track_id),
-            col,
+        col = self._catalog_column_for_header("Session Artwork")
+        managed_row = self._table_row_for_track_id(managed_track_id)
+        database_row = self._table_row_for_track_id(database_track_id)
+        self.assertIn("Managed-file storage", self._catalog_cell_tooltip(managed_row, col))
+        self.assertIn("Database storage", self._catalog_cell_tooltip(database_row, col))
+        self.assertNotEqual(
+            self._catalog_cell_icon(managed_row, col).cacheKey(),
+            self._catalog_cell_icon(database_row, col).cacheKey(),
         )
-        database_item = self.window.table.item(
-            self._table_row_for_track_id(database_track_id),
-            col,
-        )
-        self.assertIsNotNone(managed_item)
-        self.assertIsNotNone(database_item)
-        assert managed_item is not None
-        assert database_item is not None
-        self.assertIn("Managed-file storage", managed_item.toolTip())
-        self.assertIn("Database storage", database_item.toolTip())
-        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
 
     def case_blob_badge_icon_generation_is_cached_during_refresh(self):
         track_ids = [
@@ -7927,13 +7918,14 @@ class AppShellTestCase(unittest.TestCase):
             self.window.refresh_table()
 
         self.assertLessEqual(icon_factory.call_count, 1)
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         cache_keys = []
         for track_id in track_ids:
-            item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
-            self.assertIsNotNone(item)
-            assert item is not None
-            cache_keys.append(item.icon().cacheKey())
+            cache_keys.append(
+                self._catalog_cell_icon(
+                    self._table_row_for_track_id(track_id), audio_col
+                ).cacheKey()
+            )
         self.assertTrue(all(key == cache_keys[0] for key in cache_keys))
 
     def case_catalog_refresh_uses_prepared_blob_badges_without_live_meta_queries(self):
@@ -7988,20 +7980,15 @@ class AppShellTestCase(unittest.TestCase):
                 side_effect=AssertionError("live custom-field lookup should not run"),
             ),
         ):
-            self.window._apply_catalog_ui_dataset(dataset)
+            self.window._apply_catalog_model_dataset(dataset)
 
-        audio_col = self.window._column_index_by_header("Audio File")
-        custom_col = self.window._column_index_by_header("Prepared Artwork")
-        audio_item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
-        custom_item = self.window.table.item(self._table_row_for_track_id(track_id), custom_col)
-        self.assertIsNotNone(audio_item)
-        self.assertIsNotNone(custom_item)
-        assert audio_item is not None
-        assert custom_item is not None
-        self.assertNotEqual(audio_item.text(), "—")
-        self.assertNotEqual(custom_item.text(), "—")
-        self.assertFalse(audio_item.icon().isNull())
-        self.assertFalse(custom_item.icon().isNull())
+        audio_col = self._catalog_column_for_header("Audio File")
+        custom_col = self._catalog_column_for_header("Prepared Artwork")
+        row = self._table_row_for_track_id(track_id)
+        self.assertNotEqual(self._catalog_cell_text(row, audio_col), "—")
+        self.assertNotEqual(self._catalog_cell_text(row, custom_col), "—")
+        self.assertFalse(self._catalog_cell_icon(row, audio_col).isNull())
+        self.assertFalse(self._catalog_cell_icon(row, custom_col).isNull())
 
     def case_catalog_refresh_reenables_table_updates_before_final_repaint_flush(self):
         track_id = self._create_track(index=365, title="Catalog Flush Visibility")
@@ -8028,11 +8015,10 @@ class AppShellTestCase(unittest.TestCase):
             self.window._apply_catalog_refresh_request(dataset, refresh_request)
 
         self.assertEqual(repaint_flush.call_count, 1)
-        audio_col = self.window._column_index_by_header("Audio File")
-        item = self.window.table.item(self._table_row_for_track_id(track_id), audio_col)
-        self.assertIsNotNone(item)
-        assert item is not None
-        self.assertFalse(item.icon().isNull())
+        audio_col = self._catalog_column_for_header("Audio File")
+        self.assertFalse(
+            self._catalog_cell_icon(self._table_row_for_track_id(track_id), audio_col).isNull()
+        )
 
     def case_standard_media_context_menu_groups_file_and_storage_actions(self):
         track_id = self._create_track(index=339, title="Managed Media Track")
@@ -8040,7 +8026,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.track_service.set_media_path(track_id, "audio_file", audio_path)
         self.window.refresh_table()
         row = self._table_row_for_track_id(track_id)
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
 
         snapshot = self._table_context_menu_snapshot(row, audio_col)
         file_snapshot = (snapshot.get("submenus") or {}).get("File") or {}
@@ -8075,7 +8061,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
         self._select_track_ids([first_track_id, second_track_id])
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         snapshot = self._table_context_menu_snapshot(
             self._table_row_for_track_id(first_track_id),
             audio_col,
@@ -8105,7 +8091,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
         self._select_track_ids([first_track_id, second_track_id])
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         snapshot = self._table_context_menu_snapshot(
             self._table_row_for_track_id(first_track_id),
             audio_col,
@@ -8132,7 +8118,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
         self._select_track_ids([managed_track_id, database_track_id])
-        audio_col = self.window._column_index_by_header("Audio File")
+        audio_col = self._catalog_column_for_header("Audio File")
         snapshot = self._table_context_menu_snapshot(
             self._table_row_for_track_id(managed_track_id),
             audio_col,
@@ -8174,7 +8160,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.window.refresh_table()
         row = self._table_row_for_track_id(track_id)
-        col = self.window._column_index_by_header("Session Artwork")
+        col = self._catalog_column_for_header("Session Artwork")
 
         snapshot = self._table_context_menu_snapshot(row, col)
         file_snapshot = (snapshot.get("submenus") or {}).get("File") or {}
@@ -8372,7 +8358,7 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         row = self._table_row_for_track_id(track_id)
-        col = self.window._column_index_by_header("Mood Notes")
+        col = self._catalog_column_for_header("Mood Notes")
         history_before = len(self.window.history_manager.list_entries(limit=50))
 
         with (
@@ -8383,7 +8369,7 @@ class AppShellTestCase(unittest.TestCase):
             ),
             mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
         ):
-            self.window._on_item_double_clicked(self.window.table.item(row, col))
+            self.window._on_catalog_index_double_clicked(self._catalog_model_index(row, col))
 
         critical_mock.assert_not_called()
         stored = self.window.conn.execute(
@@ -8406,10 +8392,10 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         row = self._table_row_for_track_id(track_id)
-        col = self.window._column_index_by_header("Track Title")
+        col = self._catalog_column_for_header("Track Title")
 
         with mock.patch.object(self.window, "open_selected_editor") as open_selected_editor:
-            self.window._on_item_double_clicked(self.window.table.item(row, col))
+            self.window._on_catalog_index_double_clicked(self._catalog_model_index(row, col))
 
         open_selected_editor.assert_called_once_with(track_id)
 
@@ -8419,13 +8405,13 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         row = self._table_row_for_track_id(track_id)
-        col = self.window._column_index_by_header("Audio File")
+        col = self._catalog_column_for_header("Audio File")
 
         with mock.patch.object(
             self.window,
             "_attach_standard_media_for_track",
         ) as attach_standard_media:
-            self.window._on_item_double_clicked(self.window.table.item(row, col))
+            self.window._on_catalog_index_double_clicked(self._catalog_model_index(row, col))
 
         attach_standard_media.assert_called_once_with(track_id, "audio_file")
 
@@ -8435,8 +8421,8 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         row = self._table_row_for_track_id(track_id)
-        col = self.window._column_index_by_header("Audio File")
-        self.window.table.setCurrentCell(row, col)
+        col = self._catalog_column_for_header("Audio File")
+        self._set_current_catalog_cell(row, col)
         self.app.processEvents()
         event = QKeyEvent(
             app_module.QEvent.KeyPress,
@@ -8775,8 +8761,8 @@ class AppShellTestCase(unittest.TestCase):
                 audio_path=self._create_wav_file(filename),
             )
 
-        title_column = self.window._column_index_by_header("Track Title")
-        self.window.table.sortItems(title_column, Qt.AscendingOrder)
+        title_column = self._catalog_column_for_header("Track Title")
+        self.window.table.sortByColumn(title_column, Qt.AscendingOrder)
         pump_events()
 
         source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
