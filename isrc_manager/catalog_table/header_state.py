@@ -188,6 +188,48 @@ class CatalogHeaderStateManager:
             header.blockSignals(previous_signal_state)
         return restored
 
+    def restore_visibility(
+        self,
+        header: "QHeaderView",
+        *,
+        column_specs: Sequence[CatalogColumnSpec],
+        settings: QSettings | None = None,
+        settings_prefix: str | None = None,
+    ) -> bool:
+        settings_obj = self._resolve_settings(settings)
+        normalized_specs = tuple(column_specs)
+        previous_signal_state = header.blockSignals(True)
+        restored = False
+        try:
+            if settings_obj is None:
+                self._apply_default_hidden_columns(header, normalized_specs)
+                return False
+
+            hidden_column_keys = self.load_hidden_column_keys(
+                settings=settings_obj,
+                settings_prefix=settings_prefix,
+            )
+            legacy_hidden_columns = self.load_legacy_hidden_columns(
+                settings=settings_obj,
+                settings_prefix=settings_prefix,
+            )
+
+            if hidden_column_keys:
+                self._apply_hidden_columns_by_keys(header, normalized_specs, hidden_column_keys)
+                restored = True
+            elif legacy_hidden_columns:
+                self._apply_hidden_columns_by_labels(
+                    header,
+                    normalized_specs,
+                    legacy_hidden_columns,
+                )
+                restored = True
+            else:
+                self._apply_default_hidden_columns(header, normalized_specs)
+            return restored
+        finally:
+            header.blockSignals(previous_signal_state)
+
     def load_columns_movable_state(
         self,
         *,

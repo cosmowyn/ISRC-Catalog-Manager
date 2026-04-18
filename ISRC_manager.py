@@ -80,8 +80,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QLayout,
+    QLineEdit,
     QListView,
     QListWidget,
     QListWidgetItem,
@@ -121,7 +121,6 @@ from isrc_manager.app_dialogs import (
     HelpContentsDialog,
     MasterTransferExportDialog,
 )
-from isrc_manager.external_launch import open_external_path
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
 from isrc_manager.authenticity import (
@@ -145,22 +144,16 @@ from isrc_manager.blob_icons import (
     describe_blob_icon_spec,
     finalize_blob_icon_spec,
     icon_from_blob_icon_spec,
-    normalize_blob_icon_spec,
     normalize_blob_icon_settings,
+    normalize_blob_icon_spec,
 )
+from isrc_manager.catalog_table import CatalogColumnSpec, CatalogHeaderStateManager
 from isrc_manager.catalog_workspace import (
     CatalogWorkspaceDock,
     ensure_catalog_workspace_dock,
     refresh_catalog_workspace_docks,
 )
 from isrc_manager.code_registry import CatalogIdentifierField, CodeRegistryWorkspacePanel
-from isrc_manager.workspace_debug import (
-    summarize_catalog_workspace_dock,
-    summarize_panel_layout_snapshot,
-    summarize_panel_layout_state,
-    workspace_debug_enabled,
-    workspace_debug_log,
-)
 from isrc_manager.constants import (
     APP_NAME,
     BLOB_AUDIO_EXTS,
@@ -197,6 +190,9 @@ from isrc_manager.constants import (
 from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
 from isrc_manager.contracts import ContractPayload, ContractService
 from isrc_manager.contracts.dialogs import ContractBrowserPanel
+from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
+from isrc_manager.conversion.dialogs import ConversionDialog
+from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
 from isrc_manager.domain.codes import (
     is_blank,
     is_valid_isrc_compact_or_iso,
@@ -213,10 +209,8 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
-from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
-from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
-from isrc_manager.conversion.dialogs import ConversionDialog
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
+from isrc_manager.exchange.master_transfer import MasterTransferService
 from isrc_manager.exchange.models import (
     ExchangeImportOptions,
     ExchangeImportReport,
@@ -230,8 +224,8 @@ from isrc_manager.exchange.repertoire_service import (
     RepertoireExchangeService,
     RepertoireImportInspection,
 )
-from isrc_manager.exchange.master_transfer import MasterTransferService
 from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.external_launch import open_external_path
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -391,16 +385,16 @@ from isrc_manager.startup_splash import (
     create_startup_splash_controller,
 )
 from isrc_manager.storage_admin import ApplicationStorageAdminService
-from isrc_manager.storage_sizes import (
-    bytes_to_megabytes_floor,
-    format_budget_megabytes,
-    format_storage_bytes,
-)
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_RESUMABLE_STAGE,
     PREFERRED_STATE_VALID_COMPLETE,
     StorageMigrationService,
+)
+from isrc_manager.storage_sizes import (
+    bytes_to_megabytes_floor,
+    format_budget_megabytes,
+    format_storage_bytes,
 )
 from isrc_manager.tags import (
     TAGGED_AUDIO_EXPORT_STAGE_COUNT,
@@ -410,6 +404,13 @@ from isrc_manager.tags import (
     build_catalog_export_tag_data,
     merge_imported_tags,
     write_catalog_export_tags,
+)
+from isrc_manager.workspace_debug import (
+    summarize_catalog_workspace_dock,
+    summarize_panel_layout_snapshot,
+    summarize_panel_layout_state,
+    workspace_debug_enabled,
+    workspace_debug_log,
 )
 
 _RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
@@ -6409,8 +6410,8 @@ class App(QMainWindow):
         )
 
         try:
-            movable = self.settings.value(
-                f"{self._table_settings_prefix()}/columns_movable", False, bool
+            movable = self._catalog_header_state_manager(path=last_db).load_columns_movable_state(
+                default=False
             )
         except Exception:
             movable = False
@@ -14687,8 +14688,8 @@ class App(QMainWindow):
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
         try:
-            columns_movable = self.settings.value(
-                f"{self._table_settings_prefix()}/columns_movable", False, bool
+            columns_movable = self._catalog_header_state_manager().load_columns_movable_state(
+                default=False
             )
             col_width_enabled = self.settings.value("display/interactive_col_width", False, bool)
             row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
@@ -14834,7 +14835,9 @@ class App(QMainWindow):
             f"{prefix}/header_state",
             f"{prefix}/header_labels",
             f"{prefix}/header_labels_json",
+            f"{prefix}/header_column_keys_json",
             f"{prefix}/hidden_columns_json",
+            f"{prefix}/hidden_column_keys_json",
         ]
         if include_columns_movable:
             keys.append(f"{prefix}/columns_movable")
@@ -26460,13 +26463,108 @@ class App(QMainWindow):
     def _table_settings_prefix(self) -> str:
         return self._table_settings_prefix_for_path(getattr(self, "current_db_path", "") or "")
 
+    def _catalog_header_state_manager(
+        self,
+        *,
+        path: str | None = None,
+    ) -> CatalogHeaderStateManager:
+        resolved_path = getattr(self, "current_db_path", "") if path is None else path
+        return CatalogHeaderStateManager(
+            self.settings,
+            settings_prefix=self._table_settings_prefix_for_path(resolved_path or ""),
+        )
+
+    def _header_label_for_logical_index(self, logical_index: int) -> str:
+        if not hasattr(self, "table"):
+            return ""
+        header_item = self.table.horizontalHeaderItem(logical_index)
+        if header_item is not None:
+            return str(header_item.text() or "")
+        model = self.table.model()
+        if model is None:
+            return ""
+        return str(model.headerData(logical_index, Qt.Horizontal, Qt.DisplayRole) or "")
+
+    @staticmethod
+    def _fallback_header_column_key(
+        header_text: str,
+        *,
+        prefix: str,
+        logical_index: int,
+    ) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "_", str(header_text or "").strip().lower()).strip("_")
+        if not slug:
+            slug = "column"
+        return f"{prefix}:{slug}:{logical_index}"
+
+    def _catalog_header_column_specs(self) -> tuple[CatalogColumnSpec, ...]:
+        if not hasattr(self, "table"):
+            return ()
+
+        column_specs: list[CatalogColumnSpec] = []
+        table_column_count = self.table.columnCount()
+        base_column_count = min(len(self.BASE_HEADERS), table_column_count)
+        default_hidden_names = {str(name).strip() for name in DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES}
+
+        for logical_index in range(base_column_count):
+            header_text = self._header_label_for_logical_index(logical_index)
+            standard_spec = standard_field_spec_for_label(header_text)
+            column_key = (
+                f"base:{standard_spec.key}"
+                if standard_spec is not None
+                else self._fallback_header_column_key(
+                    header_text,
+                    prefix="base",
+                    logical_index=logical_index,
+                )
+            )
+            column_specs.append(
+                CatalogColumnSpec(
+                    key=column_key,
+                    header_text=header_text,
+                )
+            )
+
+        for logical_index in range(base_column_count, table_column_count):
+            field_index = logical_index - len(self.BASE_HEADERS)
+            header_text = self._header_label_for_logical_index(logical_index)
+            field = (
+                self.active_custom_fields[field_index]
+                if 0 <= field_index < len(self.active_custom_fields)
+                else {}
+            )
+            try:
+                field_id = int(field.get("id"))
+            except (TypeError, ValueError):
+                field_id = None
+            column_key = (
+                f"custom:{field_id}"
+                if field_id is not None and field_id > 0
+                else self._fallback_header_column_key(
+                    header_text,
+                    prefix="custom",
+                    logical_index=logical_index,
+                )
+            )
+            column_specs.append(
+                CatalogColumnSpec(
+                    key=column_key,
+                    header_text=header_text,
+                    hidden_by_default=header_text in default_hidden_names,
+                )
+            )
+
+        return tuple(column_specs)
+
     def _clear_table_settings_for_path(self, path: str) -> None:
         prefix = self._table_settings_prefix_for_path(path)
         for suffix in (
             "header_state",
             "header_labels",
             "header_labels_json",
+            "header_column_keys_json",
             "hidden_columns_json",
+            "hidden_column_keys_json",
             "columns_movable",
         ):
             self.settings.remove(f"{prefix}/{suffix}")
@@ -26506,10 +26604,6 @@ class App(QMainWindow):
             def mutation():
                 self.table.horizontalHeader().setSectionsMovable(bool(enabled))
                 self._save_header_state(record_history=False)
-                self.settings.setValue(
-                    f"{self._table_settings_prefix()}/columns_movable", bool(enabled)
-                )
-                self.settings.sync()
 
             self._run_setting_bundle_history_action(
                 action_label="Toggle Column Reordering",
@@ -26575,13 +26669,15 @@ class App(QMainWindow):
         if not hasattr(self, "table"):
             return
 
-        hidden_columns = set(self._load_hidden_columns_payload())
-        labels = self._header_labels()
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
         try:
-            for logical_index, token in enumerate(self._labels_with_occurrence(labels)):
-                self.table.setColumnHidden(logical_index, token in hidden_columns)
+            # B1 compatibility wrapper: live visibility restore now delegates to
+            # CatalogHeaderStateManager while the current QTableWidget shell remains.
+            self._catalog_header_state_manager().restore_visibility(
+                self.table.horizontalHeader(),
+                column_specs=self._catalog_header_column_specs(),
+            )
         finally:
             self._suspend_layout_history = previous_suspend_state
 
@@ -26658,33 +26754,17 @@ class App(QMainWindow):
         history_entity_id: str | None = None,
     ):
         try:
+            if not hasattr(self, "table"):
+                return
 
             def mutation():
-                header = self.table.horizontalHeader()
-                state = header.saveState()
-                prefix = self._table_settings_prefix()
-
-                # Native state
-                self.settings.setValue(f"{prefix}/header_state", state)
-
-                # Visual label order (robust fallback)
-                m = self.table.model()
-                logicals = list(range(m.columnCount()))
-                visual_order = sorted(logicals, key=lambda li: header.visualIndex(li))
-                labels_visual = [
-                    str(m.headerData(li, Qt.Horizontal, Qt.DisplayRole) or "")
-                    for li in visual_order
-                ]
-                self.settings.setValue(f"{prefix}/header_labels", labels_visual)
-                try:
-                    self.settings.setValue(
-                        f"{prefix}/header_labels_json", json.dumps(labels_visual)
-                    )
-                except Exception as e:
-                    self.logger.warning("Failed to save header visual order JSON: %s", e)
-
-                self._write_hidden_columns_setting(sync=False)
-                self.settings.sync()
+                # B1 compatibility wrapper: live header persistence now delegates
+                # to CatalogHeaderStateManager while keeping the current settings
+                # namespace and history bundling intact.
+                self._catalog_header_state_manager().save_state(
+                    self.table.horizontalHeader(),
+                    column_specs=self._catalog_header_column_specs(),
+                )
 
             if record_history:
                 self._run_setting_bundle_history_action(
@@ -26699,59 +26779,29 @@ class App(QMainWindow):
             self.logger.exception("Error saving header state: %s", e)
 
     def _load_header_state(self):
-        header = None
-        old_signal_state = False
         try:
-            header = self.table.horizontalHeader()
-            prefix = self._table_settings_prefix()
-            old_signal_state = header.blockSignals(True)
-            saved_order_keys = (
-                f"{prefix}/header_state",
-                f"{prefix}/header_labels",
-                f"{prefix}/header_labels_json",
-            )
-
-            # Current labels after (re)building headers — includes any new custom fields
-            current_labels = [
-                self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount())
-            ]
-
-            if not any(self.settings.contains(key) for key in saved_order_keys):
-                self._apply_header_label_order(self._default_header_labels())
-                self._apply_saved_column_visibility()
-                self._refresh_column_visibility_menu()
-                self._rebuild_search_column_choices()
+            if not hasattr(self, "table"):
                 return
-
-            # Our robust, visual-order fallback list from last save
-            saved_labels = self.settings.value(f"{prefix}/header_labels", [], list)
-
-            # Native state blob (may be stale when columns changed)
-            state = self.settings.value(f"{prefix}/header_state", None, QByteArray)
-
-            native_state_restored = False
-
-            # Only apply native restore if the label sets match (prevents dropping new columns)
-            if isinstance(state, QByteArray) and not state.isEmpty():
-                if saved_labels and set(saved_labels) == set(current_labels):
-                    native_state_restored = bool(header.restoreState(state))
-                # else: mismatch → skip native restore on purpose
-
-            # Fallback: reorder by labels we know; any new labels remain visible at the end
-            if saved_labels and not native_state_restored:
-                self._apply_header_label_order(saved_labels)
-
-            self._apply_saved_column_visibility()
+            previous_suspend_state = self._suspend_layout_history
+            self._suspend_layout_history = True
+            try:
+                # B1 compatibility wrapper: live header restore now routes
+                # through CatalogHeaderStateManager with key-based preference.
+                self._catalog_header_state_manager().restore_state(
+                    self.table.horizontalHeader(),
+                    column_specs=self._catalog_header_column_specs(),
+                )
+            finally:
+                self._suspend_layout_history = previous_suspend_state
+            if hasattr(self, "act_reorder_columns"):
+                self._set_action_checked_silently(
+                    self.act_reorder_columns,
+                    bool(self.table.horizontalHeader().sectionsMovable()),
+                )
             self._refresh_column_visibility_menu()
             self._rebuild_search_column_choices()
         except Exception as e:
             self.logger.exception("Error loading header state: %s", e)
-        finally:
-            try:
-                if header is not None:
-                    header.blockSignals(old_signal_state)
-            except Exception:
-                pass
 
     # =============================================================================
     # DB backup / restore / verify (RC blocker #7)
