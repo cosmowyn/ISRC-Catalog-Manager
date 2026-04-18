@@ -4,9 +4,11 @@ Act as a senior software engineer working directly in the live repository, with 
 
 You are the central authority and final decision-maker for this task.  
 Use worker agents only as bounded support units.  
+Use a maximum of 6 worker agents.  
 Do not deviate from the engineering plan.  
 Do not widen scope.  
-Do not begin any Phase A2 or Phase B work.
+Do not begin any Phase A2 or any Phase B work.  
+Close all idle workers as soon as they are no longer needed.
 
 ## Task
 
@@ -232,10 +234,27 @@ Do not create broad regression work outside A1 unless needed to prove A1 did not
 
 Write a detailed handoff document after completing A1.
 
+### Handoff output location
+Write the handoff document to:
+
+`root/docs/change control/Change - QTableWidget/phase execution handoffs/`
+
+If the folder does not exist yet, create it.
+
+### Handoff file naming rule
+Name the handoff file exactly:
+
+`A1 handoff.md`
+
+Do not use any other file name.  
+Do not merge this handoff with any other phase handoff.  
+Do not place the handoff anywhere else unless the task explicitly says otherwise.
+
 The handoff must explain:
 - what was created
 - why it was created
 - which files were added
+- which files were modified
 - whether any existing files were touched and why
 - how scope was kept strictly within A1
 - what was intentionally not implemented yet
@@ -243,6 +262,7 @@ The handoff must explain:
 - what QC checks were performed
 - whether any dormant imports or seams were added
 - confirmation that live behavior was not cut over
+- confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for A2/A3
 - any repo-specific conventions discovered that matter for later phases
 
@@ -260,7 +280,8 @@ Follow this order exactly:
 6. Run A1-scoped validation and import/compile checks
 7. Perform QA/QC scope audit
 8. Write the detailed handoff document
-9. Stop
+9. Update `root/docs/change control/Milestones.md`
+10. Stop
 
 ## Completion Contract
 
@@ -277,7 +298,64 @@ Do not consider the task complete until all of the following are true:
 - QA completed
 - QC completed
 - detailed handoff document written
+- milestone written to `Milestones.md`
 - idle workers closed
+
+## Milestone Update Requirement
+
+On completion of this prompt, update the document:
+
+`root/docs/change control/Milestones.md`
+
+### Update rules
+- Append the new milestone entry after any existing milestone entries already in the document.
+- Do not overwrite, reorder, or reformat previous milestone entries.
+- If the file does not exist yet, create it.
+
+### Milestone entry content
+For the completed phase, record:
+- the phase identifier
+- a completion timestamp
+- a short completion status
+- whether any exceptions occurred
+
+Use a clear append-only entry format, for example:
+
+- `A1 — completed — 18-apr-2026 14:32`
+- `Exceptions: none`
+
+or, if exceptions occurred:
+
+- `A1 — completed with exceptions — 18-apr-2026 14:32`
+- `Exceptions: A1.1, A1.2`
+
+### Exceptions section
+Also maintain an `Exceptions` section in the same document.
+
+Rules:
+- create the `Exceptions` section if it does not yet exist
+- append new exceptions after any existing exceptions
+- do not renumber old exceptions
+- each exception must use a phase-based reference with a follow number, for example:
+  - `A1.1`
+  - `A1.2`
+  - `B3.1`
+
+For each exception, record:
+- the exception reference
+- the phase
+- a short description of what happened
+- whether it was resolved in the current phase or remains open
+
+Example:
+
+- `A1.1 — Phase A1 — import scaffold required one dormant compatibility import — resolved`
+- `B3.1 — Phase B3 — proxy/source mapping bug discovered during validation — open`
+
+### Scope discipline
+- Only record the phase that was actually executed by the current prompt.
+- Do not mark future phases as complete.
+- Do not rewrite milestone history beyond appending the new completed phase entry and any new exceptions.
 
 ## Final Output Expectation
 
@@ -287,6 +365,7 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
+6. confirmation that the milestone was written to `Milestones.md`
 
 ### Final instruction
 Execute only Phase A1 from the engineering plan.  
