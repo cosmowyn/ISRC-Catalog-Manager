@@ -249,6 +249,38 @@ class _FakeNativeGestureEvent:
         self.accepted = True
 
 
+class _FakePinchGesture:
+    def __init__(self, *, last_scale: float = 1.0, scale: float = 1.0):
+        self._last_scale = float(last_scale)
+        self._scale = float(scale)
+
+    def changeFlags(self):
+        return app_module.QPinchGesture.ScaleFactorChanged
+
+    def lastScaleFactor(self):
+        return self._last_scale
+
+    def scaleFactor(self):
+        return self._scale
+
+
+class _FakeGestureEvent:
+    def __init__(self, gesture):
+        self._gesture = gesture
+        self.accepted = False
+
+    def type(self):
+        return app_module.QEvent.Gesture
+
+    def gesture(self, gesture_type):
+        if gesture_type == app_module.Qt.PinchGesture:
+            return self._gesture
+        return None
+
+    def accept(self):
+        self.accepted = True
+
+
 class _FakeMouseDoubleClickEvent:
     def __init__(self, button=Qt.LeftButton):
         self._button = button
@@ -7642,6 +7674,101 @@ class AppShellTestCase(unittest.TestCase):
             source_index = controller.map_to_source(index)
             self.assertTrue(source_index.isValid())
             self.assertEqual(source_index.data(app_module.RawValueRole), (track_id, "audio_file"))
+
+    def case_catalog_zoom_slider_wheel_and_pinch_sync_without_data_refresh(self):
+        for offset in range(30):
+            self._create_track(index=376 + offset, title=f"B5 Zoom Load {offset:02d}")
+        self.window.refresh_table()
+
+        slider = self.window.catalog_zoom_slider
+        label = self.window.catalog_zoom_value_label
+        controller = self.window._catalog_zoom_controller()
+        self.assertEqual(slider.value(), app_module.CATALOG_ZOOM_DEFAULT_PERCENT)
+        self.assertEqual(label.text(), "100%")
+        self.assertEqual(self.window.table.rowCount(), 30)
+
+        base_row_height = self.window.table.verticalHeader().defaultSectionSize()
+        with (
+            mock.patch.object(
+                self.window,
+                "refresh_table",
+                side_effect=AssertionError("zoom must not refresh catalog data"),
+            ),
+            mock.patch.object(
+                self.window,
+                "refresh_table_preserve_view",
+                side_effect=AssertionError("zoom must not refresh catalog data"),
+            ),
+            mock.patch.object(
+                self.window,
+                "_refresh_catalog_ui_in_background",
+                side_effect=AssertionError("zoom must not schedule catalog refresh"),
+            ),
+        ):
+            slider.setValue(125)
+            self.assertEqual(controller.zoom_percent(), 125)
+            self.assertEqual(label.text(), "125%")
+            controller.flush_pending_apply()
+            self.assertGreater(
+                self.window.table.verticalHeader().defaultSectionSize(), base_row_height
+            )
+
+            plain_wheel = _FakeWheelEvent(angle_y=120)
+            self.assertFalse(self.window._handle_catalog_zoom_wheel_event(plain_wheel))
+            self.assertFalse(plain_wheel.accepted)
+            self.assertEqual(slider.value(), 125)
+
+            wheel = _FakeWheelEvent(angle_y=120, modifiers=app_module.Qt.ControlModifier)
+            self.assertTrue(self.window.eventFilter(self.window.table.viewport(), wheel))
+            self.assertTrue(wheel.accepted)
+            self.assertEqual(slider.value(), 130)
+            self.assertEqual(label.text(), "130%")
+
+            native_pinch = _FakeNativeGestureEvent(app_module.Qt.ZoomNativeGesture, 0.1)
+            self.assertTrue(self.window.eventFilter(self.window.table.viewport(), native_pinch))
+            self.assertTrue(native_pinch.accepted)
+            self.assertEqual(slider.value(), 145)
+            self.assertEqual(label.text(), "145%")
+
+            generic_pinch = _FakeGestureEvent(_FakePinchGesture(last_scale=1.0, scale=1.1))
+            self.assertTrue(self.window.eventFilter(self.window.table.viewport(), generic_pinch))
+            self.assertTrue(generic_pinch.accepted)
+            self.assertEqual(slider.value(), 160)
+            self.assertEqual(label.text(), "160%")
+            controller.flush_pending_apply()
+
+    def case_catalog_zoom_persists_in_layout_and_resets_on_profile_change(self):
+        slider = self.window.catalog_zoom_slider
+        controller = self.window._catalog_zoom_controller()
+
+        controller.set_zoom_percent(135, immediate=True)
+        self.assertEqual(slider.value(), 135)
+        self.window._save_named_main_window_layout("Zoom Desk")
+        layouts = self._saved_main_window_layout_payloads()
+        self.assertEqual(
+            layouts["Zoom Desk"].get(app_module.CATALOG_ZOOM_LAYOUT_KEY),
+            135,
+        )
+
+        controller.set_zoom_percent(100, immediate=True)
+        self.assertEqual(slider.value(), 100)
+        self.assertTrue(self.window._apply_named_main_window_layout("Zoom Desk"))
+        self._drain_events()
+        self.assertEqual(slider.value(), 135)
+        self.assertEqual(self.window.catalog_zoom_value_label.text(), "135%")
+
+        target_path = self.root / "zoom-reset-profile.db"
+        self._create_profile_database(target_path)
+        controller.set_zoom_percent(145, immediate=True)
+        self.assertEqual(slider.value(), 145)
+
+        self.window._activate_profile(str(target_path), save_current_header=False)
+        self._drain_events()
+        self.assertEqual(slider.value(), app_module.CATALOG_ZOOM_DEFAULT_PERCENT)
+        self.assertEqual(
+            self.window.catalog_zoom_value_label.text(),
+            f"{app_module.CATALOG_ZOOM_DEFAULT_PERCENT}%",
+        )
 
     def case_audioless_row_context_menu_omits_audio_submenu(self):
         track_id = self._create_track(index=332, title="Metadata Only Track")

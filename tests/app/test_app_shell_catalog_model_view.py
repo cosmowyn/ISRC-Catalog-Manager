@@ -23,6 +23,12 @@ class AppShellCatalogModelViewTests(AppShellTestCase):
     test_proxy_source_mapping_stays_correct_under_sort_filter_selection_for_media_roles = (
         AppShellTestCase.case_proxy_source_mapping_stays_correct_under_sort_filter_selection_for_media_roles
     )
+    test_catalog_zoom_slider_wheel_and_pinch_sync_without_data_refresh = (
+        AppShellTestCase.case_catalog_zoom_slider_wheel_and_pinch_sync_without_data_refresh
+    )
+    test_catalog_zoom_persists_in_layout_and_resets_on_profile_change = (
+        AppShellTestCase.case_catalog_zoom_persists_in_layout_and_resets_on_profile_change
+    )
 
 
 del AppShellTestCase

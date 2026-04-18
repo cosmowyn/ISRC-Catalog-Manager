@@ -37,6 +37,7 @@ from PySide6.QtCore import (
     QRect,
     QRegularExpression,
     QSettings,
+    QSize,
     QSortFilterProxyModel,
     QStandardPaths,
     Qt,
@@ -156,6 +157,12 @@ from isrc_manager.catalog_table import (
     CatalogSnapshot,
     CatalogTableController,
     CatalogTableModel,
+    CatalogZoomController,
+    CATALOG_ZOOM_DEFAULT_PERCENT,
+    CATALOG_ZOOM_LAYOUT_KEY,
+    CATALOG_ZOOM_MAX_PERCENT,
+    CATALOG_ZOOM_MIN_PERCENT,
+    CATALOG_ZOOM_STEP_PERCENT,
     ColumnKeyRole,
     RawValueRole,
     TrackIdRole,
@@ -12642,11 +12649,12 @@ class App(QMainWindow):
         catalog_table_dock = getattr(self, "catalog_table_dock", None)
         action_ribbon_snapshot = self._capture_current_action_ribbon_layout_snapshot()
         snapshot = {
-            "schema_version": 3,
+            "schema_version": 4,
             "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
             "window_state": self._current_main_window_state_marker(),
             "normal_geometry": self._serialize_rect_setting(self.normalGeometry()),
             "dock_state_b64": self._serialize_qbytearray_setting(self.saveState(1)),
+            **self._catalog_zoom_layout_state(),
             "add_data_panel": bool(
                 isinstance(add_data_dock, QDockWidget) and add_data_dock.isVisible()
             ),
@@ -12769,6 +12777,7 @@ class App(QMainWindow):
             "profiles_toolbar_visible": bool(snapshot.get("profiles_toolbar_visible", True)),
             "ribbon_action_ids": ribbon_action_ids,
             "ribbon_visible": bool(ribbon_visible),
+            CATALOG_ZOOM_LAYOUT_KEY: snapshot.get(CATALOG_ZOOM_LAYOUT_KEY),
         }
 
     @contextmanager
@@ -12908,6 +12917,11 @@ class App(QMainWindow):
                     ribbon_action_ids,
                     bool(prepared.get("ribbon_visible", True)),
                 )
+                if prepared.get(CATALOG_ZOOM_LAYOUT_KEY) is not None:
+                    self._restore_catalog_zoom_layout_state(
+                        {CATALOG_ZOOM_LAYOUT_KEY: prepared.get(CATALOG_ZOOM_LAYOUT_KEY)},
+                        immediate=True,
+                    )
                 self._refresh_workspace_dock_default_placement_flags()
                 _advance(7, f'Applied toolbar and Action Ribbon state for "{resolved_name}".')
 
@@ -14863,6 +14877,7 @@ class App(QMainWindow):
                 pass
 
         self.open_database(path)
+        self._reset_catalog_zoom_for_profile_change()
 
         with self._suspend_table_layout_history():
             try:
@@ -15011,6 +15026,7 @@ class App(QMainWindow):
                     StartupPhase.LOADING_SERVICES,
                 ),
             )
+            self._reset_catalog_zoom_for_profile_change()
             with self._suspend_table_layout_history():
                 interface_progress = self._loading_feedback_progress_callback(
                     loading_feedback,
@@ -15551,6 +15567,223 @@ class App(QMainWindow):
         except Exception:
             pass
         self._catalog_selection_model_connection = selection_model
+
+    def _catalog_zoom_controller(self) -> CatalogZoomController:
+        controller = getattr(self, "_catalog_zoom_controller_instance", None)
+        if not isinstance(controller, CatalogZoomController):
+            controller = CatalogZoomController(self)
+            controller.zoom_percent_changed.connect(self._sync_catalog_zoom_controls)
+            self._catalog_zoom_controller_instance = controller
+        controller.bind_view(
+            getattr(self, "table", None),
+            apply_callback=self._apply_catalog_zoom_to_view,
+        )
+        return controller
+
+    def _initialize_catalog_zoom_controls(self) -> None:
+        slider = getattr(self, "catalog_zoom_slider", None)
+        if slider is None:
+            return
+        slider.setRange(CATALOG_ZOOM_MIN_PERCENT, CATALOG_ZOOM_MAX_PERCENT)
+        slider.setSingleStep(CATALOG_ZOOM_STEP_PERCENT)
+        slider.setPageStep(CATALOG_ZOOM_STEP_PERCENT)
+        controller = self._catalog_zoom_controller()
+        if not getattr(self, "_catalog_zoom_slider_connected", False):
+            slider.valueChanged.connect(self._on_catalog_zoom_slider_value_changed)
+            slider.sliderReleased.connect(self._flush_catalog_zoom)
+            self._catalog_zoom_slider_connected = True
+        self._sync_catalog_zoom_controls(controller.zoom_percent())
+        controller.set_zoom_percent(controller.zoom_percent(), immediate=True)
+
+    def _on_catalog_zoom_slider_value_changed(self, zoom_percent: int) -> None:
+        controller = self._catalog_zoom_controller()
+        controller.set_zoom_percent(int(zoom_percent), immediate=False)
+
+    def _flush_catalog_zoom(self) -> None:
+        controller = getattr(self, "_catalog_zoom_controller_instance", None)
+        if isinstance(controller, CatalogZoomController):
+            controller.flush_pending_apply()
+
+    def _sync_catalog_zoom_controls(self, zoom_percent: int) -> None:
+        normalized_zoom = CatalogZoomController.normalize_zoom_percent(zoom_percent)
+        slider = getattr(self, "catalog_zoom_slider", None)
+        if slider is not None:
+            previous_state = slider.blockSignals(True)
+            try:
+                if slider.value() != normalized_zoom:
+                    slider.setValue(normalized_zoom)
+            finally:
+                slider.blockSignals(previous_state)
+        label = getattr(self, "catalog_zoom_value_label", None)
+        if label is not None:
+            label.setText(f"{normalized_zoom}%")
+
+    @staticmethod
+    def _scaled_catalog_zoom_font(base_font: QFont, zoom_percent: int) -> QFont:
+        scale = max(0.01, float(zoom_percent) / 100.0)
+        font = QFont(base_font)
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(max(1.0, font.pointSizeF() * scale))
+        elif font.pixelSize() > 0:
+            font.setPixelSize(max(1, int(round(font.pixelSize() * scale))))
+        return font
+
+    def _catalog_zoom_base_metrics(self, view) -> dict[str, object]:
+        metrics = getattr(self, "_catalog_zoom_metrics", None)
+        if isinstance(metrics, dict):
+            return metrics
+        horizontal_header = view.horizontalHeader()
+        vertical_header = view.verticalHeader()
+        icon_size = view.iconSize()
+        icon_extent = max(int(icon_size.width()), int(icon_size.height()), 18)
+        header_height = max(
+            int(horizontal_header.height()),
+            int(horizontal_header.sizeHint().height()),
+            24,
+        )
+        metrics = {
+            "table_font": QFont(view.font()),
+            "horizontal_header_font": QFont(horizontal_header.font()),
+            "vertical_header_font": QFont(vertical_header.font()),
+            "row_height": max(int(vertical_header.defaultSectionSize()), 24),
+            "minimum_row_height": max(int(vertical_header.minimumSectionSize()), 18),
+            "header_height": header_height,
+            "icon_extent": icon_extent,
+        }
+        self._catalog_zoom_metrics = metrics
+        return metrics
+
+    def _apply_catalog_zoom_to_view(self, view, zoom_percent: int) -> None:
+        if view is None:
+            return
+        normalized_zoom = CatalogZoomController.normalize_zoom_percent(zoom_percent)
+        metrics = self._catalog_zoom_base_metrics(view)
+        scale = float(normalized_zoom) / 100.0
+        horizontal_header = view.horizontalHeader()
+        vertical_header = view.verticalHeader()
+
+        view.setFont(self._scaled_catalog_zoom_font(metrics["table_font"], normalized_zoom))
+        horizontal_header.setFont(
+            self._scaled_catalog_zoom_font(
+                metrics["horizontal_header_font"],
+                normalized_zoom,
+            )
+        )
+        vertical_header.setFont(
+            self._scaled_catalog_zoom_font(
+                metrics["vertical_header_font"],
+                normalized_zoom,
+            )
+        )
+
+        row_height = max(18, int(round(int(metrics["row_height"]) * scale)))
+        minimum_row_height = max(18, int(round(int(metrics["minimum_row_height"]) * scale)))
+        header_height = max(24, int(round(int(metrics["header_height"]) * scale)))
+        icon_extent = max(12, int(round(int(metrics["icon_extent"]) * scale)))
+
+        vertical_header.setMinimumSectionSize(minimum_row_height)
+        vertical_header.setDefaultSectionSize(row_height)
+        horizontal_header.setMinimumHeight(header_height)
+        view.setIconSize(QSize(icon_extent, icon_extent))
+        view.updateGeometry()
+        viewport = view.viewport()
+        if viewport is not None:
+            viewport.update()
+
+    @staticmethod
+    def _catalog_zoom_steps_from_wheel_event(event) -> int:
+        pixel_delta = event.pixelDelta()
+        angle_delta = event.angleDelta()
+        if not pixel_delta.isNull():
+            dominant = (
+                pixel_delta.y() if abs(pixel_delta.y()) >= abs(pixel_delta.x()) else pixel_delta.x()
+            )
+            return int(round(dominant / 40.0))
+        if not angle_delta.isNull():
+            dominant = (
+                angle_delta.y() if abs(angle_delta.y()) >= abs(angle_delta.x()) else angle_delta.x()
+            )
+            return int(round(dominant / 120.0))
+        return 0
+
+    def _handle_catalog_zoom_wheel_event(self, event) -> bool:
+        modifiers = event.modifiers() if hasattr(event, "modifiers") else Qt.NoModifier
+        if not modifiers & (Qt.ControlModifier | Qt.MetaModifier):
+            return False
+        steps = self._catalog_zoom_steps_from_wheel_event(event)
+        if not steps:
+            return False
+        self._catalog_zoom_controller().step_zoom(steps, immediate=False)
+        event.accept()
+        return True
+
+    def _handle_catalog_zoom_native_gesture_event(self, event) -> bool:
+        gesture_type = event.gestureType() if hasattr(event, "gestureType") else None
+        if gesture_type == Qt.ZoomNativeGesture:
+            value = float(event.value() if hasattr(event, "value") else 0.0)
+            if abs(value) < 0.0001:
+                return False
+            self._catalog_zoom_controller().apply_pinch_scale(1.0 + value, immediate=False)
+            event.accept()
+            return True
+        if gesture_type == Qt.SmartZoomNativeGesture:
+            self._catalog_zoom_controller().reset_zoom(immediate=False)
+            event.accept()
+            return True
+        return False
+
+    def _handle_catalog_zoom_pinch_gesture_event(self, event) -> bool:
+        if not hasattr(event, "gesture"):
+            return False
+        pinch = event.gesture(Qt.PinchGesture)
+        if pinch is None:
+            return False
+        if not pinch.changeFlags() & QPinchGesture.ScaleFactorChanged:
+            return False
+        last_factor = float(pinch.lastScaleFactor() or 1.0)
+        scale_factor = float(pinch.scaleFactor() or 1.0)
+        factor = scale_factor if abs(last_factor) < 0.0001 else scale_factor / last_factor
+        if abs(factor - 1.0) < 0.001:
+            return False
+        self._catalog_zoom_controller().apply_pinch_scale(factor, immediate=False)
+        event.accept()
+        return True
+
+    def _handle_catalog_zoom_event(self, source, event) -> bool:
+        table = getattr(self, "table", None)
+        if table is None:
+            return False
+        viewport = table.viewport()
+        if source not in (table, viewport):
+            return False
+        event_type = event.type()
+        if event_type == QEvent.Wheel:
+            return self._handle_catalog_zoom_wheel_event(event)
+        if event_type == QEvent.NativeGesture:
+            return self._handle_catalog_zoom_native_gesture_event(event)
+        if event_type == QEvent.Gesture:
+            return self._handle_catalog_zoom_pinch_gesture_event(event)
+        return False
+
+    def _catalog_zoom_layout_state(self) -> dict[str, int]:
+        return self._catalog_zoom_controller().layout_state()
+
+    def _restore_catalog_zoom_layout_state(
+        self,
+        payload: dict[str, object] | None,
+        *,
+        immediate: bool = True,
+    ) -> int:
+        controller = self._catalog_zoom_controller()
+        restored = controller.restore_layout_state(payload, immediate=immediate)
+        self._sync_catalog_zoom_controls(restored)
+        return restored
+
+    def _reset_catalog_zoom_for_profile_change(self) -> int:
+        controller = self._catalog_zoom_controller()
+        restored = controller.on_profile_changed(immediate=True)
+        self._sync_catalog_zoom_controls(restored)
+        return restored
 
     def _catalog_source_model(self) -> CatalogTableModel | None:
         model = getattr(self, "_catalog_table_model", None)
@@ -27595,6 +27828,9 @@ class App(QMainWindow):
                 if self._ensure_widget_object_names(root):
                     self._repolish_widget_tree(root)
             return super().eventFilter(source, event)
+
+        if self._handle_catalog_zoom_event(source, event):
+            return True
 
         if isinstance(source, QWidget) and (source is self or self.isAncestorOf(source)):
             if event.type() in (QEvent.DragEnter, QEvent.DragMove):

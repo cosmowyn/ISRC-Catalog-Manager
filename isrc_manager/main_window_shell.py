@@ -28,10 +28,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.catalog_table import (
+    CATALOG_ZOOM_DEFAULT_PERCENT,
+    CATALOG_ZOOM_MAX_PERCENT,
+    CATALOG_ZOOM_MIN_PERCENT,
+    CATALOG_ZOOM_STEP_PERCENT,
+)
 from isrc_manager.code_registry import CatalogIdentifierField
 from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
     FocusWheelComboBox,
+    FocusWheelSlider,
     TwoDigitSpinBox,
     _create_round_help_button,
 )
@@ -1459,6 +1466,25 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.search_layout.addWidget(app.count_label, 1)
     app.search_layout.addWidget(app.duration_label)
     app.search_layout.addWidget(app.search_button)
+
+    app.catalog_zoom_label = QLabel("Zoom")
+    app.catalog_zoom_label.setProperty("role", "secondary")
+    app.catalog_zoom_slider = FocusWheelSlider(Qt.Horizontal)
+    app.catalog_zoom_slider.setObjectName("catalogTableZoomSlider")
+    app.catalog_zoom_slider.setRange(CATALOG_ZOOM_MIN_PERCENT, CATALOG_ZOOM_MAX_PERCENT)
+    app.catalog_zoom_slider.setSingleStep(CATALOG_ZOOM_STEP_PERCENT)
+    app.catalog_zoom_slider.setPageStep(CATALOG_ZOOM_STEP_PERCENT)
+    app.catalog_zoom_slider.setTickInterval(CATALOG_ZOOM_STEP_PERCENT)
+    app.catalog_zoom_slider.setFixedWidth(130)
+    app.catalog_zoom_slider.setToolTip("Adjust catalog table density without reloading data.")
+    app.catalog_zoom_value_label = QLabel(f"{CATALOG_ZOOM_DEFAULT_PERCENT}%")
+    app.catalog_zoom_value_label.setObjectName("catalogTableZoomValueLabel")
+    app.catalog_zoom_value_label.setMinimumWidth(42)
+    app.catalog_zoom_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    app.catalog_zoom_value_label.setProperty("role", "secondary")
+    app.search_layout.addWidget(app.catalog_zoom_label)
+    app.search_layout.addWidget(app.catalog_zoom_slider)
+    app.search_layout.addWidget(app.catalog_zoom_value_label)
     app.search_layout.addWidget(
         _create_round_help_button(app, "catalog-table", "Open help for the catalog table")
     )
@@ -1483,6 +1509,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.table.setSortingEnabled(True)
     app.table.horizontalHeader().setSectionsMovable(bool(movable))
     app.table.installEventFilter(app)
+    app.table.viewport().installEventFilter(app)
+    app.table.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
+    app.table.viewport().grabGesture(Qt.PinchGesture)
+    app._initialize_catalog_zoom_controls()
 
     try:
         app._load_header_state()

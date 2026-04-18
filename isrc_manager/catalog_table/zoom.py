@@ -135,8 +135,12 @@ class CatalogZoomController(QObject):
             return self.reset_zoom(immediate=immediate)
         if payload is None:
             return self._zoom_percent
+        try:
+            zoom_percent = int(payload.get(CATALOG_ZOOM_LAYOUT_KEY, self._zoom_percent))
+        except (TypeError, ValueError):
+            zoom_percent = self._zoom_percent
         return self.set_zoom_percent(
-            int(payload.get(CATALOG_ZOOM_LAYOUT_KEY, self._zoom_percent)),
+            zoom_percent,
             immediate=immediate,
         )
 
