@@ -1434,6 +1434,18 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("GS1 Metadata…", edit_actions)
         self.assertIs(edit_actions["GS1 Metadata…"], self.window.gs1_metadata_action)
         self.assertTrue(self.window.gs1_metadata_action.isEnabled())
+        self.assertIn("Edit Selected…", edit_actions)
+        self.assertIs(edit_actions["Edit Selected…"], self.window.edit_selected_action)
+        self.assertEqual(
+            self.window.edit_selected_action.shortcut().toString(
+                app_module.QKeySequence.PortableText
+            ),
+            "Ctrl+Shift+Space",
+        )
+        self.assertEqual(
+            self.window.edit_selected_action.shortcutContext(),
+            app_module.Qt.WidgetShortcut,
+        )
 
         controller = self.window._catalog_table_controller()
         with (
@@ -6032,6 +6044,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             [tabs.tabText(index) for index in range(tabs.count())],
             [
+                "Governance",
                 "Track",
                 "Release",
                 "Codes",
@@ -6041,6 +6054,36 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self.window.left_widget_container.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
+        self.assertEqual(
+            self.window.add_data_work_context_summary.property("role"),
+            "supportingText",
+        )
+        governance_page_layout = tabs.widget(0).layout()
+        self.assertIsNotNone(governance_page_layout)
+        assert governance_page_layout is not None
+        self.assertGreaterEqual(
+            governance_page_layout.indexOf(self.window.add_data_work_context_group),
+            0,
+        )
+        self.assertEqual(
+            self.window.left_panel.indexOf(self.window.add_data_work_context_group),
+            -1,
+        )
+        self.assertEqual(
+            self.window.add_data_tabs.sizePolicy().verticalPolicy(),
+            app_module.QSizePolicy.Maximum,
+        )
+        for field in (
+            self.window.record_id_field,
+            self.window.generated_isrc_field,
+            self.window.entry_date_preview_field,
+            self.window.iswc_field,
+            self.window.upc_field,
+            self.window.catalog_number_field,
+            self.window.buma_work_number_field,
+        ):
+            self.assertEqual(field.minimumWidth(), 100)
+            self.assertEqual(field.maximumWidth(), 300)
         tabs_index = self.window.left_panel.indexOf(self.window.add_data_tabs)
         buttons_index = self.window.left_panel.indexOf(self.window.button_row_widget)
         self.assertEqual(buttons_index, tabs_index + 1)

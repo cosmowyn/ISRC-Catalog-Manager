@@ -121,13 +121,13 @@ def _standard_container_stylesheet(selector: str, extra_qss: str = "") -> str:
     }}
     {selector} QGroupBox {{
         font-size: 15px;
-        font-weight: 600;
         margin-top: 10px;
     }}
     {selector} QGroupBox::title {{
         subcontrol-origin: margin;
         left: 10px;
         padding: 0 6px;
+        font-weight: 600;
     }}
     """
     if extra_qss.strip():

@@ -2310,13 +2310,13 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         margin-top: 12px;
         padding-top: 10px;
         background-color: {theme["panel_bg"]};
-        font-weight: 600;
     }}
     QGroupBox::title {{
         subcontrol-origin: margin;
         left: 10px;
         padding: 0 6px;
         color: {theme["group_title_fg"]};
+        font-weight: 600;
     }}
     QWidget#catalogTablePanel QGroupBox#catalogTableSearchGroup,
     QWidget#catalogTablePanel QGroupBox#catalogTableInfoGroup,

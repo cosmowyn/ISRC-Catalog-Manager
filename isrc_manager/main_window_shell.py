@@ -278,6 +278,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         "Edit Selected…",
         slot=app.open_selected_editor,
     )
+    app.edit_selected_action.setShortcut(QKeySequence("Ctrl+Shift+Space"))
+    app.edit_selected_action.setShortcutContext(Qt.WidgetShortcut)
     app.delete_entry_action = app._create_action(
         "Delete Selected Track",
         slot=app.delete_entry,
@@ -1093,7 +1095,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     app.add_data_work_context_summary = QLabel("")
     app.add_data_work_context_summary.setWordWrap(True)
-    app.add_data_work_context_summary.setProperty("role", "sectionTitle")
+    app.add_data_work_context_summary.setProperty("role", "supportingText")
     add_data_work_context_layout.addWidget(app.add_data_work_context_summary)
     app.add_data_work_context_hint = QLabel(
         "Every new track must either link to an existing Work or create a new Work from the track before it can be saved."
@@ -1172,12 +1174,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_context_actions_layout.addWidget(app.add_data_clear_work_context_button)
     add_data_work_context_layout.addWidget(app.add_data_work_context_actions)
     app.add_data_work_context_group.setVisible(True)
-    app.left_panel.addWidget(app.add_data_work_context_group)
 
     app.add_data_tabs = QTabWidget()
     app.add_data_tabs.setObjectName("addDataTabs")
     app.add_data_tabs.setDocumentMode(True)
     app.add_data_tabs.setUsesScrollButtons(False)
+    app.add_data_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
     app.left_panel.addWidget(app.add_data_tabs)
 
     def create_add_data_tab(title: str, description: str) -> QVBoxLayout:
@@ -1194,6 +1196,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         app.add_data_tabs.addTab(page, title)
         return page_layout
 
+    governance_tab_layout = create_add_data_tab(
+        "Governance",
+        "Choose how this new track relates to Work records before saving.",
+    )
     track_tab_layout = create_add_data_tab(
         "Track",
         "Capture the track-facing metadata that will be shown across the catalog and browsers.",
@@ -1211,41 +1217,55 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         "Attach the managed audio file and artwork stored with this track.",
     )
 
+    governance_tab_layout.addWidget(app.add_data_work_context_group)
+    governance_tab_layout.addStretch(1)
+
+    add_data_field_min_width = 100
+    add_data_field_max_width = 300
+
+    def constrain_add_data_field(widget: QWidget) -> None:
+        widget.setMinimumWidth(add_data_field_min_width)
+        widget.setMaximumWidth(add_data_field_max_width)
+        widget.setSizePolicy(QSizePolicy.Expanding, widget.sizePolicy().verticalPolicy())
+
     app.artist_label = QLabel("Artist")
     app.artist_field = FocusWheelComboBox()
     app.artist_field.setEditable(True)
-    app.artist_field.setMinimumWidth(180)
+    constrain_add_data_field(app.artist_field)
 
     app.additional_artist_label = QLabel("Additional Artists")
     app.additional_artist_field = FocusWheelComboBox()
     app.additional_artist_field.setEditable(True)
-    app.additional_artist_field.setMinimumWidth(180)
+    constrain_add_data_field(app.additional_artist_field)
 
     app.track_title_label = QLabel("Track Title")
     app.track_title_field = QLineEdit()
-    app.track_title_field.setMinimumWidth(180)
+    constrain_add_data_field(app.track_title_field)
 
     app.album_title_label = QLabel("Album Title")
     app.album_title_field = FocusWheelComboBox()
     app.album_title_field.setEditable(True)
     app.album_title_field.setCurrentText("")
     app.album_title_field.currentTextChanged.connect(app.autofill_album_metadata)
-    app.album_title_field.setMinimumWidth(180)
+    constrain_add_data_field(app.album_title_field)
 
     app.record_id_label = QLabel("ID")
     app.record_id_field = app._create_add_data_status_field(
         "Assigned automatically when you save this track."
     )
+    constrain_add_data_field(app.record_id_field)
 
     app.generated_isrc_label = QLabel("ISRC")
     app.generated_isrc_field = app._create_add_data_status_field(
         "Generated automatically using the current ISRC settings."
     )
+    constrain_add_data_field(app.generated_isrc_field)
 
     app.entry_date_preview_label = QLabel("Entry Date")
     app.entry_date_preview_field = app._create_add_data_status_field(
         "Stamped automatically when the track is first saved."
     )
+    constrain_add_data_field(app.entry_date_preview_field)
 
     app.audio_file_label = QLabel("Audio File")
     app.audio_file_field = QLineEdit()
@@ -1288,22 +1308,23 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.release_date_field.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
     app.release_date_field.setGridVisible(True)
     app.release_date_field.selectionChanged.connect(app._update_add_data_generated_fields)
+    constrain_add_data_field(app.release_date_field)
 
     app.iswc_label = QLabel("ISWC")
     app.iswc_field = QLineEdit()
-    app.iswc_field.setMinimumWidth(170)
+    constrain_add_data_field(app.iswc_field)
 
     app.upc_label = QLabel("UPC / EAN")
     app.upc_field = FocusWheelComboBox()
     app.upc_field.setEditable(True)
     app.upc_field.setCurrentText("")
-    app.upc_field.setMinimumWidth(170)
+    constrain_add_data_field(app.upc_field)
 
     app.genre_label = QLabel("Genre")
     app.genre_field = FocusWheelComboBox()
     app.genre_field.setEditable(True)
     app.genre_field.setCurrentText("")
-    app.genre_field.setMinimumWidth(170)
+    constrain_add_data_field(app.genre_field)
 
     app.catalog_number_label = QLabel("Catalog#")
     app.catalog_number_field = CatalogIdentifierField(
@@ -1311,10 +1332,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         created_via="add_track",
         parent=app,
     )
+    constrain_add_data_field(app.catalog_number_field)
 
     app.buma_work_number_label = QLabel("BUMA Wnr.")
     app.buma_work_number_field = QLineEdit()
-    app.buma_work_number_field.setMinimumWidth(170)
+    constrain_add_data_field(app.buma_work_number_field)
 
     app.album_art_label = QLabel("Album Art")
     app.album_art_field = QLineEdit()
