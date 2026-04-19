@@ -3387,25 +3387,33 @@ class AppShellTestCase(unittest.TestCase):
         for label in panel.selection_banner.findChildren(app_module.QLabel):
             label.setFont(enlarged_font)
         panel.search_edit.setFont(enlarged_font)
+        panel.stabilize_layout_after_restore()
         self.app.processEvents()
 
-        cluster_rect = panel.manage_actions_cluster.geometry()
-        banner_rect = panel.selection_banner.geometry()
+        def _bounds_in(widget, ancestor):
+            top_left = widget.mapTo(ancestor, widget.rect().topLeft())
+            bottom_right = widget.mapTo(ancestor, widget.rect().bottomRight())
+            return top_left.x(), top_left.y(), bottom_right.x(), bottom_right.y()
+
+        _, _, _, cluster_bottom = _bounds_in(panel.manage_actions_cluster, panel)
+        _, banner_top, _, _ = _bounds_in(panel.selection_banner, panel)
         self.assertGreaterEqual(
-            banner_rect.top(),
-            cluster_rect.bottom() + 1,
+            banner_top,
+            cluster_bottom + 1,
         )
         self.assertTrue(
             all(
-                button.geometry().bottom() <= panel.manage_actions_cluster.rect().bottom()
+                _bounds_in(button, panel.manage_actions_cluster)[3]
+                <= panel.manage_actions_cluster.rect().bottom()
                 for button in panel.manage_actions_cluster.findChildren(app_module.QPushButton)
             )
         )
         self.assertTrue(
             all(
-                widget.geometry().bottom() <= panel.selection_banner.rect().bottom()
+                _bounds_in(widget, panel.selection_banner)[3]
+                <= panel.selection_banner.rect().bottom()
                 for widget in panel.selection_banner.findChildren(app_module.QWidget)
-                if widget is not panel.selection_banner
+                if widget is not panel.selection_banner and widget.isVisible()
             )
         )
 
