@@ -16556,6 +16556,7 @@ class App(QMainWindow):
         self._set_pending_work_track_context()
         self.clear_form_fields()
         self._refresh_work_track_creation_context_ui()
+        self._show_add_track_details_tab()
         self.track_title_field.setFocus()
 
     def _begin_work_child_track_creation(
@@ -19176,6 +19177,7 @@ class App(QMainWindow):
     def open_add_track_workspace(self):
         self._apply_add_data_panel_state(True)
         self._ensure_add_track_panel_initialized()
+        self._show_add_track_details_tab()
         field = getattr(self, "track_title_field", None)
         if field is not None:
             try:
@@ -19183,6 +19185,17 @@ class App(QMainWindow):
             except Exception:
                 pass
         return getattr(self, "add_data_dock", None)
+
+    def _show_add_track_details_tab(self) -> None:
+        tabs = getattr(self, "add_data_tabs", None)
+        if tabs is None:
+            return
+        try:
+            track_index = int(getattr(self, "add_data_track_tab_index", 1))
+            if 0 <= track_index < tabs.count():
+                tabs.setCurrentIndex(track_index)
+        except Exception:
+            pass
 
     def open_catalog_workspace(self):
         self._apply_catalog_table_panel_state(True)

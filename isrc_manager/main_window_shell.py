@@ -1200,6 +1200,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         "Governance",
         "Choose how this new track relates to Work records before saving.",
     )
+    app.add_data_track_tab_index = app.add_data_tabs.count()
     track_tab_layout = create_add_data_tab(
         "Track",
         "Capture the track-facing metadata that will be shown across the catalog and browsers.",
@@ -1219,6 +1220,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
 
     governance_tab_layout.addWidget(app.add_data_work_context_group)
     governance_tab_layout.addStretch(1)
+    app.add_data_tabs.setCurrentIndex(app.add_data_track_tab_index)
 
     add_data_field_min_width = 100
     add_data_field_max_width = 300

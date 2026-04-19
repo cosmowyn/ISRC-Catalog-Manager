@@ -6051,6 +6051,8 @@ class AppShellTestCase(unittest.TestCase):
                 "Media",
             ],
         )
+        self.assertEqual(tabs.currentIndex(), 1)
+        self.assertEqual(tabs.tabText(tabs.currentIndex()), "Track")
         self.assertEqual(self.window.left_widget_container.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
