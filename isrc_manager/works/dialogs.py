@@ -698,6 +698,10 @@ class WorkEditorDialog(QDialog):
 class WorkBrowserPanel(QWidget):
     """Browse, create, duplicate, and link first-class work records inside a workspace panel."""
 
+    ACTION_CLUSTER_OUTER_MARGINS = (3, 3, 3, 3)
+    ACTION_CLUSTER_HORIZONTAL_SPACING = 3
+    ACTION_CLUSTER_VERTICAL_SPACING = 3
+
     filter_requested = Signal(list)
     create_requested = Signal(object)
     create_child_track_requested = Signal(int)
@@ -788,18 +792,32 @@ class WorkBrowserPanel(QWidget):
             ],
             columns=2,
             min_button_width=180,
+            outer_margins=self.ACTION_CLUSTER_OUTER_MARGINS,
+            horizontal_spacing=self.ACTION_CLUSTER_HORIZONTAL_SPACING,
+            vertical_spacing=self.ACTION_CLUSTER_VERTICAL_SPACING,
         )
         self.manage_actions_cluster.setObjectName("workManagerActionsCluster")
+        self._apply_action_cluster_layout_metrics()
         controls_layout.addWidget(self.manage_actions_cluster)
+        root.addWidget(controls_box)
+
+        selection_box, selection_layout = _create_standard_section(
+            self,
+            "Catalog Selection",
+            "Choose the catalog tracks this manager should use when linking, filtering, or creating related work records.",
+        )
+        self._selection_box = selection_box
         self.selection_banner = SelectionScopeBanner(
             chooser_label="Choose Tracks",
-            parent=self,
+            parent=selection_box,
+            show_header=False,
+            content_margins=(0, 0, 0, 0),
         )
         self.selection_banner.use_current_button.clicked.connect(self._use_current_selection)
         self.selection_banner.choose_button.clicked.connect(self._choose_tracks)
         self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
-        controls_layout.addWidget(self.selection_banner)
-        root.addWidget(controls_box)
+        selection_layout.addWidget(self.selection_banner)
+        root.addWidget(selection_box)
 
         table_box, table_layout = _create_standard_section(
             self,
@@ -815,7 +833,7 @@ class WorkBrowserPanel(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
@@ -947,14 +965,27 @@ class WorkBrowserPanel(QWidget):
         self._control_height_sync_pending = True
         QTimer.singleShot(0, self._sync_control_height_constraints)
 
+    def _apply_action_cluster_layout_metrics(self) -> None:
+        cluster = getattr(self, "manage_actions_cluster", None)
+        if not isinstance(cluster, QWidget) or not _qt_object_is_valid(cluster):
+            return
+        layout = cluster.layout()
+        if not isinstance(layout, QGridLayout):
+            return
+        layout.setContentsMargins(*self.ACTION_CLUSTER_OUTER_MARGINS)
+        layout.setHorizontalSpacing(self.ACTION_CLUSTER_HORIZONTAL_SPACING)
+        layout.setVerticalSpacing(self.ACTION_CLUSTER_VERTICAL_SPACING)
+
     def _sync_control_height_constraints(self) -> None:
         self._control_height_sync_pending = False
         if not _qt_object_is_valid(self):
             return
+        self._apply_action_cluster_layout_metrics()
         for widget in (
             getattr(self, "manage_actions_cluster", None),
             getattr(self, "selection_banner", None),
             getattr(self, "_controls_box", None),
+            getattr(self, "_selection_box", None),
         ):
             if not isinstance(widget, QWidget) or not _qt_object_is_valid(widget):
                 continue
@@ -984,6 +1015,10 @@ class WorkBrowserPanel(QWidget):
         ):
             self._schedule_control_height_sync()
         return result
+
+    def stabilize_layout_after_restore(self) -> None:
+        self._apply_action_cluster_layout_metrics()
+        self._sync_control_height_constraints()
 
     def _use_current_selection(self) -> None:
         self.set_selection_override_track_ids([])

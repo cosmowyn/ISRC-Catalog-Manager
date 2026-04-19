@@ -140,6 +140,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Add Track</strong>: <code>Ctrl+Alt+N</code> / <code>Cmd+Option+N</code></li>
           <li><strong>Add Album</strong>: <code>Ctrl+Alt+Shift+N</code> / <code>Cmd+Option+Shift+N</code></li>
+          <li><strong>Edit Catalog Selection</strong>: <code>Ctrl+Shift+Space</code> / <code>Cmd+Shift+Space</code> while the catalog table is focused</li>
           <li><strong>Work Manager</strong>: <code>Ctrl+Alt+W</code> / <code>Cmd+Option+W</code></li>
           <li><strong>Party Manager</strong>: <code>Ctrl+Alt+Shift+P</code> / <code>Cmd+Option+Shift+P</code></li>
           <li><strong>Release Browser</strong>: <code>Ctrl+Alt+Shift+R</code> / <code>Cmd+Option+Shift+R</code></li>
@@ -297,7 +298,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Column visibility</strong>: use <strong>View &gt; Columns</strong> to show or hide visible columns without deleting them.</li>
           <li><strong>Zoom</strong>: use the table zoom slider, Ctrl/Cmd + wheel, or supported pinch gestures to change density without reloading data.</li>
           <li><strong>Double click</strong>: edit a standard row, or open file pickers directly for standard media columns such as Audio File and Album Art.</li>
-          <li><strong>Multi-row selection</strong>: select multiple rows and open <strong>Edit Selected</strong> or the context menu to launch bulk edit for the current batch.</li>
+          <li><strong>Multi-row selection</strong>: select multiple rows and press <strong>Ctrl/Cmd+Shift+Space</strong>, open <strong>Edit Selected</strong>, or use the context menu to launch bulk edit for the current batch.</li>
           <li><strong>Context menu and shortcuts</strong>: preview media, copy values, open GS1 metadata, and edit/delete the current selection. Right-clicking inside an existing multi-row selection keeps that batch selected.</li>
         </ul>
         <p>Table layout, column widths, ordering, visibility, and catalog zoom are remembered so the browser can feel tailored to your workflow rather than generic.</p>
@@ -876,17 +877,22 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="media-preview",
-        title="Media Preview",
-        summary="Preview album-art images, audio files, and stored media directly from the catalog.",
-        keywords=("media preview", "audio preview", "image preview", "waveform", "album art"),
+        title="Audio Player and Image Preview",
+        summary="Play audio files, inspect waveforms, and preview album-art images directly from the catalog.",
+        keywords=(
+            "audio player",
+            "image preview",
+            "waveform",
+            "album art",
+        ),
         content_html="""
-        <p>The app can preview file-backed media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
+        <p>The app can open file-backed audio and image media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
         <ul>
           <li><strong>Image preview</strong>: inspect stored image data such as album art, zoom with trackpad pinch or <code>Ctrl</code>/<code>Cmd</code> + scroll, double-click to reset the view to fit, and export the current image from the preview controls.</li>
-          <li><strong>Audio preview</strong>: play attached audio with waveform preview, playhead, transport controls, and in-preview export actions.</li>
+          <li><strong>Audio player</strong>: play attached audio with waveform preview, playhead, transport controls, volume, and in-player export actions.</li>
           <li><strong>Standard media columns</strong>: double-click Audio File or Album Art to attach new files, or preview existing media from the table.</li>
         </ul>
-        <p>Preview actions are intended to verify attached media quickly without leaving the catalog workflow.</p>
+        <p>The audio player and image preview are intended to verify attached media quickly without leaving the catalog workflow.</p>
         """,
     ),
     HelpChapter(

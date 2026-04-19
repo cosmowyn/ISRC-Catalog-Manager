@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -109,8 +110,8 @@ class ConversionDialog(QDialog):
         self._pending_saved_template_mapping_payload = ""
 
         self.setWindowTitle("Template Conversion")
-        self.resize(1220, 860)
-        self.setMinimumSize(1060, 760)
+        self.resize(1120, 760)
+        self.setMinimumSize(820, 560)
         _apply_standard_dialog_chrome(self, "conversionDialog")
 
         root = QVBoxLayout(self)
@@ -132,45 +133,138 @@ class ConversionDialog(QDialog):
             help_topic_id="conversion",
         )
 
-        setup_box, setup_layout = _create_standard_section(
-            self,
-            "Setup",
-            "Choose the target template and the source mode before reviewing the mapped output preview.",
-        )
-        setup_grid = QGridLayout()
-        setup_grid.setContentsMargins(0, 0, 0, 0)
-        setup_grid.setHorizontalSpacing(14)
-        setup_grid.setVerticalSpacing(12)
-        setup_grid.setColumnStretch(1, 1)
-        setup_layout.addLayout(setup_grid)
+        self.content_tabs = QTabWidget(self)
+        self.content_tabs.setObjectName("conversionTabs")
+        self.content_tabs.setDocumentMode(True)
+        self.content_tabs.setMinimumHeight(420)
+        content_layout.addWidget(self.content_tabs, 1)
 
-        setup_grid.addWidget(QLabel("Target template"), 0, 0)
-        template_row = QHBoxLayout()
-        template_row.setContentsMargins(0, 0, 0, 0)
-        template_row.setSpacing(8)
+        self.setup_page = QWidget(self.content_tabs)
+        self.setup_page.setProperty("role", "workspaceCanvas")
+        self.template_page = QWidget(self.content_tabs)
+        self.template_page.setProperty("role", "workspaceCanvas")
+        self.source_page = QWidget(self.content_tabs)
+        self.source_page.setProperty("role", "workspaceCanvas")
+        self.mapping_page = QWidget(self.content_tabs)
+        self.mapping_page.setProperty("role", "workspaceCanvas")
+        self.output_page = QWidget(self.content_tabs)
+        self.output_page.setProperty("role", "workspaceCanvas")
+        self.content_tabs.addTab(self.setup_page, "Setup")
+        self.content_tabs.addTab(self.template_page, "Template")
+        self.content_tabs.addTab(self.source_page, "Source")
+        self.content_tabs.addTab(self.mapping_page, "Mapping")
+        self.content_tabs.addTab(self.output_page, "Output Preview")
+
+        setup_page_layout = QVBoxLayout(self.setup_page)
+        setup_page_layout.setContentsMargins(0, 12, 0, 0)
+        setup_page_layout.setSpacing(16)
+
+        def _setup_label(text: str) -> QLabel:
+            label = QLabel(text, self.setup_page)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            return label
+
+        setup_middle_control_width = 300
+
+        def _compact_input(widget):
+            widget.setMinimumWidth(100)
+            widget.setMaximumWidth(setup_middle_control_width)
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            return widget
+
+        def _middle_control_cell(widget: QWidget) -> QWidget:
+            widget.setMinimumWidth(100)
+            widget.setMaximumWidth(setup_middle_control_width)
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            return widget
+
+        setup_action_button_width = 180
+
+        def _setup_action_button(button: QPushButton) -> QPushButton:
+            button.setMinimumWidth(setup_action_button_width)
+            button.setMaximumWidth(setup_action_button_width)
+            return button
+
+        def _right_cell(*widgets) -> QWidget:
+            cell = QWidget(self.setup_page)
+            cell_layout = QHBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(8)
+            cell_layout.addStretch(1)
+            for widget in widgets:
+                cell_layout.addWidget(widget)
+            return cell
+
+        def _create_setup_grid(section_layout: QVBoxLayout) -> QGridLayout:
+            grid = QGridLayout()
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(12)
+            grid.setColumnMinimumWidth(0, 104)
+            grid.setColumnStretch(1, 1)
+            grid.setColumnStretch(2, 0)
+            section_layout.addLayout(grid)
+            return grid
+
+        self.template_setup_box, template_setup_layout = _create_standard_section(
+            self.setup_page,
+            "Target Template",
+            "Choose the rigid output template and, when available, the structure scope to inspect.",
+        )
+        setup_page_layout.addWidget(self.template_setup_box)
+        template_grid = _create_setup_grid(template_setup_layout)
+
+        self.saved_template_section_box, saved_template_layout = _create_standard_section(
+            self.setup_page,
+            "Profile Template Library",
+            "Reuse templates saved in this profile, or store the current template setup for later.",
+        )
+        setup_page_layout.addWidget(self.saved_template_section_box)
+        saved_template_grid = _create_setup_grid(saved_template_layout)
+
+        self.source_setup_box, source_setup_layout = _create_standard_section(
+            self.setup_page,
+            "Source Data",
+            "Choose a structured source file or use current-profile tracks as source rows.",
+        )
+        setup_page_layout.addWidget(self.source_setup_box)
+        source_grid = _create_setup_grid(source_setup_layout)
+
+        self.target_template_label = _setup_label("Target template")
+        template_grid.addWidget(self.target_template_label, 0, 0, Qt.AlignLeft | Qt.AlignTop)
         self.template_path_label = QLabel("No template selected.")
         self.template_path_label.setWordWrap(True)
-        template_row.addWidget(self.template_path_label, 1)
+        self.template_path_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.template_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.template_path_label.setMinimumHeight(
+            self.template_path_label.fontMetrics().lineSpacing() * 2 + 8
+        )
+        self.template_path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        template_grid.addWidget(self.template_path_label, 0, 1)
         self.choose_template_button = QPushButton("Choose Template…", self)
-        self.choose_template_button.setMinimumWidth(154)
+        _setup_action_button(self.choose_template_button)
         self.choose_template_button.clicked.connect(self._choose_template)
-        template_row.addWidget(self.choose_template_button)
-        setup_grid.addLayout(template_row, 0, 1)
+        template_grid.addWidget(self.choose_template_button, 0, 2, Qt.AlignRight | Qt.AlignTop)
 
         self.saved_template_load_row = QWidget(self)
         saved_template_load_layout = QHBoxLayout(self.saved_template_load_row)
         saved_template_load_layout.setContentsMargins(0, 0, 0, 0)
         saved_template_load_layout.setSpacing(8)
         self.saved_template_combo = QComboBox(self)
-        self.saved_template_combo.setMinimumWidth(260)
+        _compact_input(self.saved_template_combo)
         saved_template_load_layout.addWidget(self.saved_template_combo, 1)
+        _middle_control_cell(self.saved_template_load_row)
         self.load_saved_template_button = QPushButton("Load Saved", self)
-        self.load_saved_template_button.setMinimumWidth(120)
+        _setup_action_button(self.load_saved_template_button)
         self.load_saved_template_button.clicked.connect(self._load_selected_saved_template)
-        saved_template_load_layout.addWidget(self.load_saved_template_button)
-        self.saved_template_load_label = QLabel("Saved templates")
-        setup_grid.addWidget(self.saved_template_load_label, 1, 0)
-        setup_grid.addWidget(self.saved_template_load_row, 1, 1)
+        self.saved_template_load_label = _setup_label("Saved templates")
+        saved_template_grid.addWidget(
+            self.saved_template_load_label, 0, 0, Qt.AlignLeft | Qt.AlignTop
+        )
+        saved_template_grid.addWidget(self.saved_template_load_row, 0, 1)
+        saved_template_grid.addWidget(
+            self.load_saved_template_button, 0, 2, Qt.AlignRight | Qt.AlignTop
+        )
 
         self.saved_template_save_row = QWidget(self)
         saved_template_save_layout = QHBoxLayout(self.saved_template_save_row)
@@ -178,37 +272,58 @@ class ConversionDialog(QDialog):
         saved_template_save_layout.setSpacing(8)
         self.saved_template_name_edit = QLineEdit(self)
         self.saved_template_name_edit.setPlaceholderText("Profile template name")
-        self.saved_template_name_edit.setMinimumWidth(220)
+        _compact_input(self.saved_template_name_edit)
         saved_template_save_layout.addWidget(self.saved_template_name_edit, 1)
         self.include_mapping_in_saved_template_checkbox = QCheckBox("Include current mapping", self)
         self.include_mapping_in_saved_template_checkbox.setChecked(True)
+        self.include_mapping_in_saved_template_checkbox.setMinimumWidth(
+            self.include_mapping_in_saved_template_checkbox.sizeHint().width() + 12
+        )
+        saved_template_save_layout.addSpacing(12)
         saved_template_save_layout.addWidget(self.include_mapping_in_saved_template_checkbox)
+        _middle_control_cell(self.saved_template_save_row)
         self.save_template_to_profile_button = QPushButton("Save To Profile", self)
-        self.save_template_to_profile_button.setMinimumWidth(140)
+        _setup_action_button(self.save_template_to_profile_button)
         self.save_template_to_profile_button.clicked.connect(self._save_template_to_profile)
-        saved_template_save_layout.addWidget(self.save_template_to_profile_button)
-        self.saved_template_save_label = QLabel("Save template")
-        setup_grid.addWidget(self.saved_template_save_label, 2, 0)
-        setup_grid.addWidget(self.saved_template_save_row, 2, 1)
+        self.saved_template_save_label = _setup_label("Save template")
+        saved_template_grid.addWidget(
+            self.saved_template_save_label, 1, 0, Qt.AlignLeft | Qt.AlignTop
+        )
+        saved_template_grid.addWidget(self.saved_template_save_row, 1, 1)
+        self.saved_template_save_actions = _right_cell(
+            self.save_template_to_profile_button,
+        )
+        saved_template_grid.addWidget(
+            self.saved_template_save_actions,
+            1,
+            2,
+        )
 
-        setup_grid.addWidget(QLabel("Source mode"), 3, 0)
+        self.source_mode_label = _setup_label("Source mode")
+        source_grid.addWidget(self.source_mode_label, 0, 0, Qt.AlignLeft | Qt.AlignTop)
         source_mode_row = QHBoxLayout()
         source_mode_row.setContentsMargins(0, 0, 0, 0)
         source_mode_row.setSpacing(8)
+        self.source_mode_control_row = QWidget(self)
+        source_mode_control_layout = QHBoxLayout(self.source_mode_control_row)
+        source_mode_control_layout.setContentsMargins(0, 0, 0, 0)
+        source_mode_control_layout.setSpacing(0)
         self.source_mode_combo = QComboBox(self)
-        self.source_mode_combo.setMinimumWidth(220)
+        _compact_input(self.source_mode_combo)
         self.source_mode_combo.addItem("Source File", _MODE_FILE)
         self.source_mode_combo.addItem("Current Profile Tracks", _MODE_DATABASE)
         model_item = self.source_mode_combo.model().item(1)
         if model_item is not None:
             model_item.setEnabled(self.profile_available)
         self.source_mode_combo.currentIndexChanged.connect(self._on_source_mode_changed)
-        source_mode_row.addWidget(self.source_mode_combo)
+        source_mode_control_layout.addWidget(self.source_mode_combo, 1)
+        _middle_control_cell(self.source_mode_control_row)
+        source_mode_row.addWidget(self.source_mode_control_row)
         self.source_mode_hint = QLabel("")
         self.source_mode_hint.setWordWrap(True)
         self.source_mode_hint.setProperty("role", "secondary")
         source_mode_row.addWidget(self.source_mode_hint, 1)
-        setup_grid.addLayout(source_mode_row, 3, 1)
+        source_grid.addLayout(source_mode_row, 0, 1, 1, 2)
 
         self.source_file_row = QWidget(self)
         source_file_layout = QHBoxLayout(self.source_file_row)
@@ -218,19 +333,19 @@ class ConversionDialog(QDialog):
         self.source_path_label.setWordWrap(True)
         source_file_layout.addWidget(self.source_path_label, 1)
         self.choose_source_button = QPushButton("Choose Source File…", self)
-        self.choose_source_button.setMinimumWidth(154)
+        _setup_action_button(self.choose_source_button)
         self.choose_source_button.clicked.connect(self._choose_source_file)
-        source_file_layout.addWidget(self.choose_source_button)
-        setup_grid.addWidget(QLabel("Source file"), 4, 0)
-        setup_grid.addWidget(self.source_file_row, 4, 1)
+        self.source_file_label = _setup_label("Source file")
+        source_grid.addWidget(self.source_file_label, 1, 0, Qt.AlignLeft | Qt.AlignTop)
+        source_grid.addWidget(self.source_file_row, 1, 1)
+        source_grid.addWidget(self.choose_source_button, 1, 2, Qt.AlignRight | Qt.AlignTop)
 
         self.csv_controls_row = QWidget(self)
         csv_layout = QHBoxLayout(self.csv_controls_row)
         csv_layout.setContentsMargins(0, 0, 0, 0)
         csv_layout.setSpacing(8)
-        csv_layout.addWidget(QLabel("CSV delimiter"))
         self.csv_delimiter_combo = QComboBox(self)
-        self.csv_delimiter_combo.setMinimumWidth(150)
+        _compact_input(self.csv_delimiter_combo)
         self.csv_delimiter_combo.addItem("Auto detect", "auto")
         self.csv_delimiter_combo.addItem("Comma (,)", ",")
         self.csv_delimiter_combo.addItem("Semicolon (;)", ";")
@@ -241,6 +356,7 @@ class ConversionDialog(QDialog):
         csv_layout.addWidget(self.csv_delimiter_combo)
         self.csv_custom_delimiter_edit = QLineEdit(self)
         self.csv_custom_delimiter_edit.setPlaceholderText("One character")
+        self.csv_custom_delimiter_edit.setMinimumWidth(100)
         self.csv_custom_delimiter_edit.setMaximumWidth(120)
         self.csv_custom_delimiter_edit.textChanged.connect(self._on_csv_delimiter_changed)
         csv_layout.addWidget(self.csv_custom_delimiter_edit)
@@ -248,8 +364,10 @@ class ConversionDialog(QDialog):
         self.csv_error_label.setWordWrap(True)
         self.csv_error_label.setProperty("role", "secondary")
         csv_layout.addWidget(self.csv_error_label, 1)
-        setup_grid.addWidget(QLabel("CSV options"), 5, 0)
-        setup_grid.addWidget(self.csv_controls_row, 5, 1)
+        _middle_control_cell(self.csv_controls_row)
+        self.csv_controls_label = _setup_label("CSV options")
+        source_grid.addWidget(self.csv_controls_label, 2, 0, Qt.AlignLeft | Qt.AlignTop)
+        source_grid.addWidget(self.csv_controls_row, 2, 1, 1, 2)
 
         self.database_scope_box = QWidget(self)
         database_scope_layout = QVBoxLayout(self.database_scope_box)
@@ -265,51 +383,36 @@ class ConversionDialog(QDialog):
         self.selection_banner.choose_button.clicked.connect(self._choose_database_tracks)
         self.selection_banner.clear_override_button.clicked.connect(self._clear_database_override)
         database_scope_layout.addWidget(self.selection_banner)
-        setup_grid.addWidget(QLabel("Track selection"), 6, 0)
-        setup_grid.addWidget(self.database_scope_box, 6, 1)
+        self.database_scope_label = _setup_label("Track selection")
+        source_grid.addWidget(self.database_scope_label, 3, 0, Qt.AlignLeft | Qt.AlignTop)
+        source_grid.addWidget(self.database_scope_box, 3, 1, 1, 2)
 
         self.template_scope_row = QWidget(self)
         template_scope_layout = QHBoxLayout(self.template_scope_row)
         template_scope_layout.setContentsMargins(0, 0, 0, 0)
         template_scope_layout.setSpacing(8)
-        template_scope_layout.addWidget(QLabel("Template scope"))
         self.template_scope_combo = QComboBox(self)
+        _compact_input(self.template_scope_combo)
         self.template_scope_combo.currentIndexChanged.connect(self._on_template_scope_changed)
         template_scope_layout.addWidget(self.template_scope_combo, 1)
-        setup_grid.addWidget(QLabel("Template scope"), 7, 0)
-        setup_grid.addWidget(self.template_scope_row, 7, 1)
+        _middle_control_cell(self.template_scope_row)
+        self.template_scope_label = _setup_label("Template scope")
+        template_grid.addWidget(self.template_scope_label, 1, 0, Qt.AlignLeft | Qt.AlignTop)
+        template_grid.addWidget(self.template_scope_row, 1, 1)
 
         self.source_scope_row = QWidget(self)
         source_scope_layout = QHBoxLayout(self.source_scope_row)
         source_scope_layout.setContentsMargins(0, 0, 0, 0)
         source_scope_layout.setSpacing(8)
-        source_scope_layout.addWidget(QLabel("Source scope"))
         self.source_scope_combo = QComboBox(self)
+        _compact_input(self.source_scope_combo)
         self.source_scope_combo.currentIndexChanged.connect(self._on_source_scope_changed)
         source_scope_layout.addWidget(self.source_scope_combo, 1)
-        setup_grid.addWidget(QLabel("Source scope"), 8, 0)
-        setup_grid.addWidget(self.source_scope_row, 8, 1)
-
-        content_layout.addWidget(setup_box)
-
-        self.content_tabs = QTabWidget(self)
-        self.content_tabs.setObjectName("conversionTabs")
-        self.content_tabs.setDocumentMode(True)
-        self.content_tabs.setMinimumHeight(500)
-        content_layout.addWidget(self.content_tabs, 1)
-
-        self.template_page = QWidget(self.content_tabs)
-        self.template_page.setProperty("role", "workspaceCanvas")
-        self.source_page = QWidget(self.content_tabs)
-        self.source_page.setProperty("role", "workspaceCanvas")
-        self.mapping_page = QWidget(self.content_tabs)
-        self.mapping_page.setProperty("role", "workspaceCanvas")
-        self.output_page = QWidget(self.content_tabs)
-        self.output_page.setProperty("role", "workspaceCanvas")
-        self.content_tabs.addTab(self.template_page, "Template")
-        self.content_tabs.addTab(self.source_page, "Source")
-        self.content_tabs.addTab(self.mapping_page, "Mapping")
-        self.content_tabs.addTab(self.output_page, "Output Preview")
+        _middle_control_cell(self.source_scope_row)
+        self.source_scope_label = _setup_label("Source scope")
+        source_grid.addWidget(self.source_scope_label, 4, 0, Qt.AlignLeft | Qt.AlignTop)
+        source_grid.addWidget(self.source_scope_row, 4, 1)
+        setup_page_layout.addStretch(1)
 
         template_layout = QVBoxLayout(self.template_page)
         template_layout.setContentsMargins(0, 0, 0, 0)
@@ -348,15 +451,19 @@ class ConversionDialog(QDialog):
         preset_row.setSpacing(10)
         preset_row.addWidget(QLabel("Mapping preset"))
         self.preset_combo = QComboBox(self)
-        self.preset_combo.setMinimumWidth(260)
-        preset_row.addWidget(self.preset_combo, 1)
+        self.preset_combo.setMinimumWidth(100)
+        self.preset_combo.setMaximumWidth(300)
+        self.preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        preset_row.addWidget(self.preset_combo)
         load_preset_button = QPushButton("Load Preset", self)
         load_preset_button.setMinimumWidth(112)
         load_preset_button.clicked.connect(self._load_selected_preset)
         preset_row.addWidget(load_preset_button)
         self.preset_name_edit = QLineEdit(self)
         self.preset_name_edit.setPlaceholderText("Preset name")
-        self.preset_name_edit.setMinimumWidth(170)
+        self.preset_name_edit.setMinimumWidth(100)
+        self.preset_name_edit.setMaximumWidth(300)
+        self.preset_name_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         preset_row.addWidget(self.preset_name_edit)
         save_preset_button = QPushButton("Save Preset", self)
         save_preset_button.setMinimumWidth(112)
@@ -366,6 +473,7 @@ class ConversionDialog(QDialog):
         auto_match_button.setMinimumWidth(104)
         auto_match_button.clicked.connect(self._apply_suggested_mapping)
         preset_row.addWidget(auto_match_button)
+        preset_row.addStretch(1)
         mapping_layout.addLayout(preset_row)
         self.mapping_table = QTableWidget(0, 7, self)
         self.mapping_table.setObjectName("conversionMappingTable")
@@ -427,15 +535,24 @@ class ConversionDialog(QDialog):
     def _apply_compact_defaults(self) -> None:
         _apply_compact_dialog_control_heights(self)
         self.template_scope_row.hide()
+        self.template_scope_label.hide()
         self.source_scope_row.hide()
+        self.source_scope_label.hide()
         self.csv_controls_row.hide()
+        self.csv_controls_label.hide()
         self.database_scope_box.hide()
+        self.database_scope_label.hide()
         self.export_button.setEnabled(False)
         has_store = self.template_store_service is not None
+        self.saved_template_section_box.setVisible(has_store)
         self.saved_template_load_label.setVisible(has_store)
         self.saved_template_save_label.setVisible(has_store)
         self.saved_template_load_row.setVisible(has_store)
         self.saved_template_save_row.setVisible(has_store)
+        self.load_saved_template_button.setVisible(has_store)
+        self.saved_template_save_actions.setVisible(has_store)
+        self.include_mapping_in_saved_template_checkbox.setVisible(has_store)
+        self.save_template_to_profile_button.setVisible(has_store)
         if not has_store:
             self.saved_template_combo.hide()
             self.saved_template_name_edit.hide()
@@ -486,12 +603,15 @@ class ConversionDialog(QDialog):
         self._pending_saved_template_mapping_payload = ""
         self._template_path = path
         self.template_path_label.setText(str(path))
+        self.template_path_label.setToolTip(str(path))
         if not self.saved_template_name_edit.text().strip():
             self.saved_template_name_edit.setText(Path(path).stem)
         self._populate_scope_combo(
             self.template_scope_combo, self.template_profile.available_scopes
         )
-        self.template_scope_row.setVisible(bool(self.template_profile.available_scopes))
+        has_template_scopes = bool(self.template_profile.available_scopes)
+        self.template_scope_row.setVisible(has_template_scopes)
+        self.template_scope_label.setVisible(has_template_scopes)
         self._rebuild_session_preview()
 
     def _choose_source_file(self) -> None:
@@ -518,7 +638,9 @@ class ConversionDialog(QDialog):
         self._source_path = path
         self.source_path_label.setText(str(path))
         self._populate_scope_combo(self.source_scope_combo, self.source_profile.available_scopes)
-        self.source_scope_row.setVisible(bool(self.source_profile.available_scopes))
+        has_source_scopes = bool(self.source_profile.available_scopes)
+        self.source_scope_row.setVisible(has_source_scopes)
+        self.source_scope_label.setVisible(has_source_scopes)
         self._set_default_source_inclusion()
         self._rebuild_session_preview()
 
@@ -530,13 +652,20 @@ class ConversionDialog(QDialog):
         mode = self._current_source_mode()
         file_mode = mode == _MODE_FILE
         self.source_file_row.setVisible(file_mode)
+        self.source_file_label.setVisible(file_mode)
+        self.choose_source_button.setVisible(file_mode)
         self.database_scope_box.setVisible(not file_mode)
+        self.database_scope_label.setVisible(not file_mode)
         self.source_mode_hint.setText(
             "Inspect a structured source file and map its fields into the template."
             if file_mode
             else "Use flattened track-centric export rows from the current profile."
         )
         if not file_mode:
+            self.csv_controls_row.setVisible(False)
+            self.csv_controls_label.setVisible(False)
+            self.source_scope_row.setVisible(False)
+            self.source_scope_label.setVisible(False)
             self._refresh_database_selection_banner()
             if self.profile_available and self._database_source_profile is None:
                 self._load_database_source()
@@ -544,9 +673,11 @@ class ConversionDialog(QDialog):
                 self.source_profile = self._database_source_profile
         else:
             self.source_profile = self._file_source_profile
-            self.csv_controls_row.setVisible(
-                bool(self.source_profile and self.source_profile.format_name == "csv")
+            show_csv_controls = bool(
+                self.source_profile and self.source_profile.format_name == "csv"
             )
+            self.csv_controls_row.setVisible(show_csv_controls)
+            self.csv_controls_label.setVisible(show_csv_controls)
 
     def _requested_csv_delimiter(self) -> str | None:
         if self._current_source_mode() != _MODE_FILE:
@@ -774,6 +905,7 @@ class ConversionDialog(QDialog):
             )
             self.template_fields_table.setRowCount(0)
             self.template_scope_row.hide()
+            self.template_scope_label.hide()
             return
         template_source_label = str(
             self.template_profile.adapter_state.get("source_label")
@@ -813,9 +945,13 @@ class ConversionDialog(QDialog):
             self.source_table.setColumnCount(1)
             self.source_table.setHorizontalHeaderLabels(["Use"])
             self.csv_controls_row.setVisible(False)
+            self.csv_controls_label.setVisible(False)
             self.source_scope_row.hide()
+            self.source_scope_label.hide()
             return
-        self.csv_controls_row.setVisible(self.source_profile.format_name == "csv")
+        show_csv_controls = self.source_profile.format_name == "csv"
+        self.csv_controls_row.setVisible(show_csv_controls)
+        self.csv_controls_label.setVisible(show_csv_controls)
         warnings_text = (
             "<br/>".join(f"- {warning}" for warning in self.source_profile.warnings)
             if self.source_profile.warnings
@@ -1204,12 +1340,16 @@ class ConversionDialog(QDialog):
             return
         self._pending_saved_template_mapping_payload = str(record.mapping_payload or "")
         self._template_path = ""
-        self.template_path_label.setText(f"Saved in profile: {record.name} ({record.filename})")
+        saved_template_label = f"Saved in profile:\n{record.name}\n{record.filename}"
+        self.template_path_label.setText(saved_template_label)
+        self.template_path_label.setToolTip(f"Saved in profile: {record.name} ({record.filename})")
         self.saved_template_name_edit.setText(record.name)
         self._populate_scope_combo(
             self.template_scope_combo, self.template_profile.available_scopes
         )
-        self.template_scope_row.setVisible(bool(self.template_profile.available_scopes))
+        has_template_scopes = bool(self.template_profile.available_scopes)
+        self.template_scope_row.setVisible(has_template_scopes)
+        self.template_scope_label.setVisible(has_template_scopes)
         target_mode = str(record.source_mode or "").strip()
         target_index = self.source_mode_combo.findData(target_mode) if target_mode else -1
         if (

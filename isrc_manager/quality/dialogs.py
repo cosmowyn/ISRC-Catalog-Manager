@@ -137,6 +137,7 @@ class QualityDashboardDialog(QDialog):
         self.issue_table.verticalHeader().setVisible(False)
         self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.itemSelectionChanged.connect(self._load_issue_details)
+        self.issue_table.itemDoubleClicked.connect(lambda _item: self._open_selected_issue())
         root.addWidget(self.issue_table, 1)
 
         self.details = QPlainTextEdit(self)

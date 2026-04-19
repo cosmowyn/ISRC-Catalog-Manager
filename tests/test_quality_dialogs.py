@@ -109,6 +109,36 @@ class QualityDialogTests(unittest.TestCase):
         self.assertEqual(combo.minimumContentsLength(), 12)
         self.assertEqual(combo.maxVisibleItems(), 18)
 
+    def test_quality_dashboard_table_double_click_opens_selected_issue(self):
+        issue = QualityIssue(
+            issue_type="missing_isrc",
+            severity="warning",
+            title="Missing ISRC",
+            details="Track is missing an ISRC.",
+            entity_type="track",
+            entity_id=7,
+            track_id=7,
+        )
+        result = QualityScanResult(
+            issues=[issue],
+            counts_by_severity={"warning": 1},
+            counts_by_type={"missing_isrc": 1},
+        )
+        opened = []
+        dialog = QualityDashboardDialog(
+            service=_DummyQualityService(result),
+            scan_callback=None,
+            task_manager=None,
+            release_choices_provider=lambda: [],
+            apply_fix_callback=lambda _issue: "",
+            open_issue_callback=lambda selected_issue: opened.append(selected_issue),
+        )
+        try:
+            dialog.issue_table.itemDoubleClicked.emit(dialog.issue_table.item(0, 0))
+            self.assertEqual(opened, [issue])
+        finally:
+            dialog.close()
+
     def test_quality_dashboard_dialog_populates_entity_filter_from_scan_result(self):
         result = QualityScanResult(
             issues=[

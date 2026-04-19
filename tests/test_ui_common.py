@@ -42,6 +42,7 @@ from isrc_manager.ui_common import (
     _create_action_button_cluster,
     _create_round_help_button,
     _create_scrollable_dialog_content,
+    _create_standard_section,
     _standard_dialog_stylesheet,
 )
 
@@ -233,6 +234,41 @@ class UICommonTests(unittest.TestCase):
             self.assertEqual(layout.verticalSpacing(), 10)
             for button in buttons:
                 self.assertGreaterEqual(button.minimumWidth(), 180)
+        finally:
+            owner.close()
+
+    def test_action_button_cluster_accepts_compact_spacing(self):
+        owner = QWidget()
+        try:
+            buttons = [QPushButton("One", owner), QPushButton("Two", owner)]
+            cluster = _create_action_button_cluster(
+                owner,
+                buttons,
+                columns=2,
+                outer_margins=(6, 6, 6, 6),
+                horizontal_spacing=6,
+                vertical_spacing=8,
+            )
+            layout = cluster.layout()
+            margins = layout.contentsMargins()
+            self.assertEqual(layout.horizontalSpacing(), 6)
+            self.assertEqual(layout.verticalSpacing(), 8)
+            self.assertEqual(
+                (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                (6, 6, 6, 6),
+            )
+        finally:
+            owner.close()
+
+    def test_standard_section_uses_compact_title_top_inset(self):
+        owner = QWidget()
+        try:
+            _box, layout = _create_standard_section(owner, "Details")
+            margins = layout.contentsMargins()
+            self.assertEqual(
+                (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                (14, 12, 14, 14),
+            )
         finally:
             owner.close()
 

@@ -6030,6 +6030,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self.window.left_widget_container.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
+        tabs_index = self.window.left_panel.indexOf(self.window.add_data_tabs)
+        buttons_index = self.window.left_panel.indexOf(self.window.button_row_widget)
+        self.assertEqual(buttons_index, tabs_index + 1)
+        self.assertIsNotNone(self.window.left_panel.itemAt(buttons_index + 1).spacerItem())
         lossy_audio = self._create_media_file("add-warning.mp3", b"ID3add-warning")
         self.window.audio_file_field.setText(str(lossy_audio))
         self.app.processEvents()
@@ -7961,6 +7965,38 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self.window.search_field.text(), "Shortcut Filter Target")
         self.assertEqual(self._visible_track_ids(), [track_id])
 
+    def case_catalog_table_command_shift_space_shortcut_edits_selection(self):
+        first_track_id = self._create_track(index=407, title="Shortcut Edit One")
+        second_track_id = self._create_track(index=408, title="Shortcut Edit Two")
+        self.window.refresh_table()
+        self._drain_events()
+
+        shortcut = self.window.catalog_edit_selected_shortcut
+        self.assertIs(shortcut.parent(), self.window.table)
+        self.assertEqual(shortcut.context(), app_module.Qt.WidgetWithChildrenShortcut)
+        self.assertEqual(
+            shortcut.key().toString(QKeySequence.PortableText),
+            "Ctrl+Shift+Space",
+        )
+
+        self._select_track_ids([first_track_id])
+        with mock.patch.object(self.window, "open_track_editor") as open_track_editor:
+            shortcut.activated.emit()
+        open_track_editor.assert_called_once_with(
+            first_track_id,
+            batch_track_ids=[first_track_id],
+        )
+
+        self._select_track_ids([first_track_id, second_track_id])
+        with mock.patch.object(self.window, "open_track_editor") as open_track_editor:
+            shortcut.activated.emit()
+
+        open_track_editor.assert_called_once()
+        args, kwargs = open_track_editor.call_args
+        batch_ids = list(kwargs.get("batch_track_ids") or [])
+        self.assertIn(args[0], batch_ids)
+        self.assertEqual(set(batch_ids), {first_track_id, second_track_id})
+
     def case_catalog_zoom_persists_in_layout_and_resets_on_profile_change(self):
         slider = self.window.catalog_zoom_slider
         controller = self.window._catalog_zoom_controller()
@@ -8821,6 +8857,7 @@ class AppShellTestCase(unittest.TestCase):
 
         dialog = self._open_audio_preview_dialog(primary_track)
 
+        self.assertEqual(dialog.windowTitle(), "Audio Player — Aurora Signal")
         self.assertEqual(dialog.title_label.text(), "Aurora Signal")
         self.assertEqual(dialog.artist_label.text(), "Moonwake")
         self.assertEqual(dialog.album_label.text(), "Album · Preview Layout A")
@@ -8875,11 +8912,13 @@ class AppShellTestCase(unittest.TestCase):
         metadata_group = dialog.findChild(app_module.QGroupBox, "audioPreviewMetadataGroup")
         waveform_panel = dialog.findChild(app_module.QFrame, "audioPreviewWaveformPanel")
         playback_group = dialog.findChild(app_module.QGroupBox, "audioPreviewPlaybackGroup")
+        volume_group = dialog.findChild(app_module.QGroupBox, "audioPreviewVolumeGroup")
         export_group = dialog.findChild(app_module.QGroupBox, "audioPreviewExportGroup")
 
         self.assertIsNotNone(metadata_group)
         self.assertIsNotNone(waveform_panel)
         self.assertIsNotNone(playback_group)
+        self.assertIsNotNone(volume_group)
         self.assertIsNotNone(export_group)
         self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
         self.assertEqual(dialog.width(), dialog.DEFAULT_WINDOW_WIDTH)
@@ -8889,9 +8928,45 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(dialog.artwork_label.height(), 200)
         self.assertEqual(dialog.artwork_label.width(), 200)
         self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
+        self.assertTrue(volume_group.isAncestorOf(dialog.volume_slider))
+        self.assertTrue(volume_group.isAncestorOf(dialog.volume_label))
+        self.assertEqual(dialog.volume_slider.orientation(), Qt.Vertical)
+        self.assertEqual(dialog.volume_slider.minimum(), 0)
+        self.assertEqual(dialog.volume_slider.maximum(), 100)
+        self.assertEqual(dialog.volume_label.text(), "100%")
+        dialog.volume_slider.setValue(37)
+        pump_events()
+        self.assertEqual(dialog.volume_label.text(), "37%")
+        self.assertAlmostEqual(dialog._audio_out.volume(), 0.37, places=2)
         self.assertEqual(dialog.album_label.text(), "Album · Layout Followup")
         self.assertEqual(dialog.play_button.styleSheet(), "")
         self.assertEqual(dialog.play_button.font().family(), dialog.font().family())
+
+        def _font_size(font):
+            if font.pixelSize() > 0:
+                return float(font.pixelSize())
+            return float(font.pointSizeF())
+
+        self.assertGreater(
+            _font_size(dialog.stop_button.font()),
+            _font_size(dialog.play_button.font()),
+        )
+        self.assertIn("font-size:", dialog.stop_button.styleSheet())
+        adjusted_font = app_module.QFont(dialog.font())
+        if adjusted_font.pixelSize() > 0:
+            adjusted_font.setPixelSize(adjusted_font.pixelSize() + 3)
+        else:
+            point_size = adjusted_font.pointSizeF()
+            if point_size <= 0:
+                point_size = 12.0
+            adjusted_font.setPointSizeF(point_size + 3.0)
+        dialog.setFont(adjusted_font)
+        pump_events()
+        self.assertGreater(
+            _font_size(dialog.stop_button.font()),
+            _font_size(dialog.play_button.font()),
+        )
+        self.assertIn("font-size:", dialog.stop_button.styleSheet())
 
         self.assertIs(dialog.layout().itemAt(2).widget(), dialog.playback_status_panel)
         status_geom = dialog.playback_status_panel.geometry()
@@ -8915,17 +8990,25 @@ class AppShellTestCase(unittest.TestCase):
             playback_group.height(),
             playback_group.sizeHint().height() + 24,
         )
-        self.assertLessEqual(
+        self.assertEqual(
+            playback_group.height(),
+            volume_group.height(),
+        )
+        self.assertEqual(
+            playback_group.height(),
             export_group.height(),
-            export_group.sizeHint().height() + 24,
         )
         self.assertLessEqual(
-            abs(playback_group.geometry().top() - export_group.geometry().top()),
-            2,
+            abs(playback_group.geometry().top() - volume_group.geometry().top()), 2
+        )
+        self.assertLessEqual(
+            abs(playback_group.geometry().top() - export_group.geometry().top()), 2
         )
         self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(waveform_panel.geometry().intersects(volume_group.geometry()))
         self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
         self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(volume_group.geometry()))
         self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
         wave_center = dialog.wave.mapTo(dialog, dialog.wave.rect().center())
         artwork_center = dialog.artwork_label.mapTo(dialog, dialog.artwork_label.rect().center())
@@ -8934,8 +9017,10 @@ class AppShellTestCase(unittest.TestCase):
         dialog.resize(dialog.minimumWidth(), dialog.minimumHeight())
         pump_events()
         self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(waveform_panel.geometry().intersects(volume_group.geometry()))
         self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
         self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(volume_group.geometry()))
         self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
 
         selectors = {entry.selector for entry in collect_qss_reference_entries([dialog])}
@@ -8945,6 +9030,9 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewWaveformPanel",
             "#audioPreviewPlaybackStatusPanel",
             "#audioPreviewPlaybackGroup",
+            "#audioPreviewVolumeGroup",
+            "#audioPreviewVolumeSlider",
+            "#audioPreviewVolumeLabel",
             "#audioPreviewExportGroup",
             "#audioPreviewArtworkContainer",
             "#audioPreviewAlbumLabel",
@@ -8952,6 +9040,8 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewAutoAdvanceCheck",
             '[role="mediaTransportButton"]',
             'QToolButton[role="mediaTransportButton"]',
+            '[role="mediaVolumeSlider"]',
+            'FocusWheelSlider[role="mediaVolumeSlider"]',
             '[role="mediaToggle"]',
             'QCheckBox[role="mediaToggle"]',
             '[role="mediaExportButton"]',

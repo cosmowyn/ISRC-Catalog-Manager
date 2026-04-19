@@ -207,7 +207,7 @@ def _create_standard_section(
 ) -> tuple[QGroupBox, QVBoxLayout]:
     box = QGroupBox(title, owner)
     box_layout = QVBoxLayout(box)
-    box_layout.setContentsMargins(14, 18, 14, 14)
+    box_layout.setContentsMargins(14, 12, 14, 14)
     box_layout.setSpacing(10)
     if description:
         desc_label = QLabel(description, box)
@@ -404,7 +404,10 @@ def _create_action_button_cluster(
     columns: int = 2,
     min_button_width: int = 160,
     outer_margins: tuple[int, int, int, int] = (2, 2, 2, 2),
+    horizontal_spacing: int = 12,
+    vertical_spacing: int = 10,
     span_last_row: bool = False,
+    lock_minimum_height: bool = True,
 ) -> QWidget:
     container = QFrame(owner)
     container.setProperty("role", "compactControlGroup")
@@ -412,8 +415,8 @@ def _create_action_button_cluster(
     layout = QGridLayout(container)
     left, top, right, bottom = outer_margins
     layout.setContentsMargins(left, top, right, bottom)
-    layout.setHorizontalSpacing(12)
-    layout.setVerticalSpacing(10)
+    layout.setHorizontalSpacing(int(horizontal_spacing))
+    layout.setVerticalSpacing(int(vertical_spacing))
     total_columns = max(1, int(columns or 1))
     for column in range(total_columns):
         layout.setColumnStretch(column, 1)
@@ -447,13 +450,14 @@ def _create_action_button_cluster(
         )
     layout.activate()
     container.ensurePolished()
-    container.setMinimumHeight(
-        max(
-            int(lower_bound_height or 0),
-            int(container.minimumSizeHint().height()),
-            int(container.sizeHint().height()),
+    if lock_minimum_height:
+        container.setMinimumHeight(
+            max(
+                int(lower_bound_height or 0),
+                int(container.minimumSizeHint().height()),
+                int(container.sizeHint().height()),
+            )
         )
-    )
     return container
 
 

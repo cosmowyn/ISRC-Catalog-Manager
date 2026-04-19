@@ -1430,6 +1430,16 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         banner = SelectionScopeBanner()
         try:
             self.assertLess(banner.minimumSizeHint().width(), 380)
+            action_groups = [
+                widget
+                for widget in banner.findChildren(QWidget)
+                if widget.property("role") == "compactControlGroup"
+            ]
+            self.assertEqual(len(action_groups), 1)
+            layout = action_groups[0].layout()
+            self.assertEqual(layout.horizontalSpacing(), 3)
+            self.assertEqual(layout.verticalSpacing(), 3)
+            self.assertTrue(banner.clear_override_button.isHidden())
         finally:
             banner.close()
 
@@ -1455,6 +1465,31 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         try:
             self.assertIsNotNone(dialog.manage_actions_cluster)
             self.assertGreaterEqual(dialog.manage_actions_cluster.minimumSizeHint().width(), 0)
+            layout = dialog.manage_actions_cluster.layout()
+            margins = layout.contentsMargins()
+            self.assertEqual(layout.horizontalSpacing(), 3)
+            self.assertEqual(layout.verticalSpacing(), 3)
+            self.assertEqual(
+                (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                (3, 3, 3, 3),
+            )
+            group_titles = {group.title() for group in dialog.findChildren(QGroupBox)}
+            self.assertIn("Catalog Selection", group_titles)
+            self.assertTrue(dialog.selection_banner.scope_label.isHidden())
+            banner_margins = dialog.selection_banner.layout().contentsMargins()
+            self.assertEqual(
+                (
+                    banner_margins.left(),
+                    banner_margins.top(),
+                    banner_margins.right(),
+                    banner_margins.bottom(),
+                ),
+                (0, 0, 0, 0),
+            )
+            self.assertTrue(dialog.selection_banner.clear_override_button.isHidden())
+            layout.setHorizontalSpacing(24)
+            dialog.panel.stabilize_layout_after_restore()
+            self.assertEqual(layout.horizontalSpacing(), 3)
         finally:
             dialog.close()
 

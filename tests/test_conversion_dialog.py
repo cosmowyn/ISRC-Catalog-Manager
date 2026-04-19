@@ -130,12 +130,33 @@ class ConversionDialogTests(unittest.TestCase):
             self.assertIs(dialog.main_scroll_area.widget(), dialog.scroll_content)
             self.assertEqual(dialog.main_scroll_area.property("role"), "workspaceCanvas")
             self.assertEqual(dialog.scroll_content.property("role"), "workspaceCanvas")
+            self.assertEqual(dialog.content_tabs.tabText(0), "Setup")
+            self.assertEqual(dialog.content_tabs.tabText(1), "Template")
+            self.assertEqual(dialog.template_setup_box.title(), "Target Template")
+            self.assertEqual(dialog.saved_template_section_box.title(), "Profile Template Library")
+            self.assertEqual(dialog.source_setup_box.title(), "Source Data")
             self.assertEqual(
                 [
                     dialog.content_tabs.widget(index).property("role")
                     for index in range(dialog.content_tabs.count())
                 ],
-                ["workspaceCanvas", "workspaceCanvas", "workspaceCanvas", "workspaceCanvas"],
+                [
+                    "workspaceCanvas",
+                    "workspaceCanvas",
+                    "workspaceCanvas",
+                    "workspaceCanvas",
+                    "workspaceCanvas",
+                ],
+            )
+            self.assertLessEqual(dialog.saved_template_combo.maximumWidth(), 300)
+            self.assertLessEqual(dialog.source_mode_combo.maximumWidth(), 300)
+            self.assertEqual(
+                dialog.saved_template_load_row.maximumWidth(),
+                dialog.saved_template_save_row.maximumWidth(),
+            )
+            self.assertEqual(
+                dialog.saved_template_load_row.maximumWidth(),
+                dialog.source_mode_control_row.maximumWidth(),
             )
         finally:
             dialog.close()

@@ -1419,8 +1419,6 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     media_tab_layout.addWidget(media_group)
     media_tab_layout.addStretch(1)
 
-    app.left_panel.addStretch(1)
-
     button_row = QHBoxLayout()
     button_row.setContentsMargins(0, 4, 0, 0)
     button_row.setSpacing(8)
@@ -1449,6 +1447,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.button_row_widget = QWidget()
     app.button_row_widget.setLayout(button_row)
     app.left_panel.addWidget(app.button_row_widget)
+    app.left_panel.addStretch(1)
 
     app.add_data_column = QWidget()
     app.add_data_column.setLayout(app.left_panel)
@@ -1740,6 +1739,9 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.catalog_set_filter_shortcut = QShortcut(QKeySequence.Find, app.table)
     app.catalog_set_filter_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
     app.catalog_set_filter_shortcut.activated.connect(app._set_catalog_filter_from_current_cell)
+    app.catalog_edit_selected_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Space"), app.table)
+    app.catalog_edit_selected_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+    app.catalog_edit_selected_shortcut.activated.connect(lambda: app.open_selected_editor())
     app._initialize_catalog_zoom_controls()
 
     try:

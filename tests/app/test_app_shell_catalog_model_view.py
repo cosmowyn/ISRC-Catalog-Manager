@@ -29,6 +29,9 @@ class AppShellCatalogModelViewTests(AppShellTestCase):
     test_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell = (
         AppShellTestCase.case_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell
     )
+    test_catalog_table_command_shift_space_shortcut_edits_selection = (
+        AppShellTestCase.case_catalog_table_command_shift_space_shortcut_edits_selection
+    )
     test_catalog_zoom_persists_in_layout_and_resets_on_profile_change = (
         AppShellTestCase.case_catalog_zoom_persists_in_layout_and_resets_on_profile_change
     )

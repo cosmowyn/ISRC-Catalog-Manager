@@ -25,7 +25,7 @@ from isrc_manager.ui_common import (
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
-    _create_action_button_grid,
+    _create_action_button_cluster,
     _create_standard_section,
 )
 
@@ -80,7 +80,14 @@ def build_selection_preview(
 class SelectionScopeBanner(QWidget):
     """Compact banner that explains which track selection a manager will use."""
 
-    def __init__(self, *, chooser_label: str = "Choose Tracks", parent=None):
+    def __init__(
+        self,
+        *,
+        chooser_label: str = "Choose Tracks",
+        parent=None,
+        show_header: bool = True,
+        content_margins: tuple[int, int, int, int] = (12, 12, 12, 12),
+    ):
         super().__init__(parent)
         self._syncing_height = False
         self.setObjectName("selectionScopeBanner")
@@ -88,7 +95,7 @@ class SelectionScopeBanner(QWidget):
         _apply_standard_widget_chrome(self, "selectionScopeBanner")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
+        root.setContentsMargins(*content_margins)
         root.setSpacing(10)
 
         header_row = QHBoxLayout()
@@ -96,12 +103,16 @@ class SelectionScopeBanner(QWidget):
         header_row.setSpacing(10)
         self.scope_label = QLabel("Catalog selection")
         self.scope_label.setProperty("role", "sectionTitle")
-        header_row.addWidget(self.scope_label)
-        header_row.addStretch(1)
         self.count_label = QLabel("0 tracks")
         self.count_label.setProperty("role", "secondary")
-        header_row.addWidget(self.count_label)
-        root.addLayout(header_row)
+        if show_header:
+            header_row.addWidget(self.scope_label)
+            header_row.addStretch(1)
+            header_row.addWidget(self.count_label)
+            root.addLayout(header_row)
+        else:
+            self.scope_label.setVisible(False)
+            root.addWidget(self.count_label, 0, Qt.AlignRight)
 
         self.preview_label = QLabel("No tracks selected.")
         self.preview_label.setWordWrap(True)
@@ -111,19 +122,24 @@ class SelectionScopeBanner(QWidget):
         self.use_current_button = QPushButton("Use Current Selection")
         self.choose_button = QPushButton(chooser_label)
         self.clear_override_button = QPushButton("Clear Override")
-        root.addWidget(
-            _create_action_button_grid(
-                self,
-                [
-                    self.use_current_button,
-                    self.choose_button,
-                    self.clear_override_button,
-                ],
-                columns=2,
-            )
+        self.action_cluster = _create_action_button_cluster(
+            self,
+            [
+                self.use_current_button,
+                self.choose_button,
+                self.clear_override_button,
+            ],
+            columns=2,
+            min_button_width=160,
+            outer_margins=(3, 3, 3, 3),
+            horizontal_spacing=3,
+            vertical_spacing=3,
+            lock_minimum_height=False,
         )
+        root.addWidget(self.action_cluster)
 
         self.clear_override_button.setEnabled(False)
+        self.clear_override_button.setVisible(False)
         _apply_compact_dialog_control_heights(self)
         self._sync_layout_height()
 
@@ -131,7 +147,10 @@ class SelectionScopeBanner(QWidget):
         self.scope_label.setText(state.source_label)
         self.count_label.setText(f"{state.count} track{'s' if state.count != 1 else ''}")
         self.preview_label.setText(state.preview_text or "No tracks selected.")
-        self.clear_override_button.setEnabled(bool(state.override_active))
+        override_active = bool(state.override_active)
+        self.clear_override_button.setEnabled(override_active)
+        self.clear_override_button.setVisible(override_active)
+        self.action_cluster.updateGeometry()
         self._sync_layout_height()
 
     def _sync_layout_height(self) -> None:

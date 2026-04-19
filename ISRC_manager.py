@@ -99,6 +99,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStatusBar,
+    QStyle,
     QTableView,
     QTableWidget,
     QTableWidgetItem,
@@ -519,6 +520,63 @@ from isrc_manager.works.dialogs import (
     WorkBrowserPanel,
     WorkEditorDialog,
 )
+
+
+def _get_name_from_editable_choice_dialog(
+    parent: QWidget | None,
+    *,
+    title: str,
+    label: str,
+    choices: list[str],
+    suggested_name: str = "",
+    placeholder: str = "Enter a new name",
+) -> tuple[str, bool]:
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setModal(True)
+
+    root = QVBoxLayout(dialog)
+    form = QFormLayout()
+    root.addLayout(form)
+
+    selector = QComboBox(dialog)
+    selector.setEditable(True)
+    selector.setInsertPolicy(QComboBox.NoInsert)
+    selector.setMinimumContentsLength(24)
+    selector.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    selector.addItem("", "")
+    for choice in choices:
+        clean_choice = str(choice or "").strip()
+        if clean_choice:
+            selector.addItem(clean_choice, clean_choice)
+
+    line_edit = selector.lineEdit()
+    if line_edit is not None:
+        line_edit.setPlaceholderText(placeholder)
+
+    clean_suggestion = str(suggested_name or "").strip()
+    if clean_suggestion:
+        suggestion_index = selector.findText(clean_suggestion, Qt.MatchFixedString)
+        if suggestion_index >= 0:
+            selector.setCurrentIndex(suggestion_index)
+        else:
+            selector.setCurrentIndex(0)
+            selector.setEditText(clean_suggestion)
+        if line_edit is not None:
+            line_edit.selectAll()
+    else:
+        selector.setCurrentIndex(0)
+
+    form.addRow(label, selector)
+
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    root.addWidget(buttons)
+
+    if dialog.exec() != QDialog.Accepted:
+        return "", False
+    return str(selector.currentText() or "").strip(), True
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -3344,7 +3402,19 @@ class ApplicationSettingsDialog(QDialog):
         suggested_name = self._current_theme_preset_name() or "My Theme"
         if suggested_name in self._bundled_theme_names:
             suggested_name = f"{suggested_name} Copy"
-        name, ok = QInputDialog.getText(self, "Save Theme", "Theme name:", text=suggested_name)
+        custom_theme_names = sorted(
+            theme_name
+            for theme_name in self._stored_themes
+            if theme_name not in self._bundled_theme_names
+        )
+        name, ok = _get_name_from_editable_choice_dialog(
+            self,
+            title="Save Theme",
+            label="Theme name:",
+            choices=custom_theme_names,
+            suggested_name=suggested_name,
+            placeholder="Enter a new theme name",
+        )
         if not ok:
             return
         clean_name = str(name or "").strip()
@@ -13162,15 +13232,26 @@ class App(QMainWindow):
         menu.addAction(widget_action)
 
     def add_named_main_window_layout(self) -> None:
-        suggested_name = self._default_saved_main_window_layout_name()
+        names = self._saved_main_window_layout_names()
+        active_name = self._find_saved_main_window_layout_name(
+            str(getattr(self, "_active_saved_main_window_layout_name", "") or "")
+        )
+        suggested_name = active_name or self._default_saved_main_window_layout_name()
         while True:
-            name, ok = QInputDialog.getText(self, "Add Layout", "Layout name:", text=suggested_name)
+            name, ok = _get_name_from_editable_choice_dialog(
+                self,
+                title="Save Layout",
+                label="Layout name:",
+                choices=names,
+                suggested_name=suggested_name,
+                placeholder="Enter a new layout name",
+            )
             if not ok:
                 return
             clean_name = str(name or "").strip()
             if clean_name:
                 break
-            QMessageBox.warning(self, "Add Layout", "Enter a layout name before saving.")
+            QMessageBox.warning(self, "Save Layout", "Enter a layout name before saving.")
             suggested_name = str(name or "")
 
         existing_name = self._find_saved_main_window_layout_name(clean_name)
@@ -26877,7 +26958,7 @@ class App(QMainWindow):
             "audio_bytes": raw_bytes,
             "audio_mime": str(mime or self._detect_mime(raw_bytes) or "audio/wav"),
             "artwork_payload": artwork,
-            "window_title": f"Audio Preview — {title}",
+            "window_title": f"Audio Player — {title}",
             "export_actions": self._audio_preview_export_actions_for_track(
                 int(track_id),
                 source_spec,
@@ -26896,29 +26977,30 @@ class App(QMainWindow):
         parent = parent_widget or self
         raw_bytes = self._coerce_export_bytes(data)
         clean_mime = str(mime or self._detect_mime(raw_bytes) or "audio/wav")
+        clean_title = str(title or "Audio Player").strip() or "Audio Player"
         return {
             "track_id": None,
             "track_order": [],
-            "title": str(title or "Audio Preview").strip() or "Audio Preview",
+            "title": clean_title,
             "artist": "",
             "album": "",
             "audio_bytes": raw_bytes,
             "audio_mime": clean_mime,
             "artwork_payload": None,
-            "window_title": f"Audio Preview — {title}",
+            "window_title": f"Audio Player — {clean_title}",
             "export_actions": [
                 {
                     "text": "Export Current Audio…",
                     "handler": lambda _checked=False: self._export_bytes_with_picker(
                         raw_bytes,
                         mime=clean_mime,
-                        suggested_basename=title,
+                        suggested_basename=clean_title,
                         parent_widget=parent,
-                        action_label="Export Audio Preview: {filename}",
+                        action_label="Export Audio Player: {filename}",
                         action_type="file.export_audio_preview",
                         entity_type="Preview",
-                        entity_id=self._sanitize_filename(title),
-                        payload={"title": title, "mime_type": clean_mime},
+                        entity_id=self._sanitize_filename(clean_title),
+                        payload={"title": clean_title, "mime_type": clean_mime},
                         dialog_title="Export Audio",
                     ),
                 }
@@ -29456,7 +29538,7 @@ class App(QMainWindow):
             )
         except Exception as exc:
             self.logger.exception("Audio preview failed: %s", exc)
-            QMessageBox.critical(self, "Preview", f"Could not open the audio preview:\n{exc}")
+            QMessageBox.critical(self, "Audio Player", f"Could not open the audio player:\n{exc}")
             return
         self._bring_media_window_to_front(self.audio_preview_dialog)
 
@@ -29472,7 +29554,7 @@ class App(QMainWindow):
             )
         except Exception as exc:
             self.logger.exception("Audio preview failed: %s", exc)
-            QMessageBox.critical(self, "Preview", f"Could not open the audio preview:\n{exc}")
+            QMessageBox.critical(self, "Audio Player", f"Could not open the audio player:\n{exc}")
             return
         self._bring_media_window_to_front(self.audio_preview_dialog)
 
@@ -32889,6 +32971,7 @@ class _ImagePreviewDialog(QDialog):
 class _AudioPreviewDialog(QDialog):
     SCRUB_STEP_MS = 1000
     JUMP_STEP_MS = 10000
+    STOP_BUTTON_FONT_SCALE = 2.5
     ARTWORK_SIZE = 200
     WAVEFORM_HEIGHT = 100
     MEDIA_ROW_HEIGHT = ARTWORK_SIZE + 24
@@ -32958,7 +33041,7 @@ class _AudioPreviewDialog(QDialog):
         header_row.setSpacing(10)
         header_text = QVBoxLayout()
         header_text.setSpacing(4)
-        self.title_label = QLabel("Audio Preview", metadata_group)
+        self.title_label = QLabel("Audio Player", metadata_group)
         self.title_label.setObjectName("audioPreviewTitleLabel")
         self.title_label.setProperty("role", "dialogTitle")
         self.artist_label = QLabel("", metadata_group)
@@ -33052,7 +33135,7 @@ class _AudioPreviewDialog(QDialog):
         root.addWidget(self.playback_status_panel)
 
         controls_row = QHBoxLayout()
-        controls_row.setSpacing(16)
+        controls_row.setSpacing(10)
 
         playback_group, playback_layout = _create_standard_section(self, "Playback")
         playback_group.setObjectName("audioPreviewPlaybackGroup")
@@ -33092,6 +33175,7 @@ class _AudioPreviewDialog(QDialog):
             "audioPreviewStopButton",
             self._stop_playback,
         )
+        self._apply_stop_button_font()
         self.forward_button = self._create_transport_button(
             "▶▶",
             "Jump Forward 10 Seconds",
@@ -33126,13 +33210,67 @@ class _AudioPreviewDialog(QDialog):
         playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft)
         playback_footer.addStretch(1)
         playback_layout.addLayout(playback_footer)
-        controls_row.addWidget(playback_group, 1, Qt.AlignTop)
+        controls_row.addWidget(playback_group, 1)
+
+        volume_group, volume_layout = _create_standard_section(self, "Volume")
+        volume_group.setObjectName("audioPreviewVolumeGroup")
+        volume_group.setProperty("role", "panel")
+        volume_group.setMinimumWidth(120)
+        volume_group.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        volume_layout.setSpacing(6)
+        volume_body = QGridLayout()
+        volume_body.setContentsMargins(0, 0, 0, 0)
+        volume_body.setHorizontalSpacing(10)
+        volume_body.setVerticalSpacing(6)
+        self.volume_slider = FocusWheelSlider(Qt.Vertical)
+        self.volume_slider.setObjectName("audioPreviewVolumeSlider")
+        self.volume_slider.setProperty("role", "mediaVolumeSlider")
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setSingleStep(5)
+        self.volume_slider.setPageStep(10)
+        self.volume_slider.setToolTip("Volume")
+        self.volume_slider.setMinimumHeight(74)
+        self.volume_label = QLabel("100%", volume_group)
+        self.volume_label.setObjectName("audioPreviewVolumeLabel")
+        self.volume_label.setProperty("role", "statusText")
+        self.volume_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.volume_label.setMinimumWidth(44)
+        self.mute_button = QToolButton(volume_group)
+        self.mute_button.setObjectName("audioPreviewMuteButton")
+        self.mute_button.setProperty("role", "mediaMuteButton")
+        self.mute_button.setCheckable(True)
+        self.mute_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.mute_button.setAutoRaise(False)
+        self.mute_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.mute_button.setFixedSize(15, 15)
+        self.mute_button.setIconSize(QSize(12, 12))
+        self.mute_button.setStyleSheet(
+            """
+            QToolButton#audioPreviewMuteButton {
+                min-width: 12px;
+                max-width: 12px;
+                min-height: 12px;
+                max-height: 12px;
+                border-radius: 6px;
+                padding: 0px;
+            }
+            """
+        )
+        volume_body.setColumnStretch(0, 1)
+        volume_body.setColumnStretch(3, 1)
+        volume_body.setRowStretch(0, 1)
+        volume_body.addWidget(self.volume_slider, 0, 1, 2, 1, Qt.AlignCenter)
+        volume_body.addWidget(self.volume_label, 0, 2, Qt.AlignRight | Qt.AlignVCenter)
+        volume_body.addWidget(self.mute_button, 1, 2, Qt.AlignRight | Qt.AlignBottom)
+        volume_layout.addLayout(volume_body)
+        volume_layout.addStretch(1)
+        controls_row.addWidget(volume_group, 0)
 
         export_group, export_layout = _create_standard_section(self, "Export")
         export_group.setObjectName("audioPreviewExportGroup")
         export_group.setProperty("role", "panel")
         export_group.setMinimumWidth(220)
-        export_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        export_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.export_button = QToolButton(export_group)
         self.export_button.setObjectName("audioPreviewExportButton")
         self.export_button.setProperty("role", "mediaExportButton")
@@ -33144,7 +33282,17 @@ class _AudioPreviewDialog(QDialog):
         self.export_button.setEnabled(False)
         export_layout.addWidget(self.export_button)
         export_layout.addStretch(1)
-        controls_row.addWidget(export_group, 0, Qt.AlignTop)
+        controls_row.addWidget(export_group, 0)
+        controls_row.setStretch(0, 1)
+        controls_row.setStretch(1, 0)
+        controls_row.setStretch(2, 0)
+        control_group_height = max(
+            playback_group.sizeHint().height(),
+            volume_group.sizeHint().height(),
+            export_group.sizeHint().height(),
+        )
+        for group in (playback_group, volume_group, export_group):
+            group.setMinimumHeight(control_group_height)
         root.addLayout(controls_row)
         root.addStretch(1)
 
@@ -33157,8 +33305,13 @@ class _AudioPreviewDialog(QDialog):
         self._player.positionChanged.connect(self._on_position_changed)
         self._player.mediaStatusChanged.connect(self._on_media_status_changed)
         self._slider.sliderMoved.connect(self._seek_to_ms)
+        self.volume_slider.valueChanged.connect(self._set_volume_percent)
+        self.mute_button.toggled.connect(self._set_muted)
+        self._audio_out.mutedChanged.connect(self._sync_mute_button)
         self.wave.scrubRequested.connect(self._scrub_by_ms)
         self.wave.seekRequested.connect(self._seek_to_ms)
+        self._sync_volume_controls()
+        self._sync_mute_button()
         self._install_shortcuts()
 
     def _create_transport_button(self, symbol, tooltip, object_name, slot):
@@ -33173,6 +33326,39 @@ class _AudioPreviewDialog(QDialog):
         button.setMinimumSize(52, 34)
         button.clicked.connect(slot)
         return button
+
+    def _apply_stop_button_font(self) -> None:
+        if not hasattr(self, "stop_button"):
+            return
+        if hasattr(self, "play_button"):
+            self.play_button.ensurePolished()
+        self.stop_button.ensurePolished()
+        base_font = self.play_button.font() if hasattr(self, "play_button") else self.font()
+        base_info = self.play_button.fontInfo() if hasattr(self, "play_button") else self.fontInfo()
+        stop_font = QFont(base_font)
+        scale = float(self.STOP_BUTTON_FONT_SCALE)
+        style_size = 0.0
+        style_unit = "pt"
+        if base_info.pixelSize() > 0:
+            style_size = float(max(1, int(round(float(base_info.pixelSize()) * scale))))
+            style_unit = "px"
+            stop_font.setPixelSize(int(style_size))
+        else:
+            point_size = float(base_info.pointSizeF())
+            if point_size <= 0:
+                point_size = float(QApplication.font().pointSizeF())
+            if point_size <= 0:
+                point_size = 12.0
+            style_size = max(1.0, point_size * scale)
+            stop_font.setPointSizeF(style_size)
+        self.stop_button.setFont(stop_font)
+        self.stop_button.setStyleSheet(
+            f"""
+            QToolButton#audioPreviewStopButton {{
+                font-size: {style_size:.3f}{style_unit};
+            }}
+            """
+        )
 
     def _install_shortcuts(self) -> None:
         bindings = (
@@ -33218,7 +33404,7 @@ class _AudioPreviewDialog(QDialog):
         self._track_order = list(state.get("track_order") or [])
         self._current_audio_bytes = bytes(state.get("audio_bytes") or b"")
         self._current_audio_mime = str(state.get("audio_mime") or "audio/wav")
-        self._current_title = str(state.get("title") or "Audio Preview").strip() or "Audio Preview"
+        self._current_title = str(state.get("title") or "Audio Player").strip() or "Audio Player"
         self._current_artist = str(state.get("artist") or "").strip()
         self._current_album = str(state.get("album") or "").strip()
         self.title_label.setText(self._current_title)
@@ -33227,7 +33413,7 @@ class _AudioPreviewDialog(QDialog):
         self.album_label.setVisible(bool(self._current_album))
         self.album_label.setText(f"Album · {self._current_album}" if self._current_album else "")
         self.setWindowTitle(
-            str(state.get("window_title") or f"Audio Preview — {self._current_title}")
+            str(state.get("window_title") or f"Audio Player — {self._current_title}")
         )
         self._set_export_actions(list(state.get("export_actions") or []))
         self._apply_artwork(state.get("artwork_payload"))
@@ -33283,6 +33469,33 @@ class _AudioPreviewDialog(QDialog):
             action = self.export_menu.addAction(text)
             action.triggered.connect(handler)
         self.export_button.setEnabled(bool(self.export_menu.actions()))
+
+    def _sync_volume_controls(self) -> None:
+        percent = max(0, min(100, int(round(float(self._audio_out.volume()) * 100))))
+        self.volume_slider.blockSignals(True)
+        self.volume_slider.setValue(percent)
+        self.volume_slider.blockSignals(False)
+        self.volume_label.setText(f"{percent}%")
+
+    def _sync_mute_button(self, *_args) -> None:
+        muted = bool(self._audio_out.isMuted())
+        self.mute_button.blockSignals(True)
+        self.mute_button.setChecked(muted)
+        self.mute_button.blockSignals(False)
+        icon = self.style().standardIcon(
+            QStyle.SP_MediaVolume if muted else QStyle.SP_MediaVolumeMuted
+        )
+        self.mute_button.setIcon(icon)
+        self.mute_button.setToolTip("Unmute" if muted else "Mute")
+
+    def _set_volume_percent(self, value: int) -> None:
+        percent = max(0, min(100, int(value)))
+        self._audio_out.setVolume(percent / 100.0)
+        self.volume_label.setText(f"{percent}%")
+
+    def _set_muted(self, muted: bool) -> None:
+        self._audio_out.setMuted(bool(muted))
+        self._sync_mute_button()
 
     def _apply_artwork(self, artwork_payload) -> None:
         self._artwork_pixmap = QPixmap()
@@ -33424,6 +33637,16 @@ class _AudioPreviewDialog(QDialog):
         self._reset_player_source()
         self._cleanup_temp_file()
         super().closeEvent(event)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.FontChange, QEvent.ApplicationFontChange):
+            self._apply_stop_button_font()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_stop_button_font()
+        QTimer.singleShot(0, self._apply_stop_button_font)
 
     def resizeEvent(self, event):
         self._resize_timer.start()
