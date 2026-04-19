@@ -212,6 +212,7 @@ from isrc_manager.contracts.dialogs import ContractBrowserPanel
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
 from isrc_manager.conversion.dialogs import ConversionDialog
 from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
+from isrc_manager.draggable_label import DraggableLabel
 from isrc_manager.domain.codes import (
     is_blank,
     is_valid_isrc_compact_or_iso,
@@ -675,72 +676,6 @@ def _install_qt_message_filter() -> None:
         sys.stderr.write(f"{message}\n")
 
     _PREVIOUS_QT_MESSAGE_HANDLER = qInstallMessageHandler(_handler)
-
-
-# =============================================================================
-# Custom Columns Dialog (with type + options)
-# =============================================================================
-# =============================================================================
-# Floating Hint bubble with pixel values for rows and columns (draggable)
-# =============================================================================
-class DraggableLabel(QLabel):
-    def __init__(self, parent=None, settings_key="hint_pos"):
-        super().__init__(parent)
-        self.settings_key = settings_key
-        self._drag_pos = None
-        self._history_before_settings = None
-        self._user_moved = False  # flag to avoid auto-reposition after user moves
-        self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.setMouseTracking(True)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
-            app = self.window()
-            if (
-                hasattr(app, "history_manager")
-                and getattr(app, "history_manager", None) is not None
-            ):
-                self._history_before_settings = app.history_manager.capture_setting_states(
-                    [self.settings_key]
-                )
-            else:
-                self._history_before_settings = None
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self._drag_pos:
-            self.move(event.globalPos() - self._drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = None
-            self._user_moved = True
-            app = self.window()
-            s = getattr(app, "settings", None)
-            if s is None:
-                configure_qt_application_identity()
-                s = QSettings(str(settings_path()), QSettings.IniFormat)
-                s.setFallbacksEnabled(False)
-            s.setValue(self.settings_key, self.pos())
-            s.sync()
-            if (
-                self._history_before_settings is not None
-                and hasattr(app, "_record_setting_bundle_from_entries")
-                and getattr(app, "history_manager", None) is not None
-            ):
-                after_settings = app.history_manager.capture_setting_states([self.settings_key])
-                label_name = (self.objectName() or self.settings_key).replace("_", " ").strip()
-                app._record_setting_bundle_from_entries(
-                    action_label=f"Move {label_name}",
-                    before_entries=self._history_before_settings,
-                    after_entries=after_settings,
-                    entity_id=self.settings_key,
-                )
-            self._history_before_settings = None
-            event.accept()
 
 
 # =============================================================================
