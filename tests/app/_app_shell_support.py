@@ -1807,8 +1807,8 @@ class AppShellTestCase(unittest.TestCase):
         self._drain_events()
 
         with mock.patch.object(
-            app_module.QInputDialog,
-            "getText",
+            app_module,
+            "_get_name_from_editable_choice_dialog",
             return_value=("Writer Desk", True),
         ):
             self.window.add_layout_action.trigger()
@@ -4851,7 +4851,10 @@ class AppShellTestCase(unittest.TestCase):
 
     def case_main_window_geometry_round_trip_restores_non_default_outer_state(self):
         self.window.showNormal()
-        self.window.resize(1333, 877)
+        self.window.resize(
+            max(1600, self.window.minimumWidth() + 80),
+            max(900, self.window.minimumHeight() + 80),
+        )
         self._drain_events()
         expected_size = self.window.size()
 
