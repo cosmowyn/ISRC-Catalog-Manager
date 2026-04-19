@@ -7738,14 +7738,14 @@ class AppShellTestCase(unittest.TestCase):
             wheel = _FakeWheelEvent(angle_y=120, modifiers=app_module.Qt.ControlModifier)
             self.assertTrue(self.window.eventFilter(self.window.table.viewport(), wheel))
             self.assertTrue(wheel.accepted)
-            self.assertEqual(slider.value(), 130)
-            self.assertEqual(label.text(), "130%")
+            self.assertEqual(slider.value(), 126)
+            self.assertEqual(label.text(), "126%")
 
             native_pinch = _FakeNativeGestureEvent(app_module.Qt.ZoomNativeGesture, 0.1)
             self.assertTrue(self.window.eventFilter(self.window.table.viewport(), native_pinch))
             self.assertTrue(native_pinch.accepted)
-            self.assertEqual(slider.value(), 143)
-            self.assertEqual(label.text(), "143%")
+            self.assertEqual(slider.value(), 139)
+            self.assertEqual(label.text(), "139%")
 
             self.window._catalog_zoom_gesture_platform = "darwin"
             mac_generic_pinch = _FakeGestureEvent(_FakePinchGesture(last_scale=1.0, scale=1.1))
@@ -7756,14 +7756,14 @@ class AppShellTestCase(unittest.TestCase):
                 )
             )
             self.assertFalse(mac_generic_pinch.accepted)
-            self.assertEqual(slider.value(), 143)
+            self.assertEqual(slider.value(), 139)
 
             self.window._catalog_zoom_gesture_platform = "linux"
             generic_pinch = _FakeGestureEvent(_FakePinchGesture(last_scale=1.0, scale=1.1))
             self.assertTrue(self.window.eventFilter(self.window.table.viewport(), generic_pinch))
             self.assertTrue(generic_pinch.accepted)
-            self.assertEqual(slider.value(), 157)
-            self.assertEqual(label.text(), "157%")
+            self.assertEqual(slider.value(), 153)
+            self.assertEqual(label.text(), "153%")
             controller.flush_pending_apply()
 
     def case_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell(self):
@@ -7900,13 +7900,13 @@ class AppShellTestCase(unittest.TestCase):
             self.window.catalog_zoom_reset_button,
             self.window.catalog_zoom_group.findChildren(app_module.QPushButton),
         )
-        self.assertEqual(self.window.catalog_zoom_slider.minimum(), 50)
-        self.assertEqual(self.window.catalog_zoom_slider.maximum(), 200)
+        self.assertEqual(self.window.catalog_zoom_slider.minimum(), 25)
+        self.assertEqual(self.window.catalog_zoom_slider.maximum(), 300)
 
         self.window._catalog_zoom_controller().set_zoom_percent(175, immediate=True)
         self.assertEqual(self.window.catalog_zoom_slider.value(), 175)
         self.window.catalog_zoom_decrease_button.click()
-        self.assertEqual(self.window.catalog_zoom_slider.value(), 170)
+        self.assertEqual(self.window.catalog_zoom_slider.value(), 174)
         self.window.catalog_zoom_increase_button.click()
         self.assertEqual(self.window.catalog_zoom_slider.value(), 175)
         self.window.catalog_zoom_reset_button.click()

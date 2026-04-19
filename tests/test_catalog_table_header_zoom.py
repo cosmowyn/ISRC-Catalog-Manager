@@ -216,21 +216,21 @@ class CatalogZoomControllerTests(unittest.TestCase):
         controller.set_apply_callback(lambda view, percent: applied.append(percent))
         controller.zoom_percent_changed.connect(changed.append)
 
-        self.assertEqual(controller.set_zoom_percent(79, immediate=True), 80)
-        self.assertEqual(controller.step_zoom(3, immediate=True), 95)
-        self.assertEqual(controller.apply_pinch_scale(1.21, immediate=True), 115)
-        self.assertEqual(controller.layout_state(), {CATALOG_ZOOM_LAYOUT_KEY: 115})
+        self.assertEqual(controller.set_zoom_percent(79, immediate=True), 79)
+        self.assertEqual(controller.step_zoom(3, immediate=True), 82)
+        self.assertEqual(controller.apply_pinch_scale(1.21, immediate=True), 99)
+        self.assertEqual(controller.layout_state(), {CATALOG_ZOOM_LAYOUT_KEY: 99})
         self.assertEqual(
             controller.restore_layout_state(
                 {CATALOG_ZOOM_LAYOUT_KEY: 157},
                 immediate=True,
             ),
-            155,
+            157,
         )
         self.assertEqual(controller.on_profile_changed(immediate=True), 100)
 
-        self.assertEqual(applied, [80, 95, 115, 155, 100])
-        self.assertEqual(changed, [80, 95, 115, 155, 100])
+        self.assertEqual(applied, [79, 82, 99, 157, 100])
+        self.assertEqual(changed, [79, 82, 99, 157, 100])
 
     def test_zoom_throttle_coalesces_multiple_updates_to_one_apply(self):
         controller = CatalogZoomController(throttle_ms=40)
