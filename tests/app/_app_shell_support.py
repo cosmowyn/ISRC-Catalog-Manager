@@ -1001,6 +1001,14 @@ class AppShellTestCase(unittest.TestCase):
                 return button
         raise AssertionError(f"Button not found: {text}")
 
+    def _show_add_track_governance_tab(self):
+        tabs = self.window.add_data_tabs
+        governance_index = 0
+        self.assertEqual(tabs.tabText(governance_index), "Governance")
+        tabs.setCurrentIndex(governance_index)
+        self.app.processEvents()
+        self.assertTrue(self.window.add_data_work_context_group.isVisible())
+
     def _menu_by_text(self, text: str):
         for menu in self.window.menuBar().findChildren(app_module.QMenu):
             if menu.title() == text:
@@ -3336,12 +3344,16 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
 
         self.assertFalse(self.window.add_data_dock.isHidden())
-        self.assertTrue(self.window.add_data_work_context_group.isVisible())
+        self.assertEqual(
+            self.window.add_data_tabs.currentIndex(),
+            self.window.add_data_track_tab_index,
+        )
         self.assertEqual(self.window.add_data_title.text(), "Add Track")
         self.assertEqual(self.window.save_button.text(), "Save Governed Track")
         self.assertIn("Docked Parent Work", self.window.add_data_work_context_summary.text())
         self.assertEqual(self.window.track_title_field.text(), "Docked Parent Work")
         self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
+        self._show_add_track_governance_tab()
         relationship_index = self.window.add_data_work_relationship_combo.findData("remix")
         self.assertGreaterEqual(relationship_index, 0)
         self.window.add_data_work_relationship_combo.setCurrentIndex(relationship_index)
@@ -3488,11 +3500,15 @@ class AppShellTestCase(unittest.TestCase):
         work_id = works[0].id
         self.assertEqual(panel._selected_work_id(), work_id)
         self.assertFalse(self.window.add_data_dock.isHidden())
-        self.assertTrue(self.window.add_data_work_context_group.isVisible())
+        self.assertEqual(
+            self.window.add_data_tabs.currentIndex(),
+            self.window.add_data_track_tab_index,
+        )
         self.assertEqual(self.window.add_data_title.text(), "Add Track")
         self.assertIn(
             "Immediate First Track Work", self.window.add_data_work_context_summary.text()
         )
+        self._show_add_track_governance_tab()
         self.assertEqual(self.window.track_title_field.text(), "Immediate First Track Work")
         self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
         context = self.window._current_work_track_context()
