@@ -84,7 +84,7 @@ def _app_version_text() -> str:
             continue
         except Exception:
             break
-    return "3.1.1"
+    return "3.2.0"
 
 
 def _utc_timestamp() -> str:

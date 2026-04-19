@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCalendarWidget,
     QDockWidget,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -35,12 +38,28 @@ from isrc_manager.catalog_table import (
     CATALOG_ZOOM_STEP_PERCENT,
 )
 from isrc_manager.code_registry import CatalogIdentifierField
+from isrc_manager.theme_builder import THEME_METRIC_SPECS_BY_KEY, theme_setting_defaults
 from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
     FocusWheelComboBox,
     FocusWheelSlider,
     TwoDigitSpinBox,
     _create_round_help_button,
+)
+
+_CATALOG_TABLE_TOOLBAR_METRIC_KEYS = (
+    "catalog_toolbar_top_margin",
+    "catalog_toolbar_column_gap",
+    "catalog_toolbar_side_group_extra_width",
+    "catalog_toolbar_group_margin",
+    "catalog_toolbar_group_height",
+    "catalog_toolbar_control_gap",
+    "catalog_toolbar_control_height",
+    "catalog_toolbar_zoom_label_height",
+    "catalog_toolbar_zoom_label_font_size",
+    "catalog_toolbar_zoom_row_gap",
+    "catalog_toolbar_zoom_slider_height",
+    "catalog_toolbar_zoom_step_button_size",
 )
 
 
@@ -58,6 +77,160 @@ def build_main_window_shell(app: Any, *, last_db: str, movable: bool) -> None:
     refresh_boundary = getattr(app, "_queue_top_chrome_boundary_refresh", None)
     if callable(refresh_boundary):
         refresh_boundary()
+
+
+def _catalog_table_toolbar_theme_metrics(
+    app: Any, theme_values: dict[str, object] | None = None
+) -> dict[str, int]:
+    theme: dict[str, object] = dict(theme_values or {})
+    if not theme:
+        effective_theme = getattr(app, "_effective_theme_settings", None)
+        if callable(effective_theme):
+            try:
+                theme = dict(effective_theme() or {})
+            except Exception:
+                theme = {}
+    if not theme:
+        theme = dict(getattr(app, "theme_settings", {}) or {})
+
+    defaults = theme_setting_defaults()
+    metrics: dict[str, int] = {}
+    for key in _CATALOG_TABLE_TOOLBAR_METRIC_KEYS:
+        spec = THEME_METRIC_SPECS_BY_KEY.get(key)
+        fallback = defaults.get(key, spec.default if spec is not None else 0)
+        try:
+            value = int(theme.get(key, fallback))
+        except Exception:
+            value = int(fallback)
+        if spec is not None:
+            value = max(spec.minimum, min(spec.maximum, value))
+        else:
+            value = max(0, value)
+        metrics[key] = value
+    return metrics
+
+
+def _apply_catalog_zoom_value_label_metrics(label: QLabel, *, height: int, font_size: int) -> int:
+    label_font = label.font()
+    label_font.setPixelSize(font_size)
+    label.setFont(label_font)
+    effective_height = max(height, QFontMetrics(label_font).height())
+    label.setMinimumHeight(effective_height)
+    label.setMaximumHeight(effective_height)
+    return effective_height
+
+
+def _catalog_zoom_slider_stack_height(metrics: dict[str, int]) -> int:
+    return max(
+        1,
+        min(
+            metrics["catalog_toolbar_zoom_slider_height"],
+            metrics["catalog_toolbar_zoom_step_button_size"],
+        ),
+    )
+
+
+def _apply_catalog_table_toolbar_theme_metrics(
+    app: Any, theme_values: dict[str, object] | None = None
+) -> None:
+    toolbar_layout = getattr(app, "catalog_table_toolbar_layout", None)
+    if toolbar_layout is None:
+        return
+    metrics = _catalog_table_toolbar_theme_metrics(app, theme_values)
+    group_margin = metrics["catalog_toolbar_group_margin"]
+    control_gap = metrics["catalog_toolbar_control_gap"]
+    control_height = metrics["catalog_toolbar_control_height"]
+    zoom_label_height = metrics["catalog_toolbar_zoom_label_height"]
+    zoom_label_font_size = metrics["catalog_toolbar_zoom_label_font_size"]
+    zoom_step_button_size = metrics["catalog_toolbar_zoom_step_button_size"]
+
+    toolbar_layout.setContentsMargins(0, metrics["catalog_toolbar_top_margin"], 0, 0)
+    toolbar_layout.setHorizontalSpacing(metrics["catalog_toolbar_column_gap"])
+    toolbar_layout.setVerticalSpacing(0)
+
+    for layout_name in ("search_layout", "catalog_info_layout"):
+        layout = getattr(app, layout_name, None)
+        if layout is not None:
+            layout.setContentsMargins(group_margin, group_margin, group_margin, group_margin)
+            layout.setSpacing(control_gap)
+
+    zoom_layout = getattr(app, "catalog_zoom_layout", None)
+    if zoom_layout is not None:
+        zoom_layout.setContentsMargins(group_margin, group_margin, group_margin, group_margin)
+        zoom_layout.setHorizontalSpacing(control_gap)
+        zoom_layout.setVerticalSpacing(0)
+
+    zoom_stack_layout = getattr(app, "catalog_zoom_stack_layout", None)
+    if zoom_stack_layout is not None:
+        zoom_stack_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_stack_layout.setSpacing(metrics["catalog_toolbar_zoom_row_gap"])
+
+    for control_name in (
+        "search_column_combo",
+        "search_field",
+        "search_button",
+        "count_label",
+        "duration_label",
+        "catalog_zoom_reset_button",
+    ):
+        control = getattr(app, control_name, None)
+        if control is not None:
+            control.setMinimumHeight(control_height)
+            control.setMaximumHeight(control_height)
+
+    zoom_value_label = getattr(app, "catalog_zoom_value_label", None)
+    effective_zoom_label_height = zoom_label_height
+    if zoom_value_label is not None:
+        effective_zoom_label_height = _apply_catalog_zoom_value_label_metrics(
+            zoom_value_label,
+            height=zoom_label_height,
+            font_size=zoom_label_font_size,
+        )
+
+    zoom_slider = getattr(app, "catalog_zoom_slider", None)
+    zoom_slider_height = _catalog_zoom_slider_stack_height(metrics)
+    if zoom_slider is not None:
+        zoom_slider.setMinimumHeight(zoom_slider_height)
+        zoom_slider.setMaximumHeight(zoom_slider_height)
+
+    zoom_stack = getattr(app, "catalog_zoom_stack_widget", None)
+    if zoom_stack is not None:
+        zoom_stack_height = max(
+            zoom_step_button_size,
+            effective_zoom_label_height,
+            zoom_slider_height,
+        )
+        zoom_stack.setMinimumHeight(zoom_stack_height)
+        zoom_stack.setMaximumHeight(zoom_stack_height)
+
+    for button_name in ("catalog_zoom_decrease_button", "catalog_zoom_increase_button"):
+        button = getattr(app, button_name, None)
+        if button is not None:
+            button.setFixedSize(zoom_step_button_size, zoom_step_button_size)
+
+    groups = tuple(
+        group
+        for group in (
+            getattr(app, "catalog_search_group", None),
+            getattr(app, "catalog_info_group", None),
+            getattr(app, "catalog_zoom_group", None),
+        )
+        if group is not None
+    )
+    if not groups:
+        return
+    group_height = metrics["catalog_toolbar_group_height"]
+    for group in groups:
+        group.setFixedHeight(group_height)
+
+    side_group_extra_width = metrics["catalog_toolbar_side_group_extra_width"]
+    for group_name in ("catalog_search_group", "catalog_zoom_group"):
+        group = getattr(app, group_name, None)
+        if group is None:
+            continue
+        group.setMinimumWidth(0)
+        base_width = max(group.sizeHint().width(), group.minimumSizeHint().width())
+        group.setMinimumWidth(base_width + side_group_extra_width)
 
 
 def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
@@ -1313,31 +1486,70 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_dock.visibilityChanged.connect(app._on_add_track_dock_visibility_changed)
 
     app.table_panel_widget = QWidget()
+    app.table_panel_widget.setObjectName("catalogTablePanel")
     app.table_panel_widget.setProperty("role", "workspaceCanvas")
+    catalog_toolbar_metrics = _catalog_table_toolbar_theme_metrics(app)
+    catalog_toolbar_group_margin = catalog_toolbar_metrics["catalog_toolbar_group_margin"]
+    catalog_toolbar_control_gap = catalog_toolbar_metrics["catalog_toolbar_control_gap"]
     right_panel = QVBoxLayout(app.table_panel_widget)
     right_panel.setContentsMargins(0, 0, 0, 0)
     right_panel.setSpacing(8)
-    app.search_layout = QHBoxLayout()
+    app.catalog_table_toolbar_layout = QGridLayout()
+    app.catalog_table_toolbar_layout.setContentsMargins(
+        0,
+        catalog_toolbar_metrics["catalog_toolbar_top_margin"],
+        0,
+        0,
+    )
+    app.catalog_table_toolbar_layout.setHorizontalSpacing(
+        catalog_toolbar_metrics["catalog_toolbar_column_gap"]
+    )
+    app.catalog_table_toolbar_layout.setVerticalSpacing(0)
+    for column in range(3):
+        app.catalog_table_toolbar_layout.setColumnStretch(column, 1)
+
+    app.catalog_search_group = QGroupBox("Search")
+    app.catalog_search_group.setObjectName("catalogTableSearchGroup")
+    app.catalog_search_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    app.search_layout = QHBoxLayout(app.catalog_search_group)
+    app.search_layout.setContentsMargins(
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+    )
+    app.search_layout.setSpacing(catalog_toolbar_control_gap)
 
     app.search_column_combo = FocusWheelComboBox()
-    app.search_column_combo.setFixedHeight(25)
     app.search_column_combo.setMinimumWidth(140)
-    app.search_layout.addWidget(app.search_column_combo)
+    app.search_column_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    app.search_layout.addWidget(app.search_column_combo, 0, Qt.AlignVCenter)
 
     app.search_field = QLineEdit()
     app.search_field.setPlaceholderText("Search...")
-    app.search_field.setMinimumHeight(25)
     app.search_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     app.search_button = QPushButton("Reset")
-    app.search_button.setMinimumHeight(25)
+    app.search_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+    app.catalog_info_group = QGroupBox("Catalog Totals")
+    app.catalog_info_group.setObjectName("catalogTableInfoGroup")
+    app.catalog_info_layout = QHBoxLayout(app.catalog_info_group)
+    app.catalog_info_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    app.catalog_info_layout.setContentsMargins(
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+    )
+    app.catalog_info_layout.setSpacing(catalog_toolbar_control_gap)
 
     app.count_label = QLabel("showing: 0 records")
-    app.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    app.count_label.setAlignment(Qt.AlignCenter)
     app.count_label.setMinimumWidth(110)
     app.count_label.setProperty("role", "secondary")
     app.duration_label = QLabel("total: 00:00:00")
-    app.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    app.duration_label.setAlignment(Qt.AlignCenter)
     app.duration_label.setMinimumWidth(130)
     app.duration_label.setProperty("role", "secondary")
 
@@ -1345,33 +1557,161 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.search_column_combo.currentIndexChanged.connect(app._apply_catalog_search_filter)
     app.search_button.clicked.connect(app.reset_search)
 
-    app.search_layout.addWidget(app.search_field)
-    app.search_layout.addWidget(app.count_label, 1)
-    app.search_layout.addWidget(app.duration_label)
-    app.search_layout.addWidget(app.search_button)
+    app.search_layout.addWidget(app.search_field, 1, Qt.AlignVCenter)
+    app.search_layout.addWidget(app.search_button, 0, Qt.AlignVCenter)
+    app.catalog_info_layout.addStretch(1)
+    app.catalog_info_layout.addWidget(app.count_label, 0, Qt.AlignCenter)
+    app.catalog_info_layout.addWidget(app.duration_label, 0, Qt.AlignCenter)
+    app.catalog_info_layout.addStretch(1)
 
-    app.catalog_zoom_label = QLabel("Zoom")
-    app.catalog_zoom_label.setProperty("role", "secondary")
+    app.catalog_zoom_group = QGroupBox("Zoom")
+    app.catalog_zoom_group.setObjectName("catalogTableZoomGroup")
+    app.catalog_zoom_layout = QGridLayout(app.catalog_zoom_group)
+    app.catalog_zoom_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    app.catalog_zoom_layout.setContentsMargins(
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+        catalog_toolbar_group_margin,
+    )
+    app.catalog_zoom_layout.setHorizontalSpacing(catalog_toolbar_control_gap)
+    app.catalog_zoom_layout.setVerticalSpacing(0)
+    app.catalog_zoom_layout.setColumnStretch(0, 0)
+    app.catalog_zoom_layout.setColumnStretch(2, 1)
+    app.catalog_zoom_stack_widget = QWidget(app.catalog_zoom_group)
+    app.catalog_zoom_stack_widget.setObjectName("catalogTableZoomStack")
+    app.catalog_zoom_stack_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    app.catalog_zoom_stack_layout = QGridLayout(app.catalog_zoom_stack_widget)
+    app.catalog_zoom_stack_layout.setContentsMargins(0, 0, 0, 0)
+    app.catalog_zoom_stack_layout.setSpacing(0)
+    app.catalog_zoom_value_label = QLabel(f"{CATALOG_ZOOM_DEFAULT_PERCENT}%")
+    app.catalog_zoom_value_label.setObjectName("catalogTableZoomValueLabel")
+    app.catalog_zoom_value_label.setMinimumWidth(42)
+    app.catalog_zoom_value_label.setAlignment(Qt.AlignCenter)
+    app.catalog_zoom_value_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    app.catalog_zoom_value_label.setProperty("role", "secondary")
+    catalog_zoom_label_height = _apply_catalog_zoom_value_label_metrics(
+        app.catalog_zoom_value_label,
+        height=catalog_toolbar_metrics["catalog_toolbar_zoom_label_height"],
+        font_size=catalog_toolbar_metrics["catalog_toolbar_zoom_label_font_size"],
+    )
+    app.catalog_zoom_value_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+    app.catalog_zoom_decrease_button = QPushButton()
+    app.catalog_zoom_decrease_button.setObjectName("catalogTableZoomDecreaseButton")
+    app.catalog_zoom_decrease_button.setText("-")
+    app.catalog_zoom_decrease_button.setCursor(Qt.PointingHandCursor)
+    app.catalog_zoom_decrease_button.setFixedSize(
+        catalog_toolbar_metrics["catalog_toolbar_zoom_step_button_size"],
+        catalog_toolbar_metrics["catalog_toolbar_zoom_step_button_size"],
+    )
+    app.catalog_zoom_decrease_button.setToolTip("Decrease catalog table zoom.")
+    app.catalog_zoom_decrease_button.clicked.connect(
+        lambda: app._catalog_zoom_controller().step_zoom(-1, immediate=True)
+    )
     app.catalog_zoom_slider = FocusWheelSlider(Qt.Horizontal)
     app.catalog_zoom_slider.setObjectName("catalogTableZoomSlider")
     app.catalog_zoom_slider.setRange(CATALOG_ZOOM_MIN_PERCENT, CATALOG_ZOOM_MAX_PERCENT)
     app.catalog_zoom_slider.setSingleStep(CATALOG_ZOOM_STEP_PERCENT)
     app.catalog_zoom_slider.setPageStep(CATALOG_ZOOM_STEP_PERCENT)
     app.catalog_zoom_slider.setTickInterval(CATALOG_ZOOM_STEP_PERCENT)
-    app.catalog_zoom_slider.setFixedWidth(130)
+    app.catalog_zoom_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    catalog_zoom_slider_height = _catalog_zoom_slider_stack_height(catalog_toolbar_metrics)
+    app.catalog_zoom_slider.setMinimumHeight(catalog_zoom_slider_height)
+    app.catalog_zoom_slider.setMaximumHeight(catalog_zoom_slider_height)
     app.catalog_zoom_slider.setToolTip("Adjust catalog table density without reloading data.")
-    app.catalog_zoom_value_label = QLabel(f"{CATALOG_ZOOM_DEFAULT_PERCENT}%")
-    app.catalog_zoom_value_label.setObjectName("catalogTableZoomValueLabel")
-    app.catalog_zoom_value_label.setMinimumWidth(42)
-    app.catalog_zoom_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    app.catalog_zoom_value_label.setProperty("role", "secondary")
-    app.search_layout.addWidget(app.catalog_zoom_label)
-    app.search_layout.addWidget(app.catalog_zoom_slider)
-    app.search_layout.addWidget(app.catalog_zoom_value_label)
-    app.search_layout.addWidget(
-        _create_round_help_button(app, "catalog-table", "Open help for the catalog table")
+    app.catalog_zoom_stack_widget.setMinimumHeight(
+        max(
+            catalog_toolbar_metrics["catalog_toolbar_zoom_step_button_size"],
+            catalog_zoom_slider_height,
+            catalog_zoom_label_height,
+        )
     )
-    right_panel.addLayout(app.search_layout)
+    app.catalog_zoom_stack_widget.setMaximumHeight(app.catalog_zoom_stack_widget.minimumHeight())
+    app.catalog_zoom_stack_layout.addWidget(
+        app.catalog_zoom_slider,
+        0,
+        0,
+        Qt.AlignVCenter,
+    )
+    app.catalog_zoom_stack_layout.addWidget(
+        app.catalog_zoom_value_label,
+        0,
+        0,
+        Qt.AlignHCenter | Qt.AlignTop,
+    )
+    app.catalog_zoom_increase_button = QPushButton()
+    app.catalog_zoom_increase_button.setObjectName("catalogTableZoomIncreaseButton")
+    app.catalog_zoom_increase_button.setText("+")
+    app.catalog_zoom_increase_button.setCursor(Qt.PointingHandCursor)
+    app.catalog_zoom_increase_button.setFixedSize(
+        catalog_toolbar_metrics["catalog_toolbar_zoom_step_button_size"],
+        catalog_toolbar_metrics["catalog_toolbar_zoom_step_button_size"],
+    )
+    app.catalog_zoom_increase_button.setToolTip("Increase catalog table zoom.")
+    app.catalog_zoom_increase_button.clicked.connect(
+        lambda: app._catalog_zoom_controller().step_zoom(1, immediate=True)
+    )
+    app.catalog_zoom_reset_button = QPushButton("Reset")
+    app.catalog_zoom_reset_button.setObjectName("catalogTableZoomResetButton")
+    app.catalog_zoom_reset_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    app.catalog_zoom_reset_button.setToolTip("Reset catalog table zoom to 100%.")
+    app.catalog_zoom_reset_button.clicked.connect(
+        lambda: app._catalog_zoom_controller().reset_zoom(immediate=True)
+    )
+    app.catalog_zoom_layout.addWidget(app.catalog_zoom_decrease_button, 0, 1, Qt.AlignVCenter)
+    app.catalog_zoom_layout.addWidget(app.catalog_zoom_stack_widget, 0, 2, Qt.AlignVCenter)
+    app.catalog_zoom_layout.addWidget(app.catalog_zoom_increase_button, 0, 3, Qt.AlignVCenter)
+    app.catalog_zoom_layout.addWidget(app.catalog_zoom_reset_button, 0, 4, Qt.AlignVCenter)
+
+    catalog_toolbar_control_height = catalog_toolbar_metrics["catalog_toolbar_control_height"]
+    catalog_toolbar_controls = (
+        app.search_column_combo,
+        app.search_field,
+        app.search_button,
+        app.count_label,
+        app.duration_label,
+        app.catalog_zoom_slider,
+        app.catalog_zoom_reset_button,
+    )
+    for control in catalog_toolbar_controls:
+        control.setMaximumHeight(catalog_toolbar_control_height)
+        control.setMinimumHeight(catalog_toolbar_control_height)
+    app._apply_catalog_table_toolbar_theme_metrics = (
+        lambda theme_values=None: _apply_catalog_table_toolbar_theme_metrics(
+            app,
+            theme_values,
+        )
+    )
+    app._apply_catalog_table_toolbar_theme_metrics()
+
+    app.catalog_table_help_button = _create_round_help_button(
+        app, "catalog-table", "Open help for the catalog table"
+    )
+    app.catalog_table_toolbar_layout.addWidget(
+        app.catalog_search_group,
+        0,
+        0,
+        Qt.AlignLeft | Qt.AlignVCenter,
+    )
+    app.catalog_table_toolbar_layout.addWidget(
+        app.catalog_info_group,
+        0,
+        1,
+        Qt.AlignCenter,
+    )
+    app.catalog_table_toolbar_layout.addWidget(
+        app.catalog_zoom_group,
+        0,
+        2,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
+    app.catalog_table_toolbar_layout.addWidget(
+        app.catalog_table_help_button,
+        0,
+        3,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
+    right_panel.addLayout(app.catalog_table_toolbar_layout)
 
     app.table = QTableView()
     app._initialize_catalog_table_model_view()
@@ -1394,7 +1734,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.table.installEventFilter(app)
     app.table.viewport().installEventFilter(app)
     app.table.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
-    app.table.viewport().grabGesture(Qt.PinchGesture)
+    app._catalog_zoom_gesture_platform = platform.system().lower()
+    if app._catalog_zoom_gesture_platform != "darwin":
+        app.table.viewport().grabGesture(Qt.PinchGesture)
+    app.catalog_set_filter_shortcut = QShortcut(QKeySequence.Find, app.table)
+    app.catalog_set_filter_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+    app.catalog_set_filter_shortcut.activated.connect(app._set_catalog_filter_from_current_cell)
     app._initialize_catalog_zoom_controls()
 
     try:

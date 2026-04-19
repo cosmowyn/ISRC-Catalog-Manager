@@ -37,8 +37,8 @@ from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
     from PySide6.QtCore import QBuffer, QDate, QIODevice, QModelIndex, QPoint, Qt
-    from PySide6.QtGui import QColor, QIcon, QImage, QKeyEvent, QKeySequence
-    from PySide6.QtWidgets import QScrollArea, QTabBar
+    from PySide6.QtGui import QColor, QFontMetrics, QIcon, QImage, QKeyEvent, QKeySequence
+    from PySide6.QtWidgets import QScrollArea, QStyle, QStyleOptionSlider, QTabBar
 
     import ISRC_manager as app_module
     from isrc_manager.qss_reference import collect_qss_reference_entries
@@ -7740,15 +7740,226 @@ class AppShellTestCase(unittest.TestCase):
             native_pinch = _FakeNativeGestureEvent(app_module.Qt.ZoomNativeGesture, 0.1)
             self.assertTrue(self.window.eventFilter(self.window.table.viewport(), native_pinch))
             self.assertTrue(native_pinch.accepted)
-            self.assertEqual(slider.value(), 145)
-            self.assertEqual(label.text(), "145%")
+            self.assertEqual(slider.value(), 143)
+            self.assertEqual(label.text(), "143%")
 
+            self.window._catalog_zoom_gesture_platform = "darwin"
+            mac_generic_pinch = _FakeGestureEvent(_FakePinchGesture(last_scale=1.0, scale=1.1))
+            self.assertFalse(
+                self.window._handle_catalog_zoom_event(
+                    self.window.table.viewport(),
+                    mac_generic_pinch,
+                )
+            )
+            self.assertFalse(mac_generic_pinch.accepted)
+            self.assertEqual(slider.value(), 143)
+
+            self.window._catalog_zoom_gesture_platform = "linux"
             generic_pinch = _FakeGestureEvent(_FakePinchGesture(last_scale=1.0, scale=1.1))
             self.assertTrue(self.window.eventFilter(self.window.table.viewport(), generic_pinch))
             self.assertTrue(generic_pinch.accepted)
-            self.assertEqual(slider.value(), 160)
-            self.assertEqual(label.text(), "160%")
+            self.assertEqual(slider.value(), 157)
+            self.assertEqual(label.text(), "157%")
             controller.flush_pending_apply()
+
+    def case_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell(self):
+        track_id = self._create_track(index=406, title="Shortcut Filter Target")
+        self.window.refresh_table()
+
+        self.assertIsInstance(self.window.catalog_search_group, app_module.QGroupBox)
+        self.assertIsInstance(self.window.catalog_info_group, app_module.QGroupBox)
+        self.assertIsInstance(self.window.catalog_zoom_group, app_module.QGroupBox)
+        self.assertEqual(self.window.search_layout.contentsMargins().left(), 5)
+        self.assertEqual(self.window.catalog_info_layout.contentsMargins().left(), 5)
+        self.assertEqual(self.window.catalog_zoom_layout.contentsMargins().left(), 5)
+        for control in (
+            self.window.search_column_combo,
+            self.window.search_field,
+            self.window.search_button,
+            self.window.count_label,
+            self.window.duration_label,
+            self.window.catalog_zoom_slider,
+            self.window.catalog_zoom_reset_button,
+        ):
+            self.assertEqual(control.maximumHeight(), 20)
+        self.assertEqual(self.window.catalog_zoom_decrease_button.maximumHeight(), 20)
+        self.assertEqual(self.window.catalog_zoom_increase_button.maximumHeight(), 20)
+        self.assertEqual(
+            len(
+                {
+                    self.window.catalog_search_group.height(),
+                    self.window.catalog_info_group.height(),
+                    self.window.catalog_zoom_group.height(),
+                }
+            ),
+            1,
+        )
+        self.assertEqual(self.window.catalog_search_group.height(), 50)
+        self.assertEqual(
+            self.window.search_layout.indexOf(self.window.search_button),
+            self.window.search_layout.indexOf(self.window.search_field) + 1,
+        )
+        self.assertIn(
+            self.window.search_field,
+            self.window.catalog_search_group.findChildren(app_module.QLineEdit),
+        )
+        self.assertIn(
+            self.window.search_column_combo,
+            self.window.catalog_search_group.findChildren(app_module.QComboBox),
+        )
+        self.assertIn(
+            self.window.count_label,
+            self.window.catalog_info_group.findChildren(app_module.QLabel),
+        )
+        self.assertIn(
+            self.window.duration_label,
+            self.window.catalog_info_group.findChildren(app_module.QLabel),
+        )
+        self.assertIs(
+            self.window.catalog_zoom_slider.parentWidget(),
+            self.window.catalog_zoom_stack_widget,
+        )
+        self.assertIs(
+            self.window.catalog_zoom_value_label.parentWidget(),
+            self.window.catalog_zoom_stack_widget,
+        )
+        stack_row, stack_column, _, _ = self.window.catalog_zoom_layout.getItemPosition(
+            self.window.catalog_zoom_layout.indexOf(self.window.catalog_zoom_stack_widget)
+        )
+        self.assertEqual((stack_row, stack_column), (0, 2))
+        self.assertEqual(
+            self.window.catalog_zoom_stack_widget.maximumHeight(),
+            max(
+                self.window.catalog_zoom_decrease_button.maximumHeight(),
+                self.window.catalog_zoom_value_label.maximumHeight(),
+                self.window.catalog_zoom_slider.maximumHeight(),
+            ),
+        )
+        self.assertEqual(self.window.catalog_zoom_value_label.maximumHeight(), 21)
+        self.assertLessEqual(
+            QFontMetrics(self.window.catalog_zoom_value_label.font()).height(),
+            self.window.catalog_zoom_value_label.maximumHeight(),
+        )
+        self.assertEqual(self.window.catalog_zoom_slider.maximumHeight(), 20)
+        self.assertTrue(
+            self.window.catalog_zoom_layout.itemAtPosition(stack_row, 2).alignment()
+            & app_module.Qt.AlignVCenter
+        )
+        for button, column in (
+            (self.window.catalog_zoom_decrease_button, 1),
+            (self.window.catalog_zoom_increase_button, 3),
+            (self.window.catalog_zoom_reset_button, 4),
+        ):
+            button_row, button_column, row_span, column_span = (
+                self.window.catalog_zoom_layout.getItemPosition(
+                    self.window.catalog_zoom_layout.indexOf(button)
+                )
+            )
+            self.assertEqual((button_row, button_column), (stack_row, column))
+            self.assertEqual((row_span, column_span), (1, 1))
+            self.assertTrue(
+                self.window.catalog_zoom_layout.itemAtPosition(stack_row, column).alignment()
+                & app_module.Qt.AlignVCenter
+            )
+        slider_option = QStyleOptionSlider()
+        self.window.catalog_zoom_slider.initStyleOption(slider_option)
+        slider_groove = self.window.catalog_zoom_slider.style().subControlRect(
+            QStyle.CC_Slider,
+            slider_option,
+            QStyle.SC_SliderGroove,
+            self.window.catalog_zoom_slider,
+        )
+        slider_groove_center_y = (
+            self.window.catalog_zoom_stack_widget.y()
+            + self.window.catalog_zoom_slider.y()
+            + slider_groove.center().y()
+        )
+        for button in (
+            self.window.catalog_zoom_decrease_button,
+            self.window.catalog_zoom_increase_button,
+            self.window.catalog_zoom_reset_button,
+        ):
+            self.assertAlmostEqual(
+                button.y() + (button.height() / 2),
+                slider_groove_center_y,
+                delta=1,
+            )
+        self.assertIn(
+            self.window.catalog_zoom_decrease_button,
+            self.window.catalog_zoom_group.findChildren(app_module.QPushButton),
+        )
+        self.assertIn(
+            self.window.catalog_zoom_increase_button,
+            self.window.catalog_zoom_group.findChildren(app_module.QPushButton),
+        )
+        self.assertIn(
+            self.window.catalog_zoom_reset_button,
+            self.window.catalog_zoom_group.findChildren(app_module.QPushButton),
+        )
+        self.assertEqual(self.window.catalog_zoom_slider.minimum(), 50)
+        self.assertEqual(self.window.catalog_zoom_slider.maximum(), 200)
+
+        self.window._catalog_zoom_controller().set_zoom_percent(175, immediate=True)
+        self.assertEqual(self.window.catalog_zoom_slider.value(), 175)
+        self.window.catalog_zoom_decrease_button.click()
+        self.assertEqual(self.window.catalog_zoom_slider.value(), 170)
+        self.window.catalog_zoom_increase_button.click()
+        self.assertEqual(self.window.catalog_zoom_slider.value(), 175)
+        self.window.catalog_zoom_reset_button.click()
+        self._drain_events()
+        self.assertEqual(
+            self.window.catalog_zoom_slider.value(),
+            app_module.CATALOG_ZOOM_DEFAULT_PERCENT,
+        )
+
+        self.window.theme_settings = {
+            **dict(self.window.theme_settings or {}),
+            "catalog_toolbar_control_height": 18,
+            "catalog_toolbar_group_margin": 3,
+            "catalog_toolbar_group_height": 42,
+            "catalog_toolbar_side_group_extra_width": 0,
+            "catalog_toolbar_zoom_step_button_size": 16,
+        }
+        self.window._apply_catalog_table_toolbar_theme_metrics()
+        self.assertEqual(self.window.catalog_search_group.height(), 42)
+        base_search_width = self.window.catalog_search_group.minimumWidth()
+        base_zoom_width = self.window.catalog_zoom_group.minimumWidth()
+
+        self.window.theme_settings = {
+            **dict(self.window.theme_settings or {}),
+            "catalog_toolbar_side_group_extra_width": 160,
+        }
+        self.window._apply_catalog_table_toolbar_theme_metrics()
+        self.assertEqual(self.window.search_layout.contentsMargins().left(), 3)
+        self.assertEqual(self.window.search_field.maximumHeight(), 18)
+        self.assertEqual(self.window.catalog_zoom_slider.maximumHeight(), 16)
+        self.assertEqual(
+            self.window.catalog_zoom_stack_widget.maximumHeight(),
+            max(
+                self.window.catalog_zoom_decrease_button.maximumHeight(),
+                self.window.catalog_zoom_value_label.maximumHeight(),
+                self.window.catalog_zoom_slider.maximumHeight(),
+            ),
+        )
+        self.assertEqual(self.window.catalog_zoom_decrease_button.maximumHeight(), 16)
+        self.assertEqual(self.window.catalog_zoom_increase_button.maximumHeight(), 16)
+        self.assertEqual(self.window.catalog_search_group.minimumWidth(), base_search_width + 160)
+        self.assertEqual(self.window.catalog_zoom_group.minimumWidth(), base_zoom_width + 160)
+
+        shortcut = self.window.catalog_set_filter_shortcut
+        self.assertIs(shortcut.parent(), self.window.table)
+        self.assertEqual(shortcut.context(), app_module.Qt.WidgetWithChildrenShortcut)
+
+        row = self._table_row_for_track_id(track_id)
+        title_column = self._catalog_column_for_header("Track Title")
+        self.assertGreaterEqual(title_column, 0)
+        self._set_current_catalog_cell(row, title_column)
+        self.window.search_field.clear()
+        shortcut.activated.emit()
+        self._drain_events()
+
+        self.assertEqual(self.window.search_field.text(), "Shortcut Filter Target")
+        self.assertEqual(self._visible_track_ids(), [track_id])
 
     def case_catalog_zoom_persists_in_layout_and_resets_on_profile_change(self):
         slider = self.window.catalog_zoom_slider

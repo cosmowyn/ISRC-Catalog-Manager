@@ -1,6 +1,6 @@
 # Build PyInstaller Venv Discovery Handoff
 
-Current product version: `3.1.1`
+Current product version: `3.2.0`
 
 Date: 2026-04-17
 

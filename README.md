@@ -1,6 +1,6 @@
 # ISRC Catalog Manager
 
-Current product version: `3.1.1`
+Current product version: `3.2.0`
 
 ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 

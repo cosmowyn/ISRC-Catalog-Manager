@@ -26,6 +26,9 @@ class AppShellCatalogModelViewTests(AppShellTestCase):
     test_catalog_zoom_slider_wheel_and_pinch_sync_without_data_refresh = (
         AppShellTestCase.case_catalog_zoom_slider_wheel_and_pinch_sync_without_data_refresh
     )
+    test_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell = (
+        AppShellTestCase.case_catalog_table_top_controls_are_grouped_and_shortcut_filters_current_cell
+    )
     test_catalog_zoom_persists_in_layout_and_resets_on_profile_change = (
         AppShellTestCase.case_catalog_zoom_persists_in_layout_and_resets_on_profile_change
     )

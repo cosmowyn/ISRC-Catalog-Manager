@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QAbstractItemView
 
 CATALOG_ZOOM_DEFAULT_PERCENT = 100
-CATALOG_ZOOM_MIN_PERCENT = 80
-CATALOG_ZOOM_MAX_PERCENT = 160
+CATALOG_ZOOM_MIN_PERCENT = 50
+CATALOG_ZOOM_MAX_PERCENT = 200
 CATALOG_ZOOM_STEP_PERCENT = 5
 CATALOG_ZOOM_LAYOUT_KEY = "catalog_zoom_percent"
 
@@ -80,8 +80,12 @@ class CatalogZoomController(QObject):
         zoom_percent: int,
         *,
         immediate: bool = False,
+        snap_to_step: bool = True,
     ) -> int:
-        normalized_zoom_percent = self.normalize_zoom_percent(zoom_percent)
+        if snap_to_step:
+            normalized_zoom_percent = self.normalize_zoom_percent(zoom_percent)
+        else:
+            normalized_zoom_percent = self.clamp_zoom_percent(zoom_percent)
         changed = normalized_zoom_percent != self._zoom_percent
         self._zoom_percent = normalized_zoom_percent
         self._pending_zoom_percent = normalized_zoom_percent
@@ -109,6 +113,7 @@ class CatalogZoomController(QObject):
         return self.set_zoom_percent(
             int(round(self._zoom_percent * factor)),
             immediate=immediate,
+            snap_to_step=False,
         )
 
     def reset_zoom(self, *, immediate: bool = False) -> int:
@@ -148,15 +153,19 @@ class CatalogZoomController(QObject):
         return self.reset_zoom(immediate=immediate)
 
     @staticmethod
-    def normalize_zoom_percent(zoom_percent: int) -> int:
+    def clamp_zoom_percent(zoom_percent: int) -> int:
         try:
             numeric_zoom_percent = int(round(float(zoom_percent)))
         except (TypeError, ValueError):
             numeric_zoom_percent = CATALOG_ZOOM_DEFAULT_PERCENT
-        clamped_zoom_percent = max(
+        return max(
             CATALOG_ZOOM_MIN_PERCENT,
             min(CATALOG_ZOOM_MAX_PERCENT, numeric_zoom_percent),
         )
+
+    @staticmethod
+    def normalize_zoom_percent(zoom_percent: int) -> int:
+        clamped_zoom_percent = CatalogZoomController.clamp_zoom_percent(zoom_percent)
         step_offset = clamped_zoom_percent - CATALOG_ZOOM_MIN_PERCENT
         step_count = int(round(step_offset / CATALOG_ZOOM_STEP_PERCENT))
         return CATALOG_ZOOM_MIN_PERCENT + (step_count * CATALOG_ZOOM_STEP_PERCENT)

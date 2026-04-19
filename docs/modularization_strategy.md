@@ -1,6 +1,6 @@
 # Modularization Strategy
 
-Current product version: `3.1.1`
+Current product version: `3.2.0`
 
 This document explains how the application is being modernized internally without changing its user-facing behavior.
 

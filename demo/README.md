@@ -1,6 +1,6 @@
 # Demo Workspace
 
-Current product version: `3.1.1`
+Current product version: `3.2.0`
 
 This folder contains the reproducible demo tooling for the repository.
 

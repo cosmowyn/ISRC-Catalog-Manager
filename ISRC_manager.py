@@ -7413,7 +7413,7 @@ class App(QMainWindow):
                 continue
             except Exception:
                 break
-        return "3.1.1"
+        return "3.2.0"
 
     def _help_html(self) -> str:
         return render_help_html(
@@ -9887,6 +9887,11 @@ class App(QMainWindow):
             app.setStyleSheet(self._build_theme_stylesheet(safe_values))
         else:
             app.setStyleSheet(self._build_theme_stylesheet(normalized))
+        refresh_catalog_toolbar_metrics = getattr(
+            self, "_apply_catalog_table_toolbar_theme_metrics", None
+        )
+        if callable(refresh_catalog_toolbar_metrics):
+            refresh_catalog_toolbar_metrics(effective)
         task_manager = getattr(self, "background_tasks", None)
         if task_manager is not None and callable(
             getattr(task_manager, "refresh_active_progress_dialogs", None)
@@ -9930,6 +9935,11 @@ class App(QMainWindow):
         app.setStyleSheet(
             str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
         )
+        refresh_catalog_toolbar_metrics = getattr(
+            self, "_apply_catalog_table_toolbar_theme_metrics", None
+        )
+        if callable(refresh_catalog_toolbar_metrics):
+            refresh_catalog_toolbar_metrics(effective)
         task_manager = getattr(self, "background_tasks", None)
         if task_manager is not None and callable(
             getattr(task_manager, "refresh_active_progress_dialogs", None)
@@ -15553,7 +15563,7 @@ class App(QMainWindow):
             controller.flush_pending_apply()
 
     def _sync_catalog_zoom_controls(self, zoom_percent: int) -> None:
-        normalized_zoom = CatalogZoomController.normalize_zoom_percent(zoom_percent)
+        normalized_zoom = CatalogZoomController.clamp_zoom_percent(zoom_percent)
         slider = getattr(self, "catalog_zoom_slider", None)
         if slider is not None:
             previous_state = slider.blockSignals(True)
@@ -15565,6 +15575,12 @@ class App(QMainWindow):
         label = getattr(self, "catalog_zoom_value_label", None)
         if label is not None:
             label.setText(f"{normalized_zoom}%")
+        decrease_button = getattr(self, "catalog_zoom_decrease_button", None)
+        if decrease_button is not None:
+            decrease_button.setEnabled(normalized_zoom > CATALOG_ZOOM_MIN_PERCENT)
+        increase_button = getattr(self, "catalog_zoom_increase_button", None)
+        if increase_button is not None:
+            increase_button.setEnabled(normalized_zoom < CATALOG_ZOOM_MAX_PERCENT)
 
     @staticmethod
     def _scaled_catalog_zoom_font(base_font: QFont, zoom_percent: int) -> QFont:
@@ -15604,7 +15620,7 @@ class App(QMainWindow):
     def _apply_catalog_zoom_to_view(self, view, zoom_percent: int) -> None:
         if view is None:
             return
-        normalized_zoom = CatalogZoomController.normalize_zoom_percent(zoom_percent)
+        normalized_zoom = CatalogZoomController.clamp_zoom_percent(zoom_percent)
         metrics = self._catalog_zoom_base_metrics(view)
         scale = float(normalized_zoom) / 100.0
         horizontal_header = view.horizontalHeader()
@@ -15671,11 +15687,11 @@ class App(QMainWindow):
             value = float(event.value() if hasattr(event, "value") else 0.0)
             if abs(value) < 0.0001:
                 return False
-            self._catalog_zoom_controller().apply_pinch_scale(1.0 + value, immediate=False)
+            self._catalog_zoom_controller().apply_pinch_scale(1.0 + value, immediate=True)
             event.accept()
             return True
         if gesture_type == Qt.SmartZoomNativeGesture:
-            self._catalog_zoom_controller().reset_zoom(immediate=False)
+            self._catalog_zoom_controller().reset_zoom(immediate=True)
             event.accept()
             return True
         return False
@@ -15693,7 +15709,7 @@ class App(QMainWindow):
         factor = scale_factor if abs(last_factor) < 0.0001 else scale_factor / last_factor
         if abs(factor - 1.0) < 0.001:
             return False
-        self._catalog_zoom_controller().apply_pinch_scale(factor, immediate=False)
+        self._catalog_zoom_controller().apply_pinch_scale(factor, immediate=True)
         event.accept()
         return True
 
@@ -15710,6 +15726,11 @@ class App(QMainWindow):
         if event_type == QEvent.NativeGesture:
             return self._handle_catalog_zoom_native_gesture_event(event)
         if event_type == QEvent.Gesture:
+            if (
+                getattr(self, "_catalog_zoom_gesture_platform", platform.system().lower())
+                == "darwin"
+            ):
+                return False
             return self._handle_catalog_zoom_pinch_gesture_event(event)
         return False
 
@@ -16659,6 +16680,25 @@ class App(QMainWindow):
         self.search_column_combo.setCurrentIndex(idx if idx != -1 else 0)
         self.search_column_combo.blockSignals(False)
         self._apply_catalog_search_filter()
+
+    def _set_catalog_filter_text(self, filter_text: str) -> None:
+        clean_text = str(filter_text or "")
+        self.search_field.setText(clean_text)
+
+    def _set_catalog_filter_from_current_cell(self) -> None:
+        table = getattr(self, "table", None)
+        if table is None:
+            return
+        index = table.currentIndex()
+        if not index.isValid():
+            selection_model = table.selectionModel()
+            selected_indexes = (
+                selection_model.selectedIndexes() if selection_model is not None else []
+            )
+            index = selected_indexes[0] if selected_indexes else index
+        if not index.isValid():
+            return
+        self._set_catalog_filter_text(str(index.data(Qt.DisplayRole) or ""))
 
     def _load_catalog_ui_dataset(
         self,
@@ -26136,7 +26176,11 @@ class App(QMainWindow):
         model = index.model()
         cell_text = str(index.data(Qt.DisplayRole) or "")
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
-        act_filter.triggered.connect(lambda: self.search_field.setText(cell_text))
+        act_filter.triggered.connect(
+            lambda _checked=False, filter_text=cell_text: self._set_catalog_filter_text(
+                filter_text
+            )
+        )
         menu.addAction(act_filter)
 
         # Copy actions

@@ -75,6 +75,7 @@ class _ThemeApplyHost(QWidget):
         self.boundary_refresh_count = 0
         self.blob_badge_reset_count = 0
         self.progress_dialog_refresh_count = 0
+        self.catalog_toolbar_theme_payloads = []
         self.menu_bar = QMenuBar(self)
         self.menu_bar.setNativeMenuBar(False)
         self.file_menu = self.menu_bar.addMenu("File")
@@ -85,6 +86,9 @@ class _ThemeApplyHost(QWidget):
 
     def refresh_active_progress_dialogs(self):
         self.progress_dialog_refresh_count += 1
+
+    def _apply_catalog_table_toolbar_theme_metrics(self, payload=None):
+        self.catalog_toolbar_theme_payloads.append(dict(payload or {}))
 
     def _reset_blob_badge_render_cache(self):
         self.blob_badge_reset_count += 1
@@ -139,6 +143,13 @@ class ThemeBuilderTests(unittest.TestCase):
             "progress_fg",
             "progress_chunk_bg",
             "help_button_size",
+            "catalog_toolbar_control_height",
+            "catalog_toolbar_group_margin",
+            "catalog_toolbar_group_height",
+            "catalog_toolbar_side_group_extra_width",
+            "catalog_toolbar_zoom_label_font_size",
+            "catalog_toolbar_zoom_slider_height",
+            "catalog_toolbar_zoom_step_button_size",
             "menu_radius",
         ):
             self.assertIn(key, defaults)
@@ -223,6 +234,10 @@ class ThemeBuilderTests(unittest.TestCase):
                 "accent": "#F97316",
                 "button_bg": "#374151",
                 "button_fg": "#111827",
+                "catalog_toolbar_control_height": 18,
+                "catalog_toolbar_group_margin_top": 4,
+                "catalog_toolbar_zoom_label_font_size": 10,
+                "catalog_toolbar_zoom_step_button_size": 19,
                 "custom_qss": "QLabel#marker { color: #123456; }",
             }
         )
@@ -259,6 +274,12 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn('QToolButton[role="mediaTransportButton"]', stylesheet)
         self.assertIn('QToolButton[role="mediaExportButton"]', stylesheet)
         self.assertIn('QCheckBox[role="mediaToggle"]', stylesheet)
+        self.assertIn("QWidget#catalogTablePanel QGroupBox#catalogTableSearchGroup", stylesheet)
+        self.assertIn("QPushButton#catalogTableZoomDecreaseButton", stylesheet)
+        self.assertIn("margin-top: 4px", stylesheet)
+        self.assertIn("font-size: 10px", stylesheet)
+        self.assertIn("max-height: 18px", stylesheet)
+        self.assertIn("max-width: 19px", stylesheet)
         self.assertIn("QComboBox::drop-down", stylesheet)
         self.assertIn("QComboBox::down-arrow", stylesheet)
         self.assertIn("QComboBox QAbstractItemView", stylesheet)
@@ -854,6 +875,7 @@ class ThemeBuilderTests(unittest.TestCase):
                     "window_bg": "#101820",
                     "window_fg": "#F8FAFC",
                     "accent": "#F97316",
+                    "catalog_toolbar_control_height": 18,
                 }
             )
 
@@ -863,6 +885,10 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(submission["unique_key"], "theme.apply.prepare")
             self.assertEqual(self.app.font().pointSize(), 13)
             self.assertTrue(self.app.styleSheet())
+            self.assertEqual(
+                host.catalog_toolbar_theme_payloads[-1]["catalog_toolbar_control_height"],
+                18,
+            )
             self.assertGreater(host.blob_badge_reset_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
