@@ -62,7 +62,11 @@ def catalog_metadata_to_tags(
             or str(track_values.get("artist_name") or "").strip()
             or None
         ),
-        track_number=int(placement.get("track_number") or 0) or None,
+        track_number=(
+            int(track_values.get("track_number") or 0)
+            or int(placement.get("track_number") or 0)
+            or None
+        ),
         disc_number=int(placement.get("disc_number") or 0) or None,
         genre=str(track_values.get("genre") or "").strip() or None,
         composer=str(track_values.get("composer") or "").strip() or None,

@@ -13,7 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from isrc_manager.file_storage import sanitize_export_basename
+from isrc_manager.file_storage import (
+    common_export_package_name,
+    deduplicate_export_path,
+    export_package_name,
+    sanitize_export_basename,
+)
 from isrc_manager.media.audio_formats import audio_format_profile
 from isrc_manager.tags import AudioTagService, write_catalog_export_tags
 
@@ -160,6 +165,7 @@ class _ManagedItemState:
     track_title: str
     temp_final_path: Path
     final_name: str
+    package_dir_name: str
     derivative_id: str
 
 
@@ -176,13 +182,24 @@ def _sha256_for_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _filename_with_hash_suffix(filename: str, sha256_hex: str) -> str:
-    source = Path(filename)
-    return f"{source.stem}--{sha256_hex[:12]}{source.suffix}"
-
-
 def _zip_filename(batch_public_id: str) -> str:
     return f"audio-export-{batch_public_id}.zip"
+
+
+def _final_audio_filename(base_name: str, suffix: str) -> str:
+    clean_base_name = sanitize_export_basename(base_name, default_stem="track")
+    clean_suffix = str(suffix or "").strip()
+    if clean_suffix and not clean_suffix.startswith("."):
+        clean_suffix = f".{clean_suffix}"
+    return f"{clean_base_name}{clean_suffix}"
+
+
+def _package_dir_name(album_title: str | None) -> str:
+    return export_package_name(album_title, default_stem="Release")
+
+
+def _package_zip_filename(album_titles: list[str | None]) -> str:
+    return f"{common_export_package_name(album_titles, default_stem='Release')}.zip"
 
 
 def _report_progress(
@@ -724,6 +741,9 @@ class ManagedDerivativeExportCoordinator:
                         base_name = sanitize_export_basename(
                             snapshot.track_title or f"track-{track_id}"
                         )
+                        package_dir_name = _package_dir_name(
+                            str(snapshot.album_title or "").strip() or None
+                        )
                         source_ext = output_profile.suffixes[0]
                         converted_path = temp_dir / f"{base_name}{source_ext}"
                         watermarked_path = temp_dir / f"{base_name}.watermarked{source_ext}"
@@ -835,9 +855,12 @@ class ManagedDerivativeExportCoordinator:
                             ),
                         )
                         final_sha256 = _sha256_for_file(finalized_output_path)
-                        final_name = _filename_with_hash_suffix(
-                            f"{base_name}{source_ext}", final_sha256
+                        temp_package_dir = temp_final_dir / package_dir_name
+                        temp_package_dir.mkdir(parents=True, exist_ok=True)
+                        final_temp_path = deduplicate_export_path(
+                            temp_package_dir / _final_audio_filename(base_name, source_ext)
                         )
+                        final_name = final_temp_path.name
                         completed_steps += 1
                         _report_progress(
                             progress_callback,
@@ -866,12 +889,11 @@ class ManagedDerivativeExportCoordinator:
                                 manifest_record.manifest_id if manifest_record is not None else None
                             ),
                             output_size_bytes=int(finalized_output_path.stat().st_size),
-                            filename_hash_suffix=final_sha256[:12],
+                            filename_hash_suffix="",
                             output_mime_type=(
                                 output_profile.mime_types[0] if output_profile.mime_types else None
                             ),
                         )
-                        final_temp_path = temp_final_dir / final_name
                         completed_steps += 1
                         _report_progress(
                             progress_callback,
@@ -888,7 +910,8 @@ class ManagedDerivativeExportCoordinator:
                                 track_id=track_id,
                                 track_title=str(snapshot.track_title or ""),
                                 temp_final_path=final_temp_path,
-                                final_name=final_name,
+                                final_name=final_temp_path.name,
+                                package_dir_name=package_dir_name,
                                 derivative_id=derivative_id,
                             )
                         )
@@ -911,20 +934,32 @@ class ManagedDerivativeExportCoordinator:
                             total_steps=total_steps,
                             message="Packaging ZIP archive…",
                         )
-                        zip_path = destination_root / _zip_filename(batch_public_id)
+                        zip_path = deduplicate_export_path(
+                            destination_root
+                            / _package_zip_filename(
+                                [
+                                    exported_state.package_dir_name
+                                    for exported_state in exported_states
+                                ]
+                            )
+                        )
                         with zipfile.ZipFile(
                             zip_path, "w", compression=zipfile.ZIP_DEFLATED
                         ) as archive:
                             for exported_state in exported_states:
+                                package_member_path = (
+                                    f"{exported_state.package_dir_name}/"
+                                    f"{exported_state.final_name}"
+                                )
                                 archive.write(
                                     exported_state.temp_final_path,
-                                    arcname=exported_state.final_name,
+                                    arcname=package_member_path,
                                 )
                                 self.ledger.update_derivative_artifacts(
                                     exported_state.derivative_id,
                                     managed_file_path=None,
                                     sidecar_path=None,
-                                    package_member_path=exported_state.final_name,
+                                    package_member_path=package_member_path,
                                 )
                         self.ledger.update_batch_completion(
                             batch_id,
@@ -941,7 +976,11 @@ class ManagedDerivativeExportCoordinator:
                             total_steps=total_steps,
                             message="Finalizing managed derivative delivery…",
                         )
-                        final_destination = destination_root / exported_states[0].final_name
+                        final_package_dir = destination_root / exported_states[0].package_dir_name
+                        final_package_dir.mkdir(parents=True, exist_ok=True)
+                        final_destination = deduplicate_export_path(
+                            final_package_dir / exported_states[0].final_name
+                        )
                         shutil.move(str(exported_states[0].temp_final_path), str(final_destination))
                         written_paths.append(str(final_destination))
                         self.ledger.update_derivative_artifacts(

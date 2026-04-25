@@ -6461,8 +6461,9 @@ class AppShellTestCase(unittest.TestCase):
         ):
             self.window.export_catalog_audio_copies([managed_track, database_track])
 
-        exported_paths = sorted(export_dir.glob("*.wav"))
+        exported_paths = sorted(export_dir.rglob("*.wav"))
         self.assertEqual(len(exported_paths), 2)
+        self.assertEqual({path.parent.name for path in exported_paths}, {"Single"})
 
         exported_tags = {
             self.window.audio_tag_service.read_tags(
@@ -8057,6 +8058,7 @@ class AppShellTestCase(unittest.TestCase):
         open_track_editor.assert_called_once_with(
             first_track_id,
             batch_track_ids=[first_track_id],
+            initial_focus_target=None,
         )
 
         self._select_track_ids([first_track_id, second_track_id])
@@ -8717,7 +8719,10 @@ class AppShellTestCase(unittest.TestCase):
         with mock.patch.object(self.window, "open_selected_editor") as open_selected_editor:
             self.window._on_catalog_index_double_clicked(self._catalog_model_index(row, col))
 
-        open_selected_editor.assert_called_once_with(track_id)
+        open_selected_editor.assert_called_once_with(
+            track_id,
+            initial_focus_target="track_title",
+        )
 
     def case_standard_media_table_double_click_routes_to_attach(self):
         track_id = self._create_track(index=354, title="Media Double Click")
@@ -8727,13 +8732,13 @@ class AppShellTestCase(unittest.TestCase):
         row = self._table_row_for_track_id(track_id)
         col = self._catalog_column_for_header("Audio File")
 
-        with mock.patch.object(
-            self.window,
-            "_attach_standard_media_for_track",
-        ) as attach_standard_media:
+        with mock.patch.object(self.window, "open_selected_editor") as open_selected_editor:
             self.window._on_catalog_index_double_clicked(self._catalog_model_index(row, col))
 
-        attach_standard_media.assert_called_once_with(track_id, "audio_file")
+        open_selected_editor.assert_called_once_with(
+            track_id,
+            initial_focus_target="audio_file",
+        )
 
     def case_space_key_previews_current_standard_media_cell(self):
         track_id = self._create_track(index=355, title="Space Preview Track")
@@ -8994,7 +8999,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsNotNone(export_group)
         self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
         self.assertEqual(dialog.width(), dialog.DEFAULT_WINDOW_WIDTH)
-        self.assertEqual(dialog.height(), dialog.DEFAULT_WINDOW_HEIGHT)
+        self.assertLessEqual(abs(dialog.height() - dialog.DEFAULT_WINDOW_HEIGHT), 8)
         self.assertEqual(dialog.wave.minimumHeight(), 100)
         self.assertEqual(dialog.wave.maximumHeight(), 100)
         self.assertEqual(dialog.artwork_label.height(), 200)

@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from isrc_manager.authenticity.crypto import derive_forensic_watermark_key
-from isrc_manager.file_storage import sanitize_export_basename
+from isrc_manager.file_storage import (
+    common_export_package_name,
+    deduplicate_export_path,
+    export_package_name,
+    sanitize_export_basename,
+)
 from isrc_manager.media.audio_formats import audio_format_profile
 from isrc_manager.media.conversion import AudioConversionService
 from isrc_manager.media.derivatives import DerivativeLedgerService
@@ -60,6 +65,7 @@ class _ForensicExportState:
     track_title: str
     temp_final_path: Path
     final_name: str
+    package_dir_name: str
     derivative_id: str
     forensic_export_id: str
 
@@ -94,13 +100,17 @@ def _sha256_for_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _filename_with_hash_suffix(filename: str, sha256_hex: str) -> str:
+def _final_audio_filename(filename: str) -> str:
     source = Path(filename)
-    return f"{source.stem}--{sha256_hex[:12]}{source.suffix}"
+    return f"{sanitize_export_basename(source.stem, default_stem='track')}{source.suffix}"
 
 
-def _zip_filename(batch_public_id: str) -> str:
-    return f"forensic-export-{batch_public_id}.zip"
+def _package_dir_name(album_title: str | None) -> str:
+    return export_package_name(album_title, default_stem="Release")
+
+
+def _package_zip_filename(album_titles: list[str | None]) -> str:
+    return f"{common_export_package_name(album_titles, default_stem='Release')}.zip"
 
 
 def _binding_crc32(
@@ -663,6 +673,9 @@ class ForensicExportCoordinator:
                         base_name = sanitize_export_basename(
                             snapshot.track_title or f"track-{track_id}"
                         )
+                        package_dir_name = _package_dir_name(
+                            str(snapshot.album_title or "").strip() or None
+                        )
                         source_ext = output_profile.suffixes[0]
                         converted_path = temp_dir / f"{base_name}{source_ext}"
                         watermarked_path = temp_dir / f"{base_name}.forensic{source_ext}"
@@ -747,9 +760,12 @@ class ForensicExportCoordinator:
                             message=f"Hashing final output {item_index} of {len(track_ids)}: {snapshot.track_title}",
                         )
                         final_sha256 = _sha256_for_file(watermarked_path)
-                        final_name = _filename_with_hash_suffix(
-                            f"{base_name}{source_ext}", final_sha256
+                        temp_package_dir = temp_final_dir / package_dir_name
+                        temp_package_dir.mkdir(parents=True, exist_ok=True)
+                        final_temp_path = deduplicate_export_path(
+                            temp_package_dir / _final_audio_filename(f"{base_name}{source_ext}")
                         )
+                        final_name = final_temp_path.name
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
@@ -774,7 +790,7 @@ class ForensicExportCoordinator:
                             source_storage_mode=source_handle.storage_mode,
                             authenticity_manifest_id=None,
                             output_size_bytes=int(watermarked_path.stat().st_size),
-                            filename_hash_suffix=final_sha256[:12],
+                            filename_hash_suffix="",
                             output_mime_type=(
                                 output_profile.mime_types[0] if output_profile.mime_types else None
                             ),
@@ -803,7 +819,6 @@ class ForensicExportCoordinator:
                             source_lineage_ref=source_lineage_ref,
                         )
                         forensic_export_ids.append(forensic_export_id)
-                        final_temp_path = temp_final_dir / final_name
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
@@ -818,7 +833,8 @@ class ForensicExportCoordinator:
                                 track_id=track_id,
                                 track_title=str(snapshot.track_title or ""),
                                 temp_final_path=final_temp_path,
-                                final_name=final_name,
+                                final_name=final_temp_path.name,
+                                package_dir_name=package_dir_name,
                                 derivative_id=derivative_id,
                                 forensic_export_id=forensic_export_id,
                             )
@@ -835,14 +851,25 @@ class ForensicExportCoordinator:
                             stage_count=_FORENSIC_STAGE_COUNT,
                             message="Packaging forensic ZIP archive…",
                         )
-                        zip_path = destination_root / _zip_filename(batch_public_id)
+                        zip_path = deduplicate_export_path(
+                            destination_root
+                            / _package_zip_filename(
+                                [
+                                    exported_state.package_dir_name
+                                    for exported_state in exported_states
+                                ]
+                            )
+                        )
                         with zipfile.ZipFile(
                             zip_path, "w", compression=zipfile.ZIP_DEFLATED
                         ) as archive:
                             for exported_state in exported_states:
                                 archive.write(
                                     exported_state.temp_final_path,
-                                    arcname=exported_state.final_name,
+                                    arcname=(
+                                        f"{exported_state.package_dir_name}/"
+                                        f"{exported_state.final_name}"
+                                    ),
                                 )
                         self.derivative_ledger.update_batch_completion(
                             batch_id,
@@ -861,7 +888,11 @@ class ForensicExportCoordinator:
                             stage_count=_FORENSIC_STAGE_COUNT,
                             message="Finalizing forensic export delivery…",
                         )
-                        final_destination = destination_root / exported_states[0].final_name
+                        final_package_dir = destination_root / exported_states[0].package_dir_name
+                        final_package_dir.mkdir(parents=True, exist_ok=True)
+                        final_destination = deduplicate_export_path(
+                            final_package_dir / exported_states[0].final_name
+                        )
                         shutil.move(str(exported_states[0].temp_final_path), str(final_destination))
                         written_paths.append(str(final_destination))
                         self.derivative_ledger.update_batch_completion(

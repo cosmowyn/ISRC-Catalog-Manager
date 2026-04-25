@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 STORAGE_MODE_DATABASE = "database"
@@ -73,6 +74,48 @@ def sanitize_export_basename(value: str | None, *, default_stem: str = "file") -
     clean = _EXPORT_BASENAME_SANITIZE_RE.sub("_", clean)
     clean = _EXPORT_BASENAME_WHITESPACE_RE.sub(" ", clean).strip().rstrip(".")
     return clean or default_stem
+
+
+def export_package_name(value: str | None, *, default_stem: str = "Release") -> str:
+    return sanitize_export_basename(value, default_stem=default_stem)
+
+
+def common_export_package_name(
+    values: Iterable[str | None],
+    *,
+    default_stem: str = "Release",
+    mixed_stem: str = "Selected Releases",
+) -> str:
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = str(value or "").strip()
+        if not clean:
+            continue
+        folded = clean.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        unique_values.append(clean)
+    if len(unique_values) == 1:
+        return export_package_name(unique_values[0], default_stem=default_stem)
+    if unique_values:
+        return export_package_name(mixed_stem, default_stem=default_stem)
+    return export_package_name(default_stem, default_stem=default_stem)
+
+
+def deduplicate_export_path(target_path: str | Path) -> Path:
+    target = Path(target_path)
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    index = 2
+    while True:
+        candidate = target.with_name(f"{stem} ({index}){suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def coalesce_filename(

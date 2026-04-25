@@ -61,6 +61,7 @@ class TaggedAudioExportItem:
     source_suffix: str
     source_path: str | Path | None = None
     source_bytes: bytes | bytearray | memoryview | None = None
+    album_title: str | None = None
 
     def __post_init__(self) -> None:
         if (self.source_path is None) == (self.source_bytes is None):
@@ -74,6 +75,7 @@ class TaggedAudioExportPlanItem:
     suggested_name: str
     source_suffix: str
     source_label: str
+    album_title: str | None = None
 
 
 @dataclass(slots=True)

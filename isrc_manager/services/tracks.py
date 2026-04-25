@@ -12,6 +12,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from mutagen import File as MutagenFile
+except Exception:  # pragma: no cover - optional at runtime in constrained environments
+    MutagenFile = None
+
 from isrc_manager.assets import AssetService
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
@@ -89,6 +94,7 @@ class TrackCreatePayload:
     iswc: str | None
     upc: str | None
     genre: str | None
+    track_number: int | None = None
     catalog_number: str | None = None
     catalog_number_mode: str | None = None
     catalog_registry_entry_id: int | None = None
@@ -121,6 +127,7 @@ class TrackUpdatePayload:
     iswc: str | None
     upc: str | None
     genre: str | None
+    track_number: int | None = None
     catalog_number: str | None = None
     catalog_number_mode: str | None = None
     catalog_registry_entry_id: int | None = None
@@ -162,6 +169,7 @@ class TrackSnapshot:
     publisher: str | None
     comments: str | None
     lyrics: str | None
+    track_number: int | None = None
     catalog_number_mode: str | None = None
     catalog_registry_entry_id: int | None = None
     catalog_external_code_identifier_id: int | None = None
@@ -578,6 +586,14 @@ class TrackService:
     def parse_additional_artists(text: str) -> list[str]:
         parts = [part.strip() for part in (text or "").split(",")]
         return [part for part in parts if part]
+
+    @staticmethod
+    def normalize_track_number(value) -> int | None:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
 
     def get_or_create_artist(self, name: str, *, cursor: sqlite3.Cursor | None = None) -> int:
         name = (name or "").strip()
@@ -1005,6 +1021,12 @@ class TrackService:
         )
         return rel_path, filename, None, mime_type, len(data)
 
+    @staticmethod
+    def _emit_progress(progress_callback, value: int, maximum: int, message: str) -> None:
+        if not callable(progress_callback):
+            return
+        progress_callback(int(value), int(maximum), str(message or ""))
+
     def _build_media_storage_payload_from_bytes(
         self,
         media_key: str,
@@ -1148,6 +1170,38 @@ class TrackService:
 
     def _is_managed_media_path(self, stored_path: str) -> bool:
         return self.media_store.is_managed(stored_path)
+
+    def derive_audio_duration_seconds(self, source_path: str | Path | None) -> int | None:
+        if source_path in (None, "") or MutagenFile is None:
+            return None
+        path = Path(source_path)
+        if not path.exists():
+            return None
+        try:
+            media = MutagenFile(str(path))
+            info = getattr(media, "info", None)
+            duration = getattr(info, "length", None) if info is not None else None
+            if duration is None:
+                return None
+            return max(0, int(round(float(duration))))
+        except Exception:
+            return None
+
+    def _sync_track_length_to_audio_source(
+        self,
+        track_id: int,
+        source_path: str | Path,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> int | None:
+        duration_seconds = self.derive_audio_duration_seconds(source_path)
+        if duration_seconds is None:
+            return None
+        cursor.execute(
+            "UPDATE Tracks SET track_length_sec=? WHERE id=?",
+            (int(duration_seconds), int(track_id)),
+        )
+        return int(duration_seconds)
 
     def _delete_unreferenced_media_files(
         self,
@@ -1562,14 +1616,34 @@ class TrackService:
         media_key: str,
         source_path: str | Path,
         *,
+        sync_track_length: bool = True,
         storage_mode: str | None = None,
+        progress_callback=None,
         cursor: sqlite3.Cursor | None = None,
     ) -> dict[str, str | int | bool]:
         cur = cursor or self.conn.cursor()
+        media_label = "audio file" if media_key == "audio_file" else "artwork file"
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        storage_label = (
+            "database storage" if clean_mode == STORAGE_MODE_DATABASE else "managed storage"
+        )
 
         if media_key == "album_art":
+            total_steps = 5
+            self._emit_progress(
+                progress_callback,
+                0,
+                total_steps,
+                "Preparing artwork attachment...",
+            )
             album_id, album_title = self._fetch_album_context(track_id, cursor=cur)
             if self._album_supports_shared_art(album_id, album_title):
+                self._emit_progress(
+                    progress_callback,
+                    1,
+                    total_steps,
+                    "Checking shared album artwork ownership...",
+                )
                 effective_meta = self.get_media_meta(track_id, media_key, cursor=cur)
                 if self._source_matches_media_meta(
                     media_key,
@@ -1579,8 +1653,20 @@ class TrackService:
                 ):
                     if str(effective_meta.get("owner_scope") or "") == "album":
                         self._clear_album_track_art_references(int(album_id), cursor=cur)
+                    self._emit_progress(
+                        progress_callback,
+                        total_steps,
+                        total_steps,
+                        "Selected artwork is already attached.",
+                    )
                     return effective_meta
                 self._require_direct_album_art_edit(track_id, cursor=cur)
+                self._emit_progress(
+                    progress_callback,
+                    2,
+                    total_steps,
+                    f"Reading the selected {media_label} and writing it to {storage_label}...",
+                )
                 rel_path, filename, blob_data, mime_type, size_bytes = (
                     self._build_media_storage_payload_from_source(
                         media_key,
@@ -1589,6 +1675,12 @@ class TrackService:
                     )
                 )
                 stale_paths = self._collect_album_art_paths_for_album(int(album_id), cursor=cur)
+                self._emit_progress(
+                    progress_callback,
+                    3,
+                    total_steps,
+                    "Updating shared album artwork references...",
+                )
                 self._update_album_art_reference(
                     int(album_id),
                     stored_path=rel_path,
@@ -1599,8 +1691,20 @@ class TrackService:
                     size_bytes=size_bytes,
                     cursor=cur,
                 )
+                self._emit_progress(
+                    progress_callback,
+                    4,
+                    total_steps,
+                    "Refreshing linked album artwork references and cleaning up replaced files...",
+                )
                 self._clear_album_track_art_references(int(album_id), cursor=cur)
                 self._delete_unreferenced_media_files(stale_paths, cursor=cur)
+                self._emit_progress(
+                    progress_callback,
+                    total_steps,
+                    total_steps,
+                    "Artwork attachment complete.",
+                )
                 return self._normalize_media_meta(
                     rel_path,
                     storage_mode,
@@ -1612,6 +1716,22 @@ class TrackService:
                     owner_id=int(album_id),
                 )
 
+        if media_key == "audio_file":
+            total_steps = 6 if bool(sync_track_length) else 5
+        else:
+            total_steps = 4
+        self._emit_progress(
+            progress_callback,
+            0,
+            total_steps,
+            f"Preparing {media_label} attachment...",
+        )
+        self._emit_progress(
+            progress_callback,
+            1,
+            total_steps,
+            f"Reading the selected {media_label} and writing it to {storage_label}...",
+        )
         rel_path, filename, blob_data, mime_type, size_bytes = (
             self._build_media_storage_payload_from_source(
                 media_key,
@@ -1620,6 +1740,12 @@ class TrackService:
             )
         )
         stale_meta = self._get_track_row_media_meta(track_id, media_key, cursor=cur)
+        self._emit_progress(
+            progress_callback,
+            2,
+            total_steps,
+            "Updating the track media reference...",
+        )
         self._update_track_media_reference(
             track_id,
             media_key,
@@ -1632,6 +1758,12 @@ class TrackService:
             cursor=cur,
         )
         if media_key == "audio_file":
+            self._emit_progress(
+                progress_callback,
+                3,
+                total_steps,
+                "Synchronizing the attached audio asset record...",
+            )
             self._sync_audio_asset_attachment(
                 track_id,
                 source_path=source_path,
@@ -1640,7 +1772,32 @@ class TrackService:
                 ),
                 cursor=cur,
             )
+            if bool(sync_track_length):
+                self._emit_progress(
+                    progress_callback,
+                    4,
+                    total_steps,
+                    "Deriving track length from the attached audio file...",
+                )
+                self._sync_track_length_to_audio_source(
+                    track_id,
+                    source_path,
+                    cursor=cur,
+                )
+        cleanup_step = total_steps - 1
+        self._emit_progress(
+            progress_callback,
+            cleanup_step,
+            total_steps,
+            f"Cleaning up replaced {media_label} references...",
+        )
         self._delete_unreferenced_media_files([str(stale_meta.get("path") or "")], cursor=cur)
+        self._emit_progress(
+            progress_callback,
+            total_steps,
+            total_steps,
+            f"{media_label.capitalize()} attachment complete.",
+        )
         return self._normalize_media_meta(
             rel_path,
             storage_mode,
@@ -1800,6 +1957,83 @@ class TrackService:
         ).fetchall()
         return [int(group_track_id) for (group_track_id,) in rows]
 
+    def list_album_group_snapshots(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+        include_media_blobs: bool = False,
+    ) -> list[TrackSnapshot]:
+        cur = cursor or self.conn.cursor()
+        group_track_ids = self.list_album_group_track_ids(track_id, cursor=cur)
+        snapshots: list[TrackSnapshot] = []
+        for group_track_id in group_track_ids:
+            snapshot = self.fetch_track_snapshot(
+                int(group_track_id),
+                cursor=cur,
+                include_media_blobs=include_media_blobs,
+            )
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        snapshots.sort(
+            key=lambda snapshot: (
+                self.normalize_track_number(snapshot.track_number) is None,
+                self.normalize_track_number(snapshot.track_number) or 0,
+                int(snapshot.track_id),
+            )
+        )
+        return snapshots
+
+    def list_album_track_number_conflicts(
+        self,
+        album_title: str | None,
+        track_number: int | None,
+        *,
+        exclude_track_ids: Iterable[int] | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[tuple[int, str]]:
+        clean_album_title = str(album_title or "").strip()
+        normalized_track_number = self.normalize_track_number(track_number)
+        if (
+            is_blank(clean_album_title)
+            or clean_album_title.casefold() == "single"
+            or normalized_track_number is None
+            or "track_number" not in self._track_columns()
+        ):
+            return []
+
+        cur = cursor or self.conn.cursor()
+        exclude_value_set: set[int] = set()
+        for track_id in exclude_track_ids or []:
+            try:
+                normalized_track_id = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_track_id > 0:
+                exclude_value_set.add(normalized_track_id)
+        exclude_values = sorted(exclude_value_set)
+        exclude_sql = ""
+        params: list[object] = [clean_album_title, int(normalized_track_number)]
+        if exclude_values:
+            exclude_sql = f"AND t.id NOT IN ({', '.join('?' for _ in exclude_values)})"
+            params.extend(exclude_values)
+        rows = cur.execute(
+            f"""
+            SELECT t.id, t.track_title
+            FROM Tracks t
+            JOIN Albums al ON al.id = t.album_id
+            WHERE al.title=?
+              AND t.track_number=?
+              {exclude_sql}
+            ORDER BY t.id
+            """,
+            params,
+        ).fetchall()
+        return [
+            (int(conflict_track_id), str(conflict_track_title or "").strip())
+            for conflict_track_id, conflict_track_title in rows
+        ]
+
     def describe_album_art_edit_state(
         self,
         track_id: int,
@@ -1874,6 +2108,7 @@ class TrackService:
         relationship_expr = (
             "t.relationship_type" if "relationship_type" in track_columns else "'original'"
         )
+        track_number_expr = "t.track_number" if "track_number" in track_columns else "NULL"
         catalog_registry_expr = (
             "t.catalog_registry_entry_id"
             if "catalog_registry_entry_id" in track_columns
@@ -1913,6 +2148,7 @@ class TrackService:
                 {main_artist_name_expr},
                 t.buma_work_number,
                 album.title,
+                {track_number_expr},
                 t.release_date,
                 t.track_length_sec,
                 t.iswc,
@@ -1943,7 +2179,7 @@ class TrackService:
         ).fetchone()
         if not row:
             return None
-        main_artist_id = int(row[28]) if row[28] is not None else None
+        main_artist_id = int(row[29]) if row[29] is not None else None
         main_artist_name = self._artist_display_name(main_artist_id, cursor=cur)
         additional_column = "party_id" if self._uses_party_artist_authority() else "artist_id"
         additional_rows = cur.execute(
@@ -1991,22 +2227,23 @@ class TrackService:
                 additional_artist_ids if self._uses_party_artist_authority() else []
             ),
             album_title=row[7],
-            release_date=row[8],
-            track_length_sec=int(row[9] or 0),
-            iswc=row[10],
-            upc=row[11],
-            genre=row[12],
-            composer=row[13],
-            publisher=row[14],
-            comments=row[15],
-            lyrics=row[16],
-            catalog_number_mode=str(row[24] or "").strip() or None,
-            catalog_registry_entry_id=int(row[22]) if row[22] is not None else None,
-            catalog_external_code_identifier_id=int(row[23]) if row[23] is not None else None,
-            external_catalog_identifier_id=int(row[23]) if row[23] is not None else None,
-            work_id=int(row[25]) if row[25] is not None else None,
-            parent_track_id=int(row[26]) if row[26] is not None else None,
-            relationship_type=self._normalize_relationship_type(row[27]),
+            track_number=self.normalize_track_number(row[8]),
+            release_date=row[9],
+            track_length_sec=int(row[10] or 0),
+            iswc=row[11],
+            upc=row[12],
+            genre=row[13],
+            composer=row[14],
+            publisher=row[15],
+            comments=row[16],
+            lyrics=row[17],
+            catalog_number_mode=str(row[25] or "").strip() or None,
+            catalog_registry_entry_id=int(row[23]) if row[23] is not None else None,
+            catalog_external_code_identifier_id=int(row[24]) if row[24] is not None else None,
+            external_catalog_identifier_id=int(row[24]) if row[24] is not None else None,
+            work_id=int(row[26]) if row[26] is not None else None,
+            parent_track_id=int(row[27]) if row[27] is not None else None,
+            relationship_type=self._normalize_relationship_type(row[28]),
             catalog_number=row[4],
             buma_work_number=row[6],
             audio_file_path=str(audio_meta.get("path") or "") or None,
@@ -2106,6 +2343,9 @@ class TrackService:
             snapshot.comments,
             snapshot.lyrics,
         ]
+        if "track_number" in track_columns:
+            update_assignments.append("track_number=?")
+            update_values.append(self.normalize_track_number(snapshot.track_number))
         if "work_id" in track_columns:
             update_assignments.append("work_id=?")
             update_values.append(int(snapshot.work_id) if snapshot.work_id is not None else None)
@@ -2191,6 +2431,9 @@ class TrackService:
                 snapshot.comments,
                 snapshot.lyrics,
             ]
+            if "track_number" in track_columns:
+                insert_columns.append("track_number")
+                insert_values.append(self.normalize_track_number(snapshot.track_number))
             if "work_id" in track_columns:
                 insert_columns.append("work_id")
                 insert_values.append(
@@ -2367,6 +2610,9 @@ class TrackService:
             payload.comments,
             payload.lyrics,
         ]
+        if "track_number" in track_columns:
+            insert_columns.append("track_number")
+            insert_values.append(self.normalize_track_number(payload.track_number))
         if "work_id" in track_columns:
             insert_columns.append("work_id")
             insert_values.append(int(payload.work_id) if payload.work_id is not None else None)
@@ -2402,6 +2648,7 @@ class TrackService:
                 track_id,
                 "audio_file",
                 payload.audio_file_source_path,
+                sync_track_length=int(payload.track_length_sec or 0) <= 0,
                 storage_mode=payload.audio_file_storage_mode,
                 cursor=cur,
             )
@@ -2453,6 +2700,20 @@ class TrackService:
             current_parent_track_id
             if payload.parent_track_id is None
             else int(payload.parent_track_id)
+        )
+        current_track_number = None
+        if "track_number" in track_columns:
+            current_track_number_row = cursor.execute(
+                "SELECT track_number FROM Tracks WHERE id=?",
+                (int(payload.track_id),),
+            ).fetchone()
+            current_track_number = self.normalize_track_number(
+                current_track_number_row[0] if current_track_number_row else None
+            )
+        next_track_number = (
+            current_track_number
+            if payload.track_number is None
+            else self.normalize_track_number(payload.track_number)
         )
         next_relationship_type = (
             current_relationship_type
@@ -2545,6 +2806,9 @@ class TrackService:
             payload.comments,
             payload.lyrics,
         ]
+        if "track_number" in track_columns:
+            update_assignments.append("track_number=?")
+            update_values.append(next_track_number)
         if "work_id" in track_columns:
             update_assignments.append("work_id=?")
             update_values.append(next_work_id)
@@ -2581,6 +2845,7 @@ class TrackService:
                 payload.track_id,
                 "audio_file",
                 payload.audio_file_source_path,
+                sync_track_length=int(payload.track_length_sec or 0) <= 0,
                 storage_mode=payload.audio_file_storage_mode,
                 cursor=cursor,
             )

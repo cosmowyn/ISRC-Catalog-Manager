@@ -140,6 +140,7 @@ class AuthenticityExportPlanItem:
     workflow_kind: str = WORKFLOW_KIND_AUTHENTICITY_MASTER
     status: str = "ready"
     warning: str | None = None
+    album_title: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

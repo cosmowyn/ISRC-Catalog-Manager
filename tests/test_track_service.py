@@ -2,6 +2,8 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
@@ -39,6 +41,7 @@ def make_track_conn():
             main_artist_id INTEGER NOT NULL,
             buma_work_number TEXT,
             album_id INTEGER,
+            track_number INTEGER,
             release_date DATE,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
             iswc TEXT,
@@ -314,6 +317,79 @@ class TrackServiceTests(unittest.TestCase):
         self.assertEqual([name for (name,) in additional], ["New Guest"])
         self.assertTrue(self.service.is_isrc_taken_normalized("nlabc2600002"))
         self.assertFalse(self.service.is_isrc_taken_normalized("NL-ABC-26-99999"))
+
+    def test_track_number_persists_and_can_be_cleared(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00005",
+                track_title="Numbered Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Ordered Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre="Pop",
+                track_number=7,
+            )
+        )
+
+        snapshot = self.service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.track_number, 7)
+        self.assertEqual(
+            self.conn.execute("SELECT track_number FROM Tracks WHERE id=?", (track_id,)).fetchone(),
+            (7,),
+        )
+
+        self.service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
+                isrc="NL-ABC-26-00005",
+                track_title="Numbered Song Updated",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Ordered Album",
+                release_date="2026-03-14",
+                track_length_sec=246,
+                iswc=None,
+                upc=None,
+                genre="Pop",
+            )
+        )
+
+        preserved_snapshot = self.service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(preserved_snapshot)
+        assert preserved_snapshot is not None
+        self.assertEqual(preserved_snapshot.track_number, 7)
+
+        self.service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
+                isrc="NL-ABC-26-00005",
+                track_title="Numbered Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Ordered Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre="Pop",
+                track_number=0,
+            )
+        )
+
+        cleared_snapshot = self.service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(cleared_snapshot)
+        assert cleared_snapshot is not None
+        self.assertIsNone(cleared_snapshot.track_number)
+        self.assertEqual(
+            self.conn.execute("SELECT track_number FROM Tracks WHERE id=?", (track_id,)).fetchone(),
+            (None,),
+        )
 
     def test_create_track_persists_governance_fields_when_schema_supports_it(self):
         enable_governance_schema(self.conn)
@@ -1070,6 +1146,79 @@ class TrackServiceTests(unittest.TestCase):
         prior_bytes, _mime = self.service.asset_service.fetch_asset_bytes(prior_asset.id)
         self.assertEqual(current_bytes, b"RIFFversiontwo")
         self.assertEqual(prior_bytes, b"RIFFversionone")
+
+    def test_set_media_path_updates_track_length_from_audio_duration(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00062",
+                track_title="Duration Synced Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Duration Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        audio_path = self._create_media_file("duration-sync.wav", b"RIFFdurationsync")
+
+        with mock.patch(
+            "isrc_manager.services.tracks.MutagenFile",
+            return_value=SimpleNamespace(info=SimpleNamespace(length=201.6)),
+        ):
+            self.service.set_media_path(track_id, "audio_file", audio_path)
+
+        stored_length = self.conn.execute(
+            "SELECT track_length_sec FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()[0]
+        self.assertEqual(stored_length, 202)
+
+    def test_update_track_keeps_manual_track_length_after_new_audio_selection(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00063",
+                track_title="Manual Length Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Manual Length Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        audio_path = self._create_media_file("manual-length.wav", b"RIFFmanuallength")
+
+        with mock.patch(
+            "isrc_manager.services.tracks.MutagenFile",
+            return_value=SimpleNamespace(info=SimpleNamespace(length=180.2)),
+        ):
+            self.service.update_track(
+                TrackUpdatePayload(
+                    track_id=track_id,
+                    isrc="NL-ABC-26-00063",
+                    track_title="Manual Length Song",
+                    artist_name="Main Artist",
+                    additional_artists=[],
+                    album_title="Manual Length Album",
+                    release_date="2026-03-13",
+                    track_length_sec=321,
+                    iswc=None,
+                    upc=None,
+                    genre=None,
+                    audio_file_source_path=str(audio_path),
+                )
+            )
+
+        stored_length = self.conn.execute(
+            "SELECT track_length_sec FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()[0]
+        self.assertEqual(stored_length, 321)
 
     def test_convert_audio_storage_mode_updates_linked_primary_asset_without_new_version(self):
         audio_path = self._create_media_file("mode-shift.wav", b"RIFFmodeshift")

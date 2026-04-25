@@ -189,7 +189,8 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(exported_tags.track_number, 2)
         self.assertEqual(exported_tags.disc_number, 1)
         self.assertEqual(exported_tags.publisher, "Northern Current")
-        self.assertRegex(output_path.name, r"--[0-9a-f]{12}\.mp3$")
+        self.assertEqual(output_path.name, "Forensic Source.mp3")
+        self.assertEqual(output_path.parent.name, "Forensic Album")
         self.assertEqual(derivative_row[0], "forensic_watermark_export")
         self.assertEqual(derivative_row[1], DERIVATIVE_KIND_FORENSIC_WATERMARKED_COPY)
         self.assertEqual(derivative_row[2], AUTHENTICITY_BASIS_FORENSIC_TRACE)
@@ -249,7 +250,14 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         with zipfile.ZipFile(zip_path) as archive:
             members = sorted(archive.namelist())
         self.assertEqual(len(members), 2)
-        self.assertTrue(all(member.endswith(".mp3") for member in members))
+        self.assertEqual(
+            members,
+            [
+                "Authenticity Tests/Forensic A.mp3",
+                "Authenticity Tests/Forensic B.mp3",
+            ],
+        )
+        self.assertEqual(zip_path.name, "Authenticity Tests.zip")
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM ForensicWatermarkExports").fetchone()[0],
             2,

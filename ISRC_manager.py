@@ -510,6 +510,7 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
+    _configure_standard_form_layout,
     _create_action_button_grid,
     _create_round_help_button,
     _create_scrollable_dialog_content,
@@ -6202,6 +6203,220 @@ class CatalogManagersDialog(QDialog):
         self.panel.refresh()
 
 
+class _AlbumTrackOrderingTable(QTableWidget):
+    orderChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(0, 4, parent)
+        self.setHorizontalHeaderLabels(["Track #", "Track Title", "Artist", "ISRC"])
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(Qt.CopyAction)
+        self.setDragDropMode(QAbstractItemView.DragDrop)
+        self.verticalHeader().setVisible(False)
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+
+    def move_current_row(self, offset: int) -> int | None:
+        source_row = self.currentRow()
+        if source_row < 0:
+            return None
+        destination_row = source_row + int(offset)
+        if destination_row < 0 or destination_row >= self.rowCount():
+            return None
+        return self._move_row(source_row, destination_row)
+
+    def dropEvent(self, event) -> None:
+        if event.source() is not self:
+            event.ignore()
+            return
+        selected_ranges = self.selectedRanges()
+        if not selected_ranges:
+            event.ignore()
+            return
+        event.setDropAction(Qt.CopyAction)
+        source_row = int(selected_ranges[0].topRow())
+        destination_row = self._drop_row_for_event(source_row, event)
+        if destination_row < 0:
+            event.ignore()
+            return
+        moved_row = self._move_row(source_row, destination_row)
+        if moved_row is None:
+            event.accept()
+            return
+        event.acceptProposedAction()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.source() is self:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.source() is self:
+            event.setDropAction(Qt.CopyAction)
+            event.accept()
+            return
+        event.ignore()
+
+    def _drop_row_for_event(self, source_row: int, event) -> int:
+        point = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        row = self.rowAt(point.y())
+        if row < 0:
+            return self.rowCount() - 1
+        indicator = self.dropIndicatorPosition()
+        if indicator == QAbstractItemView.AboveItem:
+            return row - 1 if row > source_row else row
+        if indicator == QAbstractItemView.BelowItem:
+            return row if row > source_row else min(row + 1, self.rowCount() - 1)
+        return row
+
+    def _move_row(self, source_row: int, destination_row: int) -> int | None:
+        if source_row < 0 or source_row >= self.rowCount():
+            return None
+        bounded_destination = max(0, min(int(destination_row), self.rowCount() - 1))
+        if bounded_destination == source_row:
+            return None
+        row_items = [self.takeItem(source_row, column) for column in range(self.columnCount())]
+        self.removeRow(source_row)
+        insert_row = max(0, min(bounded_destination, self.rowCount()))
+        self.insertRow(insert_row)
+        for column, item in enumerate(row_items):
+            if item is not None:
+                self.setItem(insert_row, column, item)
+        self.selectRow(insert_row)
+        self.setCurrentCell(insert_row, 0)
+        self.orderChanged.emit()
+        return insert_row
+
+
+class AlbumTrackOrderingDialog(QDialog):
+    def __init__(self, app, *, album_title: str, snapshots: list[TrackSnapshot], parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.album_title = str(album_title or "").strip()
+        self._snapshots = list(snapshots)
+        self.setObjectName("albumTrackOrderingDialog")
+        self.setWindowTitle("Album Track Ordering")
+        self.setModal(True)
+        self.resize(860, 560)
+        self.setMinimumSize(760, 480)
+        _apply_standard_dialog_chrome(self, "albumTrackOrderingDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Album Track Ordering",
+            subtitle=(
+                "Review the stored album order, move the selected track up or down, "
+                "or drag rows directly before saving the new sequence."
+            ),
+        )
+
+        album_group = QGroupBox("Album", self)
+        album_layout = QFormLayout(album_group)
+        album_layout.setContentsMargins(12, 12, 12, 12)
+        _configure_standard_form_layout(album_layout)
+        album_value = QLabel(self.album_title or "Unnamed Album", album_group)
+        album_value.setWordWrap(True)
+        album_layout.addRow("Album Title", album_value)
+        root.addWidget(album_group)
+
+        table_group = QGroupBox("Album Tracks", self)
+        table_layout = QVBoxLayout(table_group)
+        table_layout.setContentsMargins(12, 12, 12, 12)
+        table_layout.setSpacing(10)
+
+        controls_row = QHBoxLayout()
+        controls_row.setContentsMargins(0, 0, 0, 0)
+        controls_row.setSpacing(8)
+        self.move_up_button = QPushButton("Move Up", table_group)
+        self.move_up_button.clicked.connect(lambda: self._move_selected_row(-1))
+        self.move_down_button = QPushButton("Move Down", table_group)
+        self.move_down_button.clicked.connect(lambda: self._move_selected_row(1))
+        controls_row.addWidget(self.move_up_button)
+        controls_row.addWidget(self.move_down_button)
+        controls_row.addStretch(1)
+        table_layout.addLayout(controls_row)
+
+        self.table = _AlbumTrackOrderingTable(table_group)
+        self.table.orderChanged.connect(self._refresh_row_numbers)
+        self.table.itemSelectionChanged.connect(self._update_button_states)
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_group, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
+            Qt.Horizontal,
+            self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self._populate()
+        _apply_compact_dialog_control_heights(self)
+
+    def ordered_track_ids(self) -> list[int]:
+        ordered_ids: list[int] = []
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                ordered_ids.append(int(item.data(Qt.UserRole)))
+            except (TypeError, ValueError):
+                continue
+        return ordered_ids
+
+    def _populate(self) -> None:
+        self.table.setRowCount(0)
+        for row, snapshot in enumerate(self._snapshots):
+            self.table.insertRow(row)
+            number_item = QTableWidgetItem(str(row + 1))
+            number_item.setTextAlignment(Qt.AlignCenter)
+            number_item.setData(Qt.UserRole, int(snapshot.track_id))
+            title_item = QTableWidgetItem(str(snapshot.track_title or "").strip())
+            artist_item = QTableWidgetItem(str(snapshot.artist_name or "").strip())
+            isrc_item = QTableWidgetItem(str(snapshot.isrc or "").strip())
+            for column, item in enumerate((number_item, title_item, artist_item, isrc_item)):
+                self.table.setItem(row, column, item)
+        if self.table.rowCount() > 0:
+            self.table.selectRow(0)
+            self.table.setCurrentCell(0, 0)
+        self._update_button_states()
+
+    def _refresh_row_numbers(self) -> None:
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None:
+                item.setText(str(row + 1))
+        self._update_button_states()
+
+    def _move_selected_row(self, offset: int) -> None:
+        self.table.move_current_row(int(offset))
+
+    def _update_button_states(self) -> None:
+        current_row = self.table.currentRow()
+        row_count = self.table.rowCount()
+        has_selection = current_row >= 0 and row_count > 0
+        self.move_up_button.setEnabled(has_selection and current_row > 0)
+        self.move_down_button.setEnabled(has_selection and current_row < (row_count - 1))
+
+
 class App(QMainWindow):
     startupReady = Signal()
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
@@ -6209,7 +6424,7 @@ class App(QMainWindow):
 
     def __init__(self, *, startup_feedback: StartupFeedbackProtocol | None = None):
         super().__init__()
-        party_authority_notifier().changed.connect(self._on_party_authority_changed)
+        party_authority_notifier().changed.connect(lambda: self._on_party_authority_changed())
         self.setObjectName("mainWindow")
         configure_qt_application_identity(self)
         self._startup_feedback = startup_feedback
@@ -6222,8 +6437,8 @@ class App(QMainWindow):
         self._startup_ready_emitted = False
         self._startup_catalog_refresh_complete = False
         self._post_ready_startup_tasks_scheduled = False
-        self.startupReady.connect(self.complete_startup_feedback)
-        self.startupReady.connect(self._schedule_post_ready_startup_tasks)
+        self.startupReady.connect(lambda: self.complete_startup_feedback())
+        self.startupReady.connect(lambda: self._schedule_post_ready_startup_tasks())
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
@@ -6259,7 +6474,9 @@ class App(QMainWindow):
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
         self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
         self.background_tasks = BackgroundTaskManager(self)
-        self.background_tasks.task_state_changed.connect(self._on_background_task_state_changed)
+        self.background_tasks.task_state_changed.connect(
+            lambda: self._on_background_task_state_changed()
+        )
         self.background_service_factory = BackgroundAppServiceFactory(
             connection_factory=self.sqlite_connection_factory,
             data_root=self.data_root,
@@ -6342,7 +6559,7 @@ class App(QMainWindow):
         self.image_preview_dialog = None
         self.auto_snapshot_timer = QTimer(self)
         self.auto_snapshot_timer.setSingleShot(False)
-        self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
+        self.auto_snapshot_timer.timeout.connect(lambda: self._on_auto_snapshot_timer())
         self._last_auto_snapshot_marker = None
         self._last_history_budget_warning_signature = None
         self._history_budget_enforcement_scheduled = False
@@ -14088,6 +14305,13 @@ class App(QMainWindow):
                 "action": self.edit_selected_action,
             },
             {
+                "id": "album_track_ordering",
+                "label": "Album Track Ordering",
+                "category": "Edit",
+                "description": "Open the album-scoped ordering workspace for the current selected track.",
+                "action": self.album_track_ordering_action,
+            },
+            {
                 "id": "delete_entry",
                 "label": "Delete Selected",
                 "category": "Edit",
@@ -16606,6 +16830,8 @@ class App(QMainWindow):
         self.additional_artist_field.setCurrentText("")
         self.track_title_field.clear()
         self.album_title_field.setCurrentText("")
+        if hasattr(self, "track_number_field"):
+            self.track_number_field.setValue(1)
         self.audio_file_field.clear()
         self.album_art_field.clear()
         self.release_date_field.setSelectedDate(QDate.currentDate())
@@ -17703,14 +17929,75 @@ class App(QMainWindow):
         )
         return path or ""
 
+    @staticmethod
+    def _set_track_length_widgets(
+        hours_widget,
+        minutes_widget,
+        seconds_widget,
+        total_seconds: int,
+    ) -> None:
+        normalized_seconds = max(0, int(total_seconds or 0))
+        hours = min(99, normalized_seconds // 3600)
+        minutes = (normalized_seconds % 3600) // 60
+        seconds = normalized_seconds % 60
+        for widget, value in (
+            (hours_widget, hours),
+            (minutes_widget, minutes),
+            (seconds_widget, seconds),
+        ):
+            previous_state = widget.blockSignals(True)
+            try:
+                widget.setValue(int(value))
+            finally:
+                widget.blockSignals(previous_state)
+
+    def _apply_audio_duration_to_widgets(
+        self,
+        source_path: str | Path | None,
+        *,
+        hours_widget,
+        minutes_widget,
+        seconds_widget,
+    ) -> int | None:
+        if self.track_service is None:
+            return None
+        duration_seconds = self.track_service.derive_audio_duration_seconds(source_path)
+        if duration_seconds is None:
+            return None
+        self._set_track_length_widgets(
+            hours_widget,
+            minutes_widget,
+            seconds_widget,
+            int(duration_seconds),
+        )
+        return int(duration_seconds)
+
     def _choose_media_into_line_edit(
-        self, media_key: str, line_edit: QLineEdit, *, parent_widget=None
+        self,
+        media_key: str,
+        line_edit: QLineEdit,
+        *,
+        parent_widget=None,
+        hours_widget=None,
+        minutes_widget=None,
+        seconds_widget=None,
     ) -> None:
         path = self._browse_track_media_file(media_key, parent_widget=parent_widget)
         if path:
             line_edit.setText(path)
             if media_key == "audio_file":
                 self._refresh_line_edit_lossy_audio_warning(line_edit)
+                if (
+                    hours_widget is not None
+                    and minutes_widget is not None
+                    and seconds_widget is not None
+                ):
+                    self._apply_audio_duration_to_widgets(
+                        path,
+                        hours_widget=hours_widget,
+                        minutes_widget=minutes_widget,
+                        seconds_widget=seconds_widget,
+                    )
 
     def _replace_additional_artists_for_track(self, track_id: int, names):
         self.track_service.replace_additional_artists(track_id, names, cursor=self.cursor)
@@ -17724,6 +18011,95 @@ class App(QMainWindow):
             exclude_track_id=exclude_track_id,
             cursor=self.cursor,
         )
+
+    @staticmethod
+    def _normalize_track_number_value(value) -> int | None:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
+
+    def _warn_duplicate_track_numbers(
+        self,
+        *,
+        album_title: str | None,
+        planned_rows: list[tuple[int | None, str | None]],
+        exclude_track_ids=None,
+        parent_widget: QWidget | None = None,
+        title: str = "Duplicate Track Numbers",
+        track_service: TrackService | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> None:
+        active_track_service = track_service or self.track_service
+        clean_album_title = str(album_title or "").strip()
+        if (
+            active_track_service is None
+            or is_blank(clean_album_title)
+            or clean_album_title.casefold() == "single"
+        ):
+            return
+
+        normalized_rows: list[tuple[int, str]] = []
+        for index, (track_number, track_title) in enumerate(planned_rows, start=1):
+            normalized_track_number = self._normalize_track_number_value(track_number)
+            if normalized_track_number is None:
+                continue
+            clean_title = str(track_title or "").strip() or f"Track {index}"
+            normalized_rows.append((normalized_track_number, clean_title))
+        if not normalized_rows:
+            return
+
+        batch_duplicates: dict[int, list[str]] = {}
+        for track_number, track_title in normalized_rows:
+            batch_duplicates.setdefault(track_number, []).append(track_title)
+        batch_duplicates = {
+            track_number: titles
+            for track_number, titles in batch_duplicates.items()
+            if len(titles) > 1
+        }
+
+        existing_conflicts: dict[int, list[tuple[int, str]]] = {}
+        for track_number, _track_title in normalized_rows:
+            if track_number in existing_conflicts:
+                continue
+            conflicts = active_track_service.list_album_track_number_conflicts(
+                clean_album_title,
+                track_number,
+                exclude_track_ids=exclude_track_ids,
+                cursor=cursor,
+            )
+            if conflicts:
+                existing_conflicts[track_number] = conflicts
+
+        if not batch_duplicates and not existing_conflicts:
+            return
+
+        lines = [
+            f"Album '{clean_album_title}' has duplicate stored track numbers.",
+            "Saving is still allowed so you can keep adjusting the order freely.",
+        ]
+        if batch_duplicates:
+            lines.append("")
+            lines.append("This save contains duplicates:")
+            for track_number, titles in sorted(batch_duplicates.items()):
+                lines.append(f"- Track {track_number}: {', '.join(titles)}")
+        if existing_conflicts:
+            lines.append("")
+            lines.append("Existing tracks on this album already use these numbers:")
+            for track_number, conflicts in sorted(existing_conflicts.items()):
+                labels = [
+                    f'#{int(track_id)} "{track_title}"'
+                    if str(track_title or "").strip()
+                    else f"#{int(track_id)}"
+                    for track_id, track_title in conflicts
+                ]
+                extra = ""
+                if len(labels) > 4:
+                    extra = f", and {len(labels) - 4} more"
+                lines.append(f"- Track {track_number}: {', '.join(labels[:4])}{extra}")
+
+        QMessageBox.warning(parent_widget or self, title, "\n".join(lines))
 
     # =============================================================================
     # Save / Edit / Delete
@@ -17826,6 +18202,7 @@ class App(QMainWindow):
                 iswc=(iso_iswc or None),
                 upc=(self.upc_field.currentText().strip() or None),
                 genre=(self.genre_field.currentText().strip() or None),
+                track_number=self.track_number_field.value(),
                 catalog_number=(
                     self.catalog_number_field.identifier_value()
                     if hasattr(self.catalog_number_field, "identifier_value")
@@ -17869,6 +18246,14 @@ class App(QMainWindow):
                 payload.work_id = None
                 payload.parent_track_id = None
                 payload.relationship_type = "original"
+            self._warn_duplicate_track_numbers(
+                album_title=payload.album_title,
+                planned_rows=[(payload.track_number, payload.track_title)],
+                parent_widget=self,
+                title="Duplicate Track Number",
+                track_service=self.track_service,
+                cursor=self.cursor,
+            )
             if payload.audio_file_source_path and not self._confirm_lossy_primary_audio_selection(
                 [payload.audio_file_source_path],
                 title="Save Track Media",
@@ -18094,16 +18479,32 @@ class App(QMainWindow):
             inherit_work_context=False,
         )
 
-    def open_track_editor(self, track_id: int, *, batch_track_ids: list[int] | None = None):
+    def open_track_editor(
+        self,
+        track_id: int,
+        *,
+        batch_track_ids: list[int] | None = None,
+        initial_focus_target: str | None = None,
+    ):
         try:
-            dlg = EditDialog(int(track_id), self, batch_track_ids=batch_track_ids)
+            dlg = EditDialog(
+                int(track_id),
+                self,
+                batch_track_ids=batch_track_ids,
+                initial_focus_target=initial_focus_target,
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Edit Track", str(exc))
             return
         dlg.exec()
         self.populate_all_comboboxes()
 
-    def open_selected_editor(self, track_id: int | None = None):
+    def open_selected_editor(
+        self,
+        track_id: int | None = None,
+        *,
+        initial_focus_target: str | None = None,
+    ):
         if isinstance(track_id, bool):
             track_id = None
         if track_id is None:
@@ -18132,20 +18533,272 @@ class App(QMainWindow):
             batch_ids = list(self._catalog_table_controller().selected_track_ids())
             if track_id not in batch_ids:
                 batch_ids = [track_id]
-        self.open_track_editor(int(track_id), batch_track_ids=batch_ids)
+        self.open_track_editor(
+            int(track_id),
+            batch_track_ids=batch_ids,
+            initial_focus_target=initial_focus_target,
+        )
+
+    def _current_catalog_context_track_id(self) -> int | None:
+        controller = self._catalog_table_controller()
+        track_id = controller.current_track_id()
+        if track_id is not None:
+            return int(track_id)
+        selected_ids = list(controller.selected_track_ids())
+        if selected_ids:
+            return int(selected_ids[0])
+        return None
+
+    def open_album_track_ordering_dialog(self, track_id: int | None = None) -> None:
+        if self.track_service is None or self.conn is None:
+            QMessageBox.warning(self, "Album Track Ordering", "Open a profile first.")
+            return
+        if isinstance(track_id, bool):
+            track_id = None
+        if track_id is None:
+            track_id = self._current_catalog_context_track_id()
+        try:
+            resolved_track_id = int(track_id or 0)
+        except (TypeError, ValueError):
+            resolved_track_id = 0
+        if resolved_track_id <= 0:
+            QMessageBox.information(
+                self,
+                "Album Track Ordering",
+                "Select a catalog row that belongs to an album first.",
+            )
+            return
+
+        try:
+            album_snapshots = self.track_service.list_album_group_snapshots(
+                resolved_track_id,
+                include_media_blobs=False,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Album Track Ordering", str(exc))
+            return
+
+        if not album_snapshots:
+            QMessageBox.information(
+                self,
+                "Album Track Ordering",
+                "The selected track is not part of a saved album group.",
+            )
+            return
+
+        album_title = str(album_snapshots[0].album_title or "").strip() or "Unnamed Album"
+        dialog = AlbumTrackOrderingDialog(
+            self,
+            album_title=album_title,
+            snapshots=album_snapshots,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        ordered_track_ids = dialog.ordered_track_ids()
+        current_order = [int(snapshot.track_id) for snapshot in album_snapshots]
+        order_already_sequential = all(
+            self._normalize_track_number_value(snapshot.track_number) == index
+            for index, snapshot in enumerate(album_snapshots, start=1)
+        )
+        if not ordered_track_ids or (
+            ordered_track_ids == current_order and order_already_sequential
+        ):
+            if self.statusBar() is not None:
+                self.statusBar().showMessage("Album track order unchanged.", 4000)
+            return
+
+        profile_name = self._current_profile_name()
+        refresh_request = self._capture_catalog_refresh_request(focus_id=resolved_track_id)
+
+        def _worker(bundle, ctx):
+            total_tracks = max(1, len(ordered_track_ids))
+            reorder_progress = self._scaled_progress_callback(
+                ctx.report_progress,
+                start=4,
+                end=44,
+            )
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Preparing album track ordering update...",
+            )
+
+            def _mutation():
+                with bundle.conn:
+                    cur = bundle.conn.cursor()
+                    for index, ordered_track_id in enumerate(ordered_track_ids, start=1):
+                        reorder_progress(
+                            index - 1,
+                            total_tracks,
+                            f"Saving reordered track {index} of {total_tracks}...",
+                        )
+                        snapshot = bundle.track_service.fetch_track_snapshot(
+                            int(ordered_track_id),
+                            cursor=cur,
+                            include_media_blobs=False,
+                        )
+                        if snapshot is None:
+                            raise ValueError(f"Track {int(ordered_track_id)} could not be loaded.")
+                        payload = TrackUpdatePayload(
+                            track_id=int(snapshot.track_id),
+                            isrc=snapshot.isrc,
+                            track_title=snapshot.track_title,
+                            artist_name=snapshot.artist_name,
+                            additional_artists=list(snapshot.additional_artists),
+                            album_title=snapshot.album_title,
+                            release_date=snapshot.release_date,
+                            track_length_sec=int(snapshot.track_length_sec or 0),
+                            iswc=snapshot.iswc,
+                            upc=snapshot.upc,
+                            genre=snapshot.genre,
+                            track_number=index,
+                            catalog_number=snapshot.catalog_number,
+                            catalog_number_mode=snapshot.catalog_number_mode,
+                            catalog_registry_entry_id=snapshot.catalog_registry_entry_id,
+                            catalog_external_code_identifier_id=(
+                                snapshot.catalog_external_code_identifier_id
+                            ),
+                            external_catalog_identifier_id=snapshot.external_catalog_identifier_id,
+                            buma_work_number=snapshot.buma_work_number,
+                            composer=snapshot.composer,
+                            publisher=snapshot.publisher,
+                            comments=snapshot.comments,
+                            lyrics=snapshot.lyrics,
+                            work_id=snapshot.work_id,
+                            parent_track_id=snapshot.parent_track_id,
+                            relationship_type=snapshot.relationship_type,
+                            audio_file_source_path=None,
+                            album_art_source_path=None,
+                            clear_audio_file=False,
+                            clear_album_art=False,
+                        )
+                        bundle.track_service.update_track(payload, cursor=cur)
+                        reorder_progress(
+                            index,
+                            total_tracks,
+                            f"Saved reordered track {index} of {total_tracks}.",
+                        )
+                    ctx.report_progress(
+                        value=48,
+                        maximum=100,
+                        message="Synchronizing release records for the reordered album...",
+                    )
+                    release_ids = self._sync_releases_for_tracks(
+                        ordered_track_ids,
+                        cursor=cur,
+                        track_service=bundle.track_service,
+                        release_service=bundle.release_service,
+                        profile_name=profile_name,
+                    )
+                    return {
+                        "release_ids": list(release_ids),
+                        "track_ids": list(ordered_track_ids),
+                    }
+
+            result_payload = run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=f"Album Track Ordering: {album_title}",
+                action_type="track.album_order.update",
+                entity_type="Album",
+                entity_id=album_title,
+                payload={
+                    "album_title": album_title,
+                    "track_ids": list(ordered_track_ids),
+                },
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(56, "Capturing album-order history snapshot..."),
+                record_progress=(64, "Recording album-order history..."),
+                logger=self.logger,
+            )
+            ctx.report_progress(
+                value=68,
+                maximum=100,
+                message="Loading refreshed catalog rows, media badges, and lookup values...",
+            )
+            result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                bundle,
+                ctx,
+                progress_start=70,
+                progress_end=92,
+            )
+            return result_payload
+
+        def _before_cleanup(result_payload: dict[str, object], ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._apply_catalog_refresh_request(
+                dict(result_payload.get("dataset") or {}),
+                refresh_request,
+                progress_callback=self._scaled_ui_progress_callback(
+                    ui_progress,
+                    start=95,
+                    end=99,
+                ),
+            )
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Album track ordering saved and catalog UI is ready.",
+            )
+
+        def _after_cleanup(result_payload: dict[str, object]) -> None:
+            release_ids = list(result_payload.get("release_ids") or [])
+            self.populate_all_comboboxes()
+            self._refresh_catalog_workspace_docks()
+            self._log_event(
+                "track.album_order.update",
+                "Updated album track ordering",
+                album_title=album_title,
+                track_ids=list(ordered_track_ids),
+                release_ids=release_ids,
+            )
+            if self.statusBar() is not None:
+                self.statusBar().showMessage(
+                    f'Updated album track ordering for "{album_title}".',
+                    5000,
+                )
+
+        self._submit_background_bundle_task(
+            title="Album Track Ordering",
+            description="Saving album track ordering...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"track.album_order.update.{album_title.strip().casefold()}",
+            owner=self,
+            worker_completion_progress=(94, "Finalizing background album order update..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                "Album Track Ordering",
+                failure,
+                user_message="Could not save the album track order:",
+            ),
+        )
 
     def edit_entry(self, item):
         row_idx = item.row()
+        column_idx = item.column() if hasattr(item, "column") else 0
         model = self.table.model()
-        track_id = (
-            self._catalog_table_controller().track_id_for_index(model.index(int(row_idx), 0))
-            if model is not None
-            else None
+        controller = self._catalog_table_controller()
+        index = model.index(int(row_idx), int(column_idx)) if model is not None else None
+        track_id = controller.track_id_for_index(index) if index is not None else None
+        cell_target = controller.cell_target(
+            index,
+            base_column_count=len(self.BASE_HEADERS),
+            custom_fields=self.active_custom_fields,
         )
         if track_id is None:
             QMessageBox.warning(self, "Edit Track", "Could not determine the selected track.")
             return
-        self.open_selected_editor(track_id)
+        self.open_selected_editor(
+            track_id,
+            initial_focus_target=self._catalog_editor_focus_target(cell_target),
+        )
 
     def open_gs1_dialog(self, track_id: int | None = None):
         if isinstance(track_id, bool):
@@ -18665,6 +19318,12 @@ class App(QMainWindow):
         if media_key == "audio_file":
             self.audio_file_field.setText(str(source_path or ""))
             self._refresh_line_edit_lossy_audio_warning(self.audio_file_field)
+            self._apply_audio_duration_to_widgets(
+                source_path,
+                hours_widget=self.track_len_h,
+                minutes_widget=self.track_len_m,
+                seconds_widget=self.track_len_s,
+            )
         else:
             self.album_art_field.setText(str(source_path or ""))
         self.track_title_field.setFocus()
@@ -19014,14 +19673,29 @@ class App(QMainWindow):
                 (existing_summary.tracks if existing_summary is not None else []) or []
             )
         }
-        for sequence_number, snapshot in enumerate(snapshots, start=1):
+        ordered_snapshots = sorted(
+            enumerate(snapshots, start=1),
+            key=lambda item: (
+                self._normalize_track_number_value(item[1].track_number) or int(item[0]),
+                int(item[0]),
+            ),
+        )
+        for sequence_number, (_original_position, snapshot) in enumerate(
+            ordered_snapshots,
+            start=1,
+        ):
             existing = existing_placements.get(snapshot.track_id)
             placements.append(
                 ReleaseTrackPlacement(
                     track_id=snapshot.track_id,
                     disc_number=int(existing.disc_number if existing is not None else 1),
                     track_number=int(
-                        existing.track_number if existing is not None else sequence_number
+                        existing.track_number
+                        if existing is not None
+                        else (
+                            self._normalize_track_number_value(snapshot.track_number)
+                            or sequence_number
+                        )
                     ),
                     sequence_number=sequence_number,
                 )
@@ -22133,8 +22807,7 @@ class App(QMainWindow):
 
     @staticmethod
     def _tagged_audio_export_name(track_id: int, track_title: str | None) -> str:
-        safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", track_title or f"track_{track_id}").strip("_")
-        return f"{track_id:05d}_{safe_title or 'track'}"
+        return sanitize_export_basename(track_title or f"track_{track_id}", default_stem="track")
 
     def _prepare_tagged_audio_export_preview(
         self,
@@ -22196,6 +22869,7 @@ class App(QMainWindow):
                     suggested_name=self._tagged_audio_export_name(track_id, snapshot.track_title),
                     source_suffix=source_suffix,
                     source_label=source_label,
+                    album_title=str(snapshot.album_title or "").strip() or None,
                 )
             )
             preview_rows.extend(
@@ -22263,6 +22937,7 @@ class App(QMainWindow):
                         tag_data=tag_data,
                         source_path=resolved,
                         source_suffix=plan_item.source_suffix,
+                        album_title=plan_item.album_title,
                     )
                 )
                 continue
@@ -22280,6 +22955,7 @@ class App(QMainWindow):
                     tag_data=tag_data,
                     source_bytes=audio_bytes,
                     source_suffix=plan_item.source_suffix,
+                    album_title=plan_item.album_title,
                 )
             )
 
@@ -22319,6 +22995,10 @@ class App(QMainWindow):
                 handle.close()
 
         try:
+            next_track_number = snapshot.track_number
+            incoming_track_number = values.get("track_number")
+            if incoming_track_number not in (None, ""):
+                next_track_number = self._normalize_track_number_value(incoming_track_number)
             payload = TrackUpdatePayload(
                 track_id=track_id,
                 isrc=str(values.get("isrc") or snapshot.isrc or "").strip(),
@@ -22332,6 +23012,7 @@ class App(QMainWindow):
                 iswc=snapshot.iswc,
                 upc=str(values.get("upc") or snapshot.upc or "").strip() or None,
                 genre=str(values.get("genre") or snapshot.genre or "").strip() or None,
+                track_number=next_track_number,
                 catalog_number=snapshot.catalog_number,
                 buma_work_number=snapshot.buma_work_number,
                 composer=str(values.get("composer") or snapshot.composer or "").strip() or None,
@@ -25910,6 +26591,16 @@ class App(QMainWindow):
     # ============================================================
     # Double-click editing: base vs custom fields
     # ============================================================
+    @staticmethod
+    def _catalog_editor_focus_target(cell_target) -> str | None:
+        if cell_target is None or getattr(cell_target, "kind", "") != "standard":
+            return None
+        media_key = str(getattr(cell_target, "standard_media_key", "") or "").strip()
+        if media_key:
+            return media_key
+        standard_field_key = str(getattr(cell_target, "standard_field_key", "") or "").strip()
+        return standard_field_key or None
+
     def _on_catalog_index_double_clicked(self, index):
         controller = self._catalog_table_controller()
         cell_target = controller.cell_target(
@@ -25919,15 +26610,13 @@ class App(QMainWindow):
         )
         track_id = cell_target.track_id
         if cell_target.kind == "standard":
-            if cell_target.standard_media_key:
-                if track_id is None:
-                    return
-                self._attach_standard_media_for_track(track_id, cell_target.standard_media_key)
-                return
             if track_id is None:
                 QMessageBox.warning(self, "Edit Track", "Could not determine the selected track.")
                 return
-            self.open_selected_editor(track_id)
+            self.open_selected_editor(
+                track_id,
+                initial_focus_target=self._catalog_editor_focus_target(cell_target),
+            )
             return
 
         field = cell_target.custom_field
@@ -26089,6 +26778,13 @@ class App(QMainWindow):
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
         menu.addAction(act_edit)
+
+        if track_id:
+            act_album_track_order = QAction("Album Track Ordering", self)
+            act_album_track_order.triggered.connect(
+                lambda _checked=False, tid=track_id: self.open_album_track_ordering_dialog(tid)
+            )
+            menu.addAction(act_album_track_order)
 
         act_gs1 = QAction("GS1 Metadata…", self)
         act_gs1.triggered.connect(lambda tid=track_id: self.open_gs1_dialog(tid))
@@ -27911,25 +28607,106 @@ class App(QMainWindow):
             action_label="Attaching this audio file",
         ):
             return
+        refresh_request = self._capture_catalog_refresh_request(focus_id=int(track_id))
         try:
-            self._run_snapshot_history_action(
-                action_label=f"Attach {header_label}",
-                action_type=f"track.{media_key}.attach",
-                entity_type="Track",
-                entity_id=track_id,
-                payload={
-                    "track_id": track_id,
-                    "media_key": media_key,
-                    "storage_mode": storage_mode,
-                },
-                mutation=lambda: self.track_set_media(
-                    track_id,
-                    media_key,
-                    path,
-                    storage_mode=storage_mode,
+            def _worker(bundle, ctx):
+                attach_progress = self._scaled_progress_callback(
+                    ctx.report_progress,
+                    start=6,
+                    end=74,
+                )
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message=f"Preparing {header_label.lower()} attachment...",
+                )
+
+                def _mutation():
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        bundle.track_service.set_media_path(
+                            int(track_id),
+                            media_key,
+                            path,
+                            storage_mode=storage_mode,
+                            progress_callback=attach_progress,
+                            cursor=cur,
+                        )
+                    return {"track_id": int(track_id)}
+
+                result_payload = run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Attach {header_label}",
+                    action_type=f"track.{media_key}.attach",
+                    entity_type="Track",
+                    entity_id=int(track_id),
+                    payload={
+                        "track_id": int(track_id),
+                        "media_key": media_key,
+                        "storage_mode": storage_mode,
+                    },
+                    mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(80, f"Capturing {header_label.lower()} history snapshot..."),
+                    record_progress=(88, f"Recording {header_label.lower()} history..."),
+                    logger=self.logger,
+                )
+                ctx.report_progress(
+                    value=92,
+                    maximum=100,
+                    message="Loading refreshed catalog rows, media badges, and lookup values...",
+                )
+                result_payload["dataset"] = self._load_catalog_ui_dataset_from_bundle(
+                    bundle,
+                    ctx,
+                    progress_start=93,
+                    progress_end=98,
+                )
+                return result_payload
+
+            def _before_cleanup(result_payload: dict[str, object], ui_progress) -> None:
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._apply_catalog_refresh_request(
+                    dict(result_payload.get("dataset") or {}),
+                    refresh_request,
+                    progress_callback=self._scaled_ui_progress_callback(
+                        ui_progress,
+                        start=99,
+                        end=99,
+                    ),
+                )
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message=f"{header_label} attached and catalog UI is ready.",
+                )
+
+            def _after_cleanup(_result_payload: dict[str, object]) -> None:
+                self._refresh_history_actions()
+                if self.statusBar() is not None:
+                    self.statusBar().showMessage(
+                        f"Attached {header_label.lower()} to track {int(track_id)}.",
+                        5000,
+                    )
+
+            self._submit_background_bundle_task(
+                title=f"Attach {header_label}",
+                description=f"Attaching the selected {header_label.lower()} to the track...",
+                task_fn=_worker,
+                kind="write",
+                unique_key=f"track.{media_key}.attach.{int(track_id)}",
+                owner=self,
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_after_cleanup,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Track Media Error",
+                    failure,
+                    user_message="Failed to attach file:",
                 ),
             )
-            self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
             self.conn.rollback()
             self.logger.exception(f"Attach {media_key} failed: {e}")
@@ -29518,6 +30295,8 @@ class _AlbumTrackSection(QWidget):
         self.dialog = dialog
         self.app = dialog.app
         self._display_title = ""
+        self._track_number_dirty = False
+        self._setting_track_number_default = False
         self.setObjectName("albumTrackSection")
         self.setProperty("role", "tabPaneCanvas")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -29637,6 +30416,12 @@ class _AlbumTrackSection(QWidget):
         self.additional_artists.setCurrentText("")
         self._add_labeled_widget(details_layout, "Additional Artists", self.additional_artists)
 
+        self.track_number_field = FocusWheelSpinBox()
+        self.track_number_field.setRange(1, 9999)
+        self.track_number_field.valueChanged.connect(self._handle_track_number_changed)
+        self.dialog._apply_input_height(self.track_number_field)
+        self._add_labeled_widget(details_layout, "Track Number", self.track_number_field)
+
         self.release_date = QLineEdit()
         self.release_date.setReadOnly(True)
         self.release_date.setPlaceholderText("No release date selected")
@@ -29725,7 +30510,12 @@ class _AlbumTrackSection(QWidget):
         self.dialog._apply_button_height(self.audio_browse_button)
         self.audio_browse_button.clicked.connect(
             lambda: self.app._choose_media_into_line_edit(
-                "audio_file", self.audio_file, parent_widget=self.dialog
+                "audio_file",
+                self.audio_file,
+                parent_widget=self.dialog,
+                hours_widget=self.len_h,
+                minutes_widget=self.len_m,
+                seconds_widget=self.len_s,
             )
         )
         self.audio_clear_button = QPushButton("Clear")
@@ -29770,9 +30560,20 @@ class _AlbumTrackSection(QWidget):
 
     def set_track_number(self, number: int) -> None:
         self._display_title = f"Track {int(number):02d}"
+        if not self._track_number_dirty:
+            previous_state = self.track_number_field.blockSignals(True)
+            self._setting_track_number_default = True
+            try:
+                self.track_number_field.setValue(max(1, int(number)))
+            finally:
+                self._setting_track_number_default = False
+                self.track_number_field.blockSignals(previous_state)
 
     def title(self) -> str:
         return self._display_title
+
+    def track_number_value(self) -> int:
+        return max(1, int(self.track_number_field.value() or 1))
 
     def set_release_date_iso(self, iso_date: str | None) -> None:
         clean_value = str(iso_date or "").strip()
@@ -29956,6 +30757,11 @@ class _AlbumTrackSection(QWidget):
         )
         if dlg.exec() == QDialog.Accepted:
             self.set_release_date_iso(dlg.selected_iso())
+
+    def _handle_track_number_changed(self, _value: int) -> None:
+        if self._setting_track_number_default:
+            return
+        self._track_number_dirty = True
 
 
 class AlbumEntryDialog(QDialog):
@@ -30574,6 +31380,7 @@ class AlbumEntryDialog(QDialog):
                     iswc=(iso_iswc or None),
                     upc=(upc_raw or None),
                     genre=genre,
+                    track_number=section.track_number_value(),
                     catalog_number=catalog_number,
                     catalog_number_mode=(
                         self.catalog_number.identifier_mode()
@@ -30610,6 +31417,14 @@ class AlbumEntryDialog(QDialog):
                 )
             )
 
+        self.app._warn_duplicate_track_numbers(
+            album_title=album_title,
+            planned_rows=[(payload.track_number, payload.track_title) for payload in payloads],
+            parent_widget=self,
+            title="Duplicate Album Track Numbers",
+            track_service=self.app.track_service,
+            cursor=self.app.cursor,
+        )
         return payloads
 
     def save_album(self) -> None:
@@ -30778,6 +31593,7 @@ class EditDialog(QDialog):
         "isrc",
         "iswc",
         "track_title",
+        "track_number",
         "audio_file",
         "track_length_sec",
         "buma_work_number",
@@ -30793,15 +31609,23 @@ class EditDialog(QDialog):
     }
     BULK_MIXED_TOOLTIP = "Selected records currently have different values. Replace this field to update every selected record."
 
-    def __init__(self, track_id: int, parent: App, batch_track_ids: list[int] | None = None):
+    def __init__(
+        self,
+        track_id: int,
+        parent: App,
+        batch_track_ids: list[int] | None = None,
+        initial_focus_target: str | None = None,
+    ):
         super().__init__(parent)
         self.parent = parent
         self.track_id = int(track_id)
         self.batch_track_ids = self._normalize_batch_track_ids(track_id, batch_track_ids)
+        self._initial_focus_target = str(initial_focus_target or "").strip() or None
         self._is_bulk_edit = len(self.batch_track_ids) > 1
         self._bulk_loading = True
         self._bulk_field_state: dict[str, dict[str, object]] = {}
         self._bulk_focus_targets: dict[object, str] = {}
+        self._editor_tab_indices: dict[str, int] = {}
 
         self._bulk_snapshots = self._load_bulk_snapshots()
         self._album_art_edit_states = self._load_album_art_edit_states()
@@ -30855,7 +31679,7 @@ class EditDialog(QDialog):
             bulk_notice = QLabel(
                 f"Bulk editing {len(self.batch_track_ids)} selected tracks. "
                 f"Fields showing {self.BULK_MIXED_TEXT} stay unchanged unless you replace them. "
-                "ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA Wnr. are view-only in this window."
+                "ISRC, ISWC, Track Title, Track Number, Audio File, Track Length, and BUMA Wnr. are view-only in this window."
             )
             bulk_notice.setWordWrap(True)
             bulk_notice.setProperty("role", "supportingText")
@@ -30868,7 +31692,7 @@ class EditDialog(QDialog):
         self.editor_tabs.setUsesScrollButtons(False)
         main_layout.addWidget(self.editor_tabs, 1)
 
-        def create_tab(title: str, description: str) -> QVBoxLayout:
+        def create_tab(tab_key: str, title: str, description: str) -> QVBoxLayout:
             page = QWidget(self.editor_tabs)
             page.setProperty("role", "workspaceCanvas")
             page_layout = QVBoxLayout(page)
@@ -30898,7 +31722,7 @@ class EditDialog(QDialog):
 
             scroll.setWidget(content)
             page_layout.addWidget(scroll, 1)
-            self.editor_tabs.addTab(page, title)
+            self._editor_tab_indices[tab_key] = int(self.editor_tabs.addTab(page, title))
             return content_layout
 
         def create_section(target_layout: QVBoxLayout, title: str, description: str | None = None):
@@ -30960,18 +31784,22 @@ class EditDialog(QDialog):
             return cb
 
         track_tab_layout = create_tab(
+            "track",
             "Track",
             "Edit the main track-facing fields here, including credits, title, and genre.",
         )
         release_tab_layout = create_tab(
+            "release",
             "Release",
             "Keep album grouping, release timing, and track duration together in one place.",
         )
         codes_tab_layout = create_tab(
+            "codes",
             "Codes",
             "Manage identifiers, registration values, and catalog metadata used by exports and rights workflows.",
         )
         media_tab_layout = create_tab(
+            "media",
             "Media",
             "Review and replace the managed audio and artwork files linked to this track.",
         )
@@ -31057,6 +31885,31 @@ class EditDialog(QDialog):
             self.snapshot.album_title or "",
             "SELECT DISTINCT title FROM Albums ORDER BY title",
         )
+        self.track_number = FocusWheelSpinBox()
+        self.track_number.setRange(0, 9999)
+        self.track_number.setSpecialValueText("Unset")
+        current_track_number = int(self.snapshot.track_number or 0)
+        if self._is_bulk_edit and not self._bulk_field_is_mixed("track_number"):
+            current_track_number = int(self._bulk_field_initial("track_number") or 0)
+        self.track_number.setValue(max(0, current_track_number))
+        track_number_widget = QWidget(self)
+        track_number_layout = QVBoxLayout(track_number_widget)
+        track_number_layout.setContentsMargins(0, 0, 0, 0)
+        track_number_layout.setSpacing(6)
+        track_number_layout.addWidget(self.track_number, 0, Qt.AlignLeft)
+        track_number_note = self._create_bulk_note(
+            "track_number",
+            "Track Number is view-only during bulk edit. Selected tracks currently use different numbers.",
+        )
+        if track_number_note is not None:
+            track_number_layout.addWidget(track_number_note)
+        elif self._is_bulk_edit and self._is_bulk_locked_field("track_number"):
+            locked_track_number_note = QLabel("Track Number is view-only during bulk edit.")
+            locked_track_number_note.setWordWrap(True)
+            track_number_layout.addWidget(locked_track_number_note)
+        if self._is_bulk_edit and self._is_bulk_locked_field("track_number"):
+            self.track_number.setEnabled(False)
+        add_row(album_release_layout, "Track Number", track_number_widget)
         self.genre = combo(
             core_layout,
             "Genre",
@@ -31077,21 +31930,21 @@ class EditDialog(QDialog):
         audio_layout.setContentsMargins(0, 0, 0, 0)
         audio_layout.setSpacing(8)
         audio_layout.addWidget(self.audio_file, 1)
-        btn_audio_browse = QPushButton("Browse…")
-        btn_audio_clear = QPushButton("Clear")
-        btn_audio_browse.clicked.connect(
+        self.audio_file_browse_button = QPushButton("Browse…")
+        self.audio_file_clear_button = QPushButton("Clear")
+        self.audio_file_browse_button.clicked.connect(
             lambda: self._choose_track_media(
                 "audio_file", self.audio_file, clear_attr="_clear_audio_file"
             )
         )
-        btn_audio_clear.clicked.connect(
+        self.audio_file_clear_button.clicked.connect(
             lambda: self._clear_track_media(self.audio_file, clear_attr="_clear_audio_file")
         )
         if self._is_bulk_edit and self._is_bulk_locked_field("audio_file"):
-            btn_audio_browse.setEnabled(False)
-            btn_audio_clear.setEnabled(False)
-        audio_layout.addWidget(btn_audio_browse)
-        audio_layout.addWidget(btn_audio_clear)
+            self.audio_file_browse_button.setEnabled(False)
+            self.audio_file_clear_button.setEnabled(False)
+        audio_layout.addWidget(self.audio_file_browse_button)
+        audio_layout.addWidget(self.audio_file_clear_button)
         audio_widget = QWidget(self)
         audio_widget_layout = QVBoxLayout(audio_widget)
         audio_widget_layout.setContentsMargins(0, 0, 0, 0)
@@ -31187,11 +32040,29 @@ class EditDialog(QDialog):
         add_row(registration_layout, "Catalog#", self.catalog_number)
 
         self.buma_work_number = QLineEdit()
+        self._buma_work_number_managed_by_work = self._buma_work_number_is_work_managed()
         self._configure_text_field(
             self.buma_work_number,
             "buma_work_number",
-            self.snapshot.buma_work_number or "",
+            self._resolved_buma_work_number_text(),
         )
+        buma_work_number_widget: QWidget = self.buma_work_number
+        if self._buma_work_number_managed_by_work and not self._is_bulk_edit:
+            self.buma_work_number.setReadOnly(True)
+            self.buma_work_number.setToolTip(
+                "Managed by the linked Work. Open Work Manager to update the BUMA Wnr."
+            )
+            buma_work_number_widget = QWidget(self)
+            buma_work_number_layout = QVBoxLayout(buma_work_number_widget)
+            buma_work_number_layout.setContentsMargins(0, 0, 0, 0)
+            buma_work_number_layout.setSpacing(6)
+            buma_work_number_layout.addWidget(self.buma_work_number)
+            buma_work_number_note = QLabel(
+                "Managed by the linked Work. Open Work Manager to change this value."
+            )
+            buma_work_number_note.setWordWrap(True)
+            buma_work_number_note.setProperty("role", "supportingText")
+            buma_work_number_layout.addWidget(buma_work_number_note)
 
         self.release_date = FocusWheelCalendarWidget()
         self.release_date.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
@@ -31321,7 +32192,7 @@ class EditDialog(QDialog):
             """,
         )
         self.upc.setInsertPolicy(QComboBox.NoInsert)
-        add_row(registration_layout, "BUMA Wnr.", self.buma_work_number)
+        add_row(registration_layout, "BUMA Wnr.", buma_work_number_widget)
         add_row(registration_layout, "Entry Date", self.entry_date_field)
 
         track_tab_layout.addStretch(1)
@@ -31356,6 +32227,8 @@ class EditDialog(QDialog):
 
         self._bulk_loading = False
         party_authority_notifier().changed.connect(self._handle_party_authority_changed)
+        if self._initial_focus_target:
+            QTimer.singleShot(0, self._apply_initial_focus_target)
 
     @staticmethod
     def _normalize_batch_track_ids(track_id: int, batch_track_ids: list[int] | None) -> list[int]:
@@ -31485,6 +32358,83 @@ class EditDialog(QDialog):
 
     def _handle_party_authority_changed(self) -> None:
         self._refresh_artist_combo_sources()
+
+    def _apply_initial_focus_target(self) -> None:
+        self.focus_editor_target(self._initial_focus_target)
+
+    @staticmethod
+    def _preferred_focus_widget(widget: QWidget | None) -> QWidget | None:
+        if widget is None:
+            return None
+        line_edit_getter = getattr(widget, "lineEdit", None)
+        if callable(line_edit_getter):
+            try:
+                line_edit = line_edit_getter()
+            except Exception:
+                line_edit = None
+            if isinstance(line_edit, QWidget):
+                return line_edit
+        if isinstance(widget, QComboBox):
+            line_edit = widget.lineEdit()
+            if isinstance(line_edit, QWidget):
+                return line_edit
+        return widget
+
+    def focus_editor_target(self, target: str | None) -> bool:
+        clean_target = str(target or "").strip().lower()
+        if not clean_target:
+            return False
+        focus_map: dict[str, tuple[str, QWidget | None]] = {
+            "track_title": ("track", self.track_title),
+            "artist_name": ("track", self.artist_name),
+            "additional_artists": ("track", self.additional_artist),
+            "genre": ("track", self.genre),
+            "album_title": ("release", self.album_title),
+            "track_number": ("release", self.track_number),
+            "release_date": ("release", self.release_date),
+            "track_length_sec": ("release", self.len_h),
+            "isrc": ("codes", self.isrc_field),
+            "iswc": ("codes", self.iswc),
+            "upc": ("codes", self.upc),
+            "catalog_number": ("codes", self.catalog_number),
+            "buma_work_number": ("codes", self.buma_work_number),
+            "db_entry_date": ("codes", self.entry_date_field),
+            "audio_file": ("media", self.audio_file_browse_button),
+            "album_art": ("media", self.album_art_browse_button),
+        }
+        focus_target = focus_map.get(clean_target)
+        if focus_target is None:
+            return False
+        tab_key, raw_widget = focus_target
+        widget = self._preferred_focus_widget(raw_widget)
+        if widget is None or not widget.isEnabled():
+            return False
+        tab_index = self._editor_tab_indices.get(tab_key)
+        if tab_index is None:
+            return False
+        self.editor_tabs.setCurrentIndex(int(tab_index))
+        widget.setFocus(Qt.OtherFocusReason)
+        if isinstance(widget, QLineEdit) and not widget.isReadOnly():
+            widget.selectAll()
+        return widget.hasFocus()
+
+    def _resolved_buma_work_number_text(self, snapshot: TrackSnapshot | None = None) -> str:
+        source_snapshot = snapshot or self.snapshot
+        work_id = getattr(source_snapshot, "work_id", None)
+        if work_id is not None and self.parent.work_service is not None:
+            work = self.parent.work_service.fetch_work(int(work_id))
+            if work is not None:
+                resolved_value = str(getattr(work, "registration_number", "") or "").strip()
+                if resolved_value:
+                    return resolved_value
+        return str(getattr(source_snapshot, "buma_work_number", "") or "").strip()
+
+    def _buma_work_number_is_work_managed(self, snapshot: TrackSnapshot | None = None) -> bool:
+        source_snapshot = snapshot or self.snapshot
+        return bool(
+            getattr(source_snapshot, "work_id", None) is not None
+            and self.parent.work_service is not None
+        )
 
     def _resolve_snapshot_media_display(self, stored_path: str | None) -> str:
         return str(self.parent.track_service.resolve_media_path(stored_path) or "")
@@ -31642,6 +32592,9 @@ class EditDialog(QDialog):
         self._set_bulk_field_state(
             "album_title", [snapshot.album_title or "" for snapshot in snapshots]
         )
+        self._set_bulk_field_state(
+            "track_number", [int(snapshot.track_number or 0) for snapshot in snapshots]
+        )
         self._set_bulk_field_state("genre", [snapshot.genre or "" for snapshot in snapshots])
         self._set_bulk_field_state(
             "audio_file",
@@ -31658,7 +32611,8 @@ class EditDialog(QDialog):
             "catalog_number", [snapshot.catalog_number or "" for snapshot in snapshots]
         )
         self._set_bulk_field_state(
-            "buma_work_number", [snapshot.buma_work_number or "" for snapshot in snapshots]
+            "buma_work_number",
+            [self._resolved_buma_work_number_text(snapshot) for snapshot in snapshots],
         )
         self._set_bulk_field_state(
             "release_date", [snapshot.release_date or "" for snapshot in snapshots]
@@ -31792,6 +32746,12 @@ class EditDialog(QDialog):
             line_edit.setText(path)
             if media_key == "audio_file":
                 self.parent._refresh_line_edit_lossy_audio_warning(line_edit)
+                self.parent._apply_audio_duration_to_widgets(
+                    path,
+                    hours_widget=self.len_h,
+                    minutes_widget=self.len_m,
+                    seconds_widget=self.len_s,
+                )
 
     def _clear_track_media(self, line_edit: QLineEdit, *, clear_attr: str) -> None:
         setattr(self, clear_attr, True)
@@ -31959,13 +32919,18 @@ class EditDialog(QDialog):
         new_track_title = (self.track_title.text() or "").strip()
         new_artist_name = self.artist_name.currentText().strip()
         new_album_title = self.album_title.currentText().strip() or None
+        new_track_number = int(self.track_number.value() or 0)
         new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
         new_catalog_number = (
             self.catalog_number.currentText()
             if hasattr(self.catalog_number, "currentText")
             else self.catalog_number.text()
         ).strip() or None
-        new_buma_work_number = self.buma_work_number.text().strip() or None
+        new_buma_work_number = (
+            self.snapshot.buma_work_number
+            if getattr(self, "_buma_work_number_managed_by_work", False)
+            else (self.buma_work_number.text().strip() or None)
+        )
         new_additional_artist = self.parent._parse_additional_artists(
             (
                 self.additional_artist.currentText()
@@ -32039,6 +33004,16 @@ class EditDialog(QDialog):
                 )
                 return
 
+            parent._warn_duplicate_track_numbers(
+                album_title=new_album_title,
+                planned_rows=[(new_track_number, new_track_title)],
+                exclude_track_ids=[row_id],
+                parent_widget=self,
+                title="Duplicate Track Number",
+                track_service=parent.track_service,
+                cursor=parent.cursor,
+            )
+
             audio_source_path = (self.audio_file.text() or "").strip()
             album_art_source_path = (self.album_art.text() or "").strip()
             if audio_source_path == self._existing_audio_display_path:
@@ -32082,6 +33057,7 @@ class EditDialog(QDialog):
                 iswc=(iso_iswc or None),
                 upc=(new_upc_raw or None),
                 genre=(new_genre or None),
+                track_number=new_track_number,
                 catalog_number=new_catalog_number,
                 catalog_number_mode=(
                     self.catalog_number.identifier_mode()

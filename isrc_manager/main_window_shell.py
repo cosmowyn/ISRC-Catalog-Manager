@@ -43,6 +43,7 @@ from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
     FocusWheelComboBox,
     FocusWheelSlider,
+    FocusWheelSpinBox,
     TwoDigitSpinBox,
     _create_round_help_button,
 )
@@ -280,6 +281,10 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     app.edit_selected_action.setShortcut(QKeySequence("Ctrl+Shift+Space"))
     app.edit_selected_action.setShortcutContext(Qt.WidgetShortcut)
+    app.album_track_ordering_action = app._create_action(
+        "Album Track Ordering",
+        slot=app.open_album_track_ordering_dialog,
+    )
     app.delete_entry_action = app._create_action(
         "Delete Selected Track",
         slot=app.delete_entry,
@@ -559,6 +564,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     edit_menu.addAction(app.add_track_action)
     edit_menu.addAction(app.add_album_action)
     edit_menu.addAction(app.edit_selected_action)
+    edit_menu.addAction(app.album_track_ordering_action)
     edit_menu.addAction(app.delete_entry_action)
     edit_menu.addSeparator()
     edit_menu.addAction(app.copy_action)
@@ -1251,6 +1257,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.album_title_field.currentTextChanged.connect(app.autofill_album_metadata)
     constrain_add_data_field(app.album_title_field)
 
+    app.track_number_label = QLabel("Track Number")
+    app.track_number_field = FocusWheelSpinBox()
+    app.track_number_field.setRange(1, 9999)
+    app.track_number_field.setValue(1)
+    constrain_add_data_field(app.track_number_field)
+
     app.record_id_label = QLabel("ID")
     app.record_id_field = app._create_add_data_status_field(
         "Assigned automatically when you save this track."
@@ -1276,7 +1288,13 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.audio_file_field.setMinimumWidth(200)
     app.audio_file_browse_button = QPushButton("Browse…")
     app.audio_file_browse_button.clicked.connect(
-        lambda: app._choose_media_into_line_edit("audio_file", app.audio_file_field)
+        lambda: app._choose_media_into_line_edit(
+            "audio_file",
+            app.audio_file_field,
+            hours_widget=app.track_len_h,
+            minutes_widget=app.track_len_m,
+            seconds_widget=app.track_len_s,
+        )
     )
     app.audio_file_clear_button = QPushButton("Clear")
     app.audio_file_clear_button.clicked.connect(app.audio_file_field.clear)
@@ -1410,6 +1428,9 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
 
     release_group, release_layout = app._create_add_data_group("Album & Release")
     release_layout.addWidget(app._create_add_data_row(app.album_title_label, app.album_title_field))
+    release_layout.addWidget(
+        app._create_add_data_row(app.track_number_label, app.track_number_field)
+    )
     release_layout.addWidget(
         app._create_add_data_row(
             app.release_date_label,

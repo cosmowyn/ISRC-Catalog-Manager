@@ -141,6 +141,7 @@ class DatabaseSchemaService:
                 main_artist_party_id INTEGER NOT NULL,
                 buma_work_number TEXT,
                 album_id INTEGER,
+                track_number INTEGER,
                 work_id INTEGER,
                 parent_track_id INTEGER,
                 relationship_type TEXT NOT NULL DEFAULT 'original',
@@ -751,6 +752,9 @@ class DatabaseSchemaService:
             elif version == 39:
                 self._apply_migration(39, self._mig_39_to_40)
                 version = 40
+            elif version == 40:
+                self._apply_migration(40, self._mig_40_to_41)
+                version = 41
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -1456,6 +1460,7 @@ class DatabaseSchemaService:
                     "main_artist_party_id",
                     "buma_work_number",
                     "album_id",
+                    "track_number",
                     "work_id",
                     "parent_track_id",
                     "relationship_type",
@@ -1700,6 +1705,34 @@ class DatabaseSchemaService:
         self._ensure_code_registry_entry_immutability_triggers()
         self._restore_snapshotted_rows(child_row_snapshots)
         self._write_migration_diagnostics(migration_version=40, rows=dict(diagnostics))
+
+    def _mig_40_to_41(self) -> None:
+        if "track_number" not in self._table_columns("Tracks"):
+            self.cursor.execute("ALTER TABLE Tracks ADD COLUMN track_number INTEGER")
+        if not self._table_exists("ReleaseTracks"):
+            return
+        self.cursor.execute(
+            """
+            WITH consistent_track_numbers AS (
+                SELECT
+                    track_id,
+                    MIN(track_number) AS derived_track_number
+                FROM ReleaseTracks
+                WHERE track_number IS NOT NULL
+                  AND track_number > 0
+                GROUP BY track_id
+                HAVING MIN(track_number) = MAX(track_number)
+            )
+            UPDATE Tracks
+            SET track_number = (
+                SELECT derived_track_number
+                FROM consistent_track_numbers
+                WHERE consistent_track_numbers.track_id = Tracks.id
+            )
+            WHERE COALESCE(track_number, 0) <= 0
+              AND id IN (SELECT track_id FROM consistent_track_numbers)
+            """
+        )
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -2096,6 +2129,7 @@ class DatabaseSchemaService:
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("main_artist_party_id", "INTEGER REFERENCES Parties(id) ON DELETE RESTRICT"),
             ("buma_work_number", "TEXT"),
+            ("track_number", "INTEGER"),
             ("work_id", "INTEGER"),
             ("parent_track_id", "INTEGER"),
             ("relationship_type", "TEXT NOT NULL DEFAULT 'original'"),
@@ -2296,6 +2330,7 @@ class DatabaseSchemaService:
             "main_artist_party_id",
             "buma_work_number",
             "album_id",
+            "track_number",
             "work_id",
             "parent_track_id",
             "relationship_type",

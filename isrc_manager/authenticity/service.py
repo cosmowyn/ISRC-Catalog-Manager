@@ -8,7 +8,12 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from isrc_manager.file_storage import guess_mime_type, sanitize_export_basename
+from isrc_manager.file_storage import (
+    deduplicate_export_path,
+    export_package_name,
+    guess_mime_type,
+    sanitize_export_basename,
+)
 from isrc_manager.tags import (
     ArtworkPayload,
     AudioTagService,
@@ -78,6 +83,10 @@ PROVENANCE_LINEAGE_BASIS = "signed_derivative_of_verified_master"
 _AUTHENTICITY_PLAN_STAGE_COUNT = 1
 _AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT = 4
 _AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT = 4
+
+
+def _album_package_dir_name(album_title: str | None) -> str:
+    return export_package_name(album_title, default_stem="Release")
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -596,7 +605,7 @@ class AuthenticityManifestService:
         watermark_id = int(secrets.randbits(63))
         watermark_nonce = int(secrets.randbits(32))
         track_title = snapshot.track_title or f"Track {track_id}"
-        suggested_name = sanitize_export_basename(f"{track_title} - authenticity")
+        suggested_name = sanitize_export_basename(track_title, default_stem="track")
         release_refs = self._build_release_refs(track_id)
         work_refs = self._build_work_refs(track_id)
         rights_summary = self._build_rights_summary(track_id, work_refs, release_refs)
@@ -1318,9 +1327,11 @@ class AudioAuthenticityService:
                         source_label=reference.source_label,
                         source_suffix=reference.suffix,
                         suggested_name=sanitize_export_basename(
-                            f"{snapshot.track_title} - authenticity"
+                            snapshot.track_title or track_label,
+                            default_stem="track",
                         ),
                         key_id=key_record.key_id,
+                        album_title=str(snapshot.album_title or "").strip() or None,
                     )
                 )
             except Exception as exc:
@@ -1333,11 +1344,13 @@ class AudioAuthenticityService:
                         source_label="Unsupported",
                         source_suffix="",
                         suggested_name=sanitize_export_basename(
-                            f"{snapshot.track_title} - authenticity"
+                            snapshot.track_title or track_label,
+                            default_stem="track",
                         ),
                         key_id=key_record.key_id,
                         status="unsupported",
                         warning=str(exc),
+                        album_title=str(snapshot.album_title or "").strip() or None,
                     )
                 )
             if progress_callback is not None:
@@ -1395,11 +1408,13 @@ class AudioAuthenticityService:
                         source_label=str(source["source_label"]),
                         source_suffix=suffix,
                         suggested_name=sanitize_export_basename(
-                            f"{snapshot.track_title} - authenticity lineage"
+                            snapshot.track_title or track_label,
+                            default_stem="track",
                         ),
                         key_id=key_record.key_id,
                         document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
                         workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                        album_title=str(snapshot.album_title or "").strip() or None,
                     )
                 )
             except Exception as exc:
@@ -1412,13 +1427,15 @@ class AudioAuthenticityService:
                         source_label="Unsupported",
                         source_suffix="",
                         suggested_name=sanitize_export_basename(
-                            f"{snapshot.track_title} - authenticity lineage"
+                            snapshot.track_title or track_label,
+                            default_stem="track",
                         ),
                         key_id=key_record.key_id,
                         document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
                         workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
                         status="unsupported",
                         warning=str(exc),
+                        album_title=str(snapshot.album_title or "").strip() or None,
                     )
                 )
             if progress_callback is not None:
@@ -1494,8 +1511,10 @@ class AudioAuthenticityService:
                 app_version=self.app_version,
                 profile_name=profile_name,
             )
-            destination = (destination_root / item.suggested_name).with_suffix(
-                prepared.reference.suffix
+            package_dir = destination_root / _album_package_dir_name(item.album_title)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            destination = deduplicate_export_path(
+                (package_dir / item.suggested_name).with_suffix(prepared.reference.suffix)
             )
             try:
                 _report_progress_stage(
@@ -1629,7 +1648,11 @@ class AudioAuthenticityService:
         for index, item in enumerate(ready_items, start=1):
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Authenticity provenance export cancelled.")
-            destination = (destination_root / item.suggested_name).with_suffix(item.source_suffix)
+            package_dir = destination_root / _album_package_dir_name(item.album_title)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            destination = deduplicate_export_path(
+                (package_dir / item.suggested_name).with_suffix(item.source_suffix)
+            )
             try:
                 _report_progress_stage(
                     progress_callback,

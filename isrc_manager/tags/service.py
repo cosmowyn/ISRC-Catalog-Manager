@@ -51,6 +51,7 @@ except ImportError:  # pragma: no cover - exercised indirectly in runtime packag
     WAVE = None
 
 from isrc_manager.domain.codes import normalize_isrc, to_iso_isrc
+from isrc_manager.file_storage import deduplicate_export_path, export_package_name
 
 from .catalog import has_exportable_catalog_tag_data
 from .models import (
@@ -877,6 +878,13 @@ class TaggedAudioExportService:
             source_suffix=source_path.suffix,
         )
 
+    @staticmethod
+    def _package_dir_name(item: TaggedAudioExportItem) -> str:
+        return export_package_name(
+            item.album_title or item.tag_data.album,
+            default_stem="Release",
+        )
+
     def export_copies(
         self,
         *,
@@ -906,8 +914,12 @@ class TaggedAudioExportService:
             )
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Catalog audio copy export cancelled.")
-            destination = (destination_root / item.suggested_name).with_suffix(
-                self._normalize_suffix(item.source_suffix)
+            package_dir = destination_root / self._package_dir_name(item)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            destination = deduplicate_export_path(
+                (package_dir / item.suggested_name).with_suffix(
+                    self._normalize_suffix(item.source_suffix)
+                )
             )
             try:
                 _report_tagged_export_stage(

@@ -2351,6 +2351,7 @@ class ExchangeService:
                         iswc=str(row.get("iswc") or "").strip() or None,
                         upc=str(row.get("upc") or "").strip() or None,
                         genre=str(row.get("genre") or "").strip() or None,
+                        track_number=TrackService.normalize_track_number(row.get("track_number")),
                         catalog_number=str(row.get("catalog_number") or "").strip() or None,
                         buma_work_number=str(row.get("buma_work_number") or "").strip() or None,
                         composer=str(row.get("composer") or "").strip() or None,
@@ -2456,6 +2457,11 @@ class ExchangeService:
                             )
                             payload_kwargs["track_length_sec"] = (
                                 snapshot.track_length_sec or payload_kwargs["track_length_sec"]
+                            )
+                            payload_kwargs["track_number"] = (
+                                snapshot.track_number
+                                if snapshot.track_number is not None
+                                else payload_kwargs["track_number"]
                             )
                             payload_kwargs["iswc"] = snapshot.iswc or payload_kwargs["iswc"]
                             payload_kwargs["upc"] = snapshot.upc or payload_kwargs["upc"]

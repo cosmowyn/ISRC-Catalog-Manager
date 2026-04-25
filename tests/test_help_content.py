@@ -120,18 +120,22 @@ class HelpContentTests(unittest.TestCase):
         overview = HELP_CHAPTERS_BY_ID["overview"]
         add_data = HELP_CHAPTERS_BY_ID["add-data"]
         album_entry = HELP_CHAPTERS_BY_ID["album-entry"]
+        releases = HELP_CHAPTERS_BY_ID["releases"]
 
         self.assertIn("Add Track", overview.content_html)
         self.assertIn("Add Album", overview.content_html)
         self.assertIn("Work Manager", overview.content_html)
         self.assertEqual(add_data.title, "Add Track")
         self.assertIn("create new work from track", add_data.content_html.lower())
+        self.assertIn("track number", add_data.content_html.lower())
         self.assertIn("Party", add_data.content_html)
         self.assertEqual(album_entry.title, "Add Album")
         self.assertIn(
             "every populated row must resolve work governance before save",
             album_entry.content_html.lower(),
         )
+        self.assertIn("local numbering defaults", album_entry.content_html.lower())
+        self.assertIn("stored track number", releases.content_html.lower())
 
     def test_help_chapters_describe_diagnostics_cleanup_and_window_title_defaults(self):
         cleanup = HELP_CHAPTERS_BY_ID["catalog-managers"]

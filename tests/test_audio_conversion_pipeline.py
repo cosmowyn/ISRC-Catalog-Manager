@@ -1,5 +1,4 @@
 import hashlib
-import re
 import shutil
 import tempfile
 import unittest
@@ -201,7 +200,8 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(exported_tags.disc_number, 2)
         self.assertEqual(exported_tags.publisher, "Northern Current")
         self.assertEqual(exported_tags.upc, "4006381333931")
-        self.assertRegex(output_path.name, r"--[0-9a-f]{12}\.flac$")
+        self.assertEqual(output_path.name, "Lost in a Sea of Emotions.flac")
+        self.assertEqual(output_path.parent.name, "Tides of Memory")
         self.assertIsNotNone(derivative_row)
         self.assertEqual(derivative_row[1], track_id)
         self.assertEqual(derivative_row[2], MANAGED_DERIVATIVE_WORKFLOW_KIND)
@@ -211,7 +211,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(derivative_row[6], 1)
         self.assertEqual(derivative_row[7], 1)
         self.assertEqual(derivative_row[8], output_path.name)
-        self.assertEqual(derivative_row[9], derivative_row[10][:12])
+        self.assertEqual(derivative_row[9], "")
         self.assertEqual(derivative_row[10], _sha256_for_file(output_path))
         self.assertNotEqual(derivative_row[10], pre_watermark_hashes[0])
         self.assertGreater(int(derivative_row[11]), 0)
@@ -370,7 +370,8 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(source_path.read_bytes(), source_bytes_before)
         watermark_mock.assert_not_called()
         self.assertEqual(output_path.suffix.lower(), ".mp3")
-        self.assertRegex(output_path.name, r"--[0-9a-f]{12}\.mp3$")
+        self.assertEqual(output_path.name, "Lossy Export Source.mp3")
+        self.assertEqual(output_path.parent.name, "Lossy Export Album")
         self.assertEqual(exported_tags.title, "Lossy Export Source")
         self.assertEqual(exported_tags.album, "Lossy Export Album")
         self.assertEqual(exported_tags.album_artist, "Moonwake")
@@ -386,7 +387,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(derivative_row[5], "mp3")
         self.assertEqual(derivative_row[6], ".mp3")
         self.assertEqual(derivative_row[7], output_path.name)
-        self.assertEqual(derivative_row[8], derivative_row[9][:12])
+        self.assertEqual(derivative_row[8], "")
         self.assertEqual(derivative_row[9], _sha256_for_file(output_path))
         self.assertEqual(derivative_row[9], post_tag_hashes[0])
         self.assertIsNone(derivative_row[10])
@@ -448,7 +449,13 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         with zipfile.ZipFile(result.zip_path) as archive:
             names = archive.namelist()
             self.assertEqual(len(names), 2)
-            self.assertTrue(all(re.search(r"--[0-9a-f]{12}\.mp3$", name) for name in names))
+            self.assertEqual(
+                set(names),
+                {
+                    "Authenticity Tests/Blob Lossy Source.mp3",
+                    "Authenticity Tests/Managed Lossy Source.mp3",
+                },
+            )
             for name in names:
                 archive_hashes[name] = hashlib.sha256(archive.read(name)).hexdigest()
             extract_root = Path(tempfile.mkdtemp(prefix="lossy-bulk-extract-"))
@@ -496,9 +503,14 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
             ],
         )
         self.assertTrue(all(row[6].endswith(".mp3") for row in derivative_rows))
-        self.assertTrue(all(re.search(r"--[0-9a-f]{12}\.mp3$", row[6]) for row in derivative_rows))
-        self.assertEqual({row[6] for row in derivative_rows}, set(names))
-        self.assertTrue(all(archive_hashes[row[6]] == row[7] for row in derivative_rows))
+        self.assertEqual(
+            {row[6] for row in derivative_rows},
+            {"Blob Lossy Source.mp3", "Managed Lossy Source.mp3"},
+        )
+        self.assertEqual({f"Authenticity Tests/{row[6]}" for row in derivative_rows}, set(names))
+        self.assertTrue(
+            all(archive_hashes[f"Authenticity Tests/{row[6]}"] == row[7] for row in derivative_rows)
+        )
         self.assertTrue(all(row[8] == 0 for row in derivative_rows))
         self.assertTrue(all(row[9] is None for row in derivative_rows))
         self.assertEqual(batch_row[0], result.batch_public_id)
@@ -630,12 +642,19 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         with zipfile.ZipFile(result.zip_path) as archive:
             names = archive.namelist()
         self.assertEqual(len(names), 2)
-        self.assertTrue(all(re.search(r"--[0-9a-f]{12}\.wav$", name) for name in names))
+        self.assertEqual(
+            set(names),
+            {
+                "Authenticity Tests/Blob Source.wav",
+                "Authenticity Tests/Managed Source.wav",
+            },
+        )
         batch_row = self.conn.execute(
             "SELECT batch_id, zip_filename, exported_count, skipped_count, package_mode FROM DerivativeExportBatches"
         ).fetchone()
         self.assertEqual(batch_row[0], result.batch_public_id)
         self.assertEqual(batch_row[1], Path(result.zip_path).name)
+        self.assertEqual(Path(result.zip_path).name, "Authenticity Tests.zip")
         self.assertEqual(batch_row[2], 2)
         self.assertEqual(batch_row[3], 0)
         self.assertEqual(batch_row[4], "zip")

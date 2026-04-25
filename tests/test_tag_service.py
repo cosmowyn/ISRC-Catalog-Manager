@@ -146,6 +146,21 @@ class AudioTagServiceTests(unittest.TestCase):
         self.assertEqual(result.track_number, 7)
         self.assertEqual(result.disc_number, 2)
 
+    def test_catalog_metadata_to_tags_prefers_stored_track_number(self):
+        result = catalog_metadata_to_tags(
+            track_values={
+                "track_title": "Orbit",
+                "artist_name": "Moonwake",
+                "album_title": "Orbit Release",
+                "track_number": 3,
+            },
+            release_values={"title": "Orbit Release"},
+            placement_values={"track_number": 7, "disc_number": 2},
+        )
+
+        self.assertEqual(result.track_number, 3)
+        self.assertEqual(result.disc_number, 2)
+
     def test_merge_imported_tags_can_prefer_file_tags(self):
         preview = merge_imported_tags(
             database_values={
