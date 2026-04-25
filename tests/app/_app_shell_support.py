@@ -1727,6 +1727,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Add Track…",
                 "Add Album…",
                 "Edit Selected…",
+                "Album Track Ordering",
                 "Delete Selected Track",
                 "GS1 Metadata…",
                 "Copy",
