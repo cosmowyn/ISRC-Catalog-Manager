@@ -146,9 +146,7 @@ class SelectionScopeBanner(QWidget):
         self.choose_button.setVisible(self._show_choose_button)
         self.clear_override_button.setEnabled(False)
         self.clear_override_button.setVisible(False)
-        self.action_cluster.setVisible(
-            self._show_use_current_button or self._show_choose_button
-        )
+        self.action_cluster.setVisible(self._show_use_current_button or self._show_choose_button)
         _apply_compact_dialog_control_heights(self)
         self._sync_layout_height()
 

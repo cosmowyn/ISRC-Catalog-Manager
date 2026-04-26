@@ -699,13 +699,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(submitted_kwargs.get("show_dialog", True))
         self._assert_ui_ready_progress(progress, worker_terminal=66)
         worker_messages = [
-            message
-            for _value, _maximum, message in progress["worker_progress"]
-            if message
+            message for _value, _maximum, message in progress["worker_progress"] if message
         ]
-        ui_messages = [
-            message for _value, _maximum, message in progress["ui_progress"] if message
-        ]
+        ui_messages = [message for _value, _maximum, message in progress["ui_progress"] if message]
         self.assertTrue(worker_messages)
         self.assertEqual(ui_messages[-1], final_message)
 
@@ -4254,12 +4250,8 @@ class AppShellTestCase(unittest.TestCase):
             release_panel.actions_cluster.mapTo(release_panel, app_module.QPoint(0, 0)).y(),
             release_panel.detail_scroll_area.mapTo(release_panel, app_module.QPoint(0, 0)).y(),
         )
-        self.assertIsNotNone(
-            self._button_by_text(release_panel.actions_cluster, "Choose Tracks")
-        )
-        self.assertIsNotNone(
-            self._button_by_text(release_panel.actions_cluster, "Delete Release")
-        )
+        self.assertIsNotNone(self._button_by_text(release_panel.actions_cluster, "Choose Tracks"))
+        self.assertIsNotNone(self._button_by_text(release_panel.actions_cluster, "Delete Release"))
 
         self.window.open_global_search()
         self.app.processEvents()

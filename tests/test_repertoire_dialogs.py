@@ -1455,8 +1455,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertIsInstance(dialog.detail_scroll_area, QScrollArea)
             self.assertIsNotNone(dialog.actions_cluster)
             action_texts = {
-                button.text()
-                for button in dialog.actions_cluster.findChildren(QPushButton)
+                button.text() for button in dialog.actions_cluster.findChildren(QPushButton)
             }
             self.assertIn("Choose Tracks", action_texts)
             self.assertIn("Delete Release", action_texts)
