@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -793,6 +794,15 @@ class ArtifactStagingTests(unittest.TestCase):
             contents = bundle / "Contents"
             contents.mkdir(parents=True)
             (contents / "Info.plist").write_text("plist", encoding="utf-8")
+            versions_dir = contents / "Frameworks" / "Example.framework" / "Versions"
+            real_version_dir = versions_dir / "A"
+            real_version_dir.mkdir(parents=True)
+            (real_version_dir / "Example").write_text("framework", encoding="utf-8")
+            symlink_path = versions_dir / "Current"
+            try:
+                os.symlink("A", symlink_path, target_is_directory=True)
+            except (AttributeError, NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlinks unavailable in test environment: {exc}")
 
             with (
                 mock.patch.object(build, "_is_windows", return_value=False),
@@ -813,6 +823,37 @@ class ArtifactStagingTests(unittest.TestCase):
                     f"{build.APP_NAME}-3.1.1-macos.app/Contents/Info.plist",
                     archive.namelist(),
                 )
+                symlink_info = archive.getinfo(
+                    f"{build.APP_NAME}-3.1.1-macos.app/Contents/Frameworks/"
+                    "Example.framework/Versions/Current"
+                )
+                self.assertEqual(stat.S_IFMT(symlink_info.external_attr >> 16), stat.S_IFLNK)
+                self.assertEqual(
+                    archive.read(symlink_info.filename).decode("utf-8"),
+                    "A",
+                )
+
+    def test_stage_release_artifact_preserves_macos_bundle_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            bundle = dist_dir / f"{build.APP_NAME}.app"
+            versions_dir = bundle / "Contents" / "Frameworks" / "Example.framework" / "Versions"
+            real_version_dir = versions_dir / "A"
+            real_version_dir.mkdir(parents=True)
+            (real_version_dir / "Example").write_text("framework", encoding="utf-8")
+            symlink_path = versions_dir / "Current"
+            try:
+                os.symlink("A", symlink_path, target_is_directory=True)
+            except (AttributeError, NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlinks unavailable in test environment: {exc}")
+
+            staged = build._stage_release_artifact(bundle, dist_dir, app_version="3.1.1")
+
+            staged_symlink = (
+                staged / "Contents" / "Frameworks" / "Example.framework" / "Versions" / "Current"
+            )
+            self.assertTrue(staged_symlink.is_symlink())
+            self.assertEqual(os.readlink(staged_symlink), "A")
 
     def test_package_release_artifact_creates_linux_tarball(self):
         with tempfile.TemporaryDirectory() as tmpdir:

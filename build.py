@@ -22,6 +22,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -895,7 +896,7 @@ def _stage_release_artifact(source_artifact: Path, dist_dir: Path, *, app_versio
         target = release_dir / target_name
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
-        shutil.copytree(source_artifact, target)
+        shutil.copytree(source_artifact, target, symlinks=True)
     else:
         target = release_dir / f"{_release_basename(app_version)}{source_artifact.suffix}"
         target.unlink(missing_ok=True)
@@ -915,12 +916,31 @@ def _zip_release_artifact(staged_artifact: Path, package_path: Path) -> None:
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         if staged_artifact.is_dir():
             root = staged_artifact.parent
-            for path in sorted(staged_artifact.rglob("*")):
-                if path.is_file():
-                    archive.write(path, path.relative_to(root))
+            for current_dir, dirnames, filenames in os.walk(staged_artifact, followlinks=False):
+                current_path = Path(current_dir)
+                for dirname in sorted(list(dirnames)):
+                    child = current_path / dirname
+                    if child.is_symlink():
+                        _write_zip_symlink(archive, child, child.relative_to(root))
+                        dirnames.remove(dirname)
+                for filename in sorted(filenames):
+                    child = current_path / filename
+                    arcname = child.relative_to(root)
+                    if child.is_symlink():
+                        _write_zip_symlink(archive, child, arcname)
+                    else:
+                        archive.write(child, arcname)
             return
 
         archive.write(staged_artifact, staged_artifact.name)
+
+
+def _write_zip_symlink(archive: zipfile.ZipFile, path: Path, arcname: Path) -> None:
+    info = zipfile.ZipInfo(str(arcname).replace(os.sep, "/"))
+    info.create_system = 3
+    info.external_attr = (stat.S_IFLNK | 0o777) << 16
+    info.compress_type = zipfile.ZIP_STORED
+    archive.writestr(info, os.readlink(path))
 
 
 def _tar_release_artifact(staged_artifact: Path, package_path: Path) -> None:
