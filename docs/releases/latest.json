@@ -1,7 +1,7 @@
 {
-  "version": "3.5.0",
+  "version": "3.5.1",
   "released_at": "2026-04-26",
-  "summary": "Add Python 3.14.4 CI and release build coverage",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.5.0.md",
+  "summary": "use Python 3.14 wheel-backed numeric pins",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.5.1.md",
   "minimum_supported_version": null
 }
