@@ -20,3 +20,8 @@ coverage.xml
 
 # Demo generation output
 demo/.runtime/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -37,6 +39,34 @@ TAG_POLICY_CHOICES = (
     ("prefer_file_tags", "Prefer file tags"),
     ("prefer_database", "Prefer database values"),
 )
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        _slot()
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
+
+
+def _connect_args_signal(signal: Any, owner: object, slot: Callable[..., object]) -> None:
+    def _wrapper(*args: object, _slot: Callable[..., object] = slot) -> None:
+        try:
+            _slot(*args)
+        except RuntimeError as exc:
+            if "Internal C++ object" not in str(exc):
+                raise
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 class TagPreviewDialog(QDialog):
@@ -97,9 +127,9 @@ class TagPreviewDialog(QDialog):
         buttons.addStretch(1)
         confirm = QPushButton("Continue")
         confirm.setDefault(True)
-        confirm.clicked.connect(self.accept)
+        _connect_noarg_signal(confirm.clicked, confirm, self.accept)
         cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
+        _connect_noarg_signal(cancel.clicked, cancel, self.reject)
         buttons.addWidget(confirm)
         buttons.addWidget(cancel)
         root.addLayout(buttons)
@@ -235,14 +265,14 @@ class BulkAudioAttachDialog(QDialog):
         buttons = QHBoxLayout()
         if self._allow_create_track and len(self._items) == 1:
             create_track = QPushButton(create_track_button_text)
-            create_track.clicked.connect(self._request_create_track)
+            _connect_noarg_signal(create_track.clicked, create_track, self._request_create_track)
             buttons.addWidget(create_track)
         buttons.addStretch(1)
         confirm = QPushButton(attach_button_text)
         confirm.setDefault(True)
-        confirm.clicked.connect(self.accept)
+        _connect_noarg_signal(confirm.clicked, confirm, self.accept)
         cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
+        _connect_noarg_signal(cancel.clicked, cancel, self.reject)
         buttons.addWidget(confirm)
         buttons.addWidget(cancel)
         root.addLayout(buttons)
@@ -250,7 +280,8 @@ class BulkAudioAttachDialog(QDialog):
         self.populate_rows(self._items)
         _apply_compact_dialog_control_heights(self)
         if self.party_service is not None:
-            party_authority_notifier().changed.connect(self._refresh_artist_choice_combo)
+            notifier = party_authority_notifier()
+            _connect_args_signal(notifier.changed, self, self._refresh_artist_choice_combo)
 
     @staticmethod
     def _display_text_for_choice(track_id: int, label: str) -> str:

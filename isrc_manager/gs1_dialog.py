@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -60,6 +62,22 @@ def _safe_filename(text: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text or "").strip())
     cleaned = cleaned.strip("._")
     return cleaned or "gs1_export"
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        _slot()
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 class GS1MetadataEditorPage(QWidget):
@@ -603,8 +621,8 @@ class GS1ExportPreviewDialog(QDialog):
         cancel_button = button_box.button(QDialogButtonBox.Cancel)
         if cancel_button is not None:
             cancel_button.setAutoDefault(False)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        _connect_noarg_signal(button_box.accepted, button_box, self.accept)
+        _connect_noarg_signal(button_box.rejected, button_box, self.reject)
         root.addWidget(button_box)
         _apply_compact_dialog_control_heights(self)
 
@@ -712,7 +730,9 @@ class GS1MetadataDialog(QDialog):
         )
         self.settings_button = QPushButton("Open Settings…", self)
         self.settings_button.setAutoDefault(False)
-        self.settings_button.clicked.connect(self._open_settings)
+        _connect_noarg_signal(
+            self.settings_button.clicked, self.settings_button, self._open_settings
+        )
         template_button_row.addWidget(self.choose_template_button)
         template_button_row.addWidget(self.reverify_template_button)
         template_button_row.addWidget(self.settings_button)
@@ -739,7 +759,7 @@ class GS1MetadataDialog(QDialog):
             page = GS1MetadataEditorPage(
                 group, contract_entries=self._contract_entries, parent=self
             )
-            page.changed.connect(self._update_readiness)
+            _connect_noarg_signal(page.changed, page, self._update_readiness)
             self._editor_pages.append(page)
             if self._group_tabs is not None:
                 self._group_tabs.addTab(page, group.tab_title)
@@ -773,10 +793,14 @@ class GS1MetadataDialog(QDialog):
         button_row.setSpacing(12)
         self.revert_button = QPushButton("Revert", self)
         self.revert_button.setAutoDefault(False)
-        self.revert_button.clicked.connect(self._revert_form)
+        _connect_noarg_signal(self.revert_button.clicked, self.revert_button, self._revert_form)
         self.reset_defaults_button = QPushButton("Reset to Defaults", self)
         self.reset_defaults_button.setAutoDefault(False)
-        self.reset_defaults_button.clicked.connect(self._reset_to_defaults)
+        _connect_noarg_signal(
+            self.reset_defaults_button.clicked,
+            self.reset_defaults_button,
+            self._reset_to_defaults,
+        )
         form_actions = QHBoxLayout()
         form_actions.setContentsMargins(0, 0, 0, 0)
         form_actions.setSpacing(8)
@@ -790,13 +814,21 @@ class GS1MetadataDialog(QDialog):
             lambda: self._save_groups(self._groups, show_confirmation=True)
         )
         self.export_current_button = QPushButton("Export Current…", self)
-        self.export_current_button.clicked.connect(self._export_current)
+        _connect_noarg_signal(
+            self.export_current_button.clicked,
+            self.export_current_button,
+            self._export_current,
+        )
         self.export_batch_button = QPushButton(self._batch_button_text(), self)
-        self.export_batch_button.clicked.connect(self._export_batch)
+        _connect_noarg_signal(
+            self.export_batch_button.clicked,
+            self.export_batch_button,
+            self._export_batch,
+        )
         self.export_batch_button.setEnabled(len(self._groups) > 1 or len(self.batch_track_ids) > 1)
         self.close_button = QPushButton("Close", self)
         self.close_button.setAutoDefault(False)
-        self.close_button.clicked.connect(self.accept)
+        _connect_noarg_signal(self.close_button.clicked, self.close_button, self.accept)
         primary_actions = QHBoxLayout()
         primary_actions.setContentsMargins(0, 0, 0, 0)
         primary_actions.setSpacing(8)

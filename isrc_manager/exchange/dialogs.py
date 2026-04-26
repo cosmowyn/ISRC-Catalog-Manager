@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,6 +29,22 @@ from isrc_manager.ui_common import (
 )
 
 from .models import ExchangeImportOptions, ExchangeInspection
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        _slot()
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 class ExchangeImportDialog(QDialog):
@@ -163,13 +180,13 @@ class ExchangeImportDialog(QDialog):
         self.preset_combo = QComboBox()
         preset_row.addWidget(self.preset_combo, 1)
         load_preset_button = QPushButton("Load Preset")
-        load_preset_button.clicked.connect(self._load_preset)
+        _connect_noarg_signal(load_preset_button.clicked, load_preset_button, self._load_preset)
         preset_row.addWidget(load_preset_button)
         self.preset_name_edit = QLineEdit()
         self.preset_name_edit.setPlaceholderText("Preset name")
         preset_row.addWidget(self.preset_name_edit)
         save_preset_button = QPushButton("Save Preset")
-        save_preset_button.clicked.connect(self._save_preset)
+        _connect_noarg_signal(save_preset_button.clicked, save_preset_button, self._save_preset)
         preset_row.addWidget(save_preset_button)
         setup_layout.addLayout(preset_row)
 
@@ -249,9 +266,9 @@ class ExchangeImportDialog(QDialog):
         buttons.addStretch(1)
         self.import_button = QPushButton("Run Import")
         self.import_button.setDefault(True)
-        self.import_button.clicked.connect(self.accept)
+        _connect_noarg_signal(self.import_button.clicked, self.import_button, self.accept)
         cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
+        _connect_noarg_signal(cancel_button.clicked, cancel_button, self.reject)
         buttons.addWidget(self.import_button)
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
@@ -261,10 +278,22 @@ class ExchangeImportDialog(QDialog):
         self._populate_preview_table()
         self._populate_identifier_review_table()
         self._apply_initial_mode()
-        self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
+        _connect_noarg_signal(
+            self.mode_combo.currentIndexChanged,
+            self.mode_combo,
+            self._update_mode_affordances,
+        )
         if self.delimiter_combo is not None and self.custom_delimiter_edit is not None:
-            self.delimiter_combo.currentIndexChanged.connect(self._on_csv_delimiter_changed)
-            self.custom_delimiter_edit.textChanged.connect(self._on_csv_delimiter_changed)
+            _connect_noarg_signal(
+                self.delimiter_combo.currentIndexChanged,
+                self.delimiter_combo,
+                self._on_csv_delimiter_changed,
+            )
+            _connect_noarg_signal(
+                self.custom_delimiter_edit.textChanged,
+                self.custom_delimiter_edit,
+                self._on_csv_delimiter_changed,
+            )
             self._update_csv_delimiter_widgets()
             self._set_csv_delimiter_error(None)
         self._load_saved_import_preferences()
@@ -393,7 +422,7 @@ class ExchangeImportDialog(QDialog):
                 suggested = self.inspection.suggested_mapping.get(header, "")
             index = combo.findData(suggested)
             combo.setCurrentIndex(index if index >= 0 else 0)
-            combo.currentIndexChanged.connect(self._on_mapping_changed)
+            _connect_noarg_signal(combo.currentIndexChanged, combo, self._on_mapping_changed)
             self.mapping_table.setCellWidget(row, 1, combo)
 
     def _populate_preview_table(self) -> None:

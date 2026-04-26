@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -43,6 +44,38 @@ from isrc_manager.ui_common import (
 from .exchange_service import PartyExchangeInspection, PartyImportOptions
 from .models import PARTY_TYPE_CHOICES, PartyPayload, PartyRecord
 from .service import PartyService
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        try:
+            _slot()
+        except RuntimeError as exc:
+            if "Internal C++ object" not in str(exc):
+                raise
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
+
+
+def _connect_args_signal(signal: Any, owner: object, slot: Callable[..., object]) -> None:
+    def _wrapper(*args: object, _slot: Callable[..., object] = slot) -> None:
+        try:
+            _slot(*args)
+        except RuntimeError as exc:
+            if "Internal C++ object" not in str(exc):
+                raise
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 class PartyEditorDialog(QDialog):
@@ -176,10 +209,14 @@ class PartyEditorDialog(QDialog):
         alias_entry_row.setSpacing(8)
         self.alias_edit = QLineEdit(self)
         self.alias_edit.setPlaceholderText("Add one alias at a time")
-        self.alias_edit.returnPressed.connect(self._add_alias)
+        _connect_noarg_signal(self.alias_edit.returnPressed, self.alias_edit, self._add_alias)
         alias_entry_row.addWidget(self.alias_edit, 1)
         self.add_alias_button = QPushButton("Add Alias", self)
-        self.add_alias_button.clicked.connect(self._add_alias)
+        _connect_noarg_signal(
+            self.add_alias_button.clicked,
+            self.add_alias_button,
+            self._add_alias,
+        )
         alias_entry_row.addWidget(self.add_alias_button)
         aliases_box_layout.addLayout(alias_entry_row)
 
@@ -187,7 +224,11 @@ class PartyEditorDialog(QDialog):
         alias_actions_row.setContentsMargins(0, 0, 0, 0)
         alias_actions_row.setSpacing(8)
         self.remove_alias_button = QPushButton("Remove Highlighted", self)
-        self.remove_alias_button.clicked.connect(self._remove_selected_aliases)
+        _connect_noarg_signal(
+            self.remove_alias_button.clicked,
+            self.remove_alias_button,
+            self._remove_selected_aliases,
+        )
         alias_actions_row.addWidget(self.remove_alias_button)
         alias_actions_row.addStretch(1)
         aliases_box_layout.addLayout(alias_actions_row)
@@ -277,8 +318,8 @@ class PartyEditorDialog(QDialog):
         notes_box_layout.addWidget(self.notes_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        _connect_noarg_signal(buttons.accepted, buttons, self.accept)
+        _connect_noarg_signal(buttons.rejected, buttons, self.reject)
         root.addWidget(buttons)
         _apply_compact_dialog_control_heights(self)
 
@@ -493,13 +534,13 @@ class PartyImportDialog(QDialog):
         self.preset_combo = QComboBox()
         preset_row.addWidget(self.preset_combo, 1)
         load_preset_button = QPushButton("Load Preset")
-        load_preset_button.clicked.connect(self._load_preset)
+        _connect_noarg_signal(load_preset_button.clicked, load_preset_button, self._load_preset)
         preset_row.addWidget(load_preset_button)
         self.preset_name_edit = QLineEdit()
         self.preset_name_edit.setPlaceholderText("Preset name")
         preset_row.addWidget(self.preset_name_edit)
         save_preset_button = QPushButton("Save Preset")
-        save_preset_button.clicked.connect(self._save_preset)
+        _connect_noarg_signal(save_preset_button.clicked, save_preset_button, self._save_preset)
         preset_row.addWidget(save_preset_button)
         setup_layout.addLayout(preset_row)
 
@@ -557,9 +598,9 @@ class PartyImportDialog(QDialog):
         buttons.addStretch(1)
         self.import_button = QPushButton("Import Parties")
         self.import_button.setDefault(True)
-        self.import_button.clicked.connect(self.accept)
+        _connect_noarg_signal(self.import_button.clicked, self.import_button, self.accept)
         cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
+        _connect_noarg_signal(cancel_button.clicked, cancel_button, self.reject)
         buttons.addWidget(self.import_button)
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
@@ -568,10 +609,22 @@ class PartyImportDialog(QDialog):
         self._populate_mapping_table()
         self._populate_preview_table()
         self._apply_initial_mode()
-        self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
+        _connect_noarg_signal(
+            self.mode_combo.currentIndexChanged,
+            self.mode_combo,
+            self._update_mode_affordances,
+        )
         if self.delimiter_combo is not None and self.custom_delimiter_edit is not None:
-            self.delimiter_combo.currentIndexChanged.connect(self._on_csv_delimiter_changed)
-            self.custom_delimiter_edit.textChanged.connect(self._on_csv_delimiter_changed)
+            _connect_noarg_signal(
+                self.delimiter_combo.currentIndexChanged,
+                self.delimiter_combo,
+                self._on_csv_delimiter_changed,
+            )
+            _connect_noarg_signal(
+                self.custom_delimiter_edit.textChanged,
+                self.custom_delimiter_edit,
+                self._on_csv_delimiter_changed,
+            )
             self._update_csv_delimiter_widgets()
             self._set_csv_delimiter_error(None)
         self._load_saved_import_preferences()
@@ -933,29 +986,37 @@ class PartyManagerPanel(QWidget):
         self.search_edit.setPlaceholderText(
             "Search parties by legal name, display name, artist name, alias, company, email, PRO, or Chamber number..."
         )
-        self.search_edit.textChanged.connect(self.refresh)
+        _connect_noarg_signal(self.search_edit.textChanged, self.search_edit, self.refresh)
         top_row.addWidget(self.search_edit, 1)
         self.party_type_filter_combo = QComboBox(self)
         self.party_type_filter_combo.setObjectName("partyManagerTypeFilter")
         self.party_type_filter_combo.addItem("All Types", "")
         for item in PARTY_TYPE_CHOICES:
             self.party_type_filter_combo.addItem(item.replace("_", " ").title(), item)
-        self.party_type_filter_combo.currentIndexChanged.connect(self.refresh)
+        _connect_noarg_signal(
+            self.party_type_filter_combo.currentIndexChanged,
+            self.party_type_filter_combo,
+            self.refresh,
+        )
         top_row.addWidget(self.party_type_filter_combo)
         controls_layout.addLayout(top_row)
 
         add_button = QPushButton("Add")
-        add_button.clicked.connect(self.create_party)
+        _connect_noarg_signal(add_button.clicked, add_button, self.create_party)
         edit_button = QPushButton("Edit")
-        edit_button.clicked.connect(self.edit_selected)
+        _connect_noarg_signal(edit_button.clicked, edit_button, self.edit_selected)
         set_owner_button = QPushButton("Set As Owner")
-        set_owner_button.clicked.connect(self.set_selected_as_owner)
+        _connect_noarg_signal(
+            set_owner_button.clicked,
+            set_owner_button,
+            self.set_selected_as_owner,
+        )
         merge_button = QPushButton("Merge Selected")
-        merge_button.clicked.connect(self.merge_selected)
+        _connect_noarg_signal(merge_button.clicked, merge_button, self.merge_selected)
         delete_button = QPushButton("Delete")
-        delete_button.clicked.connect(self.delete_selected)
+        _connect_noarg_signal(delete_button.clicked, delete_button, self.delete_selected)
         refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh)
+        _connect_noarg_signal(refresh_button.clicked, refresh_button, self.refresh)
         self.manage_actions_cluster = _create_action_button_cluster(
             self,
             [
@@ -1017,7 +1078,11 @@ class PartyManagerPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        self.table.itemSelectionChanged.connect(self._update_selection_snapshot)
+        _connect_noarg_signal(
+            self.table.itemSelectionChanged,
+            self.table,
+            self._update_selection_snapshot,
+        )
         self.table.currentCellChanged.connect(lambda *_args: self._update_selection_snapshot())
         table_box, table_layout = _create_standard_section(
             self,
@@ -1349,10 +1414,14 @@ class OwnerBootstrapDialog(QDialog):
         self.party_combo.setMinimumWidth(320)
         picker_row.addWidget(self.party_combo, 1)
         self.new_party_button = QPushButton("New Party...", self)
-        self.new_party_button.clicked.connect(self._create_party)
+        _connect_noarg_signal(
+            self.new_party_button.clicked, self.new_party_button, self._create_party
+        )
         picker_row.addWidget(self.new_party_button)
         self.edit_party_button = QPushButton("Edit Party...", self)
-        self.edit_party_button.clicked.connect(self._edit_party)
+        _connect_noarg_signal(
+            self.edit_party_button.clicked, self.edit_party_button, self._edit_party
+        )
         picker_row.addWidget(self.edit_party_button)
         section_layout.addLayout(picker_row)
 
@@ -1367,10 +1436,16 @@ class OwnerBootstrapDialog(QDialog):
 
         self.button_box = QDialogButtonBox(Qt.Horizontal, self)
         self.set_owner_button = self.button_box.addButton("Set Owner", QDialogButtonBox.AcceptRole)
-        self.set_owner_button.clicked.connect(self._accept_if_valid)
+        _connect_noarg_signal(
+            self.set_owner_button.clicked,
+            self.set_owner_button,
+            self._accept_if_valid,
+        )
         root.addWidget(self.button_box)
 
-        self.party_combo.currentIndexChanged.connect(self._party_changed)
+        _connect_args_signal(
+            self.party_combo.currentIndexChanged, self.party_combo, self._party_changed
+        )
         self._refresh_choices()
 
     def selected_party_id(self) -> int | None:

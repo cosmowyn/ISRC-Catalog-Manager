@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -58,6 +61,38 @@ from .models import (
     WorkRecord,
 )
 from .service import WorkService
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        try:
+            _slot()
+        except RuntimeError as exc:
+            if "Internal C++ object" not in str(exc):
+                raise
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
+
+
+def _connect_args_signal(signal: Any, owner: object, slot: Callable[..., object]) -> None:
+    def _wrapper(*args: object, _slot: Callable[..., object] = slot) -> None:
+        try:
+            _slot(*args)
+        except RuntimeError as exc:
+            if "Internal C++ object" not in str(exc):
+                raise
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 class WorkEditorDialog(QDialog):
@@ -205,11 +240,23 @@ class WorkEditorDialog(QDialog):
             lambda _checked=False, self=self: self._add_contributor_row()
         )
         self.remove_contributor_button = QPushButton("Remove Highlighted")
-        self.remove_contributor_button.clicked.connect(self._remove_contributor_rows)
+        _connect_noarg_signal(
+            self.remove_contributor_button.clicked,
+            self.remove_contributor_button,
+            self._remove_contributor_rows,
+        )
         self.new_contributor_party_button = QPushButton("New Party...")
-        self.new_contributor_party_button.clicked.connect(self._create_contributor_party)
+        _connect_noarg_signal(
+            self.new_contributor_party_button.clicked,
+            self.new_contributor_party_button,
+            self._create_contributor_party,
+        )
         self.edit_contributor_party_button = QPushButton("Edit Linked Party...")
-        self.edit_contributor_party_button.clicked.connect(self._edit_contributor_party)
+        _connect_noarg_signal(
+            self.edit_contributor_party_button.clicked,
+            self.edit_contributor_party_button,
+            self._edit_contributor_party,
+        )
         self.equal_split_share_button = QPushButton("Equal Split Share")
         self.equal_split_share_button.clicked.connect(
             lambda _checked=False, self=self: self._equal_split_contributors((2,))
@@ -249,8 +296,10 @@ class WorkEditorDialog(QDialog):
         self.contributors_table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeToContents
         )
-        self.contributors_table.itemSelectionChanged.connect(
-            self._refresh_contributor_party_action_state
+        _connect_noarg_signal(
+            self.contributors_table.itemSelectionChanged,
+            self.contributors_table,
+            self._refresh_contributor_party_action_state,
         )
         contributors_layout.addWidget(self.contributors_table, 1)
         splitter.addWidget(contributors_box)
@@ -266,9 +315,15 @@ class WorkEditorDialog(QDialog):
         )
         track_actions = QHBoxLayout()
         add_selected_button = QPushButton("Link Selected Tracks")
-        add_selected_button.clicked.connect(self._add_selected_tracks)
+        _connect_noarg_signal(
+            add_selected_button.clicked, add_selected_button, self._add_selected_tracks
+        )
         remove_track_button = QPushButton("Remove Highlighted")
-        remove_track_button.clicked.connect(self._remove_track_rows)
+        _connect_noarg_signal(
+            remove_track_button.clicked,
+            remove_track_button,
+            self._remove_track_rows,
+        )
         track_actions.addWidget(add_selected_button)
         track_actions.addWidget(remove_track_button)
         track_actions.addStretch(1)
@@ -289,8 +344,8 @@ class WorkEditorDialog(QDialog):
         tabs.addTab(links_tab, "Contributors and Links")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        _connect_noarg_signal(buttons.accepted, buttons, self.accept)
+        _connect_noarg_signal(buttons.rejected, buttons, self.reject)
         save_button = buttons.button(QDialogButtonBox.Save)
         if save_button is not None:
             save_button.setText("Save Work")
@@ -319,7 +374,8 @@ class WorkEditorDialog(QDialog):
             self._append_track_row(int(track_id))
         self._refresh_contributor_party_action_state()
         if self.party_service is not None:
-            party_authority_notifier().changed.connect(self._handle_party_authority_changed)
+            notifier = party_authority_notifier()
+            _connect_noarg_signal(notifier.changed, self, self._handle_party_authority_changed)
 
     @staticmethod
     def _contributor_party_primary_label(record: PartyRecord) -> str:
@@ -758,25 +814,33 @@ class WorkBrowserPanel(QWidget):
         self.search_edit.setPlaceholderText(
             "Search works by title, alternate title, ISWC, or registration #..."
         )
-        self.search_edit.textChanged.connect(self.refresh)
+        _connect_noarg_signal(self.search_edit.textChanged, self.search_edit, self.refresh)
         controls.addWidget(self.search_edit, 1)
 
         create_button = QPushButton("Create Work")
-        create_button.clicked.connect(self.create_work)
+        _connect_noarg_signal(create_button.clicked, create_button, self.create_work)
         add_track_button = QPushButton("Add Track to Work")
-        add_track_button.clicked.connect(self.create_child_track)
+        _connect_noarg_signal(add_track_button.clicked, add_track_button, self.create_child_track)
         add_album_button = QPushButton("Add Album to Work")
-        add_album_button.clicked.connect(self.create_album_for_work)
+        _connect_noarg_signal(
+            add_album_button.clicked,
+            add_album_button,
+            self.create_album_for_work,
+        )
         edit_button = QPushButton("Edit")
-        edit_button.clicked.connect(self.edit_selected)
+        _connect_noarg_signal(edit_button.clicked, edit_button, self.edit_selected)
         duplicate_button = QPushButton("Duplicate")
-        duplicate_button.clicked.connect(self.duplicate_selected)
+        _connect_noarg_signal(duplicate_button.clicked, duplicate_button, self.duplicate_selected)
         link_button = QPushButton("Link Selected Tracks")
-        link_button.clicked.connect(self.link_selected_tracks)
+        _connect_noarg_signal(link_button.clicked, link_button, self.link_selected_tracks)
         delete_button = QPushButton("Delete")
-        delete_button.clicked.connect(self.delete_selected)
+        _connect_noarg_signal(delete_button.clicked, delete_button, self.delete_selected)
         open_filter_button = QPushButton("Filter Main Table")
-        open_filter_button.clicked.connect(self.filter_by_work_tracks)
+        _connect_noarg_signal(
+            open_filter_button.clicked,
+            open_filter_button,
+            self.filter_by_work_tracks,
+        )
         controls_layout.addLayout(controls)
         self.manage_actions_cluster = _create_action_button_cluster(
             self,
@@ -813,9 +877,21 @@ class WorkBrowserPanel(QWidget):
             show_header=False,
             content_margins=(0, 0, 0, 0),
         )
-        self.selection_banner.use_current_button.clicked.connect(self._use_current_selection)
-        self.selection_banner.choose_button.clicked.connect(self._choose_tracks)
-        self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
+        _connect_noarg_signal(
+            self.selection_banner.use_current_button.clicked,
+            self.selection_banner.use_current_button,
+            self._use_current_selection,
+        )
+        _connect_noarg_signal(
+            self.selection_banner.choose_button.clicked,
+            self.selection_banner.choose_button,
+            self._choose_tracks,
+        )
+        _connect_noarg_signal(
+            self.selection_banner.clear_override_button.clicked,
+            self.selection_banner.clear_override_button,
+            self._clear_selection_override,
+        )
         selection_layout.addWidget(self.selection_banner)
         root.addWidget(selection_box)
 
@@ -963,7 +1039,7 @@ class WorkBrowserPanel(QWidget):
         if not hasattr(self, "manage_actions_cluster") or not hasattr(self, "selection_banner"):
             return
         self._control_height_sync_pending = True
-        QTimer.singleShot(0, self._sync_control_height_constraints)
+        QTimer.singleShot(0, lambda: self._sync_control_height_constraints())
 
     def _apply_action_cluster_layout_metrics(self) -> None:
         cluster = getattr(self, "manage_actions_cluster", None)
@@ -1243,16 +1319,34 @@ class WorkBrowserDialog(QDialog):
             linked_track_id=linked_track_id,
             parent=self,
         )
-        self.panel.filter_requested.connect(self.filter_requested.emit)
-        self.panel.create_requested.connect(self.create_requested.emit)
-        self.panel.create_child_track_requested.connect(self.create_child_track_requested.emit)
-        self.panel.create_album_for_work_requested.connect(
-            self.create_album_for_work_requested.emit
+        _connect_args_signal(self.panel.filter_requested, self.panel, self.filter_requested.emit)
+        _connect_args_signal(self.panel.create_requested, self.panel, self.create_requested.emit)
+        _connect_args_signal(
+            self.panel.create_child_track_requested,
+            self.panel,
+            self.create_child_track_requested.emit,
         )
-        self.panel.update_requested.connect(self.update_requested.emit)
-        self.panel.duplicate_requested.connect(self.duplicate_requested.emit)
-        self.panel.link_tracks_requested.connect(self.link_tracks_requested.emit)
-        self.panel.delete_requested.connect(self.delete_requested.emit)
+        _connect_args_signal(
+            self.panel.create_album_for_work_requested,
+            self.panel,
+            self.create_album_for_work_requested.emit,
+        )
+        _connect_args_signal(
+            self.panel.update_requested,
+            self.panel,
+            self.update_requested.emit,
+        )
+        _connect_args_signal(
+            self.panel.duplicate_requested,
+            self.panel,
+            self.duplicate_requested.emit,
+        )
+        _connect_args_signal(
+            self.panel.link_tracks_requested,
+            self.panel,
+            self.link_tracks_requested.emit,
+        )
+        _connect_args_signal(self.panel.delete_requested, self.panel, self.delete_requested.emit)
         root.addWidget(self.panel)
 
     def __getattr__(self, name: str):

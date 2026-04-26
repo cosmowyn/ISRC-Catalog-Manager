@@ -7208,7 +7208,7 @@ class App(QMainWindow):
         if self._post_ready_startup_tasks_scheduled:
             return
         self._post_ready_startup_tasks_scheduled = True
-        QTimer.singleShot(0, self._run_post_ready_startup_tasks)
+        QTimer.singleShot(0, lambda: self._run_post_ready_startup_tasks())
 
     def _run_post_ready_startup_tasks(self) -> None:
         self._update_add_data_generated_fields()
@@ -7217,10 +7217,17 @@ class App(QMainWindow):
         self._schedule_startup_update_check()
 
     def _schedule_startup_update_check(self) -> None:
-        QTimer.singleShot(1000, self._run_startup_update_check)
+        QTimer.singleShot(1000, lambda: self._run_startup_update_check())
 
     def _run_startup_update_check(self) -> None:
-        self._start_update_check(manual=False)
+        if getattr(self, "_is_closing", False):
+            return
+        try:
+            self._start_update_check(manual=False)
+        except RuntimeError as exc:
+            if "Internal C++ object" in str(exc):
+                return
+            raise
 
     def check_for_updates(self) -> None:
         self._start_update_check(manual=True)
@@ -7846,11 +7853,54 @@ class App(QMainWindow):
                 action.setShortcutContext(Qt.WidgetShortcut)
                 self._install_explicit_action_shortcuts(action, ordered_shortcuts)
         if slot is not None:
-            action.triggered.connect(slot)
+            self._connect_noarg_signal(action.triggered, action, slot)
         if toggled_slot is not None:
-            action.toggled.connect(toggled_slot)
+            self._connect_bool_signal(action.toggled, action, toggled_slot)
         self.addAction(action)
         return action
+
+    def _signal_noarg_wrapper(self, slot):
+        def _wrapper(_checked=False, _slot=slot):
+            _slot()
+
+        return _wrapper
+
+    def _signal_bool_wrapper(self, slot):
+        def _wrapper(checked=False, _slot=slot):
+            _slot(bool(checked))
+
+        return _wrapper
+
+    def _signal_args_wrapper(self, slot):
+        def _wrapper(*args, _slot=slot):
+            _slot(*args)
+
+        return _wrapper
+
+    def _connect_noarg_signal(self, signal, owner, slot):
+        wrapper = self._signal_noarg_wrapper(slot)
+        self._keep_signal_wrapper_alive(owner, wrapper)
+        signal.connect(wrapper)
+        return wrapper
+
+    def _connect_bool_signal(self, signal, owner, slot):
+        wrapper = self._signal_bool_wrapper(slot)
+        self._keep_signal_wrapper_alive(owner, wrapper)
+        signal.connect(wrapper)
+        return wrapper
+
+    def _connect_args_signal(self, signal, owner, slot):
+        wrapper = self._signal_args_wrapper(slot)
+        self._keep_signal_wrapper_alive(owner, wrapper)
+        signal.connect(wrapper)
+        return wrapper
+
+    def _keep_signal_wrapper_alive(self, owner, wrapper) -> None:
+        wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+        if wrappers is None:
+            wrappers = []
+            owner._isrc_signal_wrappers = wrappers
+        wrappers.append(wrapper)
 
     def _should_register_explicit_action_shortcuts(
         self, shortcuts: tuple[QKeySequence, ...] | list[QKeySequence]
@@ -10627,7 +10677,7 @@ class App(QMainWindow):
         if timer is None:
             timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self._apply_top_chrome_boundary)
+            self._connect_noarg_signal(timer.timeout, timer, self._apply_top_chrome_boundary)
             self._top_chrome_boundary_timer = timer
         timer.start(0)
 
@@ -10642,7 +10692,7 @@ class App(QMainWindow):
         if self._workspace_layout_restore_pending and not self._workspace_layout_restore_scheduled:
             self._workspace_layout_restore_pending = False
             self._workspace_layout_restore_scheduled = True
-            QTimer.singleShot(0, self._restore_workspace_layout_on_first_show)
+            QTimer.singleShot(0, lambda: self._restore_workspace_layout_on_first_show())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -12708,14 +12758,18 @@ class App(QMainWindow):
         if not getattr(self, "_header_layout_signals_bound", False) or not hasattr(self, "table"):
             return
         header = self.table.horizontalHeader()
+        moved_wrapper = getattr(self, "_header_section_moved_wrapper", None)
+        resized_wrapper = getattr(self, "_header_section_resized_wrapper", None)
         try:
-            header.sectionMoved.disconnect(self._on_header_sections_reordered)
+            header.sectionMoved.disconnect(moved_wrapper or self._on_header_sections_reordered)
         except (RuntimeError, TypeError):
             pass
         try:
-            header.sectionResized.disconnect(self._on_header_sections_resized)
+            header.sectionResized.disconnect(resized_wrapper or self._on_header_sections_resized)
         except (RuntimeError, TypeError):
             pass
+        self._header_section_moved_wrapper = None
+        self._header_section_resized_wrapper = None
         self._header_layout_signals_bound = False
 
     def _bind_header_state_signals(self):
@@ -12723,8 +12777,16 @@ class App(QMainWindow):
             return
         header = self.table.horizontalHeader()
         self._unbind_header_state_signals()
-        header.sectionMoved.connect(self._on_header_sections_reordered)
-        header.sectionResized.connect(self._on_header_sections_resized)
+        self._header_section_moved_wrapper = self._connect_args_signal(
+            header.sectionMoved,
+            header,
+            self._on_header_sections_reordered,
+        )
+        self._header_section_resized_wrapper = self._connect_args_signal(
+            header.sectionResized,
+            header,
+            self._on_header_sections_resized,
+        )
         self._header_layout_signals_bound = True
 
     @staticmethod
@@ -12870,7 +12932,7 @@ class App(QMainWindow):
         if timer is None:
             timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self._save_main_dock_state)
+            self._connect_noarg_signal(timer.timeout, timer, self._save_main_dock_state)
             self._dock_state_save_timer = timer
         timer.start(75)
 
@@ -12885,7 +12947,7 @@ class App(QMainWindow):
         if timer is None:
             timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self._save_main_window_geometry)
+            self._connect_noarg_signal(timer.timeout, timer, self._save_main_window_geometry)
             self._window_geometry_save_timer = timer
         timer.start(75)
 
@@ -14413,7 +14475,7 @@ class App(QMainWindow):
         if getattr(self, "_owner_party_bootstrap_scheduled", False):
             return
         self._owner_party_bootstrap_scheduled = True
-        QTimer.singleShot(0, self._ensure_owner_party_bootstrap)
+        QTimer.singleShot(0, lambda: self._ensure_owner_party_bootstrap())
 
     def _ensure_owner_party_bootstrap(self) -> None:
         self._owner_party_bootstrap_scheduled = False
@@ -15205,13 +15267,13 @@ class App(QMainWindow):
         selector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         selector.setInsertPolicy(QComboBox.NoInsert)
         selector.setProperty("role", "actionRibbonSelector")
-        selector.activated.connect(self._on_saved_layout_selected)
+        self._connect_args_signal(selector.activated, selector, self._on_saved_layout_selected)
         layout.addWidget(selector)
 
         save_button = QPushButton("Save Layout", container)
         save_button.setObjectName("savedLayoutAddButton")
         save_button.setProperty("role", "actionRibbonButton")
-        save_button.clicked.connect(self.add_named_main_window_layout)
+        self._connect_noarg_signal(save_button.clicked, save_button, self.add_named_main_window_layout)
         layout.addWidget(save_button)
 
         delete_button = QPushButton("Delete Layout", container)
@@ -16130,7 +16192,11 @@ class App(QMainWindow):
         controller = getattr(self, "_catalog_zoom_controller_instance", None)
         if not isinstance(controller, CatalogZoomController):
             controller = CatalogZoomController(self)
-            controller.zoom_percent_changed.connect(self._sync_catalog_zoom_controls)
+            self._connect_args_signal(
+                controller.zoom_percent_changed,
+                controller,
+                self._sync_catalog_zoom_controls,
+            )
             self._catalog_zoom_controller_instance = controller
         controller.bind_view(
             getattr(self, "table", None),
@@ -16147,8 +16213,12 @@ class App(QMainWindow):
         slider.setPageStep(CATALOG_ZOOM_STEP_PERCENT)
         controller = self._catalog_zoom_controller()
         if not getattr(self, "_catalog_zoom_slider_connected", False):
-            slider.valueChanged.connect(self._on_catalog_zoom_slider_value_changed)
-            slider.sliderReleased.connect(self._flush_catalog_zoom)
+            self._connect_args_signal(
+                slider.valueChanged,
+                slider,
+                self._on_catalog_zoom_slider_value_changed,
+            )
+            self._connect_noarg_signal(slider.sliderReleased, slider, self._flush_catalog_zoom)
             self._catalog_zoom_slider_connected = True
         self._sync_catalog_zoom_controls(controller.zoom_percent())
         controller.set_zoom_percent(controller.zoom_percent(), immediate=True)
@@ -32615,7 +32685,7 @@ class EditDialog(QDialog):
         self._bulk_loading = False
         party_authority_notifier().changed.connect(self._handle_party_authority_changed)
         if self._initial_focus_target:
-            QTimer.singleShot(0, self._apply_initial_focus_target)
+            QTimer.singleShot(0, lambda: self._apply_initial_focus_target())
 
     @staticmethod
     def _normalize_batch_track_ids(track_id: int, batch_track_ids: list[int] | None) -> list[int]:
@@ -34341,7 +34411,7 @@ class _ImagePreviewDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         if not self._user_zoomed and not self._base_pix.isNull():
-            QTimer.singleShot(0, self._reset_view_to_fit)
+            QTimer.singleShot(0, lambda: self._reset_view_to_fit())
 
     def resizeEvent(self, event):
         if not self._user_zoomed and not self._base_pix.isNull():
@@ -34801,7 +34871,7 @@ class _AudioPreviewDialog(QDialog):
         self._load_audio_source(self._current_audio_bytes, self._current_audio_mime)
         self._update_navigation_buttons()
         if autoplay:
-            QTimer.singleShot(0, self._player.play)
+            QTimer.singleShot(0, lambda: self._player.play())
 
     def _load_audio_source(self, data: bytes, mime: str) -> None:
         self._reset_player_source()
@@ -35027,7 +35097,7 @@ class _AudioPreviewDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_stop_button_font()
-        QTimer.singleShot(0, self._apply_stop_button_font)
+        QTimer.singleShot(0, lambda: self._apply_stop_button_font())
 
     def resizeEvent(self, event):
         self._resize_timer.start()

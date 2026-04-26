@@ -885,7 +885,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     app.layout_menu = view_menu.addMenu("Layout")
     app.saved_layouts_menu = app.layout_menu.addMenu("Saved Layouts")
-    app.saved_layouts_menu.aboutToShow.connect(app._populate_saved_layouts_menu)
+    app._connect_noarg_signal(
+        app.saved_layouts_menu.aboutToShow,
+        app.saved_layouts_menu,
+        app._populate_saved_layouts_menu,
+    )
     app.add_layout_action = app._create_action("Add Layout", slot=app.add_named_main_window_layout)
     app.layout_menu.addAction(app.add_layout_action)
     app.delete_layout_action = app._create_action(
@@ -1006,8 +1010,10 @@ def _build_action_ribbon_toolbar(app: Any) -> None:
     app.action_ribbon_toolbar.setFloatable(False)
     app.action_ribbon_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
     app.action_ribbon_toolbar.setContextMenuPolicy(Qt.CustomContextMenu)
-    app.action_ribbon_toolbar.customContextMenuRequested.connect(
-        app._open_action_ribbon_context_menu
+    app._connect_args_signal(
+        app.action_ribbon_toolbar.customContextMenuRequested,
+        app.action_ribbon_toolbar,
+        app._open_action_ribbon_context_menu,
     )
     app.addToolBar(Qt.TopToolBarArea, app.action_ribbon_toolbar)
     app.addToolBarBreak(Qt.TopToolBarArea)
@@ -1023,15 +1029,19 @@ def _build_profiles_toolbar(app: Any, *, last_db: str) -> None:
     app.profile_combo = FocusWheelComboBox()
     app.toolbar.addWidget(app.profile_combo)
 
-    app.profile_combo.currentIndexChanged.connect(app._on_profile_changed)
+    app._connect_args_signal(
+        app.profile_combo.currentIndexChanged,
+        app.profile_combo,
+        app._on_profile_changed,
+    )
     app._reload_profiles_list(select_path=last_db)
 
     btn_new = QPushButton("New…")
-    btn_new.clicked.connect(app.create_new_profile)
+    app._connect_noarg_signal(btn_new.clicked, btn_new, app.create_new_profile)
     app.toolbar.addWidget(btn_new)
 
     btn_browse = QPushButton("Browse…")
-    btn_browse.clicked.connect(app.browse_profile)
+    app._connect_noarg_signal(btn_browse.clicked, btn_browse, app.browse_profile)
     app.toolbar.addWidget(btn_browse)
 
     btn_reload = QPushButton("Reload List")
@@ -1039,7 +1049,7 @@ def _build_profiles_toolbar(app: Any, *, last_db: str) -> None:
     app.toolbar.addWidget(btn_reload)
 
     btn_remove = QPushButton("Remove…")
-    btn_remove.clicked.connect(app.remove_selected_profile)
+    app._connect_noarg_signal(btn_remove.clicked, btn_remove, app.remove_selected_profile)
     app.toolbar.addWidget(btn_remove)
     app.toolbar.addSeparator()
     app.toolbar.addWidget(
@@ -1123,8 +1133,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_mode_combo.setEditable(False)
     for value, label in app._work_track_governance_modes():
         app.add_data_work_mode_combo.addItem(label, value)
-    app.add_data_work_mode_combo.currentIndexChanged.connect(
-        app._on_add_track_governance_mode_changed
+    app._connect_args_signal(
+        app.add_data_work_mode_combo.currentIndexChanged,
+        app.add_data_work_mode_combo,
+        app._on_add_track_governance_mode_changed,
     )
     add_data_work_context_layout.addWidget(
         app._create_add_data_row(
@@ -1137,7 +1149,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_work_combo.setEditable(False)
     app.add_data_work_work_combo.addItem("Choose the governing Work…", None)
     app.add_data_work_work_combo.setEnabled(False)
-    app.add_data_work_work_combo.currentIndexChanged.connect(app._on_add_track_work_changed)
+    app._connect_args_signal(
+        app.add_data_work_work_combo.currentIndexChanged,
+        app.add_data_work_work_combo,
+        app._on_add_track_work_changed,
+    )
     add_data_work_context_layout.addWidget(
         app._create_add_data_row(
             app.add_data_work_work_label,
@@ -1153,8 +1169,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
             value,
         )
     app.add_data_work_relationship_combo.setEnabled(False)
-    app.add_data_work_relationship_combo.currentIndexChanged.connect(
-        app._on_add_track_relationship_changed
+    app._connect_args_signal(
+        app.add_data_work_relationship_combo.currentIndexChanged,
+        app.add_data_work_relationship_combo,
+        app._on_add_track_relationship_changed,
     )
     add_data_work_context_layout.addWidget(
         app._create_add_data_row(
@@ -1167,8 +1185,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_parent_combo.setEditable(False)
     app.add_data_work_parent_combo.addItem("No direct parent track", None)
     app.add_data_work_parent_combo.setEnabled(False)
-    app.add_data_work_parent_combo.currentIndexChanged.connect(
-        app._on_add_track_parent_track_changed
+    app._connect_args_signal(
+        app.add_data_work_parent_combo.currentIndexChanged,
+        app.add_data_work_parent_combo,
+        app._on_add_track_parent_track_changed,
     )
     add_data_work_context_layout.addWidget(
         app._create_add_data_row(
@@ -1182,8 +1202,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_context_actions_layout.setSpacing(8)
     app.add_data_clear_work_context_button = QPushButton("Open Work Manager")
     app.add_data_clear_work_context_button.setVisible(False)
-    app.add_data_clear_work_context_button.clicked.connect(
-        app._return_from_work_track_creation_context
+    app._connect_noarg_signal(
+        app.add_data_clear_work_context_button.clicked,
+        app.add_data_clear_work_context_button,
+        app._return_from_work_track_creation_context,
     )
     app.add_data_work_context_actions_layout.addStretch(1)
     app.add_data_work_context_actions_layout.addWidget(app.add_data_clear_work_context_button)
@@ -1194,20 +1216,20 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     button_row.setContentsMargins(0, 0, 0, 0)
     button_row.setSpacing(8)
     app.cancel_button = QPushButton("Clear Draft")
-    app.cancel_button.clicked.connect(app.clear_form_fields)
+    app._connect_noarg_signal(app.cancel_button.clicked, app.cancel_button, app.clear_form_fields)
     app.cancel_button.setMinimumHeight(32)
     app.edit_button = QPushButton("Edit Selected")
-    app.edit_button.clicked.connect(app.open_selected_editor)
+    app._connect_noarg_signal(app.edit_button.clicked, app.edit_button, app.open_selected_editor)
     app.edit_button.setMinimumHeight(32)
     app.edit_button.setToolTip(
         "Open the selected table row, or bulk edit when multiple rows are selected."
     )
     app.save_button = QPushButton("Create Work + Save Track")
-    app.save_button.clicked.connect(app.save)
+    app._connect_noarg_signal(app.save_button.clicked, app.save_button, app.save)
     app.save_button.setMinimumHeight(32)
     app.save_button.setDefault(True)
     app.delete_button = QPushButton("Delete Selected")
-    app.delete_button.clicked.connect(app.delete_entry)
+    app._connect_noarg_signal(app.delete_button.clicked, app.delete_button, app.delete_entry)
     app.delete_button.setMinimumHeight(32)
     app.delete_button.setToolTip("Delete the currently selected track from the table.")
     button_row.addWidget(app.cancel_button)
@@ -1278,7 +1300,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.album_title_field = FocusWheelComboBox()
     app.album_title_field.setEditable(True)
     app.album_title_field.setCurrentText("")
-    app.album_title_field.currentTextChanged.connect(app.autofill_album_metadata)
+    app._connect_noarg_signal(
+        app.album_title_field.currentTextChanged,
+        app.album_title_field,
+        app.autofill_album_metadata,
+    )
     constrain_add_data_field(app.album_title_field)
 
     app.track_number_label = QLabel("Track Number")
@@ -1351,7 +1377,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.release_date_field.setMaximumHeight(220)
     app.release_date_field.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
     app.release_date_field.setGridVisible(True)
-    app.release_date_field.selectionChanged.connect(app._update_add_data_generated_fields)
+    app._connect_noarg_signal(
+        app.release_date_field.selectionChanged,
+        app.release_date_field,
+        app._update_add_data_generated_fields,
+    )
     constrain_add_data_field(app.release_date_field)
 
     app.iswc_label = QLabel("ISWC")
@@ -1429,7 +1459,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.track_length_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     app.prev_release_toggle = QRadioButton("Use release year in generated ISRC")
-    app.prev_release_toggle.toggled.connect(app._update_add_data_generated_fields)
+    app._connect_noarg_signal(
+        app.prev_release_toggle.toggled,
+        app.prev_release_toggle,
+        app._update_add_data_generated_fields,
+    )
     app.isrc_rule_label = QLabel("ISRC Rule")
 
     status_group, status_layout = app._create_add_data_group(
@@ -1538,7 +1572,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         lambda *_args: app._schedule_main_dock_state_save()
     )
     app.add_data_dock.topLevelChanged.connect(lambda *_args: app._schedule_main_dock_state_save())
-    app.add_data_dock.visibilityChanged.connect(app._on_add_track_dock_visibility_changed)
+    app._connect_bool_signal(
+        app.add_data_dock.visibilityChanged,
+        app.add_data_dock,
+        app._on_add_track_dock_visibility_changed,
+    )
 
     app.table_panel_widget = QWidget()
     app.table_panel_widget.setObjectName("catalogTablePanel")
@@ -1608,9 +1646,17 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.duration_label.setMinimumWidth(130)
     app.duration_label.setProperty("role", "secondary")
 
-    app.search_field.textChanged.connect(app._apply_catalog_search_filter)
-    app.search_column_combo.currentIndexChanged.connect(app._apply_catalog_search_filter)
-    app.search_button.clicked.connect(app.reset_search)
+    app._connect_noarg_signal(
+        app.search_field.textChanged,
+        app.search_field,
+        app._apply_catalog_search_filter,
+    )
+    app._connect_noarg_signal(
+        app.search_column_combo.currentIndexChanged,
+        app.search_column_combo,
+        app._apply_catalog_search_filter,
+    )
+    app._connect_noarg_signal(app.search_button.clicked, app.search_button, app.reset_search)
 
     app.search_layout.addWidget(app.search_field, 1, Qt.AlignVCenter)
     app.search_layout.addWidget(app.search_button, 0, Qt.AlignVCenter)
@@ -1794,7 +1840,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         app.table.viewport().grabGesture(Qt.PinchGesture)
     app.catalog_set_filter_shortcut = QShortcut(QKeySequence.Find, app.table)
     app.catalog_set_filter_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
-    app.catalog_set_filter_shortcut.activated.connect(app._set_catalog_filter_from_current_cell)
+    app._connect_noarg_signal(
+        app.catalog_set_filter_shortcut.activated,
+        app.catalog_set_filter_shortcut,
+        app._set_catalog_filter_from_current_cell,
+    )
     app.catalog_edit_selected_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Space"), app.table)
     app.catalog_edit_selected_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
     app.catalog_edit_selected_shortcut.activated.connect(lambda: app.open_selected_editor())
@@ -1823,9 +1873,17 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.col_hint_label = None
     app.row_hint_label = None
 
-    app.table.doubleClicked.connect(app._on_catalog_index_double_clicked)
+    app._connect_args_signal(
+        app.table.doubleClicked,
+        app.table,
+        app._on_catalog_index_double_clicked,
+    )
     app.table.setContextMenuPolicy(Qt.CustomContextMenu)
-    app.table.customContextMenuRequested.connect(app._on_catalog_table_context_menu)
+    app._connect_args_signal(
+        app.table.customContextMenuRequested,
+        app.table,
+        app._on_catalog_table_context_menu,
+    )
 
     right_panel.addWidget(app.table)
 

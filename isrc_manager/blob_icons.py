@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
@@ -91,6 +93,30 @@ SYSTEM_BLOB_ICON_SPECS: tuple[SystemBlobIconSpec, ...] = (
     SystemBlobIconSpec("SP_ComputerIcon", "Computer", QStyle.SP_ComputerIcon, ("image",)),
     SystemBlobIconSpec("SP_DriveHDIcon", "Drive", QStyle.SP_DriveHDIcon, ("image",)),
 )
+
+
+def _keep_signal_wrapper_alive(owner: object, wrapper: Callable[..., object]) -> None:
+    wrappers = getattr(owner, "_isrc_signal_wrappers", None)
+    if wrappers is None:
+        wrappers = []
+        setattr(owner, "_isrc_signal_wrappers", wrappers)
+    wrappers.append(wrapper)
+
+
+def _connect_noarg_signal(signal: Any, owner: object, slot: Callable[[], object]) -> None:
+    def _wrapper(_checked: bool = False, _slot: Callable[[], object] = slot) -> None:
+        _slot()
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
+
+
+def _connect_args_signal(signal: Any, owner: object, slot: Callable[..., object]) -> None:
+    def _wrapper(*args: object, _slot: Callable[..., object] = slot) -> None:
+        _slot(*args)
+
+    _keep_signal_wrapper_alive(owner, _wrapper)
+    signal.connect(_wrapper)
 
 
 EMOJI_BLOB_ICON_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -824,12 +850,30 @@ class BlobIconEditorWidget(QWidget):
         image_layout.addWidget(self.image_note_label, 2, 0, 1, 2)
         self.mode_stack.addWidget(self.image_page)
 
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        self.system_combo.currentIndexChanged.connect(self._emit_change)
-        self.emoji_combo.currentIndexChanged.connect(self._apply_selected_emoji_preset)
-        self.emoji_edit.textChanged.connect(self._emit_change)
-        self.image_browse_button.clicked.connect(self._choose_image)
-        self.image_clear_button.clicked.connect(self._clear_image)
+        _connect_args_signal(
+            self.mode_combo.currentIndexChanged, self.mode_combo, self._on_mode_changed
+        )
+        _connect_args_signal(
+            self.system_combo.currentIndexChanged,
+            self.system_combo,
+            self._emit_change,
+        )
+        _connect_args_signal(
+            self.emoji_combo.currentIndexChanged,
+            self.emoji_combo,
+            self._apply_selected_emoji_preset,
+        )
+        _connect_args_signal(self.emoji_edit.textChanged, self.emoji_edit, self._emit_change)
+        _connect_noarg_signal(
+            self.image_browse_button.clicked,
+            self.image_browse_button,
+            self._choose_image,
+        )
+        _connect_noarg_signal(
+            self.image_clear_button.clicked,
+            self.image_clear_button,
+            self._clear_image,
+        )
 
         self.set_spec(
             {"mode": "inherit"} if self.allow_inherit else default_blob_icon_spec(self.kind)
@@ -1032,8 +1076,8 @@ class BlobIconDialog(QDialog):
         ok = buttons.button(QDialogButtonBox.Ok)
         if ok is not None:
             ok.setDefault(True)
-        buttons.accepted.connect(self._accept_if_valid)
-        buttons.rejected.connect(self.reject)
+        _connect_noarg_signal(buttons.accepted, buttons, self._accept_if_valid)
+        _connect_noarg_signal(buttons.rejected, buttons, self.reject)
         layout.addWidget(buttons)
 
     def _accept_if_valid(self) -> None:
