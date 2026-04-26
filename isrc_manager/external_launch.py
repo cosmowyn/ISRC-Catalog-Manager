@@ -154,9 +154,19 @@ def _enable_qt_test_gui_safety() -> None:
         return
 
 
+def _prime_windows_asyncio_subprocess_classes() -> None:
+    if os.name != "nt":
+        return
+    try:
+        __import__("asyncio.windows_utils")
+    except Exception:
+        return
+
+
 def install_test_process_desktop_safety(*, blocked_return_value: bool = True) -> None:
     os.environ.setdefault(TEST_BLOCK_ENV_VAR, "1")
     _enable_qt_test_gui_safety()
+    _prime_windows_asyncio_subprocess_classes()
     install_test_external_launch_guard(blocked_return_value=blocked_return_value)
 
 
