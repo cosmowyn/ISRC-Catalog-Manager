@@ -2325,6 +2325,8 @@ class AppShellTestCase(unittest.TestCase):
             {"Ctrl+Alt+F", "Meta+Alt+F"},
         )
         self.assertIs(self.window.workspace_global_search_action, self.window.global_search_action)
+        self.assertEqual(_shortcut_texts(self.window.workspace_add_track_action), {"Shift+F2"})
+        self.assertEqual(_shortcut_texts(self.window.workspace_catalog_action), {"Shift+F3"})
         self.assertEqual(
             self.window.add_track_action.shortcut().toString(QKeySequence.PortableText),
             "Ctrl+Alt+N",
@@ -6093,6 +6095,20 @@ class AppShellTestCase(unittest.TestCase):
             self.window.add_data_tabs.sizePolicy().verticalPolicy(),
             app_module.QSizePolicy.Maximum,
         )
+        for index in range(tabs.count()):
+            page = tabs.widget(index)
+            self.assertEqual(page.property("role"), "workspaceCanvas")
+            page_layout = page.layout()
+            self.assertIsNotNone(page_layout)
+            top_level_widgets = [
+                page_layout.itemAt(item_index).widget()
+                for item_index in range(page_layout.count())
+                if page_layout.itemAt(item_index).widget() is not None
+            ]
+            self.assertTrue(top_level_widgets)
+            self.assertTrue(
+                all(isinstance(widget, app_module.QGroupBox) for widget in top_level_widgets)
+            )
         for field in (
             self.window.record_id_field,
             self.window.generated_isrc_field,
@@ -6106,8 +6122,10 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(field.maximumWidth(), 300)
         tabs_index = self.window.left_panel.indexOf(self.window.add_data_tabs)
         buttons_index = self.window.left_panel.indexOf(self.window.button_row_widget)
-        self.assertEqual(buttons_index, tabs_index + 1)
-        self.assertIsNotNone(self.window.left_panel.itemAt(buttons_index + 1).spacerItem())
+        self.assertEqual(buttons_index + 1, tabs_index)
+        self.assertIsInstance(self.window.button_row_widget, app_module.QGroupBox)
+        self.assertEqual(self.window.button_row_widget.title(), "Draft Actions")
+        self.assertIsNotNone(self.window.left_panel.itemAt(tabs_index + 1).spacerItem())
         lossy_audio = self._create_media_file("add-warning.mp3", b"ID3add-warning")
         self.window.audio_file_field.setText(str(lossy_audio))
         self.app.processEvents()
@@ -6207,6 +6225,46 @@ class AppShellTestCase(unittest.TestCase):
             self.app.processEvents()
             self.assertFalse(dialog.audio_file_warning_label.isHidden())
             self.assertIn("MP3", dialog.audio_file_warning_label.text())
+        finally:
+            dialog.close()
+
+    def case_track_editor_shows_database_audio_and_reads_saved_audio_length(self):
+        track_id = self._create_track(
+            index=9002,
+            title="Stored Audio Editor",
+            album_title="Editor Media",
+        )
+        audio_path = self._create_wav_file(
+            "editor-duration.wav",
+            frame_count=44100 * 3,
+        )
+        self._attach_standard_media(
+            track_id,
+            audio_path=audio_path,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        dialog = app_module.EditDialog(track_id, self.window)
+        try:
+            self.assertEqual(
+                dialog.audio_file.text(),
+                "editor-duration.wav (stored in database)",
+            )
+            self.assertTrue(dialog.set_length_from_saved_audio_button.isEnabled())
+            self.assertEqual(
+                dialog.set_length_from_saved_audio_button.text(),
+                "Set Length from Saved Audio",
+            )
+
+            dialog.len_h.setValue(1)
+            dialog.len_m.setValue(2)
+            dialog.len_s.setValue(3)
+            dialog.set_length_from_saved_audio_button.click()
+            self.app.processEvents()
+
+            self.assertEqual(dialog.len_h.value(), 0)
+            self.assertEqual(dialog.len_m.value(), 0)
+            self.assertEqual(dialog.len_s.value(), 3)
         finally:
             dialog.close()
 

@@ -689,6 +689,7 @@ class ApplicationSettingsDialog(QDialog):
     COLOR_FIELD_SPECS = THEME_COLOR_FIELD_SPECS
     METRIC_FIELD_SPECS = THEME_METRIC_FIELD_SPECS
     THEME_PAGE_SPECS = THEME_PAGE_SPECS
+    SMART_HISTORY_BUDGET_MARGIN_PERCENT = 25
     HISTORY_RETENTION_MODE_SPECS = (
         (
             HISTORY_RETENTION_MODE_MAXIMUM_SAFETY,
@@ -779,6 +780,8 @@ class ApplicationSettingsDialog(QDialog):
         self._blob_icon_preview_labels: dict[str, QLabel] = {}
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
+        self._current_profile_path = Path(current_profile_path) if current_profile_path else None
+        self._profile_database_paths = self._discover_profile_database_paths(parent)
         initial_custom_qss = str(self._theme_settings.get("custom_qss") or "")
         self._theme_last_valid_custom_qss_preview = (
             initial_custom_qss if not validate_qss_document(initial_custom_qss) else ""
@@ -1112,12 +1115,30 @@ class ApplicationSettingsDialog(QDialog):
         )
         self.history_storage_budget_spin.setMinimumWidth(180)
         self.history_storage_budget_spin.setMaximumWidth(220)
+        history_budget_widget = QWidget(self)
+        history_budget_layout = QVBoxLayout(history_budget_widget)
+        history_budget_layout.setContentsMargins(0, 0, 0, 0)
+        history_budget_layout.setSpacing(4)
+        history_budget_row = QHBoxLayout()
+        history_budget_row.setContentsMargins(0, 0, 0, 0)
+        history_budget_row.setSpacing(8)
+        history_budget_row.addWidget(self.history_storage_budget_spin)
+        self.history_storage_budget_smart_button = QPushButton("Use Smart Budget")
+        self.history_storage_budget_smart_button.setObjectName("historyStorageSmartBudgetButton")
+        self.history_storage_budget_smart_button.setAutoDefault(False)
+        self.history_storage_budget_smart_button.clicked.connect(self._apply_smart_history_budget)
+        history_budget_row.addWidget(self.history_storage_budget_smart_button)
+        history_budget_row.addStretch(1)
+        history_budget_layout.addLayout(history_budget_row)
+        self.history_storage_budget_hint = self._make_hint(
+            "Set the profile history-storage budget. Values stay exact internally. Use Smart Budget calculates from all profile database sizes, retained snapshot count, and a 25% margin."
+        )
+        history_budget_layout.addWidget(self.history_storage_budget_hint)
         self._add_row(
             snapshots_grid,
             5,
             "Storage Budget",
-            self.history_storage_budget_spin,
-            "Set the profile history-storage budget. Values stay exact internally and are displayed in MB, GB, or TB as appropriate.",
+            history_budget_widget,
         )
 
         self.history_auto_snapshot_keep_latest_spin = FocusWheelSpinBox()
@@ -1183,6 +1204,9 @@ class ApplicationSettingsDialog(QDialog):
             self.history_storage_budget_spin.setEnabled
         )
         self.history_auto_cleanup_enabled_check.toggled.connect(
+            self._refresh_smart_history_budget_button_state
+        )
+        self.history_auto_cleanup_enabled_check.toggled.connect(
             self.history_auto_snapshot_keep_latest_spin.setEnabled
         )
         self.history_auto_cleanup_enabled_check.toggled.connect(
@@ -1197,6 +1221,7 @@ class ApplicationSettingsDialog(QDialog):
         self.history_prune_pre_restore_copies_after_days_spin.setEnabled(
             self.history_auto_cleanup_enabled_check.isChecked()
         )
+        self._refresh_smart_history_budget_button_state()
         self.history_auto_cleanup_enabled_check.toggled.connect(
             self._sync_history_retention_mode_from_controls
         )
@@ -1205,6 +1230,9 @@ class ApplicationSettingsDialog(QDialog):
         )
         self.history_auto_snapshot_keep_latest_spin.valueChanged.connect(
             self._sync_history_retention_mode_from_controls
+        )
+        self.history_auto_snapshot_keep_latest_spin.valueChanged.connect(
+            self._refresh_smart_history_budget_button_state
         )
         self.history_prune_pre_restore_copies_after_days_spin.valueChanged.connect(
             self._sync_history_retention_mode_from_controls
@@ -1656,6 +1684,142 @@ class ApplicationSettingsDialog(QDialog):
             if mode_key == normalized:
                 return description
         return ""
+
+    @staticmethod
+    def _ceil_div(value: int, divisor: int) -> int:
+        clean_divisor = max(1, int(divisor or 1))
+        clean_value = max(0, int(value or 0))
+        return (clean_value + clean_divisor - 1) // clean_divisor
+
+    @classmethod
+    def _smart_history_budget_mb_from_database_size(
+        cls,
+        database_size_bytes: int,
+        retained_snapshot_count: int,
+    ) -> int:
+        size_mb = max(1, cls._ceil_div(database_size_bytes, 1024 * 1024))
+        snapshot_count = max(1, int(retained_snapshot_count or 1))
+        margin_percent = 100 + int(cls.SMART_HISTORY_BUDGET_MARGIN_PERCENT)
+        estimate_mb = cls._ceil_div(size_mb * snapshot_count * margin_percent, 100)
+        round_to_mb = 1024 if estimate_mb >= 1024 else 128
+        rounded_mb = cls._ceil_div(estimate_mb, round_to_mb) * round_to_mb
+        return max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, rounded_mb))
+
+    def _discover_profile_database_paths(self, owner: object | None) -> list[Path]:
+        candidates: list[Path] = []
+        profile_store = getattr(owner, "profile_store", None)
+        if profile_store is not None and hasattr(profile_store, "list_profiles"):
+            try:
+                candidates.extend(Path(path) for path in profile_store.list_profiles())
+            except Exception:
+                pass
+
+        database_dir = getattr(owner, "database_dir", None)
+        if database_dir:
+            try:
+                candidates.extend(sorted(Path(database_dir).glob("*.db")))
+            except Exception:
+                pass
+
+        if self._current_profile_path is None:
+            return self._deduplicate_profile_database_paths(candidates)
+        profile_path = self._current_profile_path
+        if profile_path.parent.exists():
+            try:
+                candidates.extend(sorted(profile_path.parent.glob("*.db")))
+            except Exception:
+                pass
+        candidates.append(profile_path)
+        return self._deduplicate_profile_database_paths(candidates)
+
+    @staticmethod
+    def _deduplicate_profile_database_paths(candidates: list[Path]) -> list[Path]:
+        seen: set[str] = set()
+        paths: list[Path] = []
+        for candidate in candidates:
+            try:
+                path = Path(candidate).expanduser()
+            except TypeError:
+                continue
+            normalized = str(path.resolve(strict=False))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            paths.append(path)
+        return paths
+
+    def _profile_database_collection_size_bytes(self) -> int:
+        if not self._profile_database_paths:
+            return 0
+        total_bytes = 0
+        for profile_path in self._profile_database_paths:
+            total_bytes += self._profile_database_bundle_size_bytes(profile_path)
+        return max(0, total_bytes)
+
+    @staticmethod
+    def _profile_database_bundle_size_bytes(profile_path: Path) -> int:
+        candidate_paths = [
+            profile_path,
+            Path(str(profile_path) + ".wal"),
+            Path(str(profile_path) + ".shm"),
+            Path(str(profile_path) + ".journal"),
+            Path(str(profile_path) + "-wal"),
+            Path(str(profile_path) + "-shm"),
+            Path(str(profile_path) + "-journal"),
+        ]
+        total_bytes = 0
+        seen_paths: set[str] = set()
+        for candidate in candidate_paths:
+            normalized = str(candidate)
+            if normalized in seen_paths:
+                continue
+            seen_paths.add(normalized)
+            try:
+                if candidate.exists() or candidate.is_symlink():
+                    total_bytes += int(candidate.stat().st_size)
+            except OSError:
+                continue
+        return max(0, total_bytes)
+
+    def _refresh_smart_history_budget_button_state(self, *_args) -> None:
+        database_size_bytes = self._profile_database_collection_size_bytes()
+        auto_cleanup_enabled = self.history_auto_cleanup_enabled_check.isChecked()
+        enabled = bool(auto_cleanup_enabled and database_size_bytes > 0)
+        self.history_storage_budget_smart_button.setEnabled(enabled)
+        if not auto_cleanup_enabled:
+            tooltip = "Enable automatic cleanup to use the profile-size budget helper."
+        elif database_size_bytes <= 0:
+            tooltip = "Open or save a profile database before calculating a smart budget."
+        else:
+            keep_latest = int(self.history_auto_snapshot_keep_latest_spin.value())
+            smart_budget_mb = self._smart_history_budget_mb_from_database_size(
+                database_size_bytes,
+                keep_latest,
+            )
+            tooltip = (
+                f"Set budget to {format_budget_megabytes(smart_budget_mb)} "
+                f"from {format_storage_bytes(database_size_bytes)} across all profile databases x {keep_latest} retained snapshot(s) "
+                f"+ {self.SMART_HISTORY_BUDGET_MARGIN_PERCENT}% margin."
+            )
+        self.history_storage_budget_smart_button.setToolTip(tooltip)
+
+    def _apply_smart_history_budget(self) -> None:
+        database_size_bytes = self._profile_database_collection_size_bytes()
+        if database_size_bytes <= 0:
+            QMessageBox.information(
+                self,
+                "Smart Storage Budget",
+                "Open or save a profile database before calculating a smart history-storage budget.",
+            )
+            self._refresh_smart_history_budget_button_state()
+            return
+        keep_latest = int(self.history_auto_snapshot_keep_latest_spin.value())
+        smart_budget_mb = self._smart_history_budget_mb_from_database_size(
+            database_size_bytes,
+            keep_latest,
+        )
+        self.history_storage_budget_spin.setValue(smart_budget_mb)
+        self._refresh_smart_history_budget_button_state()
 
     def _history_retention_control_payload(self) -> dict[str, object]:
         return {
@@ -15791,11 +15955,18 @@ class App(QMainWindow):
     # UI helpers
     # =============================================================================
     @staticmethod
-    def _create_add_data_group(title: str) -> tuple[QGroupBox, QVBoxLayout]:
+    def _create_add_data_group(
+        title: str, description: str | None = None
+    ) -> tuple[QGroupBox, QVBoxLayout]:
         group = QGroupBox(title)
         layout = QVBoxLayout(group)
         layout.setContentsMargins(14, 16, 14, 14)
         layout.setSpacing(10)
+        if description:
+            description_label = QLabel(description, group)
+            description_label.setWordWrap(True)
+            description_label.setProperty("role", "sectionDescription")
+            layout.addWidget(description_label)
         return group, layout
 
     @staticmethod
@@ -31775,9 +31946,7 @@ class EditDialog(QDialog):
         )
         self._build_bulk_field_states()
 
-        self._existing_audio_display_path = self._resolve_snapshot_media_display(
-            self.snapshot.audio_file_path
-        )
+        self._existing_audio_display_path = self._resolve_audio_file_display(self.snapshot)
         self._existing_album_art_display_path = self._resolve_album_art_display(self.snapshot)
         self._album_art_hint_owner_targets: list[tuple[int, str]] = []
         self._clear_audio_file = False
@@ -32281,6 +32450,35 @@ class EditDialog(QDialog):
         tl.addWidget(self.len_m)
         tl.addWidget(QLabel(":"))
         tl.addWidget(self.len_s)
+        self.set_length_from_saved_audio_button = QPushButton("Set Length from Saved Audio")
+        self.set_length_from_saved_audio_button.setObjectName("setLengthFromSavedAudioButton")
+        self.set_length_from_saved_audio_button.setAutoDefault(False)
+        self.set_length_from_saved_audio_button.setToolTip(
+            "Read the saved audio file duration into the track length fields."
+        )
+        self.set_length_from_saved_audio_button.clicked.connect(
+            self._set_track_length_from_saved_audio
+        )
+        can_read_saved_audio = (
+            not self._is_bulk_edit
+            and (
+                bool(self.snapshot.audio_file_path)
+                or normalize_storage_mode(self.snapshot.audio_file_storage_mode, default=None)
+                == STORAGE_MODE_DATABASE
+                or bool(self.snapshot.audio_file_blob_b64)
+            )
+        )
+        self.set_length_from_saved_audio_button.setEnabled(can_read_saved_audio)
+        if self._is_bulk_edit:
+            self.set_length_from_saved_audio_button.setToolTip(
+                "Saved audio length can be read when editing a single track."
+            )
+        elif not can_read_saved_audio:
+            self.set_length_from_saved_audio_button.setToolTip(
+                "No saved audio file is attached to this track."
+            )
+        tl.addSpacing(10)
+        tl.addWidget(self.set_length_from_saved_audio_button)
         tlw = QWidget()
         tlw_layout = QVBoxLayout(tlw)
         tlw_layout.setContentsMargins(0, 0, 0, 0)
@@ -32579,6 +32777,21 @@ class EditDialog(QDialog):
 
     def _resolve_snapshot_media_display(self, stored_path: str | None) -> str:
         return str(self.parent.track_service.resolve_media_path(stored_path) or "")
+
+    def _resolve_audio_file_display(self, snapshot: TrackSnapshot) -> str:
+        resolved = self._resolve_snapshot_media_display(snapshot.audio_file_path)
+        if resolved:
+            return resolved
+        if (
+            normalize_storage_mode(snapshot.audio_file_storage_mode, default=None)
+            == STORAGE_MODE_DATABASE
+            or snapshot.audio_file_blob_b64
+        ):
+            filename = str(snapshot.audio_file_filename or "").strip()
+            if filename:
+                return f"{filename} (stored in database)"
+            return "Stored in database"
+        return ""
 
     def _resolve_album_art_display(self, snapshot: TrackSnapshot) -> str:
         resolved = self._resolve_snapshot_media_display(snapshot.album_art_path)
@@ -32893,6 +33106,61 @@ class EditDialog(QDialog):
                     minutes_widget=self.len_m,
                     seconds_widget=self.len_s,
                 )
+
+    def _set_track_length_from_saved_audio(self) -> None:
+        if self._is_bulk_edit:
+            return
+        track_service = getattr(self.parent, "track_service", None)
+        if track_service is None:
+            QMessageBox.warning(self, "Track Length", "Open a profile before reading saved audio.")
+            return
+        try:
+            source_handle = track_service.resolve_media_source(self.track_id, "audio_file")
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "Track Length",
+                "This track does not have a saved audio file to read.",
+            )
+            return
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Track Length",
+                f"Could not open the saved audio file:\n{exc}",
+            )
+            return
+
+        try:
+            with source_handle.materialize_path() as source_path:
+                duration_seconds = track_service.derive_audio_duration_seconds(source_path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Track Length",
+                f"Could not read the saved audio file:\n{exc}",
+            )
+            return
+        if duration_seconds is None:
+            QMessageBox.warning(
+                self,
+                "Track Length",
+                "Could not read a duration from the saved audio file.",
+            )
+            return
+
+        self.parent._set_track_length_widgets(
+            self.len_h,
+            self.len_m,
+            self.len_s,
+            int(duration_seconds),
+        )
+        status_bar = self.parent.statusBar() if hasattr(self.parent, "statusBar") else None
+        if status_bar is not None:
+            status_bar.showMessage(
+                f"Track length set from saved audio: {seconds_to_hms(int(duration_seconds))}",
+                4000,
+            )
 
     def _clear_track_media(self, line_edit: QLineEdit, *, clear_attr: str) -> None:
         setattr(self, clear_attr, True)

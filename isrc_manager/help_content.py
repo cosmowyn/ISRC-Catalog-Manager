@@ -138,7 +138,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         </ul>
         <h3>Catalog Creation and Review</h3>
         <ul>
-          <li><strong>Add Track</strong>: <code>Ctrl+Alt+N</code> / <code>Cmd+Option+N</code></li>
+          <li><strong>Add Track</strong>: <code>Shift+F2</code> for the workspace, or <code>Ctrl+Alt+N</code> / <code>Cmd+Option+N</code> for a new entry</li>
           <li><strong>Add Album</strong>: <code>Ctrl+Alt+Shift+N</code> / <code>Cmd+Option+Shift+N</code></li>
           <li><strong>Edit Catalog Selection</strong>: <code>Ctrl+Shift+Space</code> / <code>Cmd+Shift+Space</code> while the catalog table is focused</li>
           <li><strong>Work Manager</strong>: <code>Ctrl+Alt+W</code> / <code>Cmd+Option+W</code></li>
@@ -161,6 +161,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <h3>Layout and Workspace Chrome</h3>
         <ul>
           <li><strong>Show Add Track Panel</strong>: <code>Ctrl+Shift+D</code> / <code>Cmd+Shift+D</code></li>
+          <li><strong>Show Catalog Workspace</strong>: <code>Shift+F3</code></li>
           <li><strong>Show Catalog Table</strong>: <code>Ctrl+Shift+T</code> / <code>Cmd+Shift+T</code></li>
           <li><strong>Show Action Ribbon</strong>: <code>Ctrl+Alt+R</code> / <code>Cmd+Option+R</code></li>
           <li><strong>Customize Action Ribbon</strong>: <code>Ctrl+Shift+R</code> / <code>Cmd+Shift+R</code></li>
@@ -765,11 +766,12 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "snapshot interval",
             "retention",
             "storage budget",
+            "smart budget",
         ),
         content_html="""
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
-          <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls.</li>
+          <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>

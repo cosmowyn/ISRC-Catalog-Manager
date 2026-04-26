@@ -115,6 +115,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Derivative Ledger", chapter.content_html)
         self.assertIn("Ctrl+Alt+V", chapter.content_html)
         self.assertIn("F1", chapter.content_html)
+        self.assertIn("Shift+F2", chapter.content_html)
+        self.assertIn("Shift+F3", chapter.content_html)
 
     def test_help_chapters_describe_track_first_governed_creation(self):
         overview = HELP_CHAPTERS_BY_ID["overview"]

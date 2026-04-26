@@ -863,6 +863,72 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_application_settings_dialog_smart_storage_budget_uses_all_profile_sizes(self):
+        self.assertEqual(
+            app_module.ApplicationSettingsDialog._smart_history_budget_mb_from_database_size(
+                8 * 1024**3,
+                1,
+            ),
+            10240,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_path = Path(temp_dir) / "large-profile.db"
+            with profile_path.open("wb") as handle:
+                handle.truncate(6 * 1024**3)
+            peer_profile_path = Path(temp_dir) / "peer-profile.db"
+            with peer_profile_path.open("wb") as handle:
+                handle.truncate(2 * 1024**3)
+
+            host = _ThemePreviewHost()
+            dialog = app_module.ApplicationSettingsDialog(
+                window_title="Catalog",
+                icon_path="",
+                artist_code="00",
+                auto_snapshot_enabled=True,
+                auto_snapshot_interval_minutes=30,
+                isrc_prefix="NLABC",
+                sena_number="",
+                btw_number="",
+                buma_relatie_nummer="",
+                buma_ipi="",
+                gs1_template_asset=None,
+                gs1_contracts_csv_path="",
+                gs1_contract_entries=(),
+                gs1_active_contract_number="",
+                gs1_target_market="",
+                gs1_language="",
+                gs1_brand="",
+                gs1_subbrand="",
+                gs1_packaging_type="",
+                gs1_product_classification="",
+                theme_settings={},
+                stored_themes={},
+                current_profile_path=str(profile_path),
+                history_storage_budget_mb=2048,
+                history_auto_snapshot_keep_latest=1,
+                parent=host,
+            )
+            try:
+                self.assertTrue(dialog.history_storage_budget_smart_button.isEnabled())
+                self.assertIn(
+                    "8 GB across all profile databases x 1",
+                    dialog.history_storage_budget_smart_button.toolTip(),
+                )
+
+                dialog.history_storage_budget_smart_button.click()
+                self.app.processEvents()
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 10240)
+
+                dialog.history_auto_snapshot_keep_latest_spin.setValue(2)
+                dialog.history_storage_budget_smart_button.click()
+                self.app.processEvents()
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 20480)
+                self.assertEqual(dialog.values()["history_retention_mode"], "custom")
+            finally:
+                dialog.close()
+                host.close()
+
     def test_apply_theme_with_loading_prepares_payload_before_ui_apply(self):
         host = _ThemeApplyHost()
         previous_stylesheet = self.app.styleSheet()

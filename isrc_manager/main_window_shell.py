@@ -636,11 +636,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.workspace_add_track_action = app._create_action(
         "Add Track",
         slot=app.open_add_track_workspace,
+        shortcuts=("Shift+F2",),
     )
     workspace_create_menu.insertAction(app.work_manager_action, app.workspace_add_track_action)
     app.workspace_catalog_action = app._create_action(
         "Catalog",
         slot=app.open_catalog_workspace,
+        shortcuts=("Shift+F3",),
     )
     workspace_browse_menu.insertAction(app.release_browser_action, app.workspace_catalog_action)
     app.workspace_global_search_action = app.global_search_action
@@ -1103,7 +1105,8 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_panel.addWidget(app.add_data_header)
 
     app.add_data_work_context_group, add_data_work_context_layout = app._create_add_data_group(
-        "Work Governance"
+        "Work Governance",
+        "Choose how this new track relates to Work records before saving.",
     )
     app.add_data_work_context_summary = QLabel("")
     app.add_data_work_context_summary.setWordWrap(True)
@@ -1187,6 +1190,40 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     add_data_work_context_layout.addWidget(app.add_data_work_context_actions)
     app.add_data_work_context_group.setVisible(True)
 
+    button_row = QHBoxLayout()
+    button_row.setContentsMargins(0, 0, 0, 0)
+    button_row.setSpacing(8)
+    app.cancel_button = QPushButton("Clear Draft")
+    app.cancel_button.clicked.connect(app.clear_form_fields)
+    app.cancel_button.setMinimumHeight(32)
+    app.edit_button = QPushButton("Edit Selected")
+    app.edit_button.clicked.connect(app.open_selected_editor)
+    app.edit_button.setMinimumHeight(32)
+    app.edit_button.setToolTip(
+        "Open the selected table row, or bulk edit when multiple rows are selected."
+    )
+    app.save_button = QPushButton("Create Work + Save Track")
+    app.save_button.clicked.connect(app.save)
+    app.save_button.setMinimumHeight(32)
+    app.save_button.setDefault(True)
+    app.delete_button = QPushButton("Delete Selected")
+    app.delete_button.clicked.connect(app.delete_entry)
+    app.delete_button.setMinimumHeight(32)
+    app.delete_button.setToolTip("Delete the currently selected track from the table.")
+    button_row.addWidget(app.cancel_button)
+    button_row.addStretch(1)
+    button_row.addWidget(app.edit_button)
+    button_row.addWidget(app.delete_button)
+    button_row.addWidget(app.save_button)
+    app.add_data_actions_group, app.add_data_actions_layout = app._create_add_data_group(
+        "Draft Actions"
+    )
+    app.add_data_actions_group.setObjectName("addDataActionsGroup")
+    app.add_data_actions_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    app.add_data_actions_layout.addLayout(button_row)
+    app.button_row_widget = app.add_data_actions_group
+    app.left_panel.addWidget(app.button_row_widget)
+
     app.add_data_tabs = QTabWidget()
     app.add_data_tabs.setObjectName("addDataTabs")
     app.add_data_tabs.setDocumentMode(True)
@@ -1194,41 +1231,22 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
     app.left_panel.addWidget(app.add_data_tabs)
 
-    def create_add_data_tab(title: str, description: str) -> QVBoxLayout:
+    def create_add_data_tab(title: str) -> QVBoxLayout:
         page = QWidget(app.add_data_tabs)
+        page.setProperty("role", "workspaceCanvas")
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(10)
 
-        intro = QLabel(description, page)
-        intro.setWordWrap(True)
-        intro.setProperty("role", "secondary")
-        page_layout.addWidget(intro)
-
         app.add_data_tabs.addTab(page, title)
         return page_layout
 
-    governance_tab_layout = create_add_data_tab(
-        "Governance",
-        "Choose how this new track relates to Work records before saving.",
-    )
+    governance_tab_layout = create_add_data_tab("Governance")
     app.add_data_track_tab_index = app.add_data_tabs.count()
-    track_tab_layout = create_add_data_tab(
-        "Track",
-        "Capture the track-facing metadata that will be shown across the catalog and browsers.",
-    )
-    release_tab_layout = create_add_data_tab(
-        "Release",
-        "Keep album grouping, release timing, and track duration together while you enter the record.",
-    )
-    codes_tab_layout = create_add_data_tab(
-        "Codes",
-        "Review generated identifiers and enter the registration values used by exports and rights workflows.",
-    )
-    media_tab_layout = create_add_data_tab(
-        "Media",
-        "Attach the managed audio file and artwork stored with this track.",
-    )
+    track_tab_layout = create_add_data_tab("Track")
+    release_tab_layout = create_add_data_tab("Release")
+    codes_tab_layout = create_add_data_tab("Codes")
+    media_tab_layout = create_add_data_tab("Media")
 
     governance_tab_layout.addWidget(app.add_data_work_context_group)
     governance_tab_layout.addStretch(1)
@@ -1414,7 +1432,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.prev_release_toggle.toggled.connect(app._update_add_data_generated_fields)
     app.isrc_rule_label = QLabel("ISRC Rule")
 
-    status_group, status_layout = app._create_add_data_group("Generated")
+    status_group, status_layout = app._create_add_data_group(
+        "Generated",
+        "Review the identifiers and entry values assigned by the current profile.",
+    )
     status_layout.addWidget(app._create_add_data_row(app.record_id_label, app.record_id_field))
     status_layout.addWidget(
         app._create_add_data_row(app.generated_isrc_label, app.generated_isrc_field)
@@ -1424,7 +1445,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     status_layout.addWidget(app._create_add_data_row(app.isrc_rule_label, app.prev_release_toggle))
 
-    core_group, core_layout = app._create_add_data_group("Core Details")
+    core_group, core_layout = app._create_add_data_group(
+        "Core Details",
+        "Capture the track-facing metadata shown across the catalog and browsers.",
+    )
     core_layout.addWidget(app._create_add_data_row(app.track_title_label, app.track_title_field))
     core_layout.addWidget(app._create_add_data_row(app.artist_label, app.artist_field))
     core_layout.addWidget(
@@ -1432,7 +1456,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     core_layout.addWidget(app._create_add_data_row(app.genre_label, app.genre_field))
 
-    release_group, release_layout = app._create_add_data_group("Album & Release")
+    release_group, release_layout = app._create_add_data_group(
+        "Album & Release",
+        "Keep album grouping, release timing, and track duration together while you enter the record.",
+    )
     release_layout.addWidget(app._create_add_data_row(app.album_title_label, app.album_title_field))
     release_layout.addWidget(
         app._create_add_data_row(app.track_number_label, app.track_number_field)
@@ -1446,7 +1473,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     release_layout.addWidget(app._create_add_data_row(app.track_len_label, app.track_length_row))
 
-    codes_group, codes_layout = app._create_add_data_group("Identifiers & Catalog")
+    codes_group, codes_layout = app._create_add_data_group(
+        "Identifiers & Catalog",
+        "Enter the registration values used by exports, rights workflows, and catalog numbering.",
+    )
     codes_layout.addWidget(app._create_add_data_row(app.iswc_label, app.iswc_field))
     codes_layout.addWidget(app._create_add_data_row(app.upc_label, app.upc_field))
     codes_layout.addWidget(
@@ -1456,7 +1486,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         app._create_add_data_row(app.buma_work_number_label, app.buma_work_number_field)
     )
 
-    media_group, media_layout = app._create_add_data_group("Managed Media")
+    media_group, media_layout = app._create_add_data_group(
+        "Managed Media",
+        "Attach the managed audio file and artwork stored with this track.",
+    )
     media_layout.addWidget(app._create_add_data_row(app.audio_file_label, app.audio_file_row))
     media_layout.addWidget(app._create_add_data_row(app.album_art_label, app.album_art_row))
 
@@ -1470,34 +1503,6 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     media_tab_layout.addWidget(media_group)
     media_tab_layout.addStretch(1)
 
-    button_row = QHBoxLayout()
-    button_row.setContentsMargins(0, 4, 0, 0)
-    button_row.setSpacing(8)
-    app.cancel_button = QPushButton("Clear Draft")
-    app.cancel_button.clicked.connect(app.clear_form_fields)
-    app.cancel_button.setMinimumHeight(32)
-    app.edit_button = QPushButton("Edit Selected")
-    app.edit_button.clicked.connect(app.open_selected_editor)
-    app.edit_button.setMinimumHeight(32)
-    app.edit_button.setToolTip(
-        "Open the selected table row, or bulk edit when multiple rows are selected."
-    )
-    app.save_button = QPushButton("Create Work + Save Track")
-    app.save_button.clicked.connect(app.save)
-    app.save_button.setMinimumHeight(32)
-    app.save_button.setDefault(True)
-    app.delete_button = QPushButton("Delete Selected")
-    app.delete_button.clicked.connect(app.delete_entry)
-    app.delete_button.setMinimumHeight(32)
-    app.delete_button.setToolTip("Delete the currently selected track from the table.")
-    button_row.addWidget(app.cancel_button)
-    button_row.addStretch(1)
-    button_row.addWidget(app.edit_button)
-    button_row.addWidget(app.delete_button)
-    button_row.addWidget(app.save_button)
-    app.button_row_widget = QWidget()
-    app.button_row_widget.setLayout(button_row)
-    app.left_panel.addWidget(app.button_row_widget)
     app.left_panel.addStretch(1)
 
     app.add_data_column = QWidget()
