@@ -74,15 +74,18 @@ Release builds pin exact `3.14.4`, not floating `3.14.x`.
 
 - PyInstaller moved from 6.15.0 to 6.19.0 so the build lane includes fixes that mention
   Python 3.14.4 compatibility in PyInstaller's upstream changelog.
-- NumPy moved from 2.2.6 to 2.3.2 and SciPy moved from 1.15.3 to 1.17.1 because the older
-  pins did not provide complete Python 3.14.4 binary wheel coverage for the online release
-  build matrix. Without this, macOS ARM attempted to compile SciPy from source and failed
-  because the hosted runner does not include a Fortran compiler.
+- NumPy and SciPy now use Python-version markers:
+  - Python <3.14 keeps NumPy 2.2.6 and SciPy 1.15.3 to preserve the existing Python 3.10 and
+    3.13 support lanes.
+  - Python >=3.14 uses NumPy 2.3.2 and SciPy 1.17.1 because the older pins did not provide
+    complete Python 3.14.4 binary wheel coverage for the online release build matrix. Without
+    this, macOS ARM attempted to compile SciPy from source and failed because the hosted runner
+    does not include a Fortran compiler.
 - Existing runtime pins install and import locally under Python 3.14.4:
   - PySide6 6.11.0
   - pillow 12.0.0
-  - numpy 2.3.2
-  - scipy 1.17.1
+  - numpy 2.3.2 on Python 3.14.4
+  - scipy 1.17.1 on Python 3.14.4
   - soundfile 0.13.1
   - cryptography 46.0.5
 

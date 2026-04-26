@@ -62,9 +62,22 @@ class Python314CompatibilityTests(unittest.TestCase):
             _section_text(pyproject_text, "project"), "dependencies"
         )
 
-        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
+        for requirement in (
+            "numpy==2.2.6; python_version < '3.14'",
+            "numpy==2.3.2; python_version >= '3.14'",
+            "scipy==1.15.3; python_version < '3.14'",
+            "scipy==1.17.1; python_version >= '3.14'",
+        ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, project_dependencies)
+
+        for requirement in (
+            'numpy==2.2.6; python_version < "3.14"',
+            'numpy==2.3.2; python_version >= "3.14"',
+            'scipy==1.15.3; python_version < "3.14"',
+            'scipy==1.17.1; python_version >= "3.14"',
+        ):
+            with self.subTest(requirement=requirement):
                 self.assertIn(requirement, requirements)
 
     def test_setuptools_package_list_covers_all_isrc_manager_packages(self):
