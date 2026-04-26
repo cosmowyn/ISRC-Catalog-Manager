@@ -28,8 +28,8 @@ This `docs/` directory is the repository-side companion to that help surface. It
 - [GS1 Workflow Guide](gs1_workflow.md): workbook validation, grouped product editing, and export
 - [Diagnostics and Recovery](diagnostics-and-recovery.md): quality review, diagnostics, cleanup, migration, and logs
 - [Undo, History, and Snapshots](undo_redo_strategy.md): recovery model, snapshots, backups, and retention
-- [Release Notes](../RELEASE_NOTES.md): latest automated release TL;DR and update-check metadata source
-- [Release Build Automation](release-builds.md): tag-triggered GitHub release packaging for Windows, macOS, and Linux
+- [Release Notes](../RELEASE_NOTES.md): latest automated release TL;DR and release metadata source
+- [Release Build Automation](release-builds.md): tag-triggered GitHub release packaging, checksums, and in-app update manifest flow
 
 ## Customization
 

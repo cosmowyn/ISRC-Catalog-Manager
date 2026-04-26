@@ -433,6 +433,17 @@ from isrc_manager.update_checker import (
     UpdateCheckStatus,
     fetch_release_notes_text,
 )
+from isrc_manager.update_installer import (
+    HELPER_MODE_ARGUMENT,
+    UpdateInstallPlan,
+    UpdateInstallerError,
+    detect_platform_key,
+    download_update_asset,
+    launch_update_helper,
+    prepare_update_install_plan,
+    select_platform_asset,
+    update_workspace_root,
+)
 from isrc_manager.version import current_app_version
 from isrc_manager.workspace_debug import (
     summarize_catalog_workspace_dock,
@@ -7332,17 +7343,33 @@ class App(QMainWindow):
         manifest = result.manifest
         if manifest is None:
             return
+        install_button = None
+        installer_unavailable = ""
+        try:
+            select_platform_asset(manifest)
+            if getattr(sys, "frozen", False):
+                installer_unavailable = ""
+            else:
+                installer_unavailable = (
+                    "\n\nAutomatic installation is available in packaged builds. "
+                    "This source checkout can still show release notes."
+                )
+        except UpdateInstallerError as exc:
+            installer_unavailable = f"\n\nAutomatic installation is not available: {exc}"
         text = (
             "A newer version of ISRC Catalog Manager is available.\n\n"
             f"Installed version: {result.current_version}\n"
             f"Latest version: {manifest.version}\n\n"
             f"{manifest.summary}"
+            f"{installer_unavailable}"
         )
         message_box = QMessageBox(self)
         message_box.setWindowTitle("Update Available")
         message_box.setIcon(QMessageBox.Information)
         message_box.setText(text)
         release_notes_button = None
+        if not installer_unavailable:
+            install_button = message_box.addButton("Download and Install", QMessageBox.ActionRole)
         if manifest.release_notes_url:
             release_notes_button = message_box.addButton("Release Notes", QMessageBox.ActionRole)
         ignore_button = message_box.addButton("Ignore This Version", QMessageBox.RejectRole)
@@ -7356,6 +7383,145 @@ class App(QMainWindow):
             return
         if clicked is release_notes_button:
             self._show_update_release_notes(manifest)
+            return
+        if install_button is not None and clicked is install_button:
+            self._confirm_and_start_update_install(manifest)
+
+    def _confirm_and_start_update_install(self, manifest) -> None:
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                self,
+                "Install Update",
+                "Automatic installation is only available in packaged builds.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Install Update",
+            (
+                f"Download and install version {getattr(manifest, 'version', '')}?\n\n"
+                "The application will close and restart after the package is verified."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._start_update_install(manifest)
+
+    def _start_update_install(self, manifest) -> None:
+        try:
+            platform_key = detect_platform_key()
+            asset = select_platform_asset(manifest, platform_key=platform_key)
+        except UpdateInstallerError as exc:
+            QMessageBox.information(self, "Install Update", str(exc))
+            return
+
+        workspace = update_workspace_root(getattr(manifest, "version", ""), platform_key=platform_key)
+
+        def _task(ctx):
+            ctx.set_status("Downloading update package...")
+            downloaded = download_update_asset(
+                asset,
+                workspace / "downloads",
+                progress_callback=ctx.report_progress,
+            )
+            ctx.set_status("Preparing update installer...")
+            return prepare_update_install_plan(
+                manifest,
+                downloaded.package_path,
+                platform_key=platform_key,
+                cache_root=workspace.parent,
+                progress_callback=ctx.report_progress,
+            )
+
+        def _success(plan):
+            if isinstance(plan, UpdateInstallPlan):
+                self._launch_prepared_update(plan)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Install Update",
+                    "The update installer could not be prepared.",
+                )
+
+        def _error(failure: TaskFailure):
+            self._log_event(
+                "updates.install_prepare_failed",
+                "Update installer preparation failed",
+                level=logging.WARNING,
+                version=getattr(manifest, "version", ""),
+                error=getattr(failure, "message", ""),
+            )
+            QMessageBox.warning(
+                self,
+                "Install Update",
+                (
+                    "The update could not be prepared. Check your internet connection and "
+                    "try again later."
+                ),
+            )
+
+        task_id = self._submit_background_task(
+            title="Install Update",
+            description="Preparing update installation...",
+            task_fn=_task,
+            kind="network",
+            unique_key="updates.install",
+            requires_profile=False,
+            show_dialog=True,
+            cancellable=True,
+            owner=self,
+            on_success=_success,
+            on_error=_error,
+            worker_completion_progress=(95, "Ready to install update."),
+        )
+        if task_id is None:
+            QMessageBox.information(
+                self,
+                "Install Update",
+                "Another update task is already running.",
+            )
+
+    def _launch_prepared_update(self, plan: UpdateInstallPlan) -> None:
+        try:
+            launch_update_helper(plan.helper_command)
+        except Exception as exc:
+            self._log_event(
+                "updates.helper_launch_failed",
+                "Update helper could not be launched",
+                level=logging.ERROR,
+                version=plan.expected_version,
+                error=str(exc),
+            )
+            QMessageBox.critical(
+                self,
+                "Install Update",
+                "The update installer could not be started. The application was not changed.",
+            )
+            return
+
+        self._log_event(
+            "updates.helper_launched",
+            "Update helper launched",
+            level=logging.INFO,
+            version=plan.expected_version,
+            target=str(plan.target_path),
+            replacement=str(plan.replacement_path),
+            backup=str(plan.backup_path),
+            log=str(plan.log_path),
+        )
+        QMessageBox.information(
+            self,
+            "Installing Update",
+            "The update is ready. The application will close now and restart after installation.",
+        )
+        self._is_closing = True
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
+        else:
+            self.close()
 
     def _show_update_release_notes(self, manifest) -> None:
         if not getattr(manifest, "release_notes_url", ""):
@@ -35665,8 +35831,14 @@ def load_wav_peaks(path: str, width_px: int):
 # Application Startup (Settings bootstrap + Single-instance enforcement)
 # =============================================================================
 def main() -> int:
+    argv = list(sys.argv)
+    if HELPER_MODE_ARGUMENT in argv:
+        helper_index = argv.index(HELPER_MODE_ARGUMENT)
+        from isrc_manager.updater_helper import main as updater_helper_main
+
+        return updater_helper_main(argv[helper_index + 1 :])
     return run_desktop_application(
-        argv=sys.argv,
+        argv=argv,
         init_settings=init_settings,
         install_qt_message_filter=_install_qt_message_filter,
         enforce_single_instance=enforce_single_instance,

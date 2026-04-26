@@ -3,6 +3,7 @@ import unittest
 
 from isrc_manager.update_checker import (
     RELEASE_MANIFEST_URL,
+    ReleaseAsset,
     ReleaseManifest,
     UpdateChecker,
     UpdateCheckError,
@@ -13,12 +14,41 @@ from isrc_manager.update_checker import (
 
 
 def _manifest_bytes(version="3.2.1", **overrides):
+    tag = f"v{version}"
     payload = {
         "version": version,
         "released_at": "2026-04-26",
         "summary": "A conservative release summary.",
-        "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.2.1.md",
+        "release_notes_url": (
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/" f"blob/main/docs/releases/{tag}.md"
+        ),
         "minimum_supported_version": None,
+        "assets": {
+            "windows": {
+                "name": f"ISRCManager-{tag}-windows-x64.zip",
+                "url": (
+                    "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                    f"releases/download/{tag}/ISRCManager-{tag}-windows-x64.zip"
+                ),
+                "sha256": "a" * 64,
+            },
+            "macos": {
+                "name": f"ISRCManager-{tag}-macos-arm64.zip",
+                "url": (
+                    "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                    f"releases/download/{tag}/ISRCManager-{tag}-macos-arm64.zip"
+                ),
+                "sha256": "b" * 64,
+            },
+            "linux": {
+                "name": f"ISRCManager-{tag}-linux-x64.tar.gz",
+                "url": (
+                    "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                    f"releases/download/{tag}/ISRCManager-{tag}-linux-x64.tar.gz"
+                ),
+                "sha256": "c" * 64,
+            },
+        },
     }
     payload.update(overrides)
     return json.dumps(payload).encode("utf-8")
@@ -30,6 +60,11 @@ class ReleaseManifestTests(unittest.TestCase):
 
         self.assertEqual(manifest.version, "3.2.1")
         self.assertEqual(manifest.summary, "A conservative release summary.")
+        self.assertIsInstance(manifest.asset_for_platform("macos"), ReleaseAsset)
+        self.assertEqual(
+            manifest.asset_for_platform("linux").name,
+            "ISRCManager-v3.2.1-linux-x64.tar.gz",
+        )
 
     def test_manifest_rejects_invalid_payload(self):
         invalid_payloads = [
@@ -37,6 +72,35 @@ class ReleaseManifestTests(unittest.TestCase):
             json.dumps({"version": "not-semver"}).encode("utf-8"),
             _manifest_bytes(released_at="26-04-2026"),
             _manifest_bytes(release_notes_url="http://example.com/release"),
+            _manifest_bytes(assets={}),
+            _manifest_bytes(
+                assets={
+                    "windows": {
+                        "name": "ISRCManager-v3.2.1-windows-x64.zip",
+                        "url": (
+                            "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                            "releases/download/v3.2.1/ISRCManager-v3.2.1-windows-x64.zip"
+                        ),
+                        "sha256": "a" * 64,
+                    },
+                    "macos": {
+                        "name": "ISRCManager-v3.2.1-macos-arm64.zip",
+                        "url": (
+                            "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                            "releases/download/v3.2.1/ISRCManager-v3.2.1-macos-arm64.zip"
+                        ),
+                        "sha256": "not-a-digest",
+                    },
+                    "linux": {
+                        "name": "ISRCManager-v3.2.1-linux-x64.tar.gz",
+                        "url": (
+                            "https://github.com/cosmowyn/ISRC-Catalog-Manager/"
+                            "releases/download/v3.2.1/ISRCManager-v3.2.1-linux-x64.tar.gz"
+                        ),
+                        "sha256": "c" * 64,
+                    },
+                }
+            ),
         ]
 
         for payload in invalid_payloads:
@@ -49,7 +113,7 @@ class UpdateCheckerTests(unittest.TestCase):
     def test_manifest_url_is_centralized_and_https(self):
         self.assertEqual(
             RELEASE_MANIFEST_URL,
-            "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/docs/releases/latest.json",
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/latest/download/latest.json",
         )
 
     def test_newer_version_available(self):

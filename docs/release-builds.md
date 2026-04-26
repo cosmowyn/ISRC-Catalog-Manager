@@ -94,17 +94,30 @@ Matrix jobs upload their platform package as workflow artifacts. A single final 
 1. downloads all platform artifacts,
 2. chooses release notes from `docs/releases/vX.Y.Z.md`, then `RELEASE_NOTES.md`, then a minimal fallback,
 3. creates `SHA256SUMS.txt`,
-4. creates or updates the matching GitHub Release,
-5. uploads all platform archives and checksums with `gh release upload --clobber`.
+4. creates a release-scoped `latest.json` manifest with platform asset URLs and SHA256 digests,
+5. creates or updates the matching GitHub Release,
+6. uploads all platform archives, `latest.json`, and checksums with `gh release upload --clobber`.
 
 The workflow uses the repository `GITHUB_TOKEN` with `contents: write`; it is not triggered from
 pull requests.
 
 ## Update Check Integration
 
-The existing version-bump workflow continues to update `docs/releases/latest.json`, which the app
-uses for update checks. Release packages are attached to the GitHub Release for the same tag, so
-release notes and downloadable builds share one version identity.
+The version-bump workflow still updates `docs/releases/latest.json` as repository release metadata.
+The desktop app now checks the GitHub Release asset
+`https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/latest/download/latest.json` so the
+manifest is generated after package checksums exist.
+
+The release-scoped manifest includes:
+
+- `version`, `released_at`, `summary`, and `release_notes_url`
+- `assets.windows`, `assets.macos`, and `assets.linux`
+- each asset's filename, HTTPS GitHub Release download URL, and SHA256 digest
+
+Packaged app updates use that manifest to select the current platform package, verify the download,
+stage it safely, and launch the detached updater helper. Source checkouts can still check release
+metadata and view release notes, but automatic binary installation is intentionally limited to
+packaged builds.
 
 ## Local Verification
 

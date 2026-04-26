@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-BASELINE_TEST_COUNT = 448
+BASELINE_TEST_COUNT = 467
 
 GROUP_MODULES: dict[str, tuple[str, ...]] = {
     "catalog-services": (
@@ -56,6 +56,8 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_standard_field_specs",
         "tests.test_tag_service",
         "tests.test_update_checker",
+        "tests.test_update_installer",
+        "tests.test_updater_helper",
         "tests.test_versioning",
         "tests.test_forensic_watermark_service",
         "tests.test_track_service",

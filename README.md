@@ -471,16 +471,24 @@ The test suite includes service-level coverage, dialog/controller tests, app-she
 The canonical application version lives in `pyproject.toml` under `[project].version`.
 Pushes to `main` run an automated SemVer bump workflow that updates the runtime fallback in
 `isrc_manager/version.py`, writes concise release notes under `docs/releases/`, updates
-`RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` for the app's update check.
-The generated `vX.Y.Z` tag is resolved by the cross-platform release-build workflow after version
-bumping completes, so public GitHub Release assets are produced online instead of relying on a local
-maintainer machine.
+`RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` as repository release metadata. The
+generated `vX.Y.Z` tag is resolved by the cross-platform release-build workflow after version
+bumping completes, so public GitHub Release assets and the app-facing `latest.json` update manifest
+are produced online instead of relying on a local maintainer machine.
 
 The desktop app checks that manifest after startup without blocking the UI. `Help > Check for
 Updates…` runs the same check manually. Users can ignore a specific available version; that
 choice is stored in app-wide settings and only suppresses startup notifications for that version.
 When a new version is available, the Release Notes button loads the release-note markdown inside
 the application instead of opening the GitHub page in a browser.
+
+Packaged builds can also install updates from inside the app. The release-build workflow publishes
+a `latest.json` asset on GitHub Releases with platform package URLs and SHA256 checksums. The app
+selects the matching Windows, macOS, or Linux package, downloads it to the app-managed update cache,
+verifies the checksum, extracts it with path-traversal protection, and launches a detached helper
+process. The helper waits for the main app to exit, backs up the current executable or `.app`
+bundle, installs the staged replacement, and restarts the app. If replacement or restart setup
+fails, the helper restores the backup and writes an install log in the update workspace.
 
 ## Support
 

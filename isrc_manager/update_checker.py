@@ -14,13 +14,13 @@ from urllib.parse import urlparse
 from .versioning import SemVer, SemVerError
 
 RELEASE_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/"
-    "docs/releases/latest.json"
+    "https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/latest/download/latest.json"
 )
 DEFAULT_UPDATE_TIMEOUT_SECONDS = 4.0
 DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS = 6.0
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_RELEASE_NOTES_BYTES = 512 * 1024
+SUPPORTED_RELEASE_ASSET_PLATFORMS = ("windows", "macos", "linux")
 
 
 class UpdateCheckStatus:
@@ -38,11 +38,32 @@ FetchManifest = Callable[[str, float], bytes]
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseAsset:
+    name: str
+    url: str
+    sha256: str
+
+    @classmethod
+    def from_mapping(cls, platform_key: str, payload: object) -> "ReleaseAsset":
+        if not isinstance(payload, dict):
+            raise UpdateCheckError(f"Update asset for {platform_key} has an invalid format.")
+        name = _required_text(payload, "name")
+        if "/" in name or "\\" in name:
+            raise UpdateCheckError(f"Update asset for {platform_key} has an invalid name.")
+        url = _required_text(payload, "url")
+        _validate_https_url(url, field_name=f"assets.{platform_key}.url")
+        sha256 = _required_text(payload, "sha256").lower()
+        _validate_sha256(sha256, field_name=f"assets.{platform_key}.sha256")
+        return cls(name=name, url=url, sha256=sha256)
+
+
+@dataclass(frozen=True, slots=True)
 class ReleaseManifest:
     version: str
     released_at: str
     summary: str
     release_notes_url: str
+    assets: dict[str, ReleaseAsset]
     minimum_supported_version: str | None = None
 
     @classmethod
@@ -64,6 +85,8 @@ class ReleaseManifest:
         summary = _required_text(payload, "summary")
         release_notes_url = _required_text(payload, "release_notes_url")
         _validate_https_url(release_notes_url, field_name="release_notes_url")
+        assets = _release_assets_from_mapping(payload.get("assets"))
+        _validate_asset_version_binding(assets, version)
         minimum_supported = payload.get("minimum_supported_version")
         if minimum_supported in (None, ""):
             clean_minimum = None
@@ -75,8 +98,18 @@ class ReleaseManifest:
             released_at=released_at,
             summary=summary,
             release_notes_url=release_notes_url,
+            assets=assets,
             minimum_supported_version=clean_minimum,
         )
+
+    def asset_for_platform(self, platform_key: str) -> ReleaseAsset:
+        clean_key = str(platform_key or "").strip().lower()
+        try:
+            return self.assets[clean_key]
+        except KeyError as exc:
+            raise UpdateCheckError(
+                f"No update package is available for {clean_key or 'this platform'}."
+            ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +126,7 @@ class UpdateCheckResult:
 
 
 class UpdateChecker:
-    """Fetch and evaluate the repo-backed release manifest."""
+    """Fetch and evaluate the GitHub Release update manifest."""
 
     def __init__(
         self,
@@ -261,3 +294,32 @@ def _validate_https_url(url: str, *, field_name: str) -> None:
     parsed = urlparse(str(url or "").strip())
     if parsed.scheme != "https" or not parsed.netloc:
         raise UpdateCheckError(f"{field_name} must be an HTTPS URL.")
+
+
+def _validate_sha256(value: str, *, field_name: str) -> None:
+    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise UpdateCheckError(f"{field_name} must be a lowercase SHA256 hex digest.")
+
+
+def _release_assets_from_mapping(payload: object) -> dict[str, ReleaseAsset]:
+    if not isinstance(payload, dict):
+        raise UpdateCheckError("Update information is missing platform assets.")
+    assets: dict[str, ReleaseAsset] = {}
+    for platform_key in SUPPORTED_RELEASE_ASSET_PLATFORMS:
+        if platform_key not in payload:
+            raise UpdateCheckError(f"Update information is missing the {platform_key} asset.")
+        assets[platform_key] = ReleaseAsset.from_mapping(platform_key, payload[platform_key])
+    extra_keys = sorted(set(str(key) for key in payload) - set(SUPPORTED_RELEASE_ASSET_PLATFORMS))
+    if extra_keys:
+        raise UpdateCheckError("Update information contains unsupported platform assets.")
+    return assets
+
+
+def _validate_asset_version_binding(assets: dict[str, ReleaseAsset], version: str) -> None:
+    release_tag = f"v{version}"
+    release_path = f"/releases/download/{release_tag}/"
+    for platform_key, asset in assets.items():
+        if release_tag not in asset.name or release_path not in asset.url:
+            raise UpdateCheckError(
+                f"Update asset for {platform_key} does not match release {release_tag}."
+            )

@@ -301,6 +301,73 @@ jobs:
             sha256sum * > SHA256SUMS.txt
           )
 
+          export RELEASE_TAG="$tag"
+          export RELEASE_VERSION="$version"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import date
+          from pathlib import Path
+          from urllib.parse import quote
+
+          release_assets_dir = Path("release-assets")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["RELEASE_TAG"]
+          version = os.environ["RELEASE_VERSION"]
+          metadata_path = Path("docs/releases/latest.json")
+          metadata = {}
+          if metadata_path.is_file():
+              metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+          def platform_key_for_name(name):
+              lowered = name.lower()
+              if "-windows-" in lowered:
+                  return "windows"
+              if "-macos-" in lowered:
+                  return "macos"
+              if "-linux-" in lowered:
+                  return "linux"
+              return None
+
+          assets = {}
+          for asset_path in sorted(release_assets_dir.iterdir()):
+              if not asset_path.is_file() or asset_path.name == "SHA256SUMS.txt":
+                  continue
+              platform_key = platform_key_for_name(asset_path.name)
+              if platform_key is None:
+                  continue
+              digest = hashlib.sha256(asset_path.read_bytes()).hexdigest()
+              assets[platform_key] = {
+                  "name": asset_path.name,
+                  "url": (
+                      f"https://github.com/{repo}/releases/download/"
+                      f"{tag}/{quote(asset_path.name)}"
+                  ),
+                  "sha256": digest,
+              }
+
+          missing = sorted({"windows", "macos", "linux"} - set(assets))
+          if missing:
+              raise SystemExit(f"Missing platform assets for latest.json: {', '.join(missing)}")
+
+          release_manifest = {
+              "version": version,
+              "released_at": str(metadata.get("released_at") or date.today().isoformat()),
+              "summary": str(metadata.get("summary") or f"Automated release build for {tag}."),
+              "release_notes_url": str(
+                  metadata.get("release_notes_url")
+                  or f"https://github.com/{repo}/releases/tag/{tag}"
+              ),
+              "minimum_supported_version": metadata.get("minimum_supported_version"),
+              "assets": assets,
+          }
+          (release_assets_dir / "latest.json").write_text(
+              json.dumps(release_manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"

@@ -129,6 +129,8 @@ files = [
   "isrc_manager/tags/models.py",
   "isrc_manager/tasks/models.py",
   "isrc_manager/update_checker.py",
+  "isrc_manager/update_installer.py",
+  "isrc_manager/updater_helper.py",
   "isrc_manager/version.py",
   "isrc_manager/versioning.py",
 ]
