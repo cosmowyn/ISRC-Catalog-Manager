@@ -195,7 +195,10 @@ def _process_exists(pid: int) -> bool:
 
 def _windows_process_exists(pid: int) -> bool:
     try:
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        windll = getattr(ctypes, "windll", None)
+        if windll is None:
+            return True
+        kernel32 = windll.kernel32
         handle = kernel32.OpenProcess(0x00100000, False, int(pid))
         if not handle:
             return False
