@@ -151,12 +151,21 @@ jobs:
             libxkbcommon-x11-0
 
       - name: Install release build dependencies
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,build]"
 
+      - name: Install release build dependencies
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip &&
+          python -m pip install -e .[dev,build]
+
       - name: Run release QA
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
@@ -165,8 +174,24 @@ jobs:
           python -m mypy
           python -m unittest tests.test_build_requirements tests.test_release_automation -v
 
+      - name: Run release QA
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests &&
+          python -m ruff check build.py isrc_manager scripts tests &&
+          python -m black --check build.py isrc_manager scripts tests &&
+          python -m mypy &&
+          python -m unittest tests.test_build_requirements tests.test_release_automation -v
+
       - name: Build packaged application
+        if: runner.os != 'Windows'
         shell: bash
+        run: python build.py
+
+      - name: Build packaged application
+        if: runner.os == 'Windows'
+        shell: cmd
         run: python build.py
 
       - name: Validate release package
