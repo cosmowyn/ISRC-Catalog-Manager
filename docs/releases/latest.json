@@ -1,7 +1,7 @@
 {
-  "version": "3.5.2",
+  "version": "3.5.3",
   "released_at": "2026-04-26",
-  "summary": "preserve numeric pins before Python 3.14",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.5.2.md",
+  "summary": "normalize package discovery on Windows",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.5.3.md",
   "minimum_supported_version": null
 }
