@@ -441,8 +441,10 @@ from isrc_manager.update_installer import (
     download_update_asset,
     launch_update_helper,
     prepare_update_install_plan,
+    resolve_installed_target_path,
     select_platform_asset,
     update_workspace_root,
+    validate_install_target_is_replaceable,
 )
 from isrc_manager.version import current_app_version
 from isrc_manager.workspace_debug import (
@@ -7408,6 +7410,10 @@ class App(QMainWindow):
         try:
             platform_key = detect_platform_key()
             asset = select_platform_asset(manifest, platform_key=platform_key)
+            validate_install_target_is_replaceable(
+                resolve_installed_target_path(platform_key=platform_key),
+                platform_key=platform_key,
+            )
         except UpdateInstallerError as exc:
             QMessageBox.information(self, "Install Update", str(exc))
             return
@@ -7441,20 +7447,25 @@ class App(QMainWindow):
                 )
 
         def _error(failure: TaskFailure):
+            failure_message = str(getattr(failure, "message", "") or "").strip()
             self._log_event(
                 "updates.install_prepare_failed",
                 "Update installer preparation failed",
                 level=logging.WARNING,
                 version=getattr(manifest, "version", ""),
-                error=getattr(failure, "message", ""),
+                error=failure_message,
             )
+            if failure_message:
+                message = f"The update could not be prepared.\n\n{failure_message}"
+            else:
+                message = (
+                    "The update could not be prepared. Check your internet connection and "
+                    "try again later."
+                )
             QMessageBox.warning(
                 self,
                 "Install Update",
-                (
-                    "The update could not be prepared. Check your internet connection and "
-                    "try again later."
-                ),
+                message,
             )
 
         task_id = self._submit_background_task(

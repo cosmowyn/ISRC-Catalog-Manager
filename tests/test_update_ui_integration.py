@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -384,6 +385,91 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             ],
             [("network", False, True)],
         )
+
+    def test_install_update_prepare_error_surfaces_specific_failure_message(self):
+        manifest = ReleaseManifest.from_mapping(_manifest_mapping())
+        warnings = []
+        log_events = []
+
+        class _FakeMessageBox:
+            @staticmethod
+            def warning(_parent, title, text):
+                warnings.append((title, text))
+
+            @staticmethod
+            def information(_parent, title, text):
+                raise AssertionError(f"Unexpected information dialog: {title}: {text}")
+
+        class _FakeApp:
+            def _submit_background_task(self, **kwargs):
+                kwargs["on_error"](
+                    app_module.TaskFailure(
+                        message="Automatic updates cannot replace an app running from macOS App Translocation.",
+                        traceback_text="",
+                    )
+                )
+                return "task-id"
+
+            def _log_event(self, *args, **kwargs):
+                log_events.append((args, kwargs))
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _FakeMessageBox),
+            mock.patch.object(app_module, "detect_platform_key", return_value="macos"),
+            mock.patch.object(
+                app_module,
+                "resolve_installed_target_path",
+                return_value=Path("/Applications/ISRCManager.app"),
+            ),
+            mock.patch.object(app_module, "validate_install_target_is_replaceable"),
+            mock.patch.object(
+                app_module,
+                "update_workspace_root",
+                return_value=Path("/tmp/isrc-updates/v3.3.1-macos"),
+            ),
+        ):
+            app_module.App._start_update_install(_FakeApp(), manifest)
+
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0][0], "Install Update")
+        self.assertIn("App Translocation", warnings[0][1])
+        self.assertNotIn("Check your internet connection", warnings[0][1])
+        self.assertEqual(log_events[0][1]["error"], warnings[0][1].split("\n\n", 1)[1])
+
+    def test_install_update_preflight_failure_stops_before_download_task(self):
+        manifest = ReleaseManifest.from_mapping(_manifest_mapping())
+        information_messages = []
+
+        class _FakeMessageBox:
+            @staticmethod
+            def information(_parent, title, text):
+                information_messages.append((title, text))
+
+        class _FakeApp:
+            def _submit_background_task(self, **_kwargs):
+                raise AssertionError("Download task should not start after preflight failure.")
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _FakeMessageBox),
+            mock.patch.object(app_module, "detect_platform_key", return_value="macos"),
+            mock.patch.object(
+                app_module,
+                "resolve_installed_target_path",
+                return_value=Path("/private/var/folders/example/AppTranslocation/UUID/d/App.app"),
+            ),
+            mock.patch.object(
+                app_module,
+                "validate_install_target_is_replaceable",
+                side_effect=app_module.UpdateInstallerError(
+                    "Automatic updates cannot replace an app running from macOS App Translocation."
+                ),
+            ),
+        ):
+            app_module.App._start_update_install(_FakeApp(), manifest)
+
+        self.assertEqual(len(information_messages), 1)
+        self.assertEqual(information_messages[0][0], "Install Update")
+        self.assertIn("App Translocation", information_messages[0][1])
 
 
 if __name__ == "__main__":

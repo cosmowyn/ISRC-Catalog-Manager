@@ -9,6 +9,7 @@ from unittest import mock
 from isrc_manager.update_checker import ReleaseAsset, ReleaseManifest
 from isrc_manager.update_installer import (
     HELPER_MODE_ARGUMENT,
+    StagedUpdatePackage,
     UpdateInstallerError,
     backup_path_for_target,
     build_helper_command,
@@ -17,6 +18,7 @@ from isrc_manager.update_installer import (
     extract_update_package,
     launch_update_helper,
     locate_replacement_candidate,
+    prepare_update_install_plan,
     resolve_installed_target_path,
     restart_command_for_target,
     select_platform_asset,
@@ -224,6 +226,39 @@ class UpdateInstallerTests(unittest.TestCase):
         self.assertEqual(command[0], "/tmp/helper")
         self.assertIn(HELPER_MODE_ARGUMENT, command)
         self.assertIn("--restart-json", command)
+
+    def test_prepare_update_plan_rejects_macos_app_translocation_target(self):
+        manifest = _manifest()
+        translocated_target = Path(
+            "/private/var/folders/example/AppTranslocation/UUID/d/ISRCManager.app"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = StagedUpdatePackage(
+                package_path=root / "package.zip",
+                staging_dir=root / "staging",
+                replacement_path=root / "staging" / "ISRCManager.app",
+                platform_key="macos",
+            )
+
+            with (
+                mock.patch("isrc_manager.update_installer.sys.frozen", True, create=True),
+                mock.patch(
+                    "isrc_manager.update_installer.extract_update_package",
+                    return_value=staged,
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.resolve_installed_target_path",
+                    return_value=translocated_target,
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateInstallerError, "App Translocation"):
+                    prepare_update_install_plan(
+                        manifest,
+                        root / "package.zip",
+                        cache_root=root,
+                        platform_key="macos",
+                    )
 
     def test_launch_update_helper_detaches_process(self):
         calls = []

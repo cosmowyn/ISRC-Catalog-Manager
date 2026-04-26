@@ -297,8 +297,7 @@ def prepare_update_install_plan(
         progress_callback=progress_callback,
     )
     target = resolve_installed_target_path(platform_key=key)
-    if not target.exists():
-        raise UpdateInstallerError(f"The installed application could not be found: {target}")
+    validate_install_target_is_replaceable(target, platform_key=key)
     restart_command = restart_command_for_target(target, platform_key=key)
     backup_path = backup_path_for_target(target, manifest.version)
     log_path = workspace / "install.log"
@@ -327,6 +326,29 @@ def prepare_update_install_plan(
         log_path=log_path,
         expected_version=manifest.version,
     )
+
+
+def validate_install_target_is_replaceable(
+    target_path: Path,
+    *,
+    platform_key: str | None = None,
+) -> None:
+    key = platform_key or detect_platform_key()
+    target = target_path.resolve()
+    if key == "macos" and _is_macos_app_translocation_path(target):
+        raise UpdateInstallerError(
+            "Automatic updates cannot replace an app running from macOS App Translocation. "
+            "Move ISRC Catalog Manager to /Applications, or another writable install folder, "
+            "launch it from there, then check for updates again."
+        )
+    if not target.exists():
+        raise UpdateInstallerError(f"The installed application could not be found: {target}")
+    if not os.access(target.parent, os.W_OK):
+        raise UpdateInstallerError(
+            "Automatic updates cannot replace the installed application because its folder is "
+            f"not writable: {target.parent}. Move the app to a writable install folder, then "
+            "check for updates again."
+        )
 
 
 def create_helper_runtime_copy(
@@ -369,6 +391,10 @@ def create_helper_runtime_copy(
     shutil.copy2(source_executable, helper_executable)
     helper_executable.chmod(helper_executable.stat().st_mode | stat.S_IXUSR)
     return helper_executable
+
+
+def _is_macos_app_translocation_path(path: Path) -> bool:
+    return any(part.lower() == "apptranslocation" for part in path.parts)
 
 
 def build_helper_command(
