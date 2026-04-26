@@ -412,6 +412,11 @@ The architecture is local-first, desktop-native, and designed for safe backgroun
 
 ## Developer Workflow
 
+The supported source runtime is Python `>=3.10`. CI keeps Python `3.10` coverage for the minimum
+runtime, Python `3.13` coverage for the primary compatibility lane, and exact Python `3.14.4`
+coverage for current compatibility and release packaging. Formatting and type-checking targets stay
+at Python `3.10` syntax so older supported runtimes are not accidentally dropped.
+
 Install developer tooling with:
 
 ```bash
@@ -449,13 +454,14 @@ GitHub Actions verifies the project with:
 - Black formatting checks
 - mypy type checking
 - unit and integration tests on multiple Python versions
+- exact Python 3.14.4 compatibility checks
 - headless Qt app-shell coverage
 - coverage thresholds
-- packaging smoke validation
+- packaging smoke validation on Python 3.14.4
 
 When a `vX.Y.Z` tag is pushed, or when the Version Bump workflow creates one, the release-build
-workflow runs native package builds on Windows, macOS, and Linux, then creates or updates the
-matching GitHub Release with the generated archives and `SHA256SUMS.txt`. See
+workflow runs native package builds on Windows, macOS, and Linux with exact Python 3.14.4, then
+creates or updates the matching GitHub Release with the generated archives and `SHA256SUMS.txt`. See
 [Release Build Automation](docs/release-builds.md) for the maintainer workflow.
 
 The test suite includes service-level coverage, dialog/controller tests, app-shell integration coverage, workflow integration tests, migration coverage, and background-task safety checks.

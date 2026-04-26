@@ -69,8 +69,9 @@ Linux installs the Qt runtime packages already used by the CI test matrix.
 
 ## Python Version
 
-Release builds use Python `3.13`, matching the repository's current primary CI packaging smoke
-coverage. Local verification was also run with the repo `.venv`, which is Python `3.14.4`.
+Release builds now use exact Python `3.14.4` on Windows, macOS, and Linux. The workflow verifies
+`sys.version_info[:3] == (3, 14, 4)` before dependency installation so published packages cannot
+silently build with a different Python patch release.
 
 ## Dependency Installation
 

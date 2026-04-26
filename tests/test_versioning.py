@@ -33,6 +33,13 @@ class SemVerTests(unittest.TestCase):
         self.assertLess(parse_semver("1.0.0+build.1"), parse_semver("1.0.1"))
         self.assertEqual(parse_semver("1.0.0+build.1"), parse_semver("1.0.0+build.2"))
 
+    def test_hash_matches_semver_equality_when_only_build_metadata_differs(self):
+        left = parse_semver("1.0.0+build.1")
+        right = parse_semver("1.0.0+build.2")
+
+        self.assertEqual(left, right)
+        self.assertEqual({left, right}, {left})
+
     def test_invalid_versions_are_rejected(self):
         for value in ("", "1", "1.2", "01.2.3", "1.2.3-01", "1.2.3+"):
             with self.subTest(value=value):

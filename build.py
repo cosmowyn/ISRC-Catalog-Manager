@@ -889,7 +889,10 @@ def _stage_release_artifact(source_artifact: Path, dist_dir: Path, *, app_versio
     release_dir.mkdir(parents=True, exist_ok=True)
 
     if source_artifact.is_dir():
-        target = release_dir / _release_basename(app_version)
+        target_name = _release_basename(app_version)
+        if source_artifact.suffix:
+            target_name = f"{target_name}{source_artifact.suffix}"
+        target = release_dir / target_name
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(source_artifact, target)

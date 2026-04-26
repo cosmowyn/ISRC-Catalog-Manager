@@ -11,6 +11,12 @@ requires-python = ">=3.10"
 authors = [
   { name = "M. van de Kleut" },
 ]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
   "PySide6==6.11.0",
   "audioread==3.0.1",
@@ -25,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 build = [
-  "pyinstaller==6.15.0",
+  "pyinstaller==6.19.0",
 ]
 dev = [
   "black==25.1.0",
@@ -43,6 +49,8 @@ packages = [
   "isrc_manager",
   "isrc_manager.authenticity",
   "isrc_manager.assets",
+  "isrc_manager.catalog_table",
+  "isrc_manager.code_registry",
   "isrc_manager.contracts",
   "isrc_manager.contract_templates",
   "isrc_manager.conversion",

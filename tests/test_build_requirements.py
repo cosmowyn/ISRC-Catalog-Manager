@@ -735,6 +735,28 @@ class ArtifactStagingTests(unittest.TestCase):
             self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.1-windows.exe")
             self.assertFalse((dist_dir / "release_manifest.json").exists())
 
+    def test_stage_release_artifact_preserves_macos_app_bundle_suffix(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            app_bundle = dist_dir / f"{build.APP_NAME}.app"
+            contents = app_bundle / "Contents"
+            contents.mkdir(parents=True)
+            (contents / "Info.plist").write_text("plist", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+                mock.patch.object(build, "_platform_tag", return_value="macos"),
+            ):
+                staged = build._stage_release_artifact(
+                    app_bundle,
+                    dist_dir,
+                    app_version="3.1.1",
+                )
+
+            self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.1-macos.app")
+            self.assertTrue((staged / "Contents" / "Info.plist").is_file())
+
     def test_write_release_manifest_includes_package_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
@@ -767,7 +789,7 @@ class ArtifactStagingTests(unittest.TestCase):
     def test_package_release_artifact_zips_macos_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
-            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-macos"
+            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-macos.app"
             contents = bundle / "Contents"
             contents.mkdir(parents=True)
             (contents / "Info.plist").write_text("plist", encoding="utf-8")
@@ -788,7 +810,7 @@ class ArtifactStagingTests(unittest.TestCase):
             self.assertGreater(package.stat().st_size, 0)
             with zipfile.ZipFile(package) as archive:
                 self.assertIn(
-                    f"{build.APP_NAME}-3.1.1-macos/Contents/Info.plist",
+                    f"{build.APP_NAME}-3.1.1-macos.app/Contents/Info.plist",
                     archive.namelist(),
                 )
 

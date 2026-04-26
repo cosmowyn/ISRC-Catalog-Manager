@@ -101,6 +101,20 @@ class ReleaseAutomationTests(unittest.TestCase):
             self.assertTrue((releases_dir / "v3.2.1.md").is_file())
             self.assertTrue(notes_path.is_file())
 
+    def test_write_project_version_only_updates_project_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pyproject = Path(tmpdir) / "pyproject.toml"
+            pyproject.write_text(
+                '[project]\nname = "isrc-catalog-manager"\n\n'
+                '[tool.example]\nversion = "9.9.9"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(RuntimeError):
+                automation.write_project_version("3.14.4", pyproject)
+
+            self.assertIn('version = "9.9.9"', pyproject.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

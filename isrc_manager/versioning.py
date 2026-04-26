@@ -110,6 +110,9 @@ class SemVer:
             other.prerelease,
         )
 
+    def __hash__(self) -> int:
+        return hash((self.major, self.minor, self.patch, self.prerelease))
+
 
 def _compare_prerelease(left: tuple[str, ...], right: tuple[str, ...]) -> int:
     if not left and not right:

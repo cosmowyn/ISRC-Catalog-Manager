@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.10", "3.13", "3.14.4"]
 
     steps:
       - uses: actions/checkout@v5
@@ -49,15 +49,19 @@ jobs:
           python -m py_compile $(find tests -name '*.py' | sort)
 
   lint:
-    name: Ruff lint
+    name: Ruff lint (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14.4"]
 
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
             pyproject.toml
@@ -73,15 +77,19 @@ jobs:
         run: python -m ruff check build.py isrc_manager scripts tests
 
   format:
-    name: Black format check
+    name: Black format check (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14.4"]
 
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
             pyproject.toml
@@ -97,15 +105,19 @@ jobs:
         run: python -m black --check build.py isrc_manager scripts tests
 
   type-check:
-    name: mypy
+    name: mypy (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14.4"]
 
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
             pyproject.toml
@@ -138,6 +150,13 @@ jobs:
             python-version: "3.13"
             qt-runtime: true
             coverage: true
+            timeout-minutes: 15
+            group-timeout-seconds: 600
+            module-timeout-seconds: 120
+          - group: catalog-services
+            python-version: "3.14.4"
+            qt-runtime: true
+            coverage: false
             timeout-minutes: 15
             group-timeout-seconds: 600
             module-timeout-seconds: 120
@@ -253,7 +272,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.4"
           cache: pip
           cache-dependency-path: |
             pyproject.toml
@@ -287,12 +306,37 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.4"
           cache: pip
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
             requirements-dev.txt
+
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libglib2.0-0 \
+            libopengl0 \
+            libpulse-mainloop-glib0 \
+            libx11-xcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0
 
       - name: Install build dependencies
         run: |
@@ -303,4 +347,4 @@ jobs:
         run: python -m PyInstaller --version
 
       - name: Run build helper smoke test
-        run: python -m unittest tests.test_build_requirements -v
+        run: python -m unittest tests.test_build_requirements tests.test_python_314_compatibility -v

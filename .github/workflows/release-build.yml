@@ -117,12 +117,26 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.4"
           cache: pip
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
             requirements-dev.txt
+
+      - name: Verify release Python version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+
+          if sys.version_info[:3] != (3, 14, 4):
+              raise SystemExit(
+                  "Release packages must build with Python 3.14.4; "
+                  f"got {sys.version.split()[0]}"
+              )
+          print(f"Release Python: {sys.version.split()[0]}")
+          PY
 
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
@@ -173,7 +187,7 @@ jobs:
           python -m ruff check build.py isrc_manager scripts tests
           python -m black --check build.py isrc_manager scripts tests
           python -m mypy
-          python -m unittest tests.test_build_requirements tests.test_release_automation -v
+          python -m unittest tests.test_build_requirements tests.test_release_automation tests.test_python_314_compatibility -v
 
       - name: Run release QA
         if: runner.os == 'Windows'
@@ -187,7 +201,7 @@ jobs:
           if errorlevel 1 exit /b %errorlevel%
           python -m mypy
           if errorlevel 1 exit /b %errorlevel%
-          python -m unittest tests.test_build_requirements tests.test_release_automation -v
+          python -m unittest tests.test_build_requirements tests.test_release_automation tests.test_python_314_compatibility -v
 
       - name: Build packaged application
         if: runner.os != 'Windows'

@@ -28,8 +28,10 @@ Each tag build runs natively on:
 - `macos-latest`
 - `ubuntu-latest`
 
-Release builds use Python `3.13`, matching the current primary CI packaging smoke coverage.
-Linux installs the same Qt runtime libraries used by CI before running tests or PyInstaller.
+Release builds use exact Python `3.14.4` through `actions/setup-python`. Each platform job also
+asserts `sys.version_info[:3] == (3, 14, 4)` before dependency installation so public release
+packages cannot silently fall back to a different interpreter. Linux installs the same Qt runtime
+libraries used by CI before running tests or PyInstaller.
 
 ## QA Before Packaging
 
@@ -39,6 +41,9 @@ Each platform job installs the project with build and developer extras:
 python -m pip install -e ".[dev,build]"
 ```
 
+The build extra pins PyInstaller `6.19.0`, which keeps the packaging lane on a release with
+Python 3.14.4 fixes while release builds move to exact Python 3.14.4.
+
 Before `build.py` runs, the workflow executes:
 
 ```bash
@@ -46,7 +51,7 @@ python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager sc
 python -m ruff check build.py isrc_manager scripts tests
 python -m black --check build.py isrc_manager scripts tests
 python -m mypy
-python -m unittest tests.test_build_requirements tests.test_release_automation -v
+python -m unittest tests.test_build_requirements tests.test_release_automation tests.test_python_314_compatibility -v
 ```
 
 The broader CI workflow still runs its full grouped test matrix on repository pushes.

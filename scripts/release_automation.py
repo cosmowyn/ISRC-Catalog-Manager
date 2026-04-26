@@ -79,10 +79,19 @@ def read_project_version(pyproject_path: Path | None = None) -> str:
 def write_project_version(version: str, pyproject_path: Path | None = None) -> None:
     pyproject_path = pyproject_path or PYPROJECT_PATH
     text = pyproject_path.read_text(encoding="utf-8")
-    pattern = re.compile(r'(?ms)(^\[project\].*?^\s*version\s*=\s*")([^"]+)(")')
-    updated, count = pattern.subn(rf"\g<1>{version}\3", text, count=1)
+    project_match = re.search(r"(?ms)^\[project\]\s*$.*?(?=^\[|\Z)", text)
+    if project_match is None:
+        raise RuntimeError(f"Could not update [project].version in {pyproject_path}")
+    project_block = project_match.group(0)
+    updated_block, count = re.subn(
+        r'(?m)^(\s*version\s*=\s*")([^"]+)(")\s*$',
+        rf"\g<1>{version}\3",
+        project_block,
+        count=1,
+    )
     if count != 1:
         raise RuntimeError(f"Could not update [project].version in {pyproject_path}")
+    updated = text[: project_match.start()] + updated_block + text[project_match.end() :]
     pyproject_path.write_text(updated, encoding="utf-8")
 
 
