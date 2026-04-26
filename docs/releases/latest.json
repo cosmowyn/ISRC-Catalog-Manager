@@ -1,7 +1,7 @@
 {
-  "version": "3.3.8",
+  "version": "3.4.0",
   "released_at": "2026-04-26",
-  "summary": "fix Windows release command syntax",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.3.8.md",
+  "summary": "support Windows unittest with launch guard",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.4.0.md",
   "minimum_supported_version": null
 }
