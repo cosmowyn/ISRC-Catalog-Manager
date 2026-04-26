@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import math
 import mimetypes
 import sqlite3
 import tempfile
@@ -1183,7 +1184,10 @@ class TrackService:
             duration = getattr(info, "length", None) if info is not None else None
             if duration is None:
                 return None
-            return max(0, int(round(float(duration))))
+            duration_seconds = float(duration)
+            if not math.isfinite(duration_seconds):
+                return None
+            return max(0, int(math.floor(duration_seconds + 1e-9)))
         except Exception:
             return None
 

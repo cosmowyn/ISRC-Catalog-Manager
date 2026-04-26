@@ -1174,7 +1174,18 @@ class TrackServiceTests(unittest.TestCase):
             "SELECT track_length_sec FROM Tracks WHERE id=?",
             (track_id,),
         ).fetchone()[0]
-        self.assertEqual(stored_length, 202)
+        self.assertEqual(stored_length, 201)
+
+    def test_derive_audio_duration_seconds_never_rounds_above_actual_duration(self):
+        audio_path = self._create_media_file("duration-floor.wav", b"RIFFdurationfloor")
+
+        with mock.patch(
+            "isrc_manager.services.tracks.MutagenFile",
+            return_value=SimpleNamespace(info=SimpleNamespace(length=201.999)),
+        ):
+            duration_seconds = self.service.derive_audio_duration_seconds(audio_path)
+
+        self.assertEqual(duration_seconds, 201)
 
     def test_update_track_keeps_manual_track_length_after_new_audio_selection(self):
         track_id = self.service.create_track(
