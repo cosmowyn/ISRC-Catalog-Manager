@@ -55,6 +55,18 @@ class Python314CompatibilityTests(unittest.TestCase):
         self.assertIn("pyinstaller==6.19.0", _optional_dependency_values(pyproject_text, "build"))
         self.assertIn("pyinstaller==6.19.0", requirements)
 
+    def test_binary_runtime_pins_have_python_314_release_wheels(self):
+        pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8")
+        requirements = REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines()
+        project_dependencies = _list_values(
+            _section_text(pyproject_text, "project"), "dependencies"
+        )
+
+        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, project_dependencies)
+                self.assertIn(requirement, requirements)
+
     def test_setuptools_package_list_covers_all_isrc_manager_packages(self):
         text = PYPROJECT_PATH.read_text(encoding="utf-8")
         setuptools_section = _section_text(text, "tool.setuptools")
