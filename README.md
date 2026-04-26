@@ -1,7 +1,5 @@
 # ISRC Catalog Manager
 
-Current product version: `3.2.0`
-
 ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
 It combines recording metadata, releases, works, parties, contracts, rights, documents, assets, GS1 product data, import and export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
@@ -452,6 +450,17 @@ GitHub Actions verifies the project with:
 - packaging smoke validation
 
 The test suite includes service-level coverage, dialog/controller tests, app-shell integration coverage, workflow integration tests, migration coverage, and background-task safety checks.
+
+## Versioning and Update Checks
+
+The canonical application version lives in `pyproject.toml` under `[project].version`.
+Pushes to `main` run an automated SemVer bump workflow that updates the runtime fallback in
+`isrc_manager/version.py`, writes concise release notes under `docs/releases/`, updates
+`RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` for the app's update check.
+
+The desktop app checks that manifest after startup without blocking the UI. `Help > Check for
+Updates…` runs the same check manually. Users can ignore a specific available version; that
+choice is stored in app-wide settings and only suppresses startup notifications for that version.
 
 ## Support
 

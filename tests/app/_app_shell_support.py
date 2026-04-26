@@ -1781,6 +1781,7 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "Help Contents…",
                 "About ISRC Catalog Manager…",
+                "Check for Updates…",
                 "Diagnostics…",
                 "Application Storage Admin…",
                 "Application Log…",

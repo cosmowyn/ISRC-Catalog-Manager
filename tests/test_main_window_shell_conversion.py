@@ -100,6 +100,40 @@ class MainWindowShellConversionTests(unittest.TestCase):
         finally:
             shell.close()
 
+    def test_help_menu_includes_check_for_updates_action(self):
+        shell = _ShellStub()
+        try:
+            _build_actions_and_menus(shell, movable=False)
+
+            help_action = next(
+                action
+                for action in shell.menu_bar.actions()
+                if action.text() == "Help" and action.menu() is not None
+            )
+            help_menu = help_action.menu()
+            self.assertIsNotNone(help_menu)
+            assert help_menu is not None
+
+            help_texts = [action.text() for action in help_menu.actions() if action.text()]
+            self.assertIn("Check for Updates…", help_texts)
+            self.assertLess(
+                help_texts.index("About ISRC Catalog Manager…"),
+                help_texts.index("Check for Updates…"),
+            )
+            self.assertLess(
+                help_texts.index("Check for Updates…"),
+                help_texts.index("Diagnostics…"),
+            )
+
+            shell.check_for_updates_action.trigger()
+            self.app.processEvents()
+
+            self.assertTrue(
+                any(name == "check_for_updates" for name, _args, _kwargs in shell._triggered)
+            )
+        finally:
+            shell.close()
+
 
 if __name__ == "__main__":
     unittest.main()

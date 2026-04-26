@@ -22,7 +22,6 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import fields as dataclass_fields
 from datetime import datetime
-from importlib import metadata
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -245,7 +244,7 @@ from isrc_manager.exchange.repertoire_service import (
     RepertoireImportInspection,
 )
 from isrc_manager.exchange.service import ExchangeService
-from isrc_manager.external_launch import open_external_path
+from isrc_manager.external_launch import open_external_path, open_external_url
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -372,6 +371,7 @@ from isrc_manager.services import (
     TrackService,
     TrackSnapshot,
     TrackUpdatePayload,
+    UpdatePreferenceService,
     WorkPayload,
     XMLExportService,
     XMLImportService,
@@ -425,6 +425,8 @@ from isrc_manager.tags import (
     merge_imported_tags,
     write_catalog_export_tags,
 )
+from isrc_manager.update_checker import UpdateChecker, UpdateCheckResult, UpdateCheckStatus
+from isrc_manager.version import current_app_version
 from isrc_manager.workspace_debug import (
     summarize_catalog_workspace_dock,
     summarize_panel_layout_snapshot,
@@ -6442,6 +6444,7 @@ class App(QMainWindow):
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
+        self.update_preferences = UpdatePreferenceService(self.settings)
         self.logger = logging.getLogger("ISRCManager")
         self.trace_logger = logging.getLogger("ISRCManager.trace")
         self._logging_configured = False
@@ -7040,6 +7043,151 @@ class App(QMainWindow):
         self._update_add_data_generated_fields()
         self._schedule_owner_party_bootstrap()
         self._offer_settings_on_first_launch_if_pending()
+        self._schedule_startup_update_check()
+
+    def _schedule_startup_update_check(self) -> None:
+        QTimer.singleShot(1000, self._run_startup_update_check)
+
+    def _run_startup_update_check(self) -> None:
+        self._start_update_check(manual=False)
+
+    def check_for_updates(self) -> None:
+        self._start_update_check(manual=True)
+
+    def _build_update_checker(self) -> UpdateChecker:
+        return UpdateChecker()
+
+    def _start_update_check(self, *, manual: bool) -> None:
+        action = getattr(self, "check_for_updates_action", None)
+        if manual and action is not None:
+            action.setEnabled(False)
+        ignored_version = "" if manual else self.update_preferences.ignored_version()
+        current_version = self._app_version_text()
+
+        def _task(ctx):
+            ctx.set_status("Checking for updates...")
+            checker = self._build_update_checker()
+            return checker.check(current_version, ignored_version=ignored_version)
+
+        def _success(result):
+            if isinstance(result, UpdateCheckResult):
+                self._handle_update_check_result(result, manual=manual)
+            elif manual:
+                QMessageBox.information(
+                    self,
+                    "Check for Updates",
+                    "Update information is unavailable right now.",
+                )
+
+        def _error(failure: TaskFailure):
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "Check for Updates",
+                    "Update information is unavailable right now. Check your internet connection and try again.",
+                )
+            else:
+                self._log_event(
+                    "updates.check_failed",
+                    "Startup update check failed",
+                    level=logging.INFO,
+                    error=getattr(failure, "message", ""),
+                )
+
+        def _finished():
+            if manual and action is not None:
+                action.setEnabled(True)
+
+        task_id = self._submit_background_task(
+            title="Check for Updates",
+            description="Checking for updates...",
+            task_fn=_task,
+            kind="network",
+            unique_key="updates.check",
+            requires_profile=False,
+            show_dialog=manual,
+            owner=self,
+            on_success=_success,
+            on_error=_error,
+            on_finished=_finished,
+        )
+        if task_id is None and manual and action is not None:
+            action.setEnabled(True)
+
+    def _handle_update_check_result(
+        self,
+        result: UpdateCheckResult,
+        *,
+        manual: bool,
+    ) -> None:
+        if result.status == UpdateCheckStatus.UPDATE_AVAILABLE:
+            self._show_update_available_message(result)
+            return
+        if result.status == UpdateCheckStatus.CURRENT:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "Check for Updates",
+                    (
+                        "You are running the latest available version.\n\n"
+                        f"Installed version: {result.current_version}"
+                    ),
+                )
+            return
+        if result.status == UpdateCheckStatus.IGNORED:
+            return
+        if manual:
+            QMessageBox.information(
+                self,
+                "Check for Updates",
+                "Update information is unavailable right now. Check your internet connection and try again.",
+            )
+        else:
+            self._log_event(
+                "updates.check_unavailable",
+                "Startup update information unavailable",
+                level=logging.INFO,
+                current_version=result.current_version,
+            )
+
+    def _show_update_available_message(self, result: UpdateCheckResult) -> None:
+        manifest = result.manifest
+        if manifest is None:
+            return
+        text = (
+            "A newer version of ISRC Catalog Manager is available.\n\n"
+            f"Installed version: {result.current_version}\n"
+            f"Latest version: {manifest.version}\n\n"
+            f"{manifest.summary}"
+        )
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("Update Available")
+        message_box.setIcon(QMessageBox.Information)
+        message_box.setText(text)
+        release_notes_button = None
+        if manifest.release_notes_url:
+            release_notes_button = message_box.addButton("Release Notes", QMessageBox.ActionRole)
+        ignore_button = message_box.addButton("Ignore This Version", QMessageBox.RejectRole)
+        later_button = message_box.addButton("Later", QMessageBox.AcceptRole)
+        message_box.setDefaultButton(later_button)
+        message_box.exec()
+        clicked = message_box.clickedButton()
+        if clicked is ignore_button:
+            self.update_preferences.set_ignored_version(manifest.version)
+            self.statusBar().showMessage(f"Ignoring update {manifest.version}.", 5000)
+            return
+        if clicked is release_notes_button:
+            opened = open_external_url(
+                manifest.release_notes_url,
+                source="App._show_update_available_message",
+                metadata={"version": manifest.version},
+            )
+            if not opened:
+                QMessageBox.warning(
+                    self,
+                    "Release Notes",
+                    "Could not open the release notes link.",
+                )
 
     def _offer_settings_on_first_launch_if_pending(self) -> None:
         setting_key = "startup/offer_open_settings_on_first_launch_pending"
@@ -7628,14 +7776,7 @@ class App(QMainWindow):
         return normalized_parts, variant
 
     def _app_version_text(self) -> str:
-        for package_name in ("isrc-catalog-manager", APP_NAME):
-            try:
-                return metadata.version(package_name)
-            except metadata.PackageNotFoundError:
-                continue
-            except Exception:
-                break
-        return "3.2.0"
+        return current_app_version()
 
     def _help_html(self) -> str:
         return render_help_html(

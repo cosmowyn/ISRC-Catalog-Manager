@@ -8,7 +8,6 @@ import sqlite3
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from importlib import metadata
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -20,6 +19,7 @@ from isrc_manager.contract_templates import (
 )
 from isrc_manager.file_storage import coalesce_filename
 from isrc_manager.services.licenses import LicenseService
+from isrc_manager.version import current_app_version
 
 from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspection
 from .repertoire_service import (
@@ -77,14 +77,7 @@ SECTION_DEPENDENCY_NOTES = {
 
 
 def _app_version_text() -> str:
-    for package_name in ("isrc-catalog-manager", "ISRC Catalog Manager"):
-        try:
-            return metadata.version(package_name)
-        except metadata.PackageNotFoundError:
-            continue
-        except Exception:
-            break
-    return "3.2.0"
+    return current_app_version()
 
 
 def _utc_timestamp() -> str:

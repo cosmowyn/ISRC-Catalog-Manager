@@ -1,0 +1,63 @@
+name: Version Bump
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump-main
+  cancel-in-progress: false
+
+jobs:
+  version-bump:
+    name: Version bump
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'github-actions[bot]' }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Skip stale workflow reruns
+        id: freshness
+        run: |
+          git fetch origin main --tags
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "Current event SHA is no longer the main branch tip; skipping."
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v6
+        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        with:
+          python-version: "3.13"
+
+      - name: Generate version metadata
+        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        run: |
+          python scripts/release_automation.py \
+            --base-ref "${{ github.event.before }}" \
+            --head-ref "${{ github.sha }}"
+
+      - name: Commit release metadata
+        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        run: |
+          if git diff --quiet; then
+            echo "No release metadata changes."
+            exit 0
+          fi
+          VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml isrc_manager/version.py docs/releases RELEASE_NOTES.md
+          git commit -m "chore(release): v${VERSION} [skip version]"
+          git tag "v${VERSION}"
+          git push origin HEAD:main
+          git push origin "v${VERSION}"

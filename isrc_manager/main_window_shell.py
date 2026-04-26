@@ -951,6 +951,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     help_menu.addAction(app.view_info_action)
 
+    app.check_for_updates_action = app._create_action(
+        "Check for Updates…",
+        slot=app.check_for_updates,
+    )
+    help_menu.addAction(app.check_for_updates_action)
+
     app.diagnostics_action = app._create_action(
         "Diagnostics…",
         slot=app.open_diagnostics_dialog,

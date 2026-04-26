@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from importlib import metadata
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -54,17 +53,11 @@ from isrc_manager.services import (
 )
 from isrc_manager.services.db_access import SQLiteConnectionFactory
 from isrc_manager.tags import AudioTagService, TaggedAudioExportService
+from isrc_manager.version import current_app_version
 
 
 def _app_version_text() -> str:
-    for package_name in ("isrc-catalog-manager", "ISRC Catalog Manager"):
-        try:
-            return metadata.version(package_name)
-        except metadata.PackageNotFoundError:
-            continue
-        except Exception:
-            break
-    return "3.2.0"
+    return current_app_version()
 
 
 @dataclass(slots=True)

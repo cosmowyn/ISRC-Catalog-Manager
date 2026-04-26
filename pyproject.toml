@@ -12,7 +12,7 @@ authors = [
   { name = "M. van de Kleut" },
 ]
 dependencies = [
-  "PySide6==6.9.1",
+  "PySide6==6.11.0",
   "audioread==3.0.1",
   "pillow==12.0.0",
   "openpyxl==3.1.5",
@@ -115,8 +115,12 @@ files = [
   "isrc_manager/services/settings_mutations.py",
   "isrc_manager/services/settings_reads.py",
   "isrc_manager/services/sqlite_utils.py",
+  "isrc_manager/services/update_preferences.py",
   "isrc_manager/tags/models.py",
   "isrc_manager/tasks/models.py",
+  "isrc_manager/update_checker.py",
+  "isrc_manager/version.py",
+  "isrc_manager/versioning.py",
 ]
 follow_imports = "skip"
 check_untyped_defs = true

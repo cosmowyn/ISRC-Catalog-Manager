@@ -217,6 +217,7 @@ from .tracks import (
     TrackSnapshot,
     TrackUpdatePayload,
 )
+from .update_preferences import UpdatePreferenceService
 
 __all__ = [
     "AlbumUsage",
@@ -341,6 +342,7 @@ __all__ = [
     "TrackService",
     "TrackSnapshot",
     "TrackUpdatePayload",
+    "UpdatePreferenceService",
     "WORK_CREATOR_ROLE_CHOICES",
     "WORK_STATUS_CHOICES",
     "WorkContributorPayload",

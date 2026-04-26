@@ -45,6 +45,7 @@ jobs:
         run: |
           python -m py_compile ISRC_manager.py build.py icon_factory.py
           python -m py_compile $(find isrc_manager -name '*.py' | sort)
+          python -m py_compile $(find scripts -name '*.py' | sort)
           python -m py_compile $(find tests -name '*.py' | sort)
 
   lint:
@@ -69,7 +70,7 @@ jobs:
           python -m pip install -e .[dev]
 
       - name: Run Ruff
-        run: python -m ruff check build.py isrc_manager tests
+        run: python -m ruff check build.py isrc_manager scripts tests
 
   format:
     name: Black format check
@@ -93,7 +94,7 @@ jobs:
           python -m pip install -e .[dev]
 
       - name: Run Black --check
-        run: python -m black --check build.py isrc_manager tests
+        run: python -m black --check build.py isrc_manager scripts tests
 
   type-check:
     name: mypy

@@ -4,7 +4,7 @@ COVERAGE ?= $(PYTHON) -m coverage
 MYPY ?= $(PYTHON) -m mypy
 RUFF ?= $(PYTHON) -m ruff
 
-CHECK_PATHS = build.py isrc_manager tests
+CHECK_PATHS = build.py isrc_manager scripts tests
 
 .PHONY: all-checks check fix compile lint format format-check type-check test coverage
 
@@ -24,6 +24,7 @@ check: compile
 compile:
 	$(PYTHON) -m py_compile ISRC_manager.py build.py icon_factory.py
 	$(PYTHON) -m py_compile $$(find isrc_manager -name '*.py' | sort)
+	$(PYTHON) -m py_compile $$(find scripts -name '*.py' | sort)
 	$(PYTHON) -m py_compile $$(find tests -name '*.py' | sort)
 
 lint:

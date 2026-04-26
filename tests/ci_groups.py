@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-BASELINE_TEST_COUNT = 426
+BASELINE_TEST_COUNT = 448
 
 GROUP_MODULES: dict[str, tuple[str, ...]] = {
     "catalog-services": (
@@ -51,8 +51,11 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_quality_service",
         "tests.test_release_service",
         "tests.test_repertoire_status_service",
+        "tests.test_release_automation",
         "tests.test_standard_field_specs",
         "tests.test_tag_service",
+        "tests.test_update_checker",
+        "tests.test_versioning",
         "tests.test_forensic_watermark_service",
         "tests.test_track_service",
         "tests.test_work_and_party_services",
@@ -122,6 +125,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_storage_admin_service",
         "tests.test_storage_migration_service",
         "tests.test_storage_sizes",
+        "tests.test_update_preferences",
     ),
     "ui-app-workflows": (
         "tests.app.test_app_shell_catalog_controller",
@@ -163,6 +167,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_task_manager",
         "tests.test_theme_builder",
         "tests.test_ui_common",
+        "tests.test_update_ui_integration",
         "tests.test_workspace_debug",
     ),
 }
