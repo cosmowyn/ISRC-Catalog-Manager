@@ -1,7 +1,7 @@
 {
-  "version": "3.5.3",
+  "version": "3.6.0",
   "released_at": "2026-04-26",
-  "summary": "normalize package discovery on Windows",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.5.3.md",
+  "summary": "Implement in-app binary updates",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.0.md",
   "minimum_supported_version": null
 }
