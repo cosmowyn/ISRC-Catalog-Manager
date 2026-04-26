@@ -85,7 +85,7 @@ class Python314CompatibilityTests(unittest.TestCase):
         setuptools_section = _section_text(text, "tool.setuptools")
         declared = set(_list_values(setuptools_section, "packages"))
         discovered = {
-            str(path.parent.relative_to(PROJECT_ROOT)).replace("/", ".")
+            ".".join(path.parent.relative_to(PROJECT_ROOT).parts)
             for path in (PROJECT_ROOT / "isrc_manager").rglob("__init__.py")
         }
 
