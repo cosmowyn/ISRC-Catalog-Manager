@@ -23,6 +23,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("settings", HELP_CHAPTERS_BY_ID)
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
         self.assertIn("keyboard-shortcuts", HELP_CHAPTERS_BY_ID)
+        self.assertIn("application-updates", HELP_CHAPTERS_BY_ID)
 
     def test_rendered_help_contains_contents_index_and_anchors(self):
         html = render_help_html("ISRC Catalog Manager", "1.2.3")
@@ -106,6 +107,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
         self.assertIn("conversion", grouped_ids["Deep Dives"])
         self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
+        self.assertIn("application-updates", grouped_ids["Operations & Recovery"])
         self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")
 
     def test_keyboard_shortcuts_chapter_lists_primary_shortcuts(self):
@@ -151,6 +153,18 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("custom value acts as an explicit override", settings.content_html)
         self.assertIn("Export Settings", settings.content_html)
         self.assertIn("GTIN contracts CSV", settings.content_html)
+
+    def test_application_updates_help_documents_installer_workflow(self):
+        chapter = HELP_CHAPTERS_BY_ID["application-updates"]
+        html = render_help_html("ISRC Catalog Manager", "3.6.5")
+
+        self.assertIn("Download and Install", chapter.content_html)
+        self.assertIn("SHA-256", chapter.content_html)
+        self.assertIn("updater-helper mode", chapter.content_html)
+        self.assertIn("App Translocation", chapter.content_html)
+        self.assertIn("/Applications", chapter.content_html)
+        self.assertIn("updates", chapter.content_html)
+        self.assertIn("Application Updates", html)
 
 
 if __name__ == "__main__":

@@ -883,6 +883,34 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
+        chapter_id="application-updates",
+        title="Application Updates",
+        summary="Check for new versions, read release notes in the app, and install packaged updates safely.",
+        keywords=(
+            "updates",
+            "check for updates",
+            "download and install",
+            "release notes",
+            "updater helper",
+            "app translocation",
+            "install update",
+        ),
+        content_html="""
+        <p>Use <strong>Help &gt; Check for Updates…</strong> to compare the running version with the latest published release manifest.</p>
+        <ul>
+          <li><strong>Release Notes</strong>: opens the matching release notes inside the application so you can review what changed before installing.</li>
+          <li><strong>Ignore This Version</strong>: hides the current offered version during startup checks until a newer version is published.</li>
+          <li><strong>Download and Install</strong>: available in packaged builds. The app downloads the platform-specific GitHub Release package, verifies the SHA-256 checksum from the manifest, stages the replacement, then launches a detached updater helper.</li>
+          <li><strong>Truthful progress</strong>: download, checksum verification, extraction, staging, and installer preparation report through the shared background-task progress dialog.</li>
+          <li><strong>Helper runtime</strong>: the helper is a temporary copy of the current packaged app runtime launched in updater-helper mode. It waits for the main app to quit, backs up the current app, moves the staged replacement into place, then restarts the updated app.</li>
+          <li><strong>Install location preflight</strong>: automatic installation is blocked before download when the app is running from macOS App Translocation or another location whose parent folder cannot be written. Move the app to <strong>/Applications</strong> or another writable install folder, launch it from there, and check for updates again.</li>
+          <li><strong>Source checkouts</strong>: source-tree runs can check versions and read release notes, but automatic installation is only available in packaged builds.</li>
+          <li><strong>Troubleshooting</strong>: installer preparation failures are shown in the update dialog. Once the detached helper has launched, its detailed install log is written under the app data folder in the versioned <code>updates</code> workspace.</li>
+        </ul>
+        <p>The updater never modifies the catalog profile database. It only replaces the packaged application bundle or executable, while profile data, settings, logs, and managed media remain in the app data folders.</p>
+        """,
+    ),
+    HelpChapter(
         chapter_id="media-preview",
         title="Audio Player and Image Preview",
         summary="Play audio files, inspect waveforms, and preview album-art images directly from the catalog.",
@@ -912,7 +940,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>Use the Help menu to reach:</p>
         <ul>
           <li><strong>About ISRC Catalog Manager…</strong> for version and workspace context.</li>
-          <li><strong>Check for Updates…</strong> for a manual update check. When an update is available, <strong>Release Notes</strong> opens the notes inside the app instead of launching a browser, while packaged builds can use <strong>Download and Install</strong> to fetch the matching GitHub Release package, verify its checksum, and restart through the detached updater helper.</li>
+          <li><strong>Check for Updates…</strong> for a manual update check. See <strong>Application Updates</strong> for the full update, install-helper, and troubleshooting workflow.</li>
           <li><strong>Diagnostics…</strong> for profile health checks and repair paths.</li>
           <li><strong>Application Log…</strong> for readable and structured troubleshooting logs.</li>
           <li><strong>Open Logs Folder…</strong> and <strong>Open Data Folder…</strong> for direct access to local support files.</li>
@@ -958,6 +986,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "history": "Operations & Recovery",
     "diagnostics": "Operations & Recovery",
     "application-log": "Operations & Recovery",
+    "application-updates": "Operations & Recovery",
     "settings": "Settings & Reference",
     "theme-settings": "Settings & Reference",
     "about": "Settings & Reference",
