@@ -140,6 +140,43 @@ class ReleaseServiceTests(unittest.TestCase):
         placements = self.release_service.list_release_tracks(release_id)
         self.assertEqual([placement.track_number for placement in placements], [1, 2, 3])
 
+    def test_delete_release_removes_release_links_and_unreferenced_artwork(self):
+        track_id = self._create_track(
+            isrc="NL-ABC-26-00014", title="Delete Release Track", album="Release Album"
+        )
+        artwork_source = self.data_root / "delete-release-art.png"
+        artwork_source.write_bytes(b"fake image bytes")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Delete Release",
+                primary_artist="Release Artist",
+                artwork_source_path=str(artwork_source),
+                placements=[ReleaseTrackPlacement(track_id=track_id)],
+            )
+        )
+        release = self.release_service.fetch_release(release_id)
+        self.assertIsNotNone(release)
+        assert release is not None
+        managed_artwork = self.release_service.resolve_artwork_path(release.artwork_path)
+        self.assertIsNotNone(managed_artwork)
+        assert managed_artwork is not None
+        self.assertTrue(managed_artwork.exists())
+
+        self.release_service.delete_release(release_id)
+
+        self.assertIsNone(self.release_service.fetch_release(release_id))
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM ReleaseTracks WHERE release_id=?", (release_id,)
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM Tracks WHERE id=?", (track_id,)).fetchone()[0],
+            1,
+        )
+        self.assertFalse(managed_artwork.exists())
+
     def test_replace_release_tracks_renumbers_conflicting_disc_track_positions(self):
         track_a = self._create_track(isrc="NL-ABC-26-00021", title="Track A", album="Release Album")
         track_b = self._create_track(isrc="NL-ABC-26-00022", title="Track B", album="Release Album")

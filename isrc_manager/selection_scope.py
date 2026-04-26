@@ -86,10 +86,14 @@ class SelectionScopeBanner(QWidget):
         chooser_label: str = "Choose Tracks",
         parent=None,
         show_header: bool = True,
+        show_use_current_button: bool = True,
+        show_choose_button: bool = True,
         content_margins: tuple[int, int, int, int] = (12, 12, 12, 12),
     ):
         super().__init__(parent)
         self._syncing_height = False
+        self._show_use_current_button = bool(show_use_current_button)
+        self._show_choose_button = bool(show_choose_button)
         self.setObjectName("selectionScopeBanner")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         _apply_standard_widget_chrome(self, "selectionScopeBanner")
@@ -138,8 +142,13 @@ class SelectionScopeBanner(QWidget):
         )
         root.addWidget(self.action_cluster)
 
+        self.use_current_button.setVisible(self._show_use_current_button)
+        self.choose_button.setVisible(self._show_choose_button)
         self.clear_override_button.setEnabled(False)
         self.clear_override_button.setVisible(False)
+        self.action_cluster.setVisible(
+            self._show_use_current_button or self._show_choose_button
+        )
         _apply_compact_dialog_control_heights(self)
         self._sync_layout_height()
 
@@ -148,8 +157,13 @@ class SelectionScopeBanner(QWidget):
         self.count_label.setText(f"{state.count} track{'s' if state.count != 1 else ''}")
         self.preview_label.setText(state.preview_text or "No tracks selected.")
         override_active = bool(state.override_active)
+        self.use_current_button.setVisible(self._show_use_current_button)
+        self.choose_button.setVisible(self._show_choose_button)
         self.clear_override_button.setEnabled(override_active)
         self.clear_override_button.setVisible(override_active)
+        self.action_cluster.setVisible(
+            self._show_use_current_button or self._show_choose_button or override_active
+        )
         self.action_cluster.updateGeometry()
         self._sync_layout_height()
 

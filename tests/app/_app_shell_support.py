@@ -684,6 +684,31 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(ui_values[-1], 100)
         return worker_values, ui_values
 
+    def _assert_release_task_progress(
+        self,
+        submitted_kwargs: dict[str, object],
+        progress: dict[str, object],
+        *,
+        title: str,
+        description: str,
+        final_message: str,
+    ) -> None:
+        self.assertEqual(submitted_kwargs["title"], title)
+        self.assertEqual(submitted_kwargs["description"], description)
+        self.assertEqual(submitted_kwargs["kind"], "write")
+        self.assertTrue(submitted_kwargs.get("show_dialog", True))
+        self._assert_ui_ready_progress(progress, worker_terminal=66)
+        worker_messages = [
+            message
+            for _value, _maximum, message in progress["worker_progress"]
+            if message
+        ]
+        ui_messages = [
+            message for _value, _maximum, message in progress["ui_progress"] if message
+        ]
+        self.assertTrue(worker_messages)
+        self.assertEqual(ui_messages[-1], final_message)
+
     def _set_first_launch_prompt_pending(self, pending: bool) -> None:
         settings = self._settings()
         settings.setValue("startup/offer_open_settings_on_first_launch_pending", bool(pending))
@@ -3239,6 +3264,312 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(override_state.override_active)
         self.assertEqual(panel.selection_banner.scope_label.text(), "Pinned chooser override")
 
+    def case_release_browser_create_and_update_use_truthful_progress_tasks(self):
+        track_id = self._create_track(index=154, title="Release Progress Create")
+        self.window.refresh_table()
+        self._select_track_ids([track_id])
+        panel = self.window.open_release_browser()
+        self.app.processEvents()
+
+        submissions: list[tuple[dict[str, object], dict[str, object]]] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            progress = self._run_bundle_task_with_progress_capture(window, **kwargs)
+            submissions.append((dict(kwargs), progress))
+            return "inline-release-task"
+
+        editor_payloads: list[app_module.ReleasePayload] = []
+
+        class _FakeReleaseEditorDialog:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+
+            def exec(self):
+                return app_module.QDialog.Accepted
+
+            def payload(self):
+                return editor_payloads[-1]
+
+        create_payload = app_module.ReleasePayload(
+            title="Release Progress Created",
+            primary_artist="Moonwake",
+            release_type="single",
+            release_date="2026-03-17",
+            placements=[
+                app_module.ReleaseTrackPlacement(
+                    track_id=track_id,
+                    disc_number=1,
+                    track_number=1,
+                    sequence_number=1,
+                )
+            ],
+        )
+        editor_payloads.append(create_payload)
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.release_service,
+                "create_release",
+                side_effect=AssertionError("main-thread create_release should not run"),
+            ),
+            mock.patch.object(
+                app_module,
+                "ReleaseEditorDialog",
+                _FakeReleaseEditorDialog,
+            ),
+        ):
+            self._button_by_text(panel.actions_cluster, "Create Release").click()
+            self.app.processEvents()
+
+        self.assertEqual(len(submissions), 1)
+        self._assert_release_task_progress(
+            submissions[0][0],
+            submissions[0][1],
+            title="Release Editor",
+            description="Saving release metadata and track order...",
+            final_message="Release saved and UI is ready.",
+        )
+        created_matches = [
+            release
+            for release in self.window.release_service.list_releases(
+                search_text="Release Progress Created"
+            )
+            if release.title == "Release Progress Created"
+        ]
+        self.assertEqual(len(created_matches), 1)
+        created_release = created_matches[0]
+
+        panel.refresh()
+        for row in range(panel.release_table.rowCount()):
+            item = panel.release_table.item(row, 1)
+            if item is not None and item.text() == "Release Progress Created":
+                panel.release_table.selectRow(row)
+                break
+
+        update_payload = app_module.ReleasePayload(
+            title="Release Progress Updated",
+            primary_artist="Moonwake",
+            release_type="single",
+            release_date="2026-03-18",
+            placements=[
+                app_module.ReleaseTrackPlacement(
+                    track_id=track_id,
+                    disc_number=1,
+                    track_number=1,
+                    sequence_number=1,
+                )
+            ],
+        )
+        editor_payloads.append(update_payload)
+        submissions.clear()
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.release_service,
+                "update_release",
+                side_effect=AssertionError("main-thread update_release should not run"),
+            ),
+            mock.patch.object(
+                app_module,
+                "ReleaseEditorDialog",
+                _FakeReleaseEditorDialog,
+            ),
+        ):
+            self._button_by_text(panel.actions_cluster, "Edit Release").click()
+            self.app.processEvents()
+
+        self.assertEqual(len(submissions), 1)
+        self._assert_release_task_progress(
+            submissions[0][0],
+            submissions[0][1],
+            title="Release Editor",
+            description="Saving release metadata and track order...",
+            final_message="Release saved and UI is ready.",
+        )
+        updated = self.window.release_service.fetch_release(created_release.id)
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.title, "Release Progress Updated")
+
+    def case_release_browser_mutations_use_truthful_progress_tasks(self):
+        first_track_id = self._create_track(index=155, title="Release Progress Original")
+        second_track_id = self._create_track(index=156, title="Release Progress Added")
+        release_id = self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Release Progress Mutations",
+                primary_artist="Moonwake",
+                release_type="single",
+                release_date="2026-03-17",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=first_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.window.refresh_table()
+        self.window.open_release_browser()
+        self.app.processEvents()
+
+        submissions: list[tuple[dict[str, object], dict[str, object]]] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            progress = self._run_bundle_task_with_progress_capture(window, **kwargs)
+            submissions.append((dict(kwargs), progress))
+            return "inline-release-task"
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.release_service,
+                "add_tracks_to_release",
+                side_effect=AssertionError("main-thread add_tracks_to_release should not run"),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window.add_selected_tracks_to_specific_release(release_id, [second_track_id])
+            self.app.processEvents()
+
+        self.assertEqual(len(submissions), 1)
+        self._assert_release_task_progress(
+            submissions[0][0],
+            submissions[0][1],
+            title="Add Tracks to Release",
+            description="Adding selected tracks to the release...",
+            final_message="Selected tracks added and UI is ready.",
+        )
+        summary = self.window.release_service.fetch_release_summary(release_id)
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(
+            {placement.track_id for placement in summary.tracks},
+            {first_track_id, second_track_id},
+        )
+
+        submissions.clear()
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.release_service,
+                "duplicate_release",
+                side_effect=AssertionError("main-thread duplicate_release should not run"),
+            ),
+        ):
+            self.window.duplicate_release(release_id)
+            self.app.processEvents()
+
+        self.assertEqual(len(submissions), 1)
+        self._assert_release_task_progress(
+            submissions[0][0],
+            submissions[0][1],
+            title="Duplicate Release",
+            description="Duplicating release metadata and track order...",
+            final_message="Release duplicated and UI is ready.",
+        )
+        duplicate_matches = [
+            release
+            for release in self.window.release_service.list_releases(
+                search_text="Release Progress Mutations Copy"
+            )
+            if release.title == "Release Progress Mutations Copy"
+        ]
+        self.assertEqual(len(duplicate_matches), 1)
+        duplicate = duplicate_matches[0]
+
+        submissions.clear()
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.release_service,
+                "delete_release",
+                side_effect=AssertionError("main-thread delete_release should not run"),
+            ),
+        ):
+            self.window.delete_release(duplicate.id)
+            self.app.processEvents()
+
+        self.assertEqual(len(submissions), 1)
+        self._assert_release_task_progress(
+            submissions[0][0],
+            submissions[0][1],
+            title="Delete Release",
+            description="Deleting the selected release and refreshing dependent views...",
+            final_message="Release deleted and UI is ready.",
+        )
+        self.assertIsNone(self.window.release_service.fetch_release(duplicate.id))
+
+    def case_release_browser_delete_refreshes_visible_table_after_background_task(self):
+        release_id = self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Release Delete Refresh",
+                primary_artist="Moonwake",
+                release_type="single",
+                release_date="2026-03-17",
+            )
+        )
+        remaining_release_id = self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Release Delete Still Listed",
+                primary_artist="Moonwake",
+                release_type="single",
+                release_date="2026-03-18",
+            )
+        )
+        self.window.refresh_table()
+        panel = self.window.open_release_browser()
+        self.app.processEvents()
+        self.assertIn(release_id, panel._release_ids_by_row)
+        self.assertIn(remaining_release_id, panel._release_ids_by_row)
+
+        self.window.delete_release(release_id)
+        self._wait_for_background_tasks(
+            description="release delete refresh test to finish",
+        )
+        self.app.processEvents()
+
+        visible_ids = [
+            int(panel.release_table.item(row, 0).text())
+            for row in range(panel.release_table.rowCount())
+            if panel.release_table.item(row, 0) is not None
+        ]
+        visible_titles = [
+            panel.release_table.item(row, 1).text()
+            for row in range(panel.release_table.rowCount())
+            if panel.release_table.item(row, 1) is not None
+        ]
+        self.assertNotIn(release_id, visible_ids)
+        self.assertIn(remaining_release_id, visible_ids)
+        self.assertNotIn("Release Delete Refresh", visible_titles)
+        self.assertIsNone(self.window.release_service.fetch_release(release_id))
+
     def case_work_manager_dock_uses_live_track_selection(self):
         track_ids = [
             self._create_track(index=111, title="Work Dock One"),
@@ -3914,10 +4245,20 @@ class AppShellTestCase(unittest.TestCase):
         release_panel = self.window.release_browser_dock.widget()
         self.assertEqual(release_panel.overview_tab.property("role"), "workspaceCanvas")
         self.assertEqual(release_panel.tracks_tab.property("role"), "workspaceCanvas")
-        self.assertTrue(
+        self.assertFalse(
             self._is_within_scroll_content(
                 release_panel.detail_scroll_area, release_panel.actions_cluster
             )
+        )
+        self.assertLess(
+            release_panel.actions_cluster.mapTo(release_panel, app_module.QPoint(0, 0)).y(),
+            release_panel.detail_scroll_area.mapTo(release_panel, app_module.QPoint(0, 0)).y(),
+        )
+        self.assertIsNotNone(
+            self._button_by_text(release_panel.actions_cluster, "Choose Tracks")
+        )
+        self.assertIsNotNone(
+            self._button_by_text(release_panel.actions_cluster, "Delete Release")
         )
 
         self.window.open_global_search()

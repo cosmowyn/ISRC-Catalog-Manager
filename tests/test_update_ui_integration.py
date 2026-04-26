@@ -273,6 +273,66 @@ class UpdateUiIntegrationTests(unittest.TestCase):
         self.assertEqual(started_versions, ["3.3.1"])
         fake_app.update_preferences.set_ignored_version.assert_not_called()
 
+    def test_update_available_download_button_is_offered_from_source_checkout(self):
+        manifest = ReleaseManifest.from_mapping(_manifest_mapping())
+        result = UpdateCheckResult(
+            status=UpdateCheckStatus.UPDATE_AVAILABLE,
+            current_version="3.3.0",
+            latest_version="3.3.1",
+            manifest=manifest,
+        )
+        started_versions = []
+
+        class _FakeMessageBox:
+            Information = object()
+            ActionRole = object()
+            RejectRole = object()
+            AcceptRole = object()
+
+            def __init__(self, _parent):
+                self.install_button = None
+                self.clicked_button = None
+
+            def setWindowTitle(self, _title):
+                return None
+
+            def setIcon(self, _icon):
+                return None
+
+            def setText(self, _text):
+                return None
+
+            def addButton(self, text, _role):
+                button = object()
+                if text == "Download and Install":
+                    self.install_button = button
+                return button
+
+            def setDefaultButton(self, _button):
+                return None
+
+            def exec(self):
+                self.clicked_button = self.install_button
+
+            def clickedButton(self):
+                return self.clicked_button
+
+        fake_app = SimpleNamespace(
+            _confirm_and_start_update_install=lambda release_manifest: started_versions.append(
+                release_manifest.version
+            ),
+            update_preferences=SimpleNamespace(set_ignored_version=mock.Mock()),
+        )
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _FakeMessageBox),
+            mock.patch.object(app_module.sys, "frozen", False, create=True),
+        ):
+            app_module.App._show_update_available_message(fake_app, result)
+
+        self.assertEqual(started_versions, ["3.3.1"])
+        fake_app.update_preferences.set_ignored_version.assert_not_called()
+
     def test_release_notes_loader_fetches_markdown_inside_the_app(self):
         manifest = ReleaseManifest.from_mapping(
             _manifest_mapping(release_notes_url="https://example.com/releases/v3.3.1.md")

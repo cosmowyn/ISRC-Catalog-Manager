@@ -16,6 +16,7 @@ try:
         QLineEdit,
         QMessageBox,
         QPlainTextEdit,
+        QPushButton,
         QScrollArea,
         QSplitter,
         QTabWidget,
@@ -1453,6 +1454,28 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertEqual(dialog.track_table.columnCount(), 4)
             self.assertIsInstance(dialog.detail_scroll_area, QScrollArea)
             self.assertIsNotNone(dialog.actions_cluster)
+            action_texts = {
+                button.text()
+                for button in dialog.actions_cluster.findChildren(QPushButton)
+            }
+            self.assertIn("Choose Tracks", action_texts)
+            self.assertIn("Delete Release", action_texts)
+            self.assertNotIn("Use Current Selection", action_texts)
+            actions_layout = dialog.actions_cluster.layout()
+            action_margins = actions_layout.contentsMargins()
+            self.assertEqual(actions_layout.horizontalSpacing(), 10)
+            self.assertEqual(actions_layout.verticalSpacing(), 10)
+            self.assertEqual(
+                (
+                    action_margins.left(),
+                    action_margins.top(),
+                    action_margins.right(),
+                    action_margins.bottom(),
+                ),
+                (4, 4, 4, 4),
+            )
+            self.assertTrue(dialog.selection_banner.use_current_button.isHidden())
+            self.assertTrue(dialog.selection_banner.choose_button.isHidden())
         finally:
             dialog.close()
 

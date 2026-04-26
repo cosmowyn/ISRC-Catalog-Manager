@@ -869,6 +869,46 @@ class ReleaseService:
         )
         return self.create_release(payload)
 
+    def _table_exists(self, table_name: str, *, cursor: sqlite3.Cursor) -> bool:
+        row = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (str(table_name),),
+        ).fetchone()
+        return bool(row)
+
+    def _table_has_column(
+        self, table_name: str, column_name: str, *, cursor: sqlite3.Cursor
+    ) -> bool:
+        if not self._table_exists(table_name, cursor=cursor):
+            return False
+        return any(
+            str(row[1] or "") == str(column_name)
+            for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+            if row and len(row) > 1
+        )
+
+    def delete_release(self, release_id: int) -> None:
+        release = self.fetch_release(int(release_id))
+        if release is None:
+            raise ValueError(f"Release {release_id} not found")
+        stale_artwork_path = release.artwork_path
+        with self.conn:
+            cur = self.conn.cursor()
+            for table_name in (
+                "ReleaseTracks",
+                "ContractReleaseLinks",
+                "RightsRecords",
+                "AssetVersions",
+            ):
+                if not self._table_has_column(table_name, "release_id", cursor=cur):
+                    continue
+                cur.execute(
+                    f"DELETE FROM {table_name} WHERE release_id=?",
+                    (int(release_id),),
+                )
+            cur.execute("DELETE FROM Releases WHERE id=?", (int(release_id),))
+            self._delete_unreferenced_artwork(stale_artwork_path, cursor=cur)
+
     def replace_release_tracks(
         self,
         release_id: int,

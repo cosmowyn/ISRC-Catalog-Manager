@@ -7344,16 +7344,11 @@ class App(QMainWindow):
         if manifest is None:
             return
         install_button = None
+        install_asset_available = False
         installer_unavailable = ""
         try:
             select_platform_asset(manifest)
-            if getattr(sys, "frozen", False):
-                installer_unavailable = ""
-            else:
-                installer_unavailable = (
-                    "\n\nAutomatic installation is available in packaged builds. "
-                    "This source checkout can still show release notes."
-                )
+            install_asset_available = True
         except UpdateInstallerError as exc:
             installer_unavailable = f"\n\nAutomatic installation is not available: {exc}"
         text = (
@@ -7368,7 +7363,7 @@ class App(QMainWindow):
         message_box.setIcon(QMessageBox.Information)
         message_box.setText(text)
         release_notes_button = None
-        if not installer_unavailable:
+        if install_asset_available:
             install_button = message_box.addButton("Download and Install", QMessageBox.ActionRole)
         if manifest.release_notes_url:
             release_notes_button = message_box.addButton("Release Notes", QMessageBox.ActionRole)
@@ -14128,6 +14123,7 @@ class App(QMainWindow):
         panel.open_track_requested.connect(self.open_selected_editor)
         panel.edit_release_requested.connect(self.open_release_editor)
         panel.duplicate_release_requested.connect(self.duplicate_release)
+        panel.delete_release_requested.connect(self.delete_release)
         panel.add_selected_tracks_requested.connect(
             lambda release_id, track_ids: self.add_selected_tracks_to_specific_release(
                 release_id, track_ids
@@ -22428,11 +22424,22 @@ class App(QMainWindow):
         action_type = "release.create" if summary is None else "release.update"
         entity_id = payload.title if summary is None else summary.release.id
         existing_release_id = summary.release.id if summary is not None else None
+        focus_track_id = payload.placements[0].track_id if payload.placements else None
+        operation_label = "create" if summary is None else "update"
 
         def _worker(bundle, ctx):
-            ctx.set_status("Saving the release and track order...")
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message=f"Preparing release {operation_label}...",
+            )
 
             def _mutation():
+                ctx.report_progress(
+                    value=12,
+                    maximum=100,
+                    message="Saving release metadata and track order...",
+                )
                 if summary is None:
                     return bundle.release_service.create_release(payload)
                 return bundle.release_service.update_release(int(summary.release.id), payload)
@@ -22449,14 +22456,22 @@ class App(QMainWindow):
                     "release_id": existing_release_id,
                 },
                 mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing release-save history snapshot..."),
+                record_progress=(56, "Recording release-save history..."),
                 logger=self.logger,
             )
 
-        def _success(release_pk: int):
+        def _before_cleanup(release_pk: int, ui_progress) -> None:
             try:
                 self.conn.commit()
             except Exception:
                 pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=72,
+                message="Recording release save audit details...",
+            )
             self._refresh_history_actions()
             self._log_event(
                 action_type,
@@ -22472,11 +22487,26 @@ class App(QMainWindow):
                 details=f"title={payload.title}; tracks={len(payload.placements)}",
             )
             self._audit_commit()
-            self.refresh_table_preserve_view(
-                focus_id=payload.placements[0].track_id if payload.placements else None
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=82,
+                message="Refreshing catalog rows affected by the release...",
             )
-            if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
-                self.release_browser_dialog.refresh()
+            self.refresh_table_preserve_view(focus_id=focus_track_id)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=94,
+                message="Refreshing Release Browser details...",
+            )
+            self._refresh_release_browser_panel()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Release saved and UI is ready.",
+            )
+
+        def _after_cleanup(_release_pk: int) -> None:
+            self._refresh_release_browser_panel()
 
         self._submit_background_bundle_task(
             title="Release Editor",
@@ -22484,7 +22514,10 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="write",
             unique_key=f"release.save.{existing_release_id or payload.title}",
-            on_success=_success,
+            owner=self._release_browser_task_owner(),
+            worker_completion_progress=(66, "Finalizing release save in the background..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
             on_error=lambda failure: self._show_background_task_error(
                 "Release Editor",
                 failure,
@@ -22542,20 +22575,54 @@ class App(QMainWindow):
             return
         summary = self.release_service.fetch_release_summary(int(release_id))
         if summary is None:
-            QMessageBox.warning(self, "Release Browser", "The chosen release could not be loaded.")
+            QMessageBox.warning(
+                self, "Release Browser", "The chosen release could not be loaded."
+            )
             return
 
-        def mutation():
-            return self.release_service.add_tracks_to_release(int(release_id), selected_ids)
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Preparing to add selected tracks to the release...",
+            )
 
-        try:
-            added_track_ids = self._run_snapshot_history_action(
+            def mutation():
+                ctx.report_progress(
+                    value=12,
+                    maximum=100,
+                    message=(
+                        f"Adding {len(selected_ids)} selected "
+                        f"track{'s' if len(selected_ids) != 1 else ''} to the release..."
+                    ),
+                )
+                return bundle.release_service.add_tracks_to_release(
+                    int(release_id), selected_ids
+                )
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Add Tracks to Release: {summary.release.title}",
                 action_type="release.add_tracks",
                 entity_type="Release",
                 entity_id=release_id,
                 payload={"release_id": release_id, "track_ids": selected_ids},
                 mutation=mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing release track-link history snapshot..."),
+                record_progress=(56, "Recording release track-link history..."),
+                logger=self.logger,
+            )
+
+        def _before_cleanup(added_track_ids: list[int], ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=72,
+                message="Recording release track-link audit details...",
             )
             self._log_event(
                 "release.add_tracks",
@@ -22571,21 +22638,82 @@ class App(QMainWindow):
                 details=f"add_tracks={','.join(str(track_id) for track_id in (added_track_ids or []))}",
             )
             self._audit_commit()
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Add tracks to release failed: {exc}")
-            QMessageBox.critical(
-                self, "Release Browser", f"Could not add the selected tracks:\n{exc}"
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=82,
+                message="Refreshing catalog rows affected by the release track links...",
             )
-            return
+            focus_track_id = (added_track_ids or selected_ids or [None])[0]
+            self.refresh_table_preserve_view(focus_id=focus_track_id)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=94,
+                message="Refreshing Release Browser details...",
+            )
+            self._refresh_release_browser_panel()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Selected tracks added and UI is ready.",
+            )
 
-        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
-            self.release_browser_dialog.refresh()
-        QMessageBox.information(
-            self,
-            "Release Browser",
-            f"Added {len(added_track_ids or [])} track{'s' if len(added_track_ids or []) != 1 else ''} to '{summary.release.title}'.",
+        def _after_cleanup(added_track_ids: list[int]) -> None:
+            self._refresh_release_browser_panel()
+            QMessageBox.information(
+                self,
+                "Release Browser",
+                f"Added {len(added_track_ids or [])} track{'s' if len(added_track_ids or []) != 1 else ''} to '{summary.release.title}'.",
+            )
+
+        self._submit_background_bundle_task(
+            title="Add Tracks to Release",
+            description="Adding selected tracks to the release...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"release.add_tracks.{int(release_id)}",
+            owner=self._release_browser_task_owner(),
+            worker_completion_progress=(66, "Finalizing release track-link update..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                "Release Browser",
+                failure,
+                user_message="Could not add the selected tracks:",
+            ),
         )
+
+    def _refresh_release_browser_panel(self) -> None:
+        seen_panel_ids: set[int] = set()
+        candidates = [
+            getattr(self, "release_browser_panel", None),
+            getattr(self, "release_browser_dialog", None),
+        ]
+        dock = getattr(self, "release_browser_dock", None)
+        if dock is not None:
+            try:
+                candidates.append(dock.widget())
+            except Exception:
+                pass
+        for panel in candidates:
+            if panel is None:
+                continue
+            panel_id = id(panel)
+            if panel_id in seen_panel_ids:
+                continue
+            seen_panel_ids.add(panel_id)
+            refresh = getattr(panel, "refresh", None)
+            if callable(refresh):
+                refresh()
+            refresh_scope = getattr(panel, "refresh_selection_scope", None)
+            if callable(refresh_scope):
+                refresh_scope()
+
+    def _release_browser_task_owner(self) -> QWidget:
+        for attr in ("release_browser_panel", "release_browser_dialog"):
+            owner = getattr(self, attr, None)
+            if isinstance(owner, QWidget) and owner.isVisible():
+                return owner
+        return self
 
     def _refresh_work_manager_panel(self) -> None:
         seen_panel_ids: set[int] = set()
@@ -23221,6 +23349,109 @@ class App(QMainWindow):
             ),
         )
 
+    def delete_release(self, release_id: int):
+        if self.release_service is None:
+            QMessageBox.warning(self, "Release Browser", "Open a profile first.")
+            return
+        summary = self.release_service.fetch_release_summary(int(release_id))
+        if summary is None:
+            QMessageBox.warning(
+                self, "Delete Release", "The selected release could not be loaded."
+            )
+            return
+        focus_track_id = summary.tracks[0].track_id if summary.tracks else None
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Preparing to delete the release...",
+            )
+
+            def _mutation():
+                ctx.report_progress(
+                    value=12,
+                    maximum=100,
+                    message="Deleting release metadata, track order, and release-level links...",
+                )
+                return bundle.release_service.delete_release(int(release_id))
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=f"Delete Release: {summary.release.title}",
+                action_type="release.delete",
+                entity_type="Release",
+                entity_id=release_id,
+                payload={"release_id": int(release_id), "title": summary.release.title},
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing release-delete history snapshot..."),
+                record_progress=(56, "Recording release-delete history..."),
+                logger=self.logger,
+            )
+
+        def _before_cleanup(_result: object, ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=72,
+                message="Recording release deletion audit details...",
+            )
+            self._log_event(
+                "release.delete",
+                "Release deleted",
+                release_id=int(release_id),
+                title=summary.release.title,
+            )
+            self._audit(
+                "DELETE",
+                "Release",
+                ref_id=release_id,
+                details=f"title={summary.release.title}",
+            )
+            self._audit_commit()
+            self._refresh_history_actions()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=82,
+                message="Refreshing catalog rows affected by the deleted release...",
+            )
+            self.refresh_table_preserve_view(focus_id=focus_track_id)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=94,
+                message="Refreshing Release Browser details...",
+            )
+            self._refresh_release_browser_panel()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Release deleted and UI is ready.",
+            )
+
+        def _after_cleanup(_result: object) -> None:
+            self._refresh_release_browser_panel()
+
+        self._submit_background_bundle_task(
+            title="Delete Release",
+            description="Deleting the selected release and refreshing dependent views...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"release.delete.{int(release_id)}",
+            owner=self._release_browser_task_owner(),
+            worker_completion_progress=(66, "Finalizing release deletion in the background..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                "Delete Release",
+                failure,
+                user_message="Could not delete the release:",
+            ),
+        )
+
     def duplicate_release(self, release_id: int):
         if self.release_service is None:
             return
@@ -23230,14 +23461,46 @@ class App(QMainWindow):
                 self, "Duplicate Release", "The selected release could not be loaded."
             )
             return
-        try:
-            new_release_id = self._run_snapshot_history_action(
+        focus_track_id = summary.tracks[0].track_id if summary.tracks else None
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Preparing to duplicate the release...",
+            )
+
+            def _mutation():
+                ctx.report_progress(
+                    value=12,
+                    maximum=100,
+                    message="Duplicating release metadata and track order...",
+                )
+                return bundle.release_service.duplicate_release(int(release_id))
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Duplicate Release: {summary.release.title}",
                 action_type="release.duplicate",
                 entity_type="Release",
                 entity_id=release_id,
                 payload={"release_id": release_id, "title": summary.release.title},
-                mutation=lambda: self.release_service.duplicate_release(int(release_id)),
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(48, "Capturing release-duplicate history snapshot..."),
+                record_progress=(56, "Recording release-duplicate history..."),
+                logger=self.logger,
+            )
+
+        def _before_cleanup(new_release_id: int, ui_progress) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=72,
+                message="Recording release duplication audit details...",
             )
             self._log_event(
                 "release.duplicate",
@@ -23253,15 +23516,47 @@ class App(QMainWindow):
                 details=f"duplicated_from={release_id}",
             )
             self._audit_commit()
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Duplicate release failed: {exc}")
-            QMessageBox.critical(
-                self, "Duplicate Release", f"Could not duplicate the release:\n{exc}"
+            self._refresh_history_actions()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=82,
+                message="Refreshing catalog rows affected by the duplicate release...",
             )
-            return
-        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
-            self.release_browser_dialog.refresh()
+            self.refresh_table_preserve_view(focus_id=focus_track_id)
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=94,
+                message="Refreshing Release Browser details...",
+            )
+            self._refresh_release_browser_panel()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Release duplicated and UI is ready.",
+            )
+
+        def _after_cleanup(_new_release_id: int) -> None:
+            self._refresh_release_browser_panel()
+
+        self._submit_background_bundle_task(
+            title="Duplicate Release",
+            description="Duplicating release metadata and track order...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"release.duplicate.{int(release_id)}",
+            owner=self._release_browser_task_owner(),
+            worker_completion_progress=(
+                66,
+                "Finalizing release duplication in the background...",
+            ),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=lambda failure: self._show_background_task_error(
+                "Duplicate Release",
+                failure,
+                user_message="Could not duplicate the release:",
+            ),
+        )
 
     def _build_tag_preview_rows(
         self,

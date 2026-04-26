@@ -11,6 +11,15 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_release_browser_selection_scope_tracks_catalog_selection_and_override = (
         AppShellTestCase.case_release_browser_selection_scope_tracks_catalog_selection_and_override
     )
+    test_release_browser_create_and_update_use_truthful_progress_tasks = (
+        AppShellTestCase.case_release_browser_create_and_update_use_truthful_progress_tasks
+    )
+    test_release_browser_mutations_use_truthful_progress_tasks = (
+        AppShellTestCase.case_release_browser_mutations_use_truthful_progress_tasks
+    )
+    test_release_browser_delete_refreshes_visible_table_after_background_task = (
+        AppShellTestCase.case_release_browser_delete_refreshes_visible_table_after_background_task
+    )
     test_work_manager_dock_uses_live_track_selection = (
         AppShellTestCase.case_work_manager_dock_uses_live_track_selection
     )

@@ -49,6 +49,7 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _confirm_destructive_action,
     _create_action_button_cluster,
     _create_action_button_grid,
     _create_scrollable_dialog_content,
@@ -698,6 +699,7 @@ class ReleaseBrowserPanel(QWidget):
     duplicate_release_requested = Signal(int)
     add_selected_tracks_requested = Signal(int, list)
     create_release_requested = Signal(list)
+    delete_release_requested = Signal(int)
     close_requested = Signal()
 
     def __init__(
@@ -722,41 +724,76 @@ class ReleaseBrowserPanel(QWidget):
         _apply_standard_widget_chrome(self, "releaseBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(14)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
         _add_standard_dialog_header(
             root,
             self,
             title="Release Browser",
-            subtitle=(
-                "Browse releases, inspect summary metadata, and attach the current track "
-                "selection without leaving the catalog."
-            ),
         )
 
-        controls_box, controls_layout = _create_standard_section(
+        actions_box, actions_layout = _create_standard_section(
             self,
-            "Find and Create",
-            "Search releases by title or artist, then create a new release when you need a new container for the current catalog selection.",
+            "Release Actions",
         )
+        self.actions_box = actions_box
+        actions_layout.setContentsMargins(10, 8, 10, 10)
+        actions_layout.setSpacing(6)
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(10)
+        controls.setSpacing(6)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search releases...")
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
+        actions_layout.addLayout(controls)
+        self.selection_banner = SelectionScopeBanner(
+            parent=actions_box,
+            show_header=False,
+            show_use_current_button=False,
+            show_choose_button=False,
+            content_margins=(0, 0, 0, 0),
+        )
+        self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
+        actions_layout.addWidget(self.selection_banner)
 
         new_button = QPushButton("Create Release")
         new_button.clicked.connect(self._emit_create_release_current)
-        controls.addWidget(new_button)
-        controls_layout.addLayout(controls)
-        self.selection_banner = SelectionScopeBanner(parent=self)
-        self.selection_banner.use_current_button.clicked.connect(self._use_current_selection)
-        self.selection_banner.choose_button.clicked.connect(self._choose_tracks)
-        self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
-        controls_layout.addWidget(self.selection_banner)
-        root.addWidget(controls_box)
+        choose_tracks_button = QPushButton("Choose Tracks")
+        choose_tracks_button.clicked.connect(self._choose_tracks)
+        edit_button = QPushButton("Edit Release")
+        edit_button.clicked.connect(self._emit_edit_current)
+        duplicate_button = QPushButton("Duplicate Release")
+        duplicate_button.clicked.connect(self._emit_duplicate_current)
+        delete_button = QPushButton("Delete Release")
+        delete_button.clicked.connect(self._emit_delete_current)
+        add_selection_button = QPushButton("Add Selected Tracks")
+        add_selection_button.clicked.connect(self._emit_add_selected_current)
+        filter_button = QPushButton("Filter Catalog To Release")
+        filter_button.clicked.connect(self._emit_filter_current)
+        open_track_button = QPushButton("Open Selected Track")
+        open_track_button.clicked.connect(self._emit_open_track_current)
+        self.actions_cluster = _create_action_button_cluster(
+            actions_box,
+            [
+                new_button,
+                choose_tracks_button,
+                edit_button,
+                duplicate_button,
+                delete_button,
+                add_selection_button,
+                filter_button,
+                open_track_button,
+            ],
+            columns=4,
+            min_button_width=145,
+            outer_margins=(4, 4, 4, 4),
+            horizontal_spacing=10,
+            vertical_spacing=10,
+        )
+        self.actions_cluster.setObjectName("releaseBrowserActionsCluster")
+        actions_layout.addWidget(self.actions_cluster)
+        root.addWidget(actions_box)
 
         splitter = QSplitter(Qt.Horizontal, self)
         splitter.setChildrenCollapsible(False)
@@ -898,37 +935,6 @@ class ReleaseBrowserPanel(QWidget):
         tracks_tab_layout.addWidget(tracks_box, 1)
         self.detail_tabs.addTab(tracks_tab, "Tracks")
 
-        actions_box, actions_layout = _create_standard_section(
-            self,
-            "Release Actions",
-            "Edit or duplicate the release, attach the current selection, filter the main table, or open the highlighted track.",
-        )
-        edit_button = QPushButton("Edit Release")
-        edit_button.clicked.connect(self._emit_edit_current)
-        duplicate_button = QPushButton("Duplicate Release")
-        duplicate_button.clicked.connect(self._emit_duplicate_current)
-        add_selection_button = QPushButton("Add Selected Tracks")
-        add_selection_button.clicked.connect(self._emit_add_selected_current)
-        filter_button = QPushButton("Filter Catalog To Release")
-        filter_button.clicked.connect(self._emit_filter_current)
-        open_track_button = QPushButton("Open Selected Track")
-        open_track_button.clicked.connect(self._emit_open_track_current)
-        self.actions_cluster = _create_action_button_cluster(
-            actions_box,
-            [
-                edit_button,
-                duplicate_button,
-                add_selection_button,
-                filter_button,
-                open_track_button,
-            ],
-            columns=2,
-            min_button_width=180,
-            span_last_row=True,
-        )
-        self.actions_cluster.setObjectName("releaseBrowserActionsCluster")
-        actions_layout.addWidget(self.actions_cluster)
-        detail_content_layout.addWidget(actions_box)
         detail_content_layout.addStretch(1)
 
         splitter.addWidget(self.detail_scroll_area)
@@ -955,7 +961,11 @@ class ReleaseBrowserPanel(QWidget):
         service = self._release_service()
         if service is None:
             self._release_ids_by_row = []
+            self._current_summary = None
+            self.release_table.clearSelection()
+            self.release_table.clearContents()
             self.release_table.setRowCount(0)
+            self.track_table.clearContents()
             self.track_table.setRowCount(0)
             self.release_count_label.setText("Open a profile first to browse releases.")
             for label in self._summary_fields.values():
@@ -968,28 +978,38 @@ class ReleaseBrowserPanel(QWidget):
         self.release_count_label.setText(
             f"{len(releases)} release{'s' if len(releases) != 1 else ''} shown."
         )
-        self.release_table.setRowCount(len(releases))
-        for row, release in enumerate(releases):
-            values = [
-                str(release.id),
-                release.title,
-                release.primary_artist or "",
-                release.release_type.replace("_", " ").title(),
-                (release.repertoire_status or "").replace("_", " ").title(),
-                release.release_date or "",
-                str(release.track_count),
-            ]
-            for column, value in enumerate(values):
-                self.release_table.setItem(row, column, QTableWidgetItem(value))
-        restored = self._restore_release_selection(selected_release_id)
-        if releases:
-            if not restored:
+        previous_signal_state = self.release_table.blockSignals(True)
+        try:
+            self.release_table.clearSelection()
+            self.release_table.clearContents()
+            self.release_table.setRowCount(len(releases))
+            for row, release in enumerate(releases):
+                values = [
+                    str(release.id),
+                    release.title,
+                    release.primary_artist or "",
+                    release.release_type.replace("_", " ").title(),
+                    (release.repertoire_status or "").replace("_", " ").title(),
+                    release.release_date or "",
+                    str(release.track_count),
+                ]
+                for column, value in enumerate(values):
+                    self.release_table.setItem(row, column, QTableWidgetItem(value))
+            restored = self._restore_release_selection(selected_release_id)
+            if releases and not restored:
                 self.release_table.selectRow(0)
+        finally:
+            self.release_table.blockSignals(previous_signal_state)
+        if releases:
+            self._load_selected_release()
         else:
+            self._current_summary = None
             for label in self._summary_fields.values():
                 label.setText("")
+            self.track_table.clearContents()
             self.track_table.setRowCount(0)
         self.refresh_selection_scope()
+        self.release_table.viewport().update()
 
     def _selected_release_id(self) -> int | None:
         row = self.release_table.currentRow()
@@ -1137,6 +1157,29 @@ class ReleaseBrowserPanel(QWidget):
         if release_id is not None:
             self.duplicate_release_requested.emit(release_id)
 
+    def _emit_delete_current(self) -> None:
+        service = self._release_service()
+        if service is None:
+            QMessageBox.warning(self, "Release Browser", "Open a profile first.")
+            return
+        release_id = self._selected_release_id()
+        if release_id is None:
+            QMessageBox.information(self, "Release Browser", "Select a release first.")
+            return
+        summary = service.fetch_release_summary(int(release_id))
+        release_title = summary.release.title if summary is not None else f"Release {release_id}"
+        if not _confirm_destructive_action(
+            self,
+            title="Delete Release",
+            prompt=f"Delete '{release_title}'?",
+            consequences=(
+                "This removes the release record, release track order, and release-level links.",
+                "Catalog tracks stay in place.",
+            ),
+        ):
+            return
+        self.delete_release_requested.emit(int(release_id))
+
     def _emit_add_selected_current(self) -> None:
         release_id = self._selected_release_id()
         if release_id is not None:
@@ -1173,6 +1216,7 @@ class ReleaseBrowserDialog(QDialog):
     duplicate_release_requested = Signal(int)
     add_selected_tracks_requested = Signal(int, list)
     create_release_requested = Signal(list)
+    delete_release_requested = Signal(int)
 
     def __init__(
         self,
@@ -1205,6 +1249,7 @@ class ReleaseBrowserDialog(QDialog):
         self.panel.duplicate_release_requested.connect(self.duplicate_release_requested.emit)
         self.panel.add_selected_tracks_requested.connect(self.add_selected_tracks_requested.emit)
         self.panel.create_release_requested.connect(self.create_release_requested.emit)
+        self.panel.delete_release_requested.connect(self.delete_release_requested.emit)
         self.panel.close_requested.connect(self.accept)
         root.addWidget(self.panel)
 
