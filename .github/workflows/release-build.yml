@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_run:
+    workflows:
+      - Version Bump
+    types:
+      - completed
 
 permissions:
   contents: write
@@ -20,11 +25,89 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.resolve.outputs.should_release }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag to build
+        id: resolve
+        shell: bash
+        env:
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            if [ "$WORKFLOW_RUN_CONCLUSION" != "success" ]; then
+              echo "Version Bump did not complete successfully; skipping release build."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$WORKFLOW_RUN_HEAD_BRANCH" != "main" ]; then
+              echo "Version Bump completed for '$WORKFLOW_RUN_HEAD_BRANCH', not main; skipping."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            git fetch origin main --tags
+            git checkout --force origin/main
+            version="$(
+              python - <<'PY'
+              import json
+              from pathlib import Path
+
+              metadata = json.loads(Path("docs/releases/latest.json").read_text(encoding="utf-8"))
+              print(str(metadata["version"]).strip())
+              PY
+            )"
+            tag="v${version}"
+          else
+            tag="$GITHUB_REF_NAME"
+            git fetch origin "$tag" --tags || git fetch origin --tags
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
+            echo "Release builds only publish SemVer-style vX.Y.Z tags; got '$tag'." >&2
+            exit 1
+          fi
+
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Resolved release tag does not exist: $tag" >&2
+            exit 1
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            tag_sha="$(git rev-list -n 1 "$tag")"
+            main_sha="$(git rev-parse HEAD)"
+            if [ "$tag_sha" != "$main_sha" ]; then
+              echo "Latest release tag $tag does not point at the current main tip; skipping."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "Resolved release tag: $tag"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$tag" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.os }}
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    needs:
+      - prepare
     strategy:
       fail-fast: false
       matrix:
@@ -35,14 +118,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-
-      - name: Validate release tag
-        shell: bash
-        run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
-            echo "Release builds only publish SemVer-style vX.Y.Z tags; got '$GITHUB_REF_NAME'." >&2
-            exit 1
-          fi
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - uses: actions/setup-python@v6
         with:
@@ -140,14 +217,17 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs:
+      - prepare
       - build
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - uses: actions/download-artifact@v8
         with:
@@ -159,7 +239,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="${{ needs.prepare.outputs.tag }}"
           version="${tag#v}"
           notes_file="release-notes.md"
 

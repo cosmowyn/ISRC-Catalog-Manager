@@ -4,15 +4,19 @@ Date: 2026-04-26
 
 ## Summary
 
-GitHub Actions now has a tag-triggered release packaging workflow for Windows, macOS, and Linux.
-When a `vX.Y.Z` tag is pushed, native runner jobs build platform packages with `build.py`, upload
-those packages as workflow artifacts, and a single publish job creates or updates the matching
-GitHub Release with the archives and `SHA256SUMS.txt`.
+GitHub Actions now has release packaging workflow coverage for Windows, macOS, and Linux. When a
+`vX.Y.Z` tag is pushed, or when the existing `Version Bump` workflow successfully generates a tag,
+native runner jobs build platform packages with `build.py`, upload those packages as workflow
+artifacts, and a single publish job creates or updates the matching GitHub Release with the archives
+and `SHA256SUMS.txt`.
 
 ## Files Changed
 
 - `.github/workflows/release-build.yml`
-  - Adds native `windows-latest`, `macos-latest`, and `ubuntu-latest` release builds on `v*` tags.
+  - Adds native `windows-latest`, `macos-latest`, and `ubuntu-latest` release builds on `v*` tags
+    and successful `Version Bump` completions.
+  - Resolves the generated version-bump tag from `docs/releases/latest.json` so release builds still
+    run when the tag was pushed by GitHub Actions' `GITHUB_TOKEN`.
   - Runs compile, Ruff, Black, mypy, release automation tests, and build packaging tests before
     PyInstaller packaging.
   - Publishes downloaded platform artifacts from one final job to avoid matrix release-upload races.
@@ -35,7 +39,7 @@ GitHub Release with the archives and `SHA256SUMS.txt`.
 
 ## Release Trigger Behavior
 
-The workflow runs on:
+The workflow runs on direct release-tag pushes:
 
 ```yaml
 on:
@@ -44,8 +48,13 @@ on:
       - "v*"
 ```
 
-Each build job validates the tag as SemVer-style `vX.Y.Z` before building. The existing
-`version-bump.yml` workflow already creates these tags after updating `pyproject.toml`,
+It also runs on successful `Version Bump` workflow completion. In that path it checks out `main`,
+reads `docs/releases/latest.json`, resolves `vX.Y.Z`, verifies that the tag exists and points at the
+current `main` tip, then builds that tag. This is needed because GitHub does not normally trigger a
+second workflow from a tag pushed by another workflow using the default `GITHUB_TOKEN`.
+
+Each resolved tag is validated as SemVer-style `vX.Y.Z` before building. The existing
+`version-bump.yml` workflow creates these tags after updating `pyproject.toml`,
 `isrc_manager/version.py`, `docs/releases/`, `RELEASE_NOTES.md`, and `docs/releases/latest.json`.
 
 ## Platform Matrix

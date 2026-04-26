@@ -453,10 +453,10 @@ GitHub Actions verifies the project with:
 - coverage thresholds
 - packaging smoke validation
 
-When a `vX.Y.Z` tag is pushed, the release-build workflow runs native package builds on
-Windows, macOS, and Linux, then creates or updates the matching GitHub Release with the generated
-archives and `SHA256SUMS.txt`. See [Release Build Automation](docs/release-builds.md) for the
-maintainer workflow.
+When a `vX.Y.Z` tag is pushed, or when the Version Bump workflow creates one, the release-build
+workflow runs native package builds on Windows, macOS, and Linux, then creates or updates the
+matching GitHub Release with the generated archives and `SHA256SUMS.txt`. See
+[Release Build Automation](docs/release-builds.md) for the maintainer workflow.
 
 The test suite includes service-level coverage, dialog/controller tests, app-shell integration coverage, workflow integration tests, migration coverage, and background-task safety checks.
 
@@ -466,8 +466,9 @@ The canonical application version lives in `pyproject.toml` under `[project].ver
 Pushes to `main` run an automated SemVer bump workflow that updates the runtime fallback in
 `isrc_manager/version.py`, writes concise release notes under `docs/releases/`, updates
 `RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` for the app's update check.
-The generated `vX.Y.Z` tag triggers the cross-platform release-build workflow, so public GitHub
-Release assets are produced online instead of relying on a local maintainer machine.
+The generated `vX.Y.Z` tag is resolved by the cross-platform release-build workflow after version
+bumping completes, so public GitHub Release assets are produced online instead of relying on a local
+maintainer machine.
 
 The desktop app checks that manifest after startup without blocking the UI. `Help > Check for
 Updates…` runs the same check manually. Users can ignore a specific available version; that

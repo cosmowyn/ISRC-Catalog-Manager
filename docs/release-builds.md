@@ -14,7 +14,11 @@ release-build workflow builds and publishes packages for that tag
 ```
 
 The release workflow is `.github/workflows/release-build.yml` and runs only for tags matching
-`v*`. It validates that the tag is SemVer-style before packaging.
+`v*`. It also runs after the `Version Bump` workflow completes successfully, resolves the generated
+tag from `docs/releases/latest.json`, and builds that tag when it points at the current `main` tip.
+This second trigger is important because GitHub does not start new workflows from tags pushed by a
+workflow using the repository `GITHUB_TOKEN`. In both paths, the resolved tag is validated as
+SemVer-style before packaging.
 
 ## Platforms
 
