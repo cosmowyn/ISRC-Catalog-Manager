@@ -1,7 +1,7 @@
 {
-  "version": "3.3.1",
+  "version": "3.3.2",
   "released_at": "2026-04-26",
-  "summary": "Improve track workflows and smart storage budgets",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.3.1.md",
+  "summary": "Show update release notes in app",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.3.2.md",
   "minimum_supported_version": null
 }
