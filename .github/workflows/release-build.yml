@@ -161,7 +161,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          python -m pip install --upgrade pip &&
+          python -m pip install --upgrade pip
+          if errorlevel 1 exit /b %errorlevel%
           python -m pip install -e .[dev,build]
 
       - name: Run release QA
@@ -178,10 +179,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests &&
-          python -m ruff check build.py isrc_manager scripts tests &&
-          python -m black --check build.py isrc_manager scripts tests &&
-          python -m mypy &&
+          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
+          if errorlevel 1 exit /b %errorlevel%
+          python -m ruff check build.py isrc_manager scripts tests
+          if errorlevel 1 exit /b %errorlevel%
+          python -m black --check build.py isrc_manager scripts tests
+          if errorlevel 1 exit /b %errorlevel%
+          python -m mypy
+          if errorlevel 1 exit /b %errorlevel%
           python -m unittest tests.test_build_requirements tests.test_release_automation -v
 
       - name: Build packaged application
