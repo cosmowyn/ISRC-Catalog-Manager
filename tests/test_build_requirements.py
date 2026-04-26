@@ -1,8 +1,10 @@
 import json
 import os
 import subprocess
+import tarfile
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -607,6 +609,12 @@ class MainFlowTests(unittest.TestCase):
                 mock.patch.object(build.os, "chdir"),
                 mock.patch.object(build.subprocess, "run", side_effect=run_pyinstaller),
                 mock.patch.object(build, "_stage_release_artifact", return_value=staged),
+                mock.patch.object(
+                    build,
+                    "_package_release_artifact",
+                    return_value=root / "dist" / "release" / "packages" / "app.tar.gz",
+                ),
+                mock.patch.object(build, "_write_release_manifest"),
                 mock.patch.object(build, "_is_windows", return_value=False),
                 mock.patch.object(build, "_is_macos", return_value=False),
                 mock.patch("builtins.print"),
@@ -676,6 +684,21 @@ class MainFlowTests(unittest.TestCase):
 
 
 class ArtifactStagingTests(unittest.TestCase):
+    def test_architecture_tag_normalizes_common_runner_architectures(self):
+        self.assertEqual(build._architecture_tag("x86_64"), "x64")
+        self.assertEqual(build._architecture_tag("AMD64"), "x64")
+        self.assertEqual(build._architecture_tag("arm64"), "arm64")
+        self.assertEqual(build._architecture_tag("aarch64"), "arm64")
+
+    def test_release_asset_basename_includes_tagged_version_platform_and_architecture(self):
+        with (
+            mock.patch.object(build, "_platform_tag", return_value="linux"),
+            mock.patch.object(build, "_architecture_tag", return_value="x64"),
+        ):
+            basename = build._release_asset_basename("3.1.1")
+
+        self.assertEqual(basename, f"{build.APP_NAME}-v3.1.1-linux-x64")
+
     def test_find_built_artifact_prefers_macos_app_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -690,7 +713,7 @@ class ArtifactStagingTests(unittest.TestCase):
 
         self.assertEqual(artifact, app_bundle)
 
-    def test_stage_release_artifact_copies_file_and_writes_manifest(self):
+    def test_stage_release_artifact_copies_file_without_writing_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             dist_dir = root / "dist"
@@ -708,13 +731,93 @@ class ArtifactStagingTests(unittest.TestCase):
                     app_version="3.1.1",
                 )
 
-            manifest = json.loads((dist_dir / "release_manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(staged.exists())
             self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.1-windows.exe")
+            self.assertFalse((dist_dir / "release_manifest.json").exists())
+
+    def test_write_release_manifest_includes_package_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            dist_dir.mkdir()
+            source = dist_dir / f"{build.APP_NAME}.exe"
+            staged = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-windows.exe"
+            package = dist_dir / "release" / "packages" / f"{build.APP_NAME}-v3.1.1-windows-x64.zip"
+
+            with (
+                mock.patch.object(build, "_platform_tag", return_value="windows"),
+                mock.patch.object(build, "_architecture_tag", return_value="x64"),
+            ):
+                manifest_path = build._write_release_manifest(
+                    dist_dir,
+                    source,
+                    staged,
+                    app_version="3.1.1",
+                    release_package=package,
+                )
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["app_version"], "3.1.1")
             self.assertEqual(manifest["platform"], "windows")
-            self.assertEqual(manifest["source_artifact"], str(artifact))
+            self.assertEqual(manifest["architecture"], "x64")
+            self.assertEqual(manifest["source_artifact"], str(source))
             self.assertEqual(manifest["release_artifact"], str(staged))
+            self.assertEqual(manifest["release_package"], str(package))
+            self.assertEqual(manifest["release_asset_name"], package.name)
+
+    def test_package_release_artifact_zips_macos_bundle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-macos"
+            contents = bundle / "Contents"
+            contents.mkdir(parents=True)
+            (contents / "Info.plist").write_text("plist", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+                mock.patch.object(build, "_platform_tag", return_value="macos"),
+                mock.patch.object(build, "_architecture_tag", return_value="arm64"),
+            ):
+                package = build._package_release_artifact(
+                    bundle,
+                    dist_dir,
+                    app_version="3.1.1",
+                )
+
+            self.assertEqual(package.name, f"{build.APP_NAME}-v3.1.1-macos-arm64.zip")
+            self.assertGreater(package.stat().st_size, 0)
+            with zipfile.ZipFile(package) as archive:
+                self.assertIn(
+                    f"{build.APP_NAME}-3.1.1-macos/Contents/Info.plist",
+                    archive.namelist(),
+                )
+
+    def test_package_release_artifact_creates_linux_tarball(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = Path(tmpdir) / "dist"
+            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-linux"
+            bundle.mkdir(parents=True)
+            (bundle / build.APP_NAME).write_text("binary", encoding="utf-8")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=False),
+                mock.patch.object(build, "_platform_tag", return_value="linux"),
+                mock.patch.object(build, "_architecture_tag", return_value="x64"),
+            ):
+                package = build._package_release_artifact(
+                    bundle,
+                    dist_dir,
+                    app_version="3.1.1",
+                )
+
+            self.assertEqual(package.name, f"{build.APP_NAME}-v3.1.1-linux-x64.tar.gz")
+            self.assertGreater(package.stat().st_size, 0)
+            with tarfile.open(package, "r:gz") as archive:
+                self.assertIn(
+                    f"{build.APP_NAME}-3.1.1-linux/{build.APP_NAME}",
+                    archive.getnames(),
+                )
 
 
 if __name__ == "__main__":

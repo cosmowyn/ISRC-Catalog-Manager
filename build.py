@@ -8,6 +8,7 @@ Behavior:
 - Bundles an optional runtime splash into ``build_assets/`` for packaged builds.
 - Cleans ``build/`` and ``dist/`` before each run.
 - Stages a versioned release artifact under ``dist/release/``.
+- Creates an upload-ready release archive under ``dist/release/packages/``.
 
 Notes:
 - Branding is customized by replacing the same-named files in ``build_assets/``
@@ -18,10 +19,13 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -111,6 +115,22 @@ def _project_version(pyproject_path: Path) -> str:
 
 def _release_basename(version: str) -> str:
     return f"{APP_NAME}-{version}-{_platform_tag()}"
+
+
+def _architecture_tag(machine: str | None = None) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", (machine or platform.machine() or "").lower())
+    normalized = normalized.strip("-")
+    if normalized in {"amd64", "x86-64", "x86_64"}:
+        return "x64"
+    if normalized in {"aarch64", "arm64"}:
+        return "arm64"
+    if normalized in {"i386", "i686", "x86"}:
+        return "x86"
+    return normalized or "unknown"
+
+
+def _release_asset_basename(version: str) -> str:
+    return f"{APP_NAME}-v{version}-{_platform_tag()}-{_architecture_tag()}"
 
 
 def _build_splash_version_label(
@@ -846,15 +866,20 @@ def _write_release_manifest(
     staged_artifact: Path,
     *,
     app_version: str,
+    release_package: Path | None = None,
 ) -> Path:
     manifest_path = dist_dir / "release_manifest.json"
     payload = {
         "app_name": APP_NAME,
         "app_version": app_version,
         "platform": _platform_tag(),
+        "architecture": _architecture_tag(),
         "source_artifact": str(source_artifact),
         "release_artifact": str(staged_artifact),
     }
+    if release_package is not None:
+        payload["release_package"] = str(release_package)
+        payload["release_asset_name"] = release_package.name
     manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return manifest_path
 
@@ -873,13 +898,53 @@ def _stage_release_artifact(source_artifact: Path, dist_dir: Path, *, app_versio
         target.unlink(missing_ok=True)
         shutil.copy2(source_artifact, target)
 
-    _write_release_manifest(
-        dist_dir,
-        source_artifact,
-        target,
-        app_version=app_version,
-    )
     return target
+
+
+def _release_package_path(release_dir: Path, *, app_version: str) -> Path:
+    packages_dir = release_dir / "packages"
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    extension = ".zip" if _is_windows() or _is_macos() else ".tar.gz"
+    return packages_dir / f"{_release_asset_basename(app_version)}{extension}"
+
+
+def _zip_release_artifact(staged_artifact: Path, package_path: Path) -> None:
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        if staged_artifact.is_dir():
+            root = staged_artifact.parent
+            for path in sorted(staged_artifact.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(root))
+            return
+
+        archive.write(staged_artifact, staged_artifact.name)
+
+
+def _tar_release_artifact(staged_artifact: Path, package_path: Path) -> None:
+    with tarfile.open(package_path, "w:gz") as archive:
+        archive.add(staged_artifact, arcname=staged_artifact.name, recursive=True)
+
+
+def _package_release_artifact(
+    staged_artifact: Path,
+    dist_dir: Path,
+    *,
+    app_version: str,
+) -> Path:
+    if not staged_artifact.exists():
+        raise FileNotFoundError(f"Release artifact does not exist: {staged_artifact}")
+
+    package_path = _release_package_path(dist_dir / "release", app_version=app_version)
+    package_path.unlink(missing_ok=True)
+
+    if _is_windows() or _is_macos():
+        _zip_release_artifact(staged_artifact, package_path)
+    else:
+        _tar_release_artifact(staged_artifact, package_path)
+
+    if not package_path.exists() or package_path.stat().st_size <= 0:
+        raise RuntimeError(f"Release package was not created or is empty: {package_path}")
+    return package_path
 
 
 def _clean_build_directories(project_root: Path) -> None:
@@ -1018,10 +1083,28 @@ def main() -> int:
         out_path,
         app_version=app_version,
     )
+    try:
+        release_package = _package_release_artifact(
+            staged_artifact,
+            out_path,
+            app_version=app_version,
+        )
+    except Exception as exc:
+        print(f"\nERROR [package]: {exc}")
+        return 3
+
+    _write_release_manifest(
+        out_path,
+        built_artifact,
+        staged_artifact,
+        app_version=app_version,
+        release_package=release_package,
+    )
 
     print("\nBuild complete.")
     print(f"Output folder: {out_path}")
     print(f"Release artifact: {staged_artifact}")
+    print(f"Release package: {release_package}")
     print(f"Release manifest: {out_path / 'release_manifest.json'}")
     return 0
 

@@ -1,0 +1,205 @@
+name: Release Builds
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONFAULTHANDLER: "1"
+  PYTHONUNBUFFERED: "1"
+  PYTHONUTF8: "1"
+  QT_QPA_PLATFORM: offscreen
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
+            echo "Release builds only publish SemVer-style vX.Y.Z tags; got '$GITHUB_REF_NAME'." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libglib2.0-0 \
+            libopengl0 \
+            libpulse-mainloop-glib0 \
+            libx11-xcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0
+
+      - name: Install release build dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,build]"
+
+      - name: Run release QA
+        shell: bash
+        run: |
+          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
+          python -m ruff check build.py isrc_manager scripts tests
+          python -m black --check build.py isrc_manager scripts tests
+          python -m mypy
+          python -m unittest tests.test_build_requirements tests.test_release_automation -v
+
+      - name: Build packaged application
+        shell: bash
+        run: python build.py
+
+      - name: Validate release package
+        id: package
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest_path = Path("dist/release_manifest.json")
+          if not manifest_path.is_file():
+              raise SystemExit("dist/release_manifest.json was not created")
+
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          package = Path(str(manifest.get("release_package", "")))
+          if not package.is_file():
+              raise SystemExit(f"release package was not created: {package}")
+          if package.stat().st_size <= 0:
+              raise SystemExit(f"release package is empty: {package}")
+
+          asset_name = str(manifest.get("release_asset_name") or package.name)
+          if asset_name != package.name:
+              raise SystemExit(
+                  f"manifest asset name {asset_name!r} does not match package {package.name!r}"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"asset_path={package}\n")
+              output.write(f"asset_name={asset_name}\n")
+
+          print(f"Validated release package: {package} ({package.stat().st_size} bytes)")
+          PY
+
+      - name: Upload platform package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.asset_name }}
+          path: ${{ steps.package.outputs.asset_path }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - build
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Prepare release notes and checksums
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          notes_file="release-notes.md"
+
+          if [ -f "docs/releases/${tag}.md" ]; then
+            cp "docs/releases/${tag}.md" "$notes_file"
+          elif [ -f "RELEASE_NOTES.md" ]; then
+            cp "RELEASE_NOTES.md" "$notes_file"
+          else
+            printf '# %s\n\nAutomated release build for %s.\n' "$tag" "$tag" > "$notes_file"
+          fi
+
+          file_count="$(find release-assets -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -size +0c | wc -l | tr -d ' ')"
+          if [ "$file_count" -lt 3 ]; then
+            echo "Expected at least three platform assets, found $file_count." >&2
+            find release-assets -maxdepth 1 -type f -ls >&2
+            exit 1
+          fi
+
+          (
+            cd release-assets
+            sha256sum * > SHA256SUMS.txt
+          )
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          notes_file="${{ steps.release.outputs.notes_file }}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
+          else
+            gh release create "$tag" --title "$tag" --notes-file "$notes_file" --verify-tag
+          fi
+
+          gh release upload "$tag" release-assets/* --clobber
