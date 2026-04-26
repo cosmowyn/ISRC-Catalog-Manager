@@ -1,7 +1,7 @@
 {
-  "version": "3.6.6",
+  "version": "3.6.7",
   "released_at": "2026-04-26",
-  "summary": "document application updates",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.6.md",
+  "summary": "preserve macos app symlinks",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.7.md",
   "minimum_supported_version": null
 }
