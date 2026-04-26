@@ -18,7 +18,9 @@ RELEASE_MANIFEST_URL = (
     "docs/releases/latest.json"
 )
 DEFAULT_UPDATE_TIMEOUT_SECONDS = 4.0
+DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS = 6.0
 MAX_MANIFEST_BYTES = 64 * 1024
+MAX_RELEASE_NOTES_BYTES = 512 * 1024
 
 
 class UpdateCheckStatus:
@@ -160,21 +162,84 @@ class UpdateChecker:
 
 
 def fetch_manifest_bytes(url: str, timeout_seconds: float) -> bytes:
-    _validate_https_url(url, field_name="manifest_url")
+    return _fetch_https_bytes(
+        url,
+        float(timeout_seconds),
+        field_name="manifest_url",
+        accept="application/json",
+        max_bytes=MAX_MANIFEST_BYTES,
+        too_large_message="Update information is too large.",
+    )
+
+
+def fetch_release_notes_text(
+    url: str,
+    timeout_seconds: float = DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS,
+    *,
+    fetcher: FetchManifest | None = None,
+) -> str:
+    notes_url = resolve_release_notes_fetch_url(url)
+    _validate_https_url(notes_url, field_name="release_notes_url")
+    fetch_notes = fetcher or _fetch_release_notes_bytes
+    data = fetch_notes(notes_url, float(timeout_seconds))
+    if len(data) > MAX_RELEASE_NOTES_BYTES:
+        raise UpdateCheckError("Release notes are too large.")
+    try:
+        return data.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise UpdateCheckError("Release notes could not be decoded.") from exc
+
+
+def resolve_release_notes_fetch_url(url: str) -> str:
+    """Return the direct content URL used by the in-app release notes viewer."""
+
+    candidate = str(url or "").strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme == "https" and parsed.netloc.lower() == "github.com":
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) >= 5 and path_parts[2] == "blob":
+            owner, repo, _blob, ref = path_parts[:4]
+            release_path = "/".join(path_parts[4:])
+            if owner and repo and ref and release_path:
+                return f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/" f"{release_path}"
+    return candidate
+
+
+def _fetch_release_notes_bytes(url: str, timeout_seconds: float) -> bytes:
+    return _fetch_https_bytes(
+        url,
+        float(timeout_seconds),
+        field_name="release_notes_url",
+        accept="text/markdown, text/plain, */*",
+        max_bytes=MAX_RELEASE_NOTES_BYTES,
+        too_large_message="Release notes are too large.",
+    )
+
+
+def _fetch_https_bytes(
+    url: str,
+    timeout_seconds: float,
+    *,
+    field_name: str,
+    accept: str,
+    max_bytes: int,
+    too_large_message: str,
+) -> bytes:
+    _validate_https_url(url, field_name=field_name)
     request = urllib.request.Request(
         url,
         headers={
-            "Accept": "application/json",
+            "Accept": accept,
             "User-Agent": "ISRC-Catalog-Manager-Update-Check",
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=float(timeout_seconds)) as response:
-            data = bytes(response.read(MAX_MANIFEST_BYTES + 1))
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            data = bytes(response.read(max_bytes + 1))
     except (OSError, TimeoutError, socket.timeout, urllib.error.URLError) as exc:
         raise UpdateCheckError("Update information is unavailable right now.") from exc
-    if len(data) > MAX_MANIFEST_BYTES:
-        raise UpdateCheckError("Update information is too large.")
+    if len(data) > max_bytes:
+        raise UpdateCheckError(too_large_message)
     return data
 
 

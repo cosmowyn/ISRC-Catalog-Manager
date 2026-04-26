@@ -461,6 +461,8 @@ Pushes to `main` run an automated SemVer bump workflow that updates the runtime 
 The desktop app checks that manifest after startup without blocking the UI. `Help > Check for
 Updates…` runs the same check manually. Users can ignore a specific available version; that
 choice is stored in app-wide settings and only suppresses startup notifications for that version.
+When a new version is available, the Release Notes button loads the release-note markdown inside
+the application instead of opening the GitHub page in a browser.
 
 ## Support
 

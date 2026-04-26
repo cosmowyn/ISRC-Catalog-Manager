@@ -2159,6 +2159,110 @@ class AboutDialog(QDialog):
         root.addWidget(buttons)
 
 
+class ReleaseNotesDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        version: str,
+        released_at: str,
+        summary: str,
+        release_notes_markdown: str,
+        release_notes_url: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(f"Release Notes - {version}")
+        self.resize(900, 680)
+        self.setMinimumSize(760, 520)
+        _apply_standard_dialog_chrome(self, "releaseNotesDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        subtitle_parts = [f"Version {version}"]
+        if released_at:
+            subtitle_parts.append(str(released_at))
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Release Notes",
+            subtitle=" - ".join(subtitle_parts),
+        )
+
+        summary_box, summary_layout = _create_standard_section(
+            self,
+            "Update Summary",
+            "A quick summary from the update manifest.",
+        )
+        summary_label = QLabel(str(summary or "").strip() or "No summary was provided.")
+        summary_label.setWordWrap(True)
+        summary_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        summary_layout.addWidget(summary_label)
+        root.addWidget(summary_box)
+
+        notes_box, notes_layout = _create_standard_section(
+            self,
+            "Release Notes",
+            "Release notes are loaded and shown inside the application.",
+        )
+        self.browser = QTextBrowser(self)
+        self.browser.setOpenExternalLinks(False)
+        self.browser.setOpenLinks(False)
+        self.browser.setMinimumHeight(320)
+        self.browser.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard | Qt.LinksAccessibleByKeyboard
+        )
+        self._set_notes_markdown(
+            release_notes_markdown=release_notes_markdown,
+            version=version,
+            summary=summary,
+            release_notes_url=release_notes_url,
+        )
+        notes_layout.addWidget(self.browser, 1)
+        root.addWidget(notes_box, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
+        buttons.rejected.connect(self.reject)
+        close_button = buttons.button(QDialogButtonBox.Close)
+        if close_button is not None:
+            close_button.setDefault(True)
+        root.addWidget(buttons)
+
+    def _set_notes_markdown(
+        self,
+        *,
+        release_notes_markdown: str,
+        version: str,
+        summary: str,
+        release_notes_url: str,
+    ) -> None:
+        markdown = str(release_notes_markdown or "").strip()
+        if not markdown:
+            fallback_lines = [
+                f"# ISRC Catalog Manager {version}",
+                "",
+                str(summary or "").strip() or "No release-note details were provided.",
+                "",
+                "The full release notes could not be loaded inside the app right now.",
+            ]
+            if release_notes_url:
+                fallback_lines.extend(
+                    [
+                        "",
+                        "Source:",
+                        str(release_notes_url).strip(),
+                    ]
+                )
+            markdown = "\n".join(fallback_lines)
+        if hasattr(self.browser, "setMarkdown"):
+            self.browser.setMarkdown(markdown)
+        else:
+            self.browser.setPlainText(markdown)
+
+
 class HelpContentsDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)

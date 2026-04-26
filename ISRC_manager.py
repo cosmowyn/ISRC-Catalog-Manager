@@ -121,6 +121,7 @@ from isrc_manager.app_dialogs import (
     DiagnosticsDialog,
     HelpContentsDialog,
     MasterTransferExportDialog,
+    ReleaseNotesDialog,
 )
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
@@ -244,7 +245,7 @@ from isrc_manager.exchange.repertoire_service import (
     RepertoireImportInspection,
 )
 from isrc_manager.exchange.service import ExchangeService
-from isrc_manager.external_launch import open_external_path, open_external_url
+from isrc_manager.external_launch import open_external_path
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -425,7 +426,13 @@ from isrc_manager.tags import (
     merge_imported_tags,
     write_catalog_export_tags,
 )
-from isrc_manager.update_checker import UpdateChecker, UpdateCheckResult, UpdateCheckStatus
+from isrc_manager.update_checker import (
+    DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS,
+    UpdateChecker,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+    fetch_release_notes_text,
+)
 from isrc_manager.version import current_app_version
 from isrc_manager.workspace_debug import (
     summarize_catalog_workspace_dock,
@@ -7341,17 +7348,58 @@ class App(QMainWindow):
             self.statusBar().showMessage(f"Ignoring update {manifest.version}.", 5000)
             return
         if clicked is release_notes_button:
-            opened = open_external_url(
+            self._show_update_release_notes(manifest)
+
+    def _show_update_release_notes(self, manifest) -> None:
+        if not getattr(manifest, "release_notes_url", ""):
+            self._present_update_release_notes(manifest, "")
+            return
+
+        def _task(ctx):
+            ctx.set_status("Loading release notes...")
+            return fetch_release_notes_text(
                 manifest.release_notes_url,
-                source="App._show_update_available_message",
-                metadata={"version": manifest.version},
+                DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS,
             )
-            if not opened:
-                QMessageBox.warning(
-                    self,
-                    "Release Notes",
-                    "Could not open the release notes link.",
-                )
+
+        def _success(release_notes_markdown):
+            self._present_update_release_notes(manifest, str(release_notes_markdown or ""))
+
+        def _error(failure: TaskFailure):
+            self._log_event(
+                "updates.release_notes_unavailable",
+                "Release notes could not be loaded inside the app",
+                level=logging.INFO,
+                version=getattr(manifest, "version", ""),
+                error=getattr(failure, "message", ""),
+            )
+            self._present_update_release_notes(manifest, "")
+
+        task_id = self._submit_background_task(
+            title="Release Notes",
+            description="Loading release notes...",
+            task_fn=_task,
+            kind="network",
+            unique_key="updates.release_notes",
+            requires_profile=False,
+            show_dialog=True,
+            owner=self,
+            on_success=_success,
+            on_error=_error,
+        )
+        if task_id is None:
+            self._present_update_release_notes(manifest, "")
+
+    def _present_update_release_notes(self, manifest, release_notes_markdown: str) -> None:
+        dialog = ReleaseNotesDialog(
+            version=getattr(manifest, "version", ""),
+            released_at=getattr(manifest, "released_at", ""),
+            summary=getattr(manifest, "summary", ""),
+            release_notes_markdown=release_notes_markdown,
+            release_notes_url=getattr(manifest, "release_notes_url", ""),
+            parent=self,
+        )
+        dialog.exec()
 
     def _offer_settings_on_first_launch_if_pending(self) -> None:
         setting_key = "startup/offer_open_settings_on_first_launch_pending"

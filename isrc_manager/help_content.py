@@ -912,6 +912,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>Use the Help menu to reach:</p>
         <ul>
           <li><strong>About ISRC Catalog Manager…</strong> for version and workspace context.</li>
+          <li><strong>Check for Updates…</strong> for a manual update check. When an update is available, the <strong>Release Notes</strong> button opens the notes inside the app instead of launching a browser.</li>
           <li><strong>Diagnostics…</strong> for profile health checks and repair paths.</li>
           <li><strong>Application Log…</strong> for readable and structured troubleshooting logs.</li>
           <li><strong>Open Logs Folder…</strong> and <strong>Open Data Folder…</strong> for direct access to local support files.</li>

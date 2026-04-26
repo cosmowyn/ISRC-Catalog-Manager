@@ -5,7 +5,10 @@ from isrc_manager.update_checker import (
     RELEASE_MANIFEST_URL,
     ReleaseManifest,
     UpdateChecker,
+    UpdateCheckError,
     UpdateCheckStatus,
+    fetch_release_notes_text,
+    resolve_release_notes_fetch_url,
 )
 
 
@@ -90,6 +93,52 @@ class UpdateCheckerTests(unittest.TestCase):
 
                 self.assertEqual(result.status, UpdateCheckStatus.FAILED)
                 self.assertFalse(result.update_available)
+
+
+class ReleaseNotesFetchTests(unittest.TestCase):
+    def test_github_blob_release_note_url_resolves_to_raw_content_url(self):
+        url = (
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/" "blob/main/docs/releases/v3.3.1.md"
+        )
+
+        self.assertEqual(
+            resolve_release_notes_fetch_url(url),
+            (
+                "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/"
+                "main/docs/releases/v3.3.1.md"
+            ),
+        )
+
+    def test_release_notes_fetch_decodes_markdown_from_resolved_url(self):
+        calls = []
+        blob_url = (
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/" "blob/main/docs/releases/v3.3.1.md"
+        )
+
+        def _fetcher(url, timeout):
+            calls.append((url, timeout))
+            return b"# Release Notes\n\nLoaded internally."
+
+        text = fetch_release_notes_text(blob_url, 9.0, fetcher=_fetcher)
+
+        self.assertEqual(text, "# Release Notes\n\nLoaded internally.")
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/"
+                    "main/docs/releases/v3.3.1.md",
+                    9.0,
+                )
+            ],
+        )
+
+    def test_release_notes_fetch_rejects_non_https_urls(self):
+        with self.assertRaises(UpdateCheckError):
+            fetch_release_notes_text(
+                "http://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.3.1.md",
+                fetcher=lambda _url, _timeout: b"",
+            )
 
 
 if __name__ == "__main__":
