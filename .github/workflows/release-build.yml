@@ -62,13 +62,7 @@ jobs:
             git fetch origin main --tags
             git checkout --force origin/main
             version="$(
-              python - <<'PY'
-              import json
-              from pathlib import Path
-
-              metadata = json.loads(Path("docs/releases/latest.json").read_text(encoding="utf-8"))
-              print(str(metadata["version"]).strip())
-              PY
+              python -c 'import json; from pathlib import Path; print(str(json.loads(Path("docs/releases/latest.json").read_text(encoding="utf-8"))["version"]).strip())'
             )"
             tag="v${version}"
           else
