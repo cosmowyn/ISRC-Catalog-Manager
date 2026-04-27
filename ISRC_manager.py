@@ -10860,6 +10860,9 @@ class App(QMainWindow):
     def _build_theme_stylesheet(self, raw_values: dict[str, object] | None = None) -> str:
         return build_app_theme_stylesheet(raw_values or self.theme_settings)
 
+    def _set_application_theme_stylesheet(self, app: QApplication, stylesheet: str) -> None:
+        app.setStyleSheet(stylesheet)
+
     def _apply_theme(self, raw_values: dict[str, object] | None = None) -> None:
         app = QApplication.instance()
         if app is None:
@@ -10883,9 +10886,9 @@ class App(QMainWindow):
                     "Skipping invalid advanced QSS during theme application: %s",
                     self._format_theme_qss_issues(qss_issues),
                 )
-            app.setStyleSheet(self._build_theme_stylesheet(safe_values))
+            self._set_application_theme_stylesheet(app, self._build_theme_stylesheet(safe_values))
         else:
-            app.setStyleSheet(self._build_theme_stylesheet(normalized))
+            self._set_application_theme_stylesheet(app, self._build_theme_stylesheet(normalized))
         refresh_catalog_toolbar_metrics = getattr(
             self, "_apply_catalog_table_toolbar_theme_metrics", None
         )
@@ -10931,8 +10934,8 @@ class App(QMainWindow):
         app.setPalette(palette)
         self.setPalette(palette)
         app.setStyle(build_app_theme_style(normalized))
-        app.setStyleSheet(
-            str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
+        self._set_application_theme_stylesheet(
+            app, str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
         )
         refresh_catalog_toolbar_metrics = getattr(
             self, "_apply_catalog_table_toolbar_theme_metrics", None

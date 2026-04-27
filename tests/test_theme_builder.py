@@ -72,6 +72,7 @@ class _ThemeApplyHost(QWidget):
         super().__init__()
         self.theme_settings = {}
         self.submissions = []
+        self.applied_stylesheets = []
         self.boundary_refresh_count = 0
         self.blob_badge_reset_count = 0
         self.progress_dialog_refresh_count = 0
@@ -92,6 +93,9 @@ class _ThemeApplyHost(QWidget):
 
     def _reset_blob_badge_render_cache(self):
         self.blob_badge_reset_count += 1
+
+    def _set_application_theme_stylesheet(self, _app, stylesheet):
+        self.applied_stylesheets.append(str(stylesheet))
 
     def _submit_background_task(self, **kwargs):
         self.submissions.append(dict(kwargs))
@@ -946,7 +950,6 @@ class ThemeBuilderTests(unittest.TestCase):
 
     def test_apply_theme_with_loading_prepares_payload_before_ui_apply(self):
         host = _ThemeApplyHost()
-        previous_stylesheet = self.app.styleSheet()
         previous_font = self.app.font()
         try:
             host._apply_theme_with_loading(
@@ -965,7 +968,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertTrue(submission["show_dialog"])
             self.assertEqual(submission["unique_key"], "theme.apply.prepare")
             self.assertEqual(self.app.font().pointSize(), 13)
-            self.assertTrue(self.app.styleSheet())
+            self.assertTrue(host.applied_stylesheets[-1])
             self.assertEqual(
                 host.catalog_toolbar_theme_payloads[-1]["catalog_toolbar_control_height"],
                 18,
@@ -973,7 +976,6 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertGreater(host.blob_badge_reset_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
-            self.app.setStyleSheet(previous_stylesheet)
             self.app.setFont(previous_font)
             host.close()
 
@@ -994,7 +996,6 @@ class ThemeBuilderTests(unittest.TestCase):
 
     def test_apply_theme_without_explicit_values_uses_saved_theme_settings(self):
         host = _ThemeApplyHost()
-        previous_stylesheet = self.app.styleSheet()
         previous_font = self.app.font()
         previous_palette = self.app.palette()
         previous_style = self.app.style()
@@ -1030,12 +1031,11 @@ class ThemeBuilderTests(unittest.TestCase):
                 "#F8FAFC",
             )
             self.assertEqual(self.app.style().pixelMetric(QStyle.PM_MenuButtonIndicator), 14)
-            self.assertIn("#F97316", self.app.styleSheet().upper())
+            self.assertIn("#F97316", host.applied_stylesheets[-1].upper())
             self.assertGreater(host.blob_badge_reset_count, 0)
             self.assertGreater(host.progress_dialog_refresh_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
-            self.app.setStyleSheet(previous_stylesheet)
             self.app.setFont(previous_font)
             self.app.setPalette(previous_palette)
             restored_style = QStyleFactory.create(previous_style_key)
