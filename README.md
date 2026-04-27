@@ -1,6 +1,6 @@
-# ISRC Catalog Manager
+# Music Catalog Manager
 
-ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
+Music Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
 It combines recording metadata, releases, works, parties, contracts, rights, documents, assets, GS1 product data, import and export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
 
@@ -8,7 +8,7 @@ It combines recording metadata, releases, works, parties, contracts, rights, doc
 
 ## Support Development
 
-If ISRC Catalog Manager has created value for you, please consider a small donation. All support is greatly appreciated.
+If Music Catalog Manager has created value for you, please consider a small donation. All support is greatly appreciated.
 
 [Donate with PayPal](https://paypal.me/cosmowyn)
 
