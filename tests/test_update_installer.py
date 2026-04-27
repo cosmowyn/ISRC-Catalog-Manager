@@ -137,6 +137,88 @@ class UpdateInstallerTests(unittest.TestCase):
                 download_update_asset(asset, Path(tmp), fetcher=lambda _url, _timeout: b"bad")
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_download_update_asset_can_cancel_before_fetch(self):
+        asset = _asset(
+            "ISRCManager-v3.5.4-linux-x64.tar.gz",
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/download/v3.5.4/pkg",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(InterruptedError):
+                download_update_asset(
+                    asset,
+                    Path(tmp),
+                    fetcher=mock.Mock(side_effect=AssertionError("fetch should not start")),
+                    is_cancelled=lambda: True,
+                )
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_streaming_update_download_cancels_between_chunks_and_removes_partial_file(self):
+        chunks = [b"first", b"second"]
+
+        class _FakeResponse:
+            headers = {"Content-Length": str(sum(len(chunk) for chunk in chunks))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                if chunks:
+                    return chunks.pop(0)
+                return b""
+
+        asset = _asset(
+            "ISRCManager-v3.5.4-linux-x64.tar.gz",
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/download/v3.5.4/pkg",
+            data=b"firstsecond",
+        )
+        cancelled = False
+
+        def _progress(_value, _maximum, message):
+            nonlocal cancelled
+            if "Downloading" in str(message):
+                cancelled = True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "isrc_manager.update_installer.urllib.request.urlopen",
+                return_value=_FakeResponse(),
+            ) as urlopen:
+                with self.assertRaises(InterruptedError):
+                    download_update_asset(
+                        asset,
+                        Path(tmp),
+                        progress_callback=_progress,
+                        is_cancelled=lambda: cancelled,
+                    )
+
+            self.assertFalse((Path(tmp) / asset.name).exists())
+            self.assertEqual(urlopen.call_args.kwargs["timeout"], 5.0)
+
+    def test_extract_update_package_can_cancel_and_removes_partial_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "ISRCManager-v3.5.4-windows-x64.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr(f"{PACKAGED_APP_NAME}.exe", b"exe")
+            cancelled = False
+
+            def _progress(_value, _maximum, _message):
+                nonlocal cancelled
+                cancelled = True
+
+            with self.assertRaises(InterruptedError):
+                extract_update_package(
+                    package,
+                    root / "stage",
+                    platform_key="windows",
+                    progress_callback=_progress,
+                    is_cancelled=lambda: cancelled,
+                )
+            self.assertFalse((root / "stage" / "extracted").exists())
+
     def test_safe_zip_extract_finds_windows_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

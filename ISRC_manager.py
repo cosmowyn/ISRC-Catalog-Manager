@@ -7418,15 +7418,20 @@ class App(QMainWindow):
             QMessageBox.information(self, "Install Update", str(exc))
             return
 
-        workspace = update_workspace_root(getattr(manifest, "version", ""), platform_key=platform_key)
+        workspace = update_workspace_root(
+            getattr(manifest, "version", ""), platform_key=platform_key
+        )
 
         def _task(ctx):
+            ctx.raise_if_cancelled()
             ctx.set_status("Downloading update package...")
             downloaded = download_update_asset(
                 asset,
                 workspace / "downloads",
                 progress_callback=ctx.report_progress,
+                is_cancelled=ctx.is_cancelled,
             )
+            ctx.raise_if_cancelled()
             ctx.set_status("Preparing update installer...")
             return prepare_update_install_plan(
                 manifest,
@@ -7434,6 +7439,7 @@ class App(QMainWindow):
                 platform_key=platform_key,
                 cache_root=workspace.parent,
                 progress_callback=ctx.report_progress,
+                is_cancelled=ctx.is_cancelled,
             )
 
         def _success(plan):

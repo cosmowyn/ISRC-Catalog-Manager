@@ -18,7 +18,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import IO, cast
 from urllib.parse import urlparse
 
 from .constants import APP_NAME, PACKAGED_APP_NAME
@@ -29,11 +29,13 @@ APP_NAME_TEXT = str(APP_NAME)
 PACKAGED_APP_NAME_TEXT = str(PACKAGED_APP_NAME)
 HELPER_MODE_ARGUMENT = "--run-updater-helper"
 DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS = 45.0
+DEFAULT_UPDATE_DOWNLOAD_READ_TIMEOUT_SECONDS = 5.0
 MAX_UPDATE_PACKAGE_BYTES = 5 * 1024 * 1024 * 1024
 SUPPORTED_PACKAGE_SUFFIXES = (".zip", ".tar.gz", ".tgz")
 
 ProgressCallback = Callable[[int, int, str], None]
 DownloadFetcher = Callable[[str, float], bytes]
+CancellationCallback = Callable[[], bool]
 
 
 class UpdateInstallerError(RuntimeError):
@@ -113,30 +115,43 @@ def download_update_asset(
     destination_dir: Path,
     *,
     timeout_seconds: float = DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+    read_timeout_seconds: float = DEFAULT_UPDATE_DOWNLOAD_READ_TIMEOUT_SECONDS,
     fetcher: DownloadFetcher | None = None,
     progress_callback: ProgressCallback | None = None,
+    is_cancelled: CancellationCallback | None = None,
 ) -> DownloadedUpdatePackage:
     _validate_download_url(asset.url)
     destination_dir.mkdir(parents=True, exist_ok=True)
     package_path = destination_dir / asset.name
     package_path.unlink(missing_ok=True)
 
-    _report(progress_callback, 0, 100, "Starting update download...")
-    if fetcher is not None:
-        data = fetcher(asset.url, float(timeout_seconds))
-        _reject_unusable_download_size(len(data))
-        package_path.write_bytes(data)
-    else:
-        _stream_download(
-            asset.url,
-            package_path,
-            timeout_seconds=float(timeout_seconds),
-            progress_callback=progress_callback,
-        )
+    try:
+        _raise_if_cancelled(is_cancelled)
+        _report(progress_callback, 0, 100, "Starting update download...")
+        if fetcher is not None:
+            data = fetcher(asset.url, float(timeout_seconds))
+            _raise_if_cancelled(is_cancelled)
+            _reject_unusable_download_size(len(data))
+            package_path.write_bytes(data)
+        else:
+            _stream_download(
+                asset.url,
+                package_path,
+                timeout_seconds=float(timeout_seconds),
+                read_timeout_seconds=float(read_timeout_seconds),
+                progress_callback=progress_callback,
+                is_cancelled=is_cancelled,
+            )
 
-    size_bytes = package_path.stat().st_size if package_path.exists() else 0
-    _reject_unusable_download_size(size_bytes)
-    digest = file_sha256(package_path)
+        _raise_if_cancelled(is_cancelled)
+        size_bytes = package_path.stat().st_size if package_path.exists() else 0
+        _reject_unusable_download_size(size_bytes)
+        digest = file_sha256(package_path, is_cancelled=is_cancelled)
+        _raise_if_cancelled(is_cancelled)
+    except InterruptedError:
+        package_path.unlink(missing_ok=True)
+        raise
+
     if digest != asset.sha256.lower():
         package_path.unlink(missing_ok=True)
         raise UpdateInstallerError("The downloaded update package did not match its checksum.")
@@ -149,10 +164,14 @@ def download_update_asset(
     )
 
 
-def file_sha256(path: Path) -> str:
+def file_sha256(path: Path, *, is_cancelled: CancellationCallback | None = None) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        while True:
+            _raise_if_cancelled(is_cancelled)
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -163,7 +182,9 @@ def extract_update_package(
     *,
     platform_key: str | None = None,
     progress_callback: ProgressCallback | None = None,
+    is_cancelled: CancellationCallback | None = None,
 ) -> StagedUpdatePackage:
+    _raise_if_cancelled(is_cancelled)
     key = platform_key or detect_platform_key()
     if not package_path.is_file():
         raise UpdateInstallerError(f"Update package was not found: {package_path}")
@@ -176,14 +197,19 @@ def extract_update_package(
     extract_dir.mkdir(parents=True, exist_ok=True)
 
     _report(progress_callback, 45, 100, "Extracting update package...")
-    suffixes = "".join(package_path.suffixes[-2:]).lower()
-    if package_path.suffix.lower() == ".zip":
-        _safe_extract_zip(package_path, extract_dir)
-    elif suffixes == ".tar.gz" or package_path.suffix.lower() == ".tgz":
-        _safe_extract_tar(package_path, extract_dir)
-    else:
-        raise UpdateInstallerError(f"Unsupported update package type: {package_path.name}")
+    try:
+        suffixes = "".join(package_path.suffixes[-2:]).lower()
+        if package_path.suffix.lower() == ".zip":
+            _safe_extract_zip(package_path, extract_dir, is_cancelled=is_cancelled)
+        elif suffixes == ".tar.gz" or package_path.suffix.lower() == ".tgz":
+            _safe_extract_tar(package_path, extract_dir, is_cancelled=is_cancelled)
+        else:
+            raise UpdateInstallerError(f"Unsupported update package type: {package_path.name}")
+    except InterruptedError:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        raise
 
+    _raise_if_cancelled(is_cancelled)
     replacement = locate_replacement_candidate(extract_dir, key)
     _report(progress_callback, 70, 100, "Update package staged.")
     return StagedUpdatePackage(
@@ -314,10 +340,12 @@ def prepare_update_install_plan(
     cache_root: Path | None = None,
     platform_key: str | None = None,
     progress_callback: ProgressCallback | None = None,
+    is_cancelled: CancellationCallback | None = None,
 ) -> UpdateInstallPlan:
     if not getattr(sys, "frozen", False):
         raise UpdateInstallerError("Automatic installation is only available in packaged builds.")
 
+    _raise_if_cancelled(is_cancelled)
     key = platform_key or detect_platform_key()
     select_platform_asset(manifest, platform_key=key)
     workspace = update_workspace_root(manifest.version, platform_key=key, cache_root=cache_root)
@@ -326,7 +354,9 @@ def prepare_update_install_plan(
         workspace / "staging",
         platform_key=key,
         progress_callback=progress_callback,
+        is_cancelled=is_cancelled,
     )
+    _raise_if_cancelled(is_cancelled)
     target = resolve_installed_target_path(platform_key=key)
     validate_install_target_is_replaceable(target, platform_key=key)
     install_target = install_target_for_replacement(target, staged.replacement_path)
@@ -338,11 +368,13 @@ def prepare_update_install_plan(
     )
     backup_path = backup_path_for_target(target, manifest.version)
     log_path = workspace / "install.log"
+    _raise_if_cancelled(is_cancelled)
     helper_executable = create_helper_runtime_copy(
         target,
         workspace / "helper",
         platform_key=key,
     )
+    _raise_if_cancelled(is_cancelled)
     helper_command = build_helper_command(
         helper_executable,
         current_pid=current_pid or os.getpid(),
@@ -501,7 +533,9 @@ def _stream_download(
     package_path: Path,
     *,
     timeout_seconds: float,
+    read_timeout_seconds: float,
     progress_callback: ProgressCallback | None,
+    is_cancelled: CancellationCallback | None,
 ) -> None:
     request = urllib.request.Request(
         url,
@@ -510,8 +544,10 @@ def _stream_download(
             "User-Agent": "ISRC-Catalog-Manager-Updater",
         },
     )
+    request_timeout = max(0.5, min(float(timeout_seconds), float(read_timeout_seconds)))
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        _raise_if_cancelled(is_cancelled)
+        with urllib.request.urlopen(request, timeout=request_timeout) as response:
             length_header = response.headers.get("Content-Length")
             expected_size = int(length_header) if length_header and length_header.isdigit() else 0
             if expected_size > MAX_UPDATE_PACKAGE_BYTES:
@@ -519,6 +555,7 @@ def _stream_download(
             downloaded = 0
             with package_path.open("wb") as handle:
                 while True:
+                    _raise_if_cancelled(is_cancelled)
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
@@ -529,20 +566,31 @@ def _stream_download(
                     if expected_size:
                         percent = 1 + int(min(downloaded / expected_size, 1.0) * 34)
                         _report(progress_callback, percent, 100, "Downloading update package...")
+                    _raise_if_cancelled(is_cancelled)
+    except InterruptedError:
+        package_path.unlink(missing_ok=True)
+        raise
     except UpdateInstallerError:
         package_path.unlink(missing_ok=True)
         raise
     except (OSError, TimeoutError, urllib.error.URLError) as exc:
         package_path.unlink(missing_ok=True)
+        _raise_if_cancelled(is_cancelled)
         raise UpdateInstallerError("The update package could not be downloaded.") from exc
 
 
-def _safe_extract_zip(package_path: Path, extract_dir: Path) -> None:
+def _safe_extract_zip(
+    package_path: Path,
+    extract_dir: Path,
+    *,
+    is_cancelled: CancellationCallback | None = None,
+) -> None:
     with zipfile.ZipFile(package_path) as archive:
         members: list[tuple[zipfile.ZipInfo, PurePosixPath, int, str | None]] = []
         seen_paths: set[PurePosixPath] = set()
         symlink_paths: set[PurePosixPath] = set()
         for info in archive.infolist():
+            _raise_if_cancelled(is_cancelled)
             member_path = _validate_archive_member(info.filename)
             if member_path in seen_paths:
                 raise UpdateInstallerError("Update package contains duplicate archive paths.")
@@ -562,22 +610,29 @@ def _safe_extract_zip(package_path: Path, extract_dir: Path) -> None:
 
         _reject_entries_below_symlinks(seen_paths, symlink_paths)
         for info, member_path, mode, link_target in members:
+            _raise_if_cancelled(is_cancelled)
             destination = _prepare_archive_destination(extract_dir, member_path)
             if link_target is not None:
                 _create_archive_symlink(destination, link_target)
             elif info.is_dir():
                 _create_archive_directory(destination, mode)
             else:
-                _write_zip_file(archive, info, destination, mode)
+                _write_zip_file(archive, info, destination, mode, is_cancelled=is_cancelled)
 
 
-def _safe_extract_tar(package_path: Path, extract_dir: Path) -> None:
+def _safe_extract_tar(
+    package_path: Path,
+    extract_dir: Path,
+    *,
+    is_cancelled: CancellationCallback | None = None,
+) -> None:
     with tarfile.open(package_path, "r:*") as archive:
         members = archive.getmembers()
         seen_paths: set[PurePosixPath] = set()
         symlink_paths: set[PurePosixPath] = set()
         prepared_members: list[tuple[tarfile.TarInfo, PurePosixPath]] = []
         for member in members:
+            _raise_if_cancelled(is_cancelled)
             member_path = _validate_archive_member(member.name)
             if member_path in seen_paths:
                 raise UpdateInstallerError("Update package contains duplicate archive paths.")
@@ -591,13 +646,14 @@ def _safe_extract_tar(package_path: Path, extract_dir: Path) -> None:
 
         _reject_entries_below_symlinks(seen_paths, symlink_paths)
         for member, member_path in prepared_members:
+            _raise_if_cancelled(is_cancelled)
             destination = _prepare_archive_destination(extract_dir, member_path)
             if member.issym():
                 _create_archive_symlink(destination, member.linkname)
             elif member.isdir():
                 _create_archive_directory(destination, member.mode)
             else:
-                _write_tar_file(archive, member, destination)
+                _write_tar_file(archive, member, destination, is_cancelled=is_cancelled)
 
 
 def _validate_archive_member(name: str) -> PurePosixPath:
@@ -714,23 +770,45 @@ def _write_zip_file(
     info: zipfile.ZipInfo,
     destination: Path,
     mode: int,
+    *,
+    is_cancelled: CancellationCallback | None = None,
 ) -> None:
     if destination.is_symlink() or destination.is_dir():
         raise UpdateInstallerError("Update package contains conflicting archive paths.")
     with archive.open(info) as source, destination.open("wb") as target:
-        shutil.copyfileobj(source, target)
+        _copy_fileobj(source, target, is_cancelled=is_cancelled)
     _apply_archive_mode(destination, mode)
 
 
-def _write_tar_file(archive: tarfile.TarFile, member: tarfile.TarInfo, destination: Path) -> None:
+def _write_tar_file(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    destination: Path,
+    *,
+    is_cancelled: CancellationCallback | None = None,
+) -> None:
     if destination.is_symlink() or destination.is_dir():
         raise UpdateInstallerError("Update package contains conflicting archive paths.")
     source = archive.extractfile(member)
     if source is None:
         raise UpdateInstallerError("Update package contains an unreadable file entry.")
     with source, destination.open("wb") as target:
-        shutil.copyfileobj(source, target)
+        _copy_fileobj(source, target, is_cancelled=is_cancelled)
     _apply_archive_mode(destination, member.mode)
+
+
+def _copy_fileobj(
+    source: IO[bytes],
+    target: IO[bytes],
+    *,
+    is_cancelled: CancellationCallback | None = None,
+) -> None:
+    while True:
+        _raise_if_cancelled(is_cancelled)
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            return
+        target.write(chunk)
 
 
 def _apply_archive_mode(destination: Path, mode: int) -> None:
@@ -812,3 +890,8 @@ def _report(
 ) -> None:
     if callback is not None:
         callback(value, maximum, message)
+
+
+def _raise_if_cancelled(callback: CancellationCallback | None) -> None:
+    if callback is not None and callback():
+        raise InterruptedError("Update installation cancelled.")

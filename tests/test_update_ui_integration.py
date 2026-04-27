@@ -436,6 +436,72 @@ class UpdateUiIntegrationTests(unittest.TestCase):
         self.assertNotIn("Check your internet connection", warnings[0][1])
         self.assertEqual(log_events[0][1]["error"], warnings[0][1].split("\n\n", 1)[1])
 
+    def test_install_update_task_passes_cancellation_callback_to_installer_pipeline(self):
+        manifest = ReleaseManifest.from_mapping(_manifest_mapping())
+        captured = {}
+
+        class _Context:
+            def __init__(self):
+                self.cancel_checks = 0
+                self.statuses = []
+
+            def is_cancelled(self):
+                self.cancel_checks += 1
+                return False
+
+            def raise_if_cancelled(self):
+                self.is_cancelled()
+
+            def report_progress(self, *_args):
+                return None
+
+            def set_status(self, message):
+                self.statuses.append(message)
+
+        class _FakeApp:
+            def _submit_background_task(self, **kwargs):
+                ctx = _Context()
+                captured["context"] = ctx
+                kwargs["task_fn"](ctx)
+                return "task-id"
+
+        def _download(_asset, _destination, **kwargs):
+            captured["download_cancel"] = kwargs["is_cancelled"]
+            kwargs["is_cancelled"]()
+            return SimpleNamespace(package_path=Path("/tmp/update.zip"))
+
+        def _prepare(_manifest, _package_path, **kwargs):
+            captured["prepare_cancel"] = kwargs["is_cancelled"]
+            kwargs["is_cancelled"]()
+            return object()
+
+        with (
+            mock.patch.object(app_module, "detect_platform_key", return_value="macos"),
+            mock.patch.object(
+                app_module,
+                "resolve_installed_target_path",
+                return_value=Path("/Applications/ISRCManager.app"),
+            ),
+            mock.patch.object(app_module, "validate_install_target_is_replaceable"),
+            mock.patch.object(
+                app_module,
+                "update_workspace_root",
+                return_value=Path("/tmp/isrc-updates/v3.3.1-macos"),
+            ),
+            mock.patch.object(app_module, "download_update_asset", side_effect=_download),
+            mock.patch.object(app_module, "prepare_update_install_plan", side_effect=_prepare),
+        ):
+            app_module.App._start_update_install(_FakeApp(), manifest)
+
+        ctx = captured["context"]
+        self.assertIs(captured["download_cancel"].__self__, ctx)
+        self.assertIs(captured["prepare_cancel"].__self__, ctx)
+        self.assertGreaterEqual(ctx.cancel_checks, 4)
+        self.assertEqual(
+            ctx.statuses,
+            ["Downloading update package...", "Preparing update installer..."],
+        )
+
     def test_install_update_preflight_failure_stops_before_download_task(self):
         manifest = ReleaseManifest.from_mapping(_manifest_mapping())
         information_messages = []
