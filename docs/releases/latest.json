@@ -1,7 +1,7 @@
 {
-  "version": "3.6.8",
+  "version": "3.6.9",
   "released_at": "2026-04-27",
-  "summary": "harden updates and default styling",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.8.md",
+  "summary": "reduce dependabot noise",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.9.md",
   "minimum_supported_version": null
 }
