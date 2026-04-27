@@ -35,8 +35,12 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.settings.sync()
         self._build_legacy_storage()
 
-    def _build_service(self) -> StorageMigrationService:
-        return StorageMigrationService(self._build_layout(), settings=self.settings)
+    def _build_service(self, progress_reporter=None) -> StorageMigrationService:
+        return StorageMigrationService(
+            self._build_layout(),
+            settings=self.settings,
+            progress_reporter=progress_reporter,
+        )
 
     def tearDown(self):
         self.settings.clear()
@@ -216,6 +220,48 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.assertTrue(result.copied_items)
         self.assertTrue(result.rewritten_files)
         self.assertTrue(result.verified_databases)
+
+    def test_migrate_reports_truthful_storage_progress_steps(self):
+        progress_updates: list[tuple[int, int, str]] = []
+        service = self._build_service(
+            progress_reporter=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            )
+        )
+
+        service.migrate()
+
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertIn("Checking existing app storage roots...", messages)
+        self.assertIn("Validating preferred storage layout...", messages)
+        self.assertIn("Inventorying legacy app-data files...", messages)
+        self.assertTrue(any(message.startswith("Copying storage item:") for message in messages))
+        self.assertTrue(
+            any(
+                message.startswith("Scanning legacy app-data file:")
+                and str(self.db_path.resolve()) in message
+                for message in messages
+            )
+        )
+        self.assertTrue(
+            any(
+                message.startswith("Scanning preferred app-data root:")
+                and str(self.target_root.resolve()) in message
+                for message in messages
+            )
+        )
+        self.assertTrue(
+            any(
+                message.startswith("Copying storage database:")
+                and str(self.db_path.resolve()) in message
+                for message in messages
+            )
+        )
+        self.assertIn("Checking migrated profile databases...", messages)
+        self.assertIn("Storage migration completed.", messages)
+        values = [value for value, _maximum, _message in progress_updates]
+        self.assertEqual(values, sorted(values))
+        self.assertTrue(all(maximum == 100 for _value, maximum, _message in progress_updates))
 
     def test_migrate_copies_live_wal_backed_profile_database_safely(self):
         live_conn = sqlite3.connect(str(self.db_path))

@@ -76,6 +76,81 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             ["generated-fields", "owner-bootstrap", "first-launch", "update-check"],
         )
 
+    def test_update_backup_handoff_cleanup_logs_failure(self):
+        log_events = []
+        fake_app = SimpleNamespace(
+            _log_event=lambda *args, **kwargs: log_events.append((args, kwargs))
+        )
+
+        with mock.patch.object(
+            app_module,
+            "cleanup_ready_update_backup",
+            side_effect=OSError("delete blocked"),
+        ):
+            app_module.App._cleanup_ready_update_backup_handoff(fake_app, phase="startup")
+
+        self.assertEqual(log_events[0][0][0], "updates.backup_cleanup_failed")
+        self.assertEqual(log_events[0][1]["phase"], "startup")
+        self.assertIn("delete blocked", log_events[0][1]["error"])
+
+    def test_update_backup_handoff_is_marked_ready_only_after_startup(self):
+        fake_app = SimpleNamespace(_startup_ready_emitted=False)
+
+        with mock.patch.object(app_module, "mark_update_backup_ready_for_deletion") as mark_ready:
+            app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+
+        mark_ready.assert_not_called()
+
+    def test_update_backup_handoff_ready_close_runs_cleanup(self):
+        cleanup = mock.Mock()
+        fake_app = SimpleNamespace(
+            _startup_ready_emitted=True,
+            _cleanup_ready_update_backup_handoff=cleanup,
+            _cleanup_legacy_update_backup_siblings=mock.Mock(),
+        )
+
+        with mock.patch.object(
+            app_module,
+            "mark_update_backup_ready_for_deletion",
+            return_value={"status": "ready_for_deletion"},
+        ) as mark_ready:
+            app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+
+        mark_ready.assert_called_once_with()
+        cleanup.assert_called_once_with(phase="close")
+        fake_app._cleanup_legacy_update_backup_siblings.assert_called_once_with()
+
+    def test_legacy_update_backup_cleanup_uses_current_packaged_version(self):
+        log_events = []
+        fake_app = SimpleNamespace(
+            _app_version_text=lambda: "3.6.9",
+            _log_event=lambda *args, **kwargs: log_events.append((args, kwargs)),
+        )
+        installed_target = Path("/Applications/Music Catalog Manager.app")
+        removed_backup = Path(
+            "/Applications/ISRCManager-3.6.8-macos.app.backup-before-v3.6.9-20260427"
+        )
+
+        with (
+            mock.patch.object(app_module.sys, "frozen", True, create=True),
+            mock.patch.object(
+                app_module,
+                "resolve_installed_target_path",
+                return_value=installed_target,
+            ) as resolve_target,
+            mock.patch.object(
+                app_module,
+                "cleanup_legacy_update_backups_for_version",
+                return_value=[removed_backup],
+            ) as cleanup_legacy,
+        ):
+            app_module.App._cleanup_legacy_update_backup_siblings(fake_app)
+
+        resolve_target.assert_called_once_with()
+        cleanup_legacy.assert_called_once_with(installed_target, "3.6.9")
+        self.assertEqual(log_events[0][0][0], "updates.legacy_backup_cleanup")
+        self.assertEqual(log_events[0][1]["count"], 1)
+
     def test_startup_update_check_uses_non_manual_path(self):
         start_check = mock.Mock()
         fake_app = SimpleNamespace(_start_update_check=start_check)

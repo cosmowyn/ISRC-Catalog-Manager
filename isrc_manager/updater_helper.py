@@ -13,6 +13,11 @@ import time
 from pathlib import Path
 from typing import TextIO
 
+from .update_handoff import (
+    mark_update_backup_destroyed,
+    record_update_backup_created,
+)
+
 EXIT_SUCCESS = 0
 EXIT_INVALID_ARGUMENTS = 2
 EXIT_WAIT_TIMEOUT = 3
@@ -32,6 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--replacement", required=True)
     parser.add_argument("--expected-version", required=True)
     parser.add_argument("--backup", required=True)
+    parser.add_argument("--handoff-json", required=True)
     parser.add_argument("--restart-json", required=True)
     parser.add_argument("--log", required=True)
     parser.add_argument("--wait-timeout", type=float, default=120.0)
@@ -102,6 +108,7 @@ def run_update(args: argparse.Namespace) -> int:
     target = Path(args.target).expanduser().resolve()
     replacement = Path(args.replacement).expanduser().resolve()
     backup = Path(args.backup).expanduser().resolve()
+    handoff_path = Path(args.handoff_json).expanduser().resolve()
     try:
         restart_command = _parse_restart_command(args.restart_json)
     except ValueError as exc:
@@ -114,6 +121,7 @@ def run_update(args: argparse.Namespace) -> int:
         _log(log, f"Target: {target}")
         _log(log, f"Replacement: {replacement}")
         _log(log, f"Backup: {backup}")
+        _log(log, f"Handoff: {handoff_path}")
         try:
             wait_for_process_exit(args.current_pid, timeout_seconds=args.wait_timeout)
         except UpdaterHelperError as exc:
@@ -127,16 +135,39 @@ def run_update(args: argparse.Namespace) -> int:
             return EXIT_REPLACEMENT_FAILED
 
         try:
+            record_update_backup_created(
+                backup,
+                expected_version=args.expected_version,
+                target_path=target,
+                installed_path=install_target,
+                state_path=handoff_path,
+            )
+            _log(log, "Recorded update backup handoff.")
+        except Exception as exc:
+            _log(log, f"Could not record update backup handoff: {exc}")
+            try:
+                _restore_backup(target, backup, log, installed_target=install_target)
+            except UpdaterHelperError as rollback_exc:
+                _log(log, f"Rollback after handoff failure also failed: {rollback_exc}")
+            return EXIT_REPLACEMENT_FAILED
+
+        try:
             restart_application(restart_command, log)
         except UpdaterHelperError as exc:
             _log(log, str(exc))
             try:
                 _restore_backup(target, backup, log, installed_target=install_target)
+                mark_update_backup_destroyed(
+                    state_path=handoff_path,
+                    reason="Update restart failed; backup restored.",
+                )
             except UpdaterHelperError as rollback_exc:
                 _log(log, f"Rollback after restart failure also failed: {rollback_exc}")
+            except Exception as handoff_exc:
+                _log(log, f"Could not update handoff after rollback: {handoff_exc}")
             return EXIT_RESTART_FAILED
 
-        _remove_successful_backup(backup, log)
+        _log(log, "Update backup retained until the updated app confirms a clean run.")
         _log(log, "Update helper completed successfully.")
         return EXIT_SUCCESS
 
@@ -187,17 +218,6 @@ def _restore_backup(
         shutil.move(str(backup), str(target))
     except Exception as exc:
         raise UpdaterHelperError(f"Could not restore the previous installation: {exc}") from exc
-
-
-def _remove_successful_backup(backup: Path, log: TextIO) -> None:
-    if not backup.exists():
-        _log(log, "Update backup was already removed.")
-        return
-    _log(log, f"Removing successful update backup: {backup}")
-    try:
-        _remove_path(backup)
-    except Exception as exc:
-        _log(log, f"Update backup cleanup failed: {exc}")
 
 
 def _remove_path(path: Path) -> None:

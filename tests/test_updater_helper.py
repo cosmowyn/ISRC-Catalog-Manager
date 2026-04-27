@@ -23,6 +23,8 @@ class UpdaterHelperTests(unittest.TestCase):
                 "3.5.4",
                 "--backup",
                 "/tmp/app.backup",
+                "--handoff-json",
+                "/tmp/update-handoff.json",
                 "--restart-json",
                 '["/tmp/app"]',
                 "--log",
@@ -32,6 +34,7 @@ class UpdaterHelperTests(unittest.TestCase):
 
         self.assertEqual(args.current_pid, 123)
         self.assertEqual(args.expected_version, "3.5.4")
+        self.assertEqual(args.handoff_json, "/tmp/update-handoff.json")
 
     def test_replace_installation_moves_target_to_backup_and_replacement_into_place(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,6 +105,7 @@ class UpdaterHelperTests(unittest.TestCase):
             target = root / "app.txt"
             replacement = root / "stage" / "new.txt"
             backup = root / "app.backup"
+            handoff = root / "handoff.json"
             log = root / "update.log"
             target.write_text("old", encoding="utf-8")
             replacement.parent.mkdir()
@@ -112,6 +116,7 @@ class UpdaterHelperTests(unittest.TestCase):
                 replacement=str(replacement),
                 expected_version="3.5.4",
                 backup=str(backup),
+                handoff_json=str(handoff),
                 restart_json=json.dumps([str(target)]),
                 log=str(log),
                 wait_timeout=1.0,
@@ -127,14 +132,18 @@ class UpdaterHelperTests(unittest.TestCase):
             self.assertEqual(exit_code, updater_helper.EXIT_RESTART_FAILED)
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
             self.assertFalse((root / "new.txt").exists())
+            self.assertFalse(backup.exists())
+            state = json.loads(handoff.read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "destroyed")
             self.assertIn("restart failed", log.read_text(encoding="utf-8"))
 
-    def test_run_update_removes_backup_after_successful_restart(self):
+    def test_run_update_records_backup_handoff_after_successful_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "app.txt"
             replacement = root / "stage" / "app.txt"
             backup = root / "app.backup"
+            handoff = root / "handoff.json"
             log = root / "update.log"
             target.write_text("old", encoding="utf-8")
             replacement.parent.mkdir()
@@ -145,6 +154,7 @@ class UpdaterHelperTests(unittest.TestCase):
                 replacement=str(replacement),
                 expected_version="3.5.4",
                 backup=str(backup),
+                handoff_json=str(handoff),
                 restart_json=json.dumps([str(target)]),
                 log=str(log),
                 wait_timeout=1.0,
@@ -155,17 +165,22 @@ class UpdaterHelperTests(unittest.TestCase):
 
             self.assertEqual(exit_code, updater_helper.EXIT_SUCCESS)
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
-            self.assertFalse(backup.exists())
+            self.assertTrue(backup.exists())
+            state = json.loads(handoff.read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "created")
+            self.assertEqual(state["backup_path"], str(backup.resolve()))
             log_text = log.read_text(encoding="utf-8")
-            self.assertIn("Removing successful update backup", log_text)
+            self.assertIn("Recorded update backup handoff", log_text)
+            self.assertIn("retained until the updated app confirms a clean run", log_text)
             self.assertIn("Update helper completed successfully", log_text)
 
-    def test_run_update_succeeds_when_successful_backup_cleanup_fails(self):
+    def test_run_update_rolls_back_when_backup_handoff_cannot_be_recorded(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "app.txt"
             replacement = root / "stage" / "app.txt"
             backup = root / "app.backup"
+            handoff = root / "missing-parent" / "handoff.json"
             log = root / "update.log"
             target.write_text("old", encoding="utf-8")
             replacement.parent.mkdir()
@@ -176,26 +191,25 @@ class UpdaterHelperTests(unittest.TestCase):
                 replacement=str(replacement),
                 expected_version="3.5.4",
                 backup=str(backup),
+                handoff_json=str(handoff),
                 restart_json=json.dumps([str(target)]),
                 log=str(log),
                 wait_timeout=1.0,
             )
-            real_remove_path = updater_helper._remove_path
-            resolved_backup = backup.resolve()
 
-            def _remove_path(path):
-                if Path(path).resolve() == resolved_backup:
-                    raise OSError("cleanup blocked")
-                return real_remove_path(path)
+            with mock.patch.object(
+                updater_helper,
+                "record_update_backup_created",
+                side_effect=OSError("handoff blocked"),
+            ):
+                exit_code = updater_helper.run_update(args)
 
-            with mock.patch.object(updater_helper, "restart_application"):
-                with mock.patch.object(updater_helper, "_remove_path", side_effect=_remove_path):
-                    exit_code = updater_helper.run_update(args)
-
-            self.assertEqual(exit_code, updater_helper.EXIT_SUCCESS)
-            self.assertEqual(target.read_text(encoding="utf-8"), "new")
-            self.assertTrue(backup.exists())
-            self.assertIn("Update backup cleanup failed", log.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, updater_helper.EXIT_REPLACEMENT_FAILED)
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+            self.assertFalse(backup.exists())
+            log_text = log.read_text(encoding="utf-8")
+            self.assertIn("Could not record update backup handoff", log_text)
+            self.assertIn("Restoring backup", log_text)
 
     def test_run_update_rejects_invalid_restart_json(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,6 +220,7 @@ class UpdaterHelperTests(unittest.TestCase):
                 replacement=str(root / "new.txt"),
                 expected_version="3.5.4",
                 backup=str(root / "app.backup"),
+                handoff_json=str(root / "handoff.json"),
                 restart_json="{}",
                 log=str(root / "update.log"),
                 wait_timeout=1.0,

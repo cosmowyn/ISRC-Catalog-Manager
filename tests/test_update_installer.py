@@ -375,12 +375,15 @@ class UpdateInstallerTests(unittest.TestCase):
             replacement_path=Path(f"/tmp/{PACKAGED_APP_NAME}.app"),
             expected_version="3.5.4",
             backup_path=Path(f"/Applications/{PACKAGED_APP_NAME}.app.backup"),
+            handoff_path=Path("/tmp/update-handoff.json"),
             restart_command=("open", "-n", f"/Applications/{PACKAGED_APP_NAME}.app"),
             log_path=Path("/tmp/update.log"),
         )
 
         self.assertEqual(command[0], "/tmp/helper")
         self.assertIn(HELPER_MODE_ARGUMENT, command)
+        self.assertIn("--handoff-json", command)
+        self.assertIn("/tmp/update-handoff.json", command)
         self.assertIn("--restart-json", command)
 
     def test_prepare_update_plan_rejects_macos_app_translocation_target(self):

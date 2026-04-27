@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from .constants import APP_NAME, PACKAGED_APP_NAME
 from .paths import preferred_data_root
 from .update_checker import ReleaseAsset, ReleaseManifest, UpdateCheckError
+from .update_handoff import update_backup_handoff_path
 
 APP_NAME_TEXT = str(APP_NAME)
 PACKAGED_APP_NAME_TEXT = str(PACKAGED_APP_NAME)
@@ -64,6 +65,7 @@ class UpdateInstallPlan:
     target_path: Path
     replacement_path: Path
     backup_path: Path
+    handoff_path: Path
     restart_command: tuple[str, ...]
     log_path: Path
     expected_version: str
@@ -367,6 +369,7 @@ def prepare_update_install_plan(
         platform_key=key,
     )
     backup_path = backup_path_for_target(target, manifest.version)
+    handoff_path = update_backup_handoff_path(workspace.parent)
     log_path = workspace / "install.log"
     _raise_if_cancelled(is_cancelled)
     helper_executable = create_helper_runtime_copy(
@@ -382,6 +385,7 @@ def prepare_update_install_plan(
         replacement_path=staged.replacement_path,
         expected_version=manifest.version,
         backup_path=backup_path,
+        handoff_path=handoff_path,
         restart_command=restart_command,
         log_path=log_path,
     )
@@ -391,6 +395,7 @@ def prepare_update_install_plan(
         target_path=install_target,
         replacement_path=staged.replacement_path,
         backup_path=backup_path,
+        handoff_path=handoff_path,
         restart_command=restart_command,
         log_path=log_path,
         expected_version=manifest.version,
@@ -485,6 +490,7 @@ def build_helper_command(
     replacement_path: Path,
     expected_version: str,
     backup_path: Path,
+    handoff_path: Path,
     restart_command: Sequence[str],
     log_path: Path,
 ) -> tuple[str, ...]:
@@ -501,6 +507,8 @@ def build_helper_command(
         str(expected_version),
         "--backup",
         str(backup_path),
+        "--handoff-json",
+        str(handoff_path),
         "--restart-json",
         json.dumps(list(restart_command)),
         "--log",

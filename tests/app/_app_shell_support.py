@@ -1150,6 +1150,14 @@ class AppShellTestCase(unittest.TestCase):
             [update[0] for update in splash.progress_updates],
             sorted(update[0] for update in splash.progress_updates),
         )
+        resolving_storage_messages = [
+            message
+            for _progress, phase, message in splash.progress_updates
+            if phase == StartupPhase.RESOLVING_STORAGE
+        ]
+        self.assertGreaterEqual(len(resolving_storage_messages), 5)
+        self.assertIn("Checking existing app storage roots...", resolving_storage_messages)
+        self.assertIn("Finished storage layout inspection.", resolving_storage_messages)
 
         self.window.show()
         self.assertEqual(splash.finish_calls, [])

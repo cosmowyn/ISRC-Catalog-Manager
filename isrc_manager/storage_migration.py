@@ -9,12 +9,15 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-try:
+if TYPE_CHECKING:
     from PySide6.QtCore import QSettings
-except Exception:  # pragma: no cover - optional Qt fallback
-    QSettings = None
+else:
+    try:
+        from PySide6.QtCore import QSettings
+    except Exception:  # pragma: no cover - optional Qt fallback
+        QSettings = None
 
 from .paths import (
     APP_NAME,
@@ -119,6 +122,9 @@ class StorageMigrationResult:
     journal_path: Path
 
 
+ProgressReporter = Callable[[int, int, str], None]
+
+
 class StorageMigrationService:
     """Detects and migrates legacy app-owned storage into the preferred layout."""
 
@@ -130,19 +136,34 @@ class StorageMigrationService:
         layout: AppStorageLayout,
         settings: QSettings | None = None,
         reporter: Callable[..., None] | None = None,
+        progress_reporter: ProgressReporter | None = None,
     ):
         self.layout = layout
         self.settings = settings
         self.reporter = reporter
+        self.progress_reporter = progress_reporter
 
     def inspect(self) -> StorageLayoutInspection:
+        self._progress(8, 100, "Checking existing app storage roots...")
         legacy_root = self._select_legacy_root()
-        legacy_items = self._present_items(legacy_root) if legacy_root is not None else ()
-        preferred_items = self._present_items(self.layout.preferred_data_root)
+        self._progress(16, 100, "Scanning legacy app-data folder...")
+        legacy_items = (
+            self._present_items(legacy_root, progress_value=16, label="legacy app-data")
+            if legacy_root is not None
+            else ()
+        )
+        self._progress(24, 100, "Scanning preferred app-data folder...")
+        preferred_items = self._present_items(
+            self.layout.preferred_data_root,
+            progress_value=24,
+            label="preferred app-data",
+        )
+        self._progress(32, 100, "Reading storage migration journal...")
         journal, journal_path = self._load_journal_details()
         journal_status = str(journal.get("status") or "").strip()
         journal_source_root = self._journal_path_value(journal.get("source_root"))
         stage_root = self._journal_path_value(journal.get("stage_root"))
+        self._progress(40, 100, "Validating preferred storage layout...")
         preferred_state, conflict_items = self._assess_preferred_root_state(
             legacy_root=legacy_root,
             legacy_items=legacy_items,
@@ -150,6 +171,7 @@ class StorageMigrationService:
             journal=journal,
             stage_root=stage_root,
         )
+        self._progress(46, 100, "Checking stored migration preference...")
         deferred = self._settings_value(STORAGE_MIGRATION_STATE_KEY) == STORAGE_STATE_DEFERRED
         migration_needed = bool(
             legacy_root is not None
@@ -157,6 +179,7 @@ class StorageMigrationService:
             and legacy_root != self.layout.preferred_data_root
             and preferred_state in (PREFERRED_STATE_EMPTY, PREFERRED_STATE_SAFE_NOISE)
         )
+        self._progress(50, 100, "Finished storage layout inspection.")
         return StorageLayoutInspection(
             layout=self.layout,
             legacy_root=legacy_root,
@@ -205,7 +228,7 @@ class StorageMigrationService:
         self.settings.setValue(
             STORAGE_ACTIVE_DATA_ROOT_KEY, str(self.layout.preferred_data_root.resolve())
         )
-        legacy_root = self._select_legacy_root()
+        legacy_root = self._select_legacy_root(progress_value=94)
         if legacy_root is not None:
             self.settings.setValue(STORAGE_LEGACY_DATA_ROOT_KEY, str(legacy_root.resolve()))
         self.settings.setValue(STORAGE_MIGRATION_STATE_KEY, STORAGE_STATE_COMPLETE)
@@ -214,7 +237,7 @@ class StorageMigrationService:
     def mark_failed(self, legacy_root: Path | None = None) -> None:
         if self.settings is None:
             return
-        root = legacy_root or self._select_legacy_root()
+        root = legacy_root or self._select_legacy_root(progress_value=94)
         if root is not None:
             self.settings.setValue(STORAGE_LEGACY_DATA_ROOT_KEY, str(root.resolve()))
         self.settings.setValue(STORAGE_MIGRATION_STATE_KEY, STORAGE_STATE_FAILED)
@@ -226,6 +249,7 @@ class StorageMigrationService:
         source_root = self._resolve_source_root(inspection)
 
         if inspection.preferred_state == PREFERRED_STATE_VALID_COMPLETE:
+            self._progress(56, 100, "Adopting verified preferred storage root...")
             self._report(
                 "storage.migration.adopt",
                 "Adopting verified preferred app-data root",
@@ -236,6 +260,7 @@ class StorageMigrationService:
             return self._adopt_preferred_root(inspection, source_root, target_root)
 
         if inspection.preferred_state == PREFERRED_STATE_CONFLICT:
+            self._progress(56, 100, "Preferred storage contains conflicting content.")
             self._report(
                 "storage.migration.conflict",
                 "Preferred app-data root contains conflicting content",
@@ -246,6 +271,7 @@ class StorageMigrationService:
 
         if inspection.preferred_state == PREFERRED_STATE_RESUMABLE_STAGE:
             try:
+                self._progress(56, 100, "Resuming staged storage migration...")
                 self._report(
                     "storage.migration.resume",
                     "Resuming preserved staged app-data migration",
@@ -275,6 +301,7 @@ class StorageMigrationService:
             raise RuntimeError("No app-owned legacy storage was found to migrate.")
 
         if inspection.preferred_state == PREFERRED_STATE_SAFE_NOISE:
+            self._progress(56, 100, "Clearing safe preferred-storage bootstrap files...")
             self._report(
                 "storage.migration.safe_noise",
                 "Clearing safe bootstrap residue from preferred app-data root",
@@ -282,7 +309,14 @@ class StorageMigrationService:
             )
             self._clear_safe_target_noise(target_root)
 
-        source_inventory = self._source_inventory(source_root, copied_items)
+        self._progress(60, 100, "Inventorying legacy app-data files...")
+        source_inventory = self._source_inventory(
+            source_root,
+            copied_items,
+            progress_value=60,
+            label="legacy app-data",
+        )
+        self._progress(64, 100, "Creating temporary storage migration stage...")
         target_root.parent.mkdir(parents=True, exist_ok=True)
         stage_container = Path(
             tempfile.mkdtemp(prefix=f"{target_root.name}_migration_", dir=str(target_root.parent))
@@ -315,13 +349,29 @@ class StorageMigrationService:
         )
 
         try:
-            for name in copied_items:
-                self._copy_item(source_root / name, stage_root / name)
+            copy_start = 68
+            copy_end = 82
+            for index, name in enumerate(copied_items, start=1):
+                copy_progress = copy_start + int(
+                    ((index - 1) / max(1, len(copied_items))) * (copy_end - copy_start)
+                )
+                self._progress(copy_progress, 100, f"Copying storage item: {name}")
+                self._copy_item(
+                    source_root / name,
+                    stage_root / name,
+                    progress_value=copy_progress,
+                )
 
+            self._progress(82, 100, "Verifying staged storage inventory...")
             self._validate_stage_inventory(stage_root, source_inventory)
 
-            rewritten_files = list(self._rewrite_target_storage(source_root, stage_root))
-            verified = list(self._verify_target_databases(stage_root))
+            self._progress(86, 100, "Rewriting internal storage references...")
+            rewritten_files = list(
+                self._rewrite_target_storage(source_root, stage_root, progress_value=86)
+            )
+            self._progress(90, 100, "Checking migrated profile databases...")
+            verified = list(self._verify_target_databases(stage_root, progress_value=90))
+            self._progress(94, 100, "Activating preferred storage root...")
             self._promote_stage_root(stage_root, target_root)
             self._rewrite_settings_paths(source_root, target_root)
             self.mark_complete()
@@ -336,6 +386,7 @@ class StorageMigrationService:
             )
             self._write_journal(target_root / STORAGE_MIGRATION_JOURNAL_BASENAME, payload)
             self._remove_empty_stage_container(stage_container)
+            self._progress(98, 100, "Storage migration completed.")
             self._report(
                 "storage.migration.promote",
                 "Migrated legacy app-owned data into the preferred layout",
@@ -386,6 +437,7 @@ class StorageMigrationService:
 
     def _load_journal_details(self) -> tuple[dict[str, Any], Path | None]:
         for journal_path in self._journal_candidates():
+            self._progress_path(32, 100, "Checking storage migration journal", journal_path)
             if not journal_path.exists():
                 continue
             try:
@@ -396,34 +448,77 @@ class StorageMigrationService:
                 return raw, journal_path
         return {}, None
 
-    def _select_legacy_root(self) -> Path | None:
+    def _select_legacy_root(self, *, progress_value: int = 8) -> Path | None:
         configured = self._settings_value(STORAGE_LEGACY_DATA_ROOT_KEY)
         if configured:
             candidate = Path(configured).resolve()
+            self._progress_path(
+                progress_value, 100, "Checking configured legacy storage root", candidate
+            )
             if candidate.exists():
                 return candidate
         for candidate in self.layout.legacy_data_roots:
             resolved_candidate = Path(candidate).resolve()
-            if self._present_items(resolved_candidate):
+            self._progress_path(
+                progress_value, 100, "Checking legacy storage root", resolved_candidate
+            )
+            if self._present_items(
+                resolved_candidate,
+                progress_value=progress_value,
+                label="legacy app-data candidate",
+            ):
                 return resolved_candidate
         return None
 
-    @staticmethod
-    def _present_items(root: Path | None) -> tuple[str, ...]:
-        if root is None or not root.exists():
+    def _present_items(
+        self,
+        root: Path | None,
+        *,
+        progress_value: int = 0,
+        label: str = "app-data",
+    ) -> tuple[str, ...]:
+        if root is None:
             return ()
-        return tuple(name for name in APP_OWNED_SUBDIRS if (root / name).exists())
+        self._progress_path(progress_value, 100, f"Scanning {label} root", root)
+        if not root.exists():
+            return ()
+        items: list[str] = []
+        for name in APP_OWNED_SUBDIRS:
+            candidate = root / name
+            self._progress_path(progress_value, 100, f"Scanning {label} path", candidate)
+            if candidate.exists():
+                items.append(name)
+        return tuple(items)
 
     def _settings_value(self, key: str) -> str:
         if self.settings is None:
             return ""
         return str(self.settings.value(key, "", str) or "").strip()
 
-    def _report(self, event: str, message: str, **fields) -> None:
+    def _report(self, event: str, message: str, **fields: Any) -> None:
         if self.reporter is None:
             return
         level_name = str(fields.pop("level", "info")).strip().lower()
         self.reporter(event, message, level=self._report_level(level_name), **fields)
+
+    def _progress(self, value: int, maximum: int, message: str) -> None:
+        if self.progress_reporter is None:
+            return
+        try:
+            self.progress_reporter(int(value), int(maximum), str(message or ""))
+        except Exception:
+            pass
+
+    def _progress_path(self, value: int, maximum: int, action: str, path: Path) -> None:
+        action_text = str(action or "Scanning storage path").rstrip(":")
+        self._progress(value, maximum, f"{action_text}: {self._display_path(path)}")
+
+    @staticmethod
+    def _display_path(path: Path) -> str:
+        try:
+            return str(Path(path).expanduser().resolve())
+        except Exception:
+            return str(path)
 
     @staticmethod
     def _report_level(level_name: str) -> int:
@@ -483,16 +578,23 @@ class StorageMigrationService:
         if not required_items:
             return False
         for name in required_items:
-            if not (target_root / name).exists():
+            required_path = target_root / name
+            self._progress_path(40, 100, "Checking preferred storage item", required_path)
+            if not required_path.exists():
                 return False
         try:
-            self._verify_target_databases(target_root)
+            self._verify_target_databases(target_root, progress_value=40)
         except Exception:
             return False
         validation_root = legacy_root or self._journal_path_value(journal.get("source_root"))
         if validation_root is not None:
             try:
-                if self._find_legacy_references(validation_root.resolve(), target_root):
+                if self._find_legacy_references(
+                    validation_root.resolve(),
+                    target_root,
+                    progress_value=40,
+                    label="preferred storage",
+                ):
                     return False
             except Exception:
                 return False
@@ -527,13 +629,20 @@ class StorageMigrationService:
                 deduped.append(name)
         return tuple(deduped)
 
-    def _preferred_root_conflicts(self, target_root: Path) -> tuple[str, ...]:
+    def _preferred_root_conflicts(
+        self,
+        target_root: Path,
+        *,
+        progress_value: int = 40,
+        label: str = "preferred app-data",
+    ) -> tuple[str, ...]:
         conflicts: list[str] = []
         if not target_root.exists():
             return ()
         for path in sorted(target_root.rglob("*")):
             if path.is_dir():
                 continue
+            self._progress_path(progress_value, 100, f"Scanning {label} file", path)
             try:
                 relative = path.relative_to(target_root)
             except Exception:
@@ -555,10 +664,21 @@ class StorageMigrationService:
         if not stage_root.exists():
             raise RuntimeError("The preserved staged migration folder is missing.")
 
+        self._progress(60, 100, "Inspecting preserved storage migration stage...")
         copied_items = self._journal_copied_items(inspection.journal, inspection.legacy_items)
-        stage_inventory = self._collect_inventory(stage_root)
+        stage_inventory = self._collect_inventory(
+            stage_root,
+            progress_value=60,
+            label="preserved migration stage",
+        )
         if source_root is not None and copied_items:
-            source_inventory = self._source_inventory(source_root, copied_items)
+            self._progress(66, 100, "Verifying staged storage against legacy inventory...")
+            source_inventory = self._source_inventory(
+                source_root,
+                copied_items,
+                progress_value=66,
+                label="legacy app-data",
+            )
             self._validate_stage_inventory(stage_root, source_inventory)
             source_inventory_count = len(source_inventory)
         else:
@@ -570,14 +690,21 @@ class StorageMigrationService:
             source_inventory_count = len(stage_inventory)
 
         rewrite_root = source_root or inspection.journal_source_root
+        self._progress(74, 100, "Rewriting staged storage references...")
         rewritten_files = list(
-            self._rewrite_target_storage(rewrite_root, stage_root)
+            self._rewrite_target_storage(rewrite_root, stage_root, progress_value=74)
             if rewrite_root is not None
             else ()
         )
-        verified = list(self._verify_target_databases(stage_root))
+        self._progress(82, 100, "Checking staged profile databases...")
+        verified = list(self._verify_target_databases(stage_root, progress_value=82))
         if (
-            self._find_legacy_references(rewrite_root, stage_root)
+            self._find_legacy_references(
+                rewrite_root,
+                stage_root,
+                progress_value=86,
+                label="staged storage",
+            )
             if rewrite_root is not None
             else ()
         ):
@@ -585,13 +712,15 @@ class StorageMigrationService:
                 "The preserved staged migration still contains legacy-root references."
             )
         if target_root.exists() and any(target_root.iterdir()):
-            if self._preferred_root_conflicts(target_root):
-                raise RuntimeError(
-                    self._format_conflict_error(
-                        target_root, self._preferred_root_conflicts(target_root)
-                    )
-                )
+            target_conflicts = self._preferred_root_conflicts(
+                target_root,
+                progress_value=88,
+                label="preferred app-data",
+            )
+            if target_conflicts:
+                raise RuntimeError(self._format_conflict_error(target_root, target_conflicts))
             self._clear_safe_target_noise(target_root)
+        self._progress(90, 100, "Activating resumed storage migration...")
         self._promote_stage_root(stage_root, target_root)
         if rewrite_root is not None:
             self._rewrite_settings_paths(rewrite_root, target_root)
@@ -609,6 +738,7 @@ class StorageMigrationService:
         )
         self._write_journal(target_root / STORAGE_MIGRATION_JOURNAL_BASENAME, payload)
         self._remove_empty_stage_container(stage_root.parent)
+        self._progress(98, 100, "Resumed storage migration completed.")
         return StorageMigrationResult(
             action="resumed",
             source_root=(rewrite_root or target_root).resolve(),
@@ -628,7 +758,15 @@ class StorageMigrationService:
         copied_items = self._journal_copied_items(inspection.journal, inspection.legacy_items)
         if not copied_items:
             copied_items = list(inspection.preferred_items)
-        verified = list(self._verify_target_databases(target_root))
+        self._progress(64, 100, "Checking preferred storage databases...")
+        verified = list(self._verify_target_databases(target_root, progress_value=64))
+        source_inventory_count = self._adoption_inventory_count(
+            source_root,
+            copied_items,
+            inspection.journal,
+            progress_value=72,
+        )
+        self._progress(78, 100, "Updating active storage settings...")
         if source_root is not None:
             self._rewrite_settings_paths(source_root, target_root)
         else:
@@ -639,13 +777,12 @@ class StorageMigrationService:
             source_root=source_root,
             target_root=target_root,
             copied_items=copied_items,
-            source_inventory_count=self._adoption_inventory_count(
-                source_root, copied_items, inspection.journal
-            ),
+            source_inventory_count=source_inventory_count,
             rewritten_files=[],
             verified_databases=verified,
         )
         self._write_journal(target_root / STORAGE_MIGRATION_JOURNAL_BASENAME, payload)
+        self._progress(98, 100, "Preferred storage root is ready.")
         return StorageMigrationResult(
             action="adopted",
             source_root=(source_root or target_root).resolve(),
@@ -665,14 +802,23 @@ class StorageMigrationService:
             return [str(name) for name in copied_items if isinstance(name, str)]
         return list(fallback_items)
 
-    @staticmethod
     def _adoption_inventory_count(
+        self,
         source_root: Path | None,
         copied_items: list[str],
         journal: dict[str, Any],
+        *,
+        progress_value: int,
     ) -> int:
         if source_root is not None and copied_items:
-            return len(StorageMigrationService._source_inventory(source_root, copied_items))
+            return len(
+                self._source_inventory(
+                    source_root,
+                    copied_items,
+                    progress_value=progress_value,
+                    label="legacy app-data",
+                )
+            )
         try:
             return int(journal.get("source_inventory_count") or 0)
         except Exception:
@@ -716,7 +862,7 @@ class StorageMigrationService:
             return True
         if relative == cls.SAFE_HELP_FILE:
             return True
-        return relative.parts[0] == LOGS_SUBDIR
+        return bool(relative.parts[0] == LOGS_SUBDIR)
 
     @staticmethod
     def _format_conflict_error(target_root: Path, conflict_items: tuple[str, ...]) -> str:
@@ -744,19 +890,32 @@ class StorageMigrationService:
             target_root.parent / f".{target_root.name}_{STORAGE_MIGRATION_JOURNAL_BASENAME}",
         )
 
-    @classmethod
-    def _collect_inventory(cls, root: Path) -> tuple[str, ...]:
+    def _collect_inventory(
+        self,
+        root: Path,
+        *,
+        progress_value: int,
+        label: str,
+    ) -> tuple[str, ...]:
         if not root.exists():
             return ()
         inventory: list[str] = []
         for path in sorted(root.rglob("*")):
-            if path.is_dir() or cls._is_transient_sqlite_companion(path):
+            if path.is_dir():
+                continue
+            self._progress_path(progress_value, 100, f"Scanning {label} file", path)
+            if self._is_transient_sqlite_companion(path):
                 continue
             inventory.append(str(path.relative_to(root)))
         return tuple(inventory)
 
     def _find_legacy_references(
-        self, source_root: Path | None, target_root: Path
+        self,
+        source_root: Path | None,
+        target_root: Path,
+        *,
+        progress_value: int,
+        label: str,
     ) -> tuple[str, ...]:
         if source_root is None:
             return ()
@@ -766,23 +925,41 @@ class StorageMigrationService:
         database_dir = target_root / DATABASE_SUBDIR
         if database_dir.exists():
             for db_path in sorted(database_dir.glob("*.db")):
+                self._progress_path(progress_value, 100, f"Scanning {label} database", db_path)
                 if self._database_contains_legacy_reference(db_path, source_root):
                     references.append(str(db_path))
 
         history_root = target_root / HISTORY_SUBDIR
         if history_root.exists():
             session_history_path = history_root / "session_history.json"
-            if session_history_path.exists() and self._json_file_contains_legacy_reference(
-                session_history_path, source_root
-            ):
-                references.append(str(session_history_path))
+            if session_history_path.exists():
+                self._progress_path(
+                    progress_value,
+                    100,
+                    f"Scanning {label} history file",
+                    session_history_path,
+                )
+                if self._json_file_contains_legacy_reference(session_history_path, source_root):
+                    references.append(str(session_history_path))
             for sidecar in sorted(history_root.rglob("*.snapshot.json")):
+                self._progress_path(
+                    progress_value,
+                    100,
+                    f"Scanning {label} snapshot sidecar",
+                    sidecar,
+                )
                 if self._json_file_contains_legacy_reference(sidecar, source_root):
                     references.append(str(sidecar))
 
         backups_root = target_root / BACKUPS_SUBDIR
         if backups_root.exists():
             for sidecar in sorted(backups_root.rglob("*.backup.json")):
+                self._progress_path(
+                    progress_value,
+                    100,
+                    f"Scanning {label} backup sidecar",
+                    sidecar,
+                )
                 if self._json_file_contains_legacy_reference(sidecar, source_root):
                     references.append(str(sidecar))
 
@@ -865,18 +1042,19 @@ class StorageMigrationService:
             payload["source_root"] = str(source_root)
         return payload
 
-    @staticmethod
-    def _copy_item(source: Path, target: Path) -> None:
+    def _copy_item(self, source: Path, target: Path, *, progress_value: int) -> None:
         if source.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             for child in sorted(source.iterdir()):
                 if StorageMigrationService._is_transient_sqlite_companion(child):
                     continue
-                StorageMigrationService._copy_item(child, target / child.name)
+                self._copy_item(child, target / child.name, progress_value=progress_value)
             return
         if source.suffix.lower() == ".db":
+            self._progress_path(progress_value, 100, "Copying storage database", source)
             StorageMigrationService._copy_sqlite_database(source, target)
             return
+        self._progress_path(progress_value, 100, "Copying storage file", source)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
@@ -901,18 +1079,30 @@ class StorageMigrationService:
         name = path.name.lower()
         return any(name.endswith(f".db{suffix}") for suffix in cls.SQLITE_COMPANION_SUFFIXES)
 
-    @classmethod
-    def _source_inventory(cls, source_root: Path, copied_items: list[str]) -> tuple[str, ...]:
+    def _source_inventory(
+        self,
+        source_root: Path,
+        copied_items: list[str],
+        *,
+        progress_value: int,
+        label: str,
+    ) -> tuple[str, ...]:
         inventory: list[str] = []
         for name in copied_items:
             item_root = source_root / name
+            self._progress_path(progress_value, 100, f"Scanning {label} item", item_root)
             if item_root.is_dir():
                 for path in sorted(item_root.rglob("*")):
-                    if path.is_dir() or cls._is_transient_sqlite_companion(path):
+                    if path.is_dir():
+                        continue
+                    self._progress_path(progress_value, 100, f"Scanning {label} file", path)
+                    if self._is_transient_sqlite_companion(path):
                         continue
                     inventory.append(str(path.relative_to(source_root)))
-            elif item_root.exists() and not cls._is_transient_sqlite_companion(item_root):
-                inventory.append(str(item_root.relative_to(source_root)))
+            elif item_root.exists():
+                self._progress_path(progress_value, 100, f"Scanning {label} file", item_root)
+                if not self._is_transient_sqlite_companion(item_root):
+                    inventory.append(str(item_root.relative_to(source_root)))
         return tuple(inventory)
 
     @staticmethod
@@ -947,29 +1137,43 @@ class StorageMigrationService:
         except Exception:
             pass
 
-    def _rewrite_target_storage(self, source_root: Path, target_root: Path) -> tuple[str, ...]:
+    def _rewrite_target_storage(
+        self,
+        source_root: Path,
+        target_root: Path,
+        *,
+        progress_value: int,
+    ) -> tuple[str, ...]:
         rewritten: list[str] = []
 
         database_dir = target_root / DATABASE_SUBDIR
         if database_dir.exists():
             for db_path in sorted(database_dir.glob("*.db")):
+                self._progress_path(progress_value, 100, "Rewriting storage database", db_path)
                 self._rewrite_profile_database(db_path, source_root, target_root)
                 rewritten.append(str(db_path))
 
         history_root = target_root / HISTORY_SUBDIR
         if history_root.exists():
             session_history_path = history_root / "session_history.json"
-            if session_history_path.exists() and self._rewrite_json_file(
-                session_history_path, source_root, target_root
-            ):
-                rewritten.append(str(session_history_path))
+            if session_history_path.exists():
+                self._progress_path(
+                    progress_value,
+                    100,
+                    "Rewriting session history file",
+                    session_history_path,
+                )
+                if self._rewrite_json_file(session_history_path, source_root, target_root):
+                    rewritten.append(str(session_history_path))
             for sidecar in sorted(history_root.rglob("*.snapshot.json")):
+                self._progress_path(progress_value, 100, "Rewriting snapshot sidecar", sidecar)
                 if self._rewrite_json_file(sidecar, source_root, target_root):
                     rewritten.append(str(sidecar))
 
         backups_root = target_root / BACKUPS_SUBDIR
         if backups_root.exists():
             for sidecar in sorted(backups_root.rglob("*.backup.json")):
+                self._progress_path(progress_value, 100, "Rewriting backup sidecar", sidecar)
                 if self._rewrite_json_file(sidecar, source_root, target_root):
                     rewritten.append(str(sidecar))
 
@@ -1073,9 +1277,15 @@ class StorageMigrationService:
             self.settings.setValue(STORAGE_LEGACY_DATA_ROOT_KEY, str(source_root.resolve()))
         self.settings.sync()
 
-    def _verify_target_databases(self, target_root: Path) -> tuple[str, ...]:
+    def _verify_target_databases(
+        self,
+        target_root: Path,
+        *,
+        progress_value: int,
+    ) -> tuple[str, ...]:
         verified: list[str] = []
         for db_path in sorted(target_root.rglob("*.db")):
+            self._progress_path(progress_value, 100, "Verifying storage database", db_path)
             conn = sqlite3.connect(str(db_path))
             try:
                 row = conn.execute("PRAGMA integrity_check").fetchone()
@@ -1098,7 +1308,7 @@ class StorageMigrationService:
         path.write_text(json.dumps(updated, indent=2, sort_keys=True), encoding="utf-8")
         return True
 
-    def _rewrite_json_value(self, value: Any, source_root: Path, target_root: Path):
+    def _rewrite_json_value(self, value: Any, source_root: Path, target_root: Path) -> Any:
         if isinstance(value, dict):
             return {
                 str(key): self._rewrite_json_value(item, source_root, target_root)

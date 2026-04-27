@@ -433,6 +433,11 @@ from isrc_manager.update_checker import (
     UpdateCheckStatus,
     fetch_release_notes_text,
 )
+from isrc_manager.update_handoff import (
+    cleanup_legacy_update_backups_for_version,
+    cleanup_ready_update_backup,
+    mark_update_backup_ready_for_deletion,
+)
 from isrc_manager.update_installer import (
     HELPER_MODE_ARGUMENT,
     UpdateInstallPlan,
@@ -6633,27 +6638,31 @@ class App(QMainWindow):
         self.trace_logger = logging.getLogger("ISRCManager.trace")
         self._logging_configured = False
         self._bootstrap_log_buffer: list[tuple[str, int, str, dict | None]] = []
+        self._report_startup_phase(StartupPhase.RESOLVING_STORAGE)
+        self._report_storage_startup_progress(2, 100, "Locating startup storage settings...")
         self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+        self._report_storage_startup_progress(5, 100, "Resolved base storage directories.")
         self.storage_migration_service = StorageMigrationService(
             self.storage_layout,
             settings=self.settings,
             reporter=self._log_event,
+            progress_reporter=self._report_storage_startup_progress,
         )
-        self._report_startup_phase(StartupPhase.RESOLVING_STORAGE)
         startup_root = self._reconcile_startup_storage_root()
         self._report_startup_progress(
             StartupPhase.RESOLVING_STORAGE,
-            value=1,
-            maximum=2,
+            value=84,
+            maximum=100,
             message_override="Resolved startup storage layout.",
         )
         self._apply_storage_layout(active_data_root=startup_root)
         self._report_startup_progress(
             StartupPhase.RESOLVING_STORAGE,
-            value=2,
-            maximum=2,
+            value=100,
+            maximum=100,
             message_override="Applied startup storage directories.",
         )
+        self._cleanup_ready_update_backup_handoff(phase="startup")
 
         self.sqlite_connection_factory = SQLiteConnectionFactory()
         self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
@@ -6908,6 +6917,22 @@ class App(QMainWindow):
             self._report_startup_phase(phase, str(message or startup_phase_label(phase)))
 
         return _fallback
+
+    def _report_storage_startup_progress(
+        self,
+        value: int | float,
+        maximum: int | float,
+        message: str,
+    ) -> None:
+        if getattr(self, "_startup_feedback_completed", False):
+            return
+        self._report_startup_progress(
+            StartupPhase.RESOLVING_STORAGE,
+            value=value,
+            maximum=maximum,
+            message_override=str(message or "Resolving storage layout..."),
+        )
+        self._drain_qt_events()
 
     @staticmethod
     def _drain_qt_events() -> None:
@@ -7217,6 +7242,61 @@ class App(QMainWindow):
             self._startup_feedback = None
             self._startup_progress_tracker = None
 
+    def _cleanup_ready_update_backup_handoff(self, *, phase: str) -> None:
+        try:
+            cleanup_ready_update_backup()
+        except Exception as exc:
+            self._log_event(
+                "updates.backup_cleanup_failed",
+                "Update backup cleanup failed",
+                level=logging.WARNING,
+                phase=phase,
+                error=str(exc),
+            )
+
+    def _cleanup_legacy_update_backup_siblings(self) -> None:
+        if not getattr(sys, "frozen", False):
+            return
+        try:
+            installed_target = resolve_installed_target_path()
+            removed_paths = cleanup_legacy_update_backups_for_version(
+                installed_target,
+                self._app_version_text(),
+            )
+        except Exception as exc:
+            self._log_event(
+                "updates.legacy_backup_cleanup_failed",
+                "Legacy update backup cleanup failed",
+                level=logging.WARNING,
+                error=str(exc),
+            )
+            return
+        if removed_paths:
+            self._log_event(
+                "updates.legacy_backup_cleanup",
+                "Removed legacy update backup(s)",
+                level=logging.INFO,
+                count=len(removed_paths),
+                paths=[str(path) for path in removed_paths],
+            )
+
+    def _mark_update_backup_handoff_ready_on_close(self) -> None:
+        if not getattr(self, "_startup_ready_emitted", False):
+            return
+        try:
+            state = mark_update_backup_ready_for_deletion()
+        except Exception as exc:
+            self._log_event(
+                "updates.backup_handoff_ready_failed",
+                "Update backup handoff could not be marked ready for cleanup",
+                level=logging.WARNING,
+                error=str(exc),
+            )
+            return
+        if state is not None:
+            self._cleanup_ready_update_backup_handoff(phase="close")
+        self._cleanup_legacy_update_backup_siblings()
+
     def _schedule_post_ready_startup_tasks(self) -> None:
         if self._post_ready_startup_tasks_scheduled:
             return
@@ -7521,6 +7601,7 @@ class App(QMainWindow):
             target=str(plan.target_path),
             replacement=str(plan.replacement_path),
             backup=str(plan.backup_path),
+            handoff=str(plan.handoff_path),
             log=str(plan.log_path),
         )
         QMessageBox.information(
@@ -7620,6 +7701,7 @@ class App(QMainWindow):
             self.open_settings_dialog()
 
     def _apply_storage_layout(self, *, active_data_root: str | Path | None = None) -> None:
+        self._report_storage_startup_progress(86, 100, "Applying active storage root...")
         self.storage_layout = resolve_app_storage_layout(
             settings=self.settings,
             active_data_root=active_data_root,
@@ -7628,6 +7710,7 @@ class App(QMainWindow):
             self.storage_layout,
             settings=self.settings,
             reporter=self._log_event,
+            progress_reporter=self._report_storage_startup_progress,
         )
         self.data_root = self.storage_layout.data_root
         self.database_dir = self.storage_layout.database_dir
@@ -7637,7 +7720,7 @@ class App(QMainWindow):
         self.history_dir = self.storage_layout.history_dir
         self.help_dir = self.storage_layout.help_dir
 
-        for directory in (
+        storage_directories = (
             self.data_root,
             self.database_dir,
             self.exports_dir,
@@ -7645,7 +7728,13 @@ class App(QMainWindow):
             self.backups_dir,
             self.history_dir,
             self.help_dir,
-        ):
+        )
+        for directory_index, directory in enumerate(storage_directories, start=1):
+            self._report_storage_startup_progress(
+                86 + int((directory_index / len(storage_directories)) * 10),
+                100,
+                f"Ensuring storage folder: {directory.name}",
+            )
             directory.mkdir(parents=True, exist_ok=True)
 
         today_stamp = datetime.now().strftime("%Y-%m-%d")
@@ -7882,6 +7971,7 @@ class App(QMainWindow):
         self._store_workspace_panel_visibility_preferences(sync=False)
         self._save_main_dock_state(sync=False)
         self.settings.sync()
+        self._mark_update_backup_handoff_ready_on_close()
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
 
@@ -9600,9 +9690,7 @@ class App(QMainWindow):
                 if budget_preview.auto_cleanup_enabled and budget_preview.candidate_items:
                     warning_summary += " Safe cleanup candidates are available."
                 elif budget_preview.protected_over_budget_items:
-                    warning_summary += (
-                        " Remaining space is still needed by the current undo boundary or retained recovery artifacts."
-                    )
+                    warning_summary += " Remaining space is still needed by the current undo boundary or retained recovery artifacts."
                 budget_details.extend(
                     [
                         "",
@@ -15452,7 +15540,9 @@ class App(QMainWindow):
         save_button = QPushButton("Save Layout", container)
         save_button.setObjectName("savedLayoutAddButton")
         save_button.setProperty("role", "actionRibbonButton")
-        self._connect_noarg_signal(save_button.clicked, save_button, self.add_named_main_window_layout)
+        self._connect_noarg_signal(
+            save_button.clicked, save_button, self.add_named_main_window_layout
+        )
         layout.addWidget(save_button)
 
         delete_button = QPushButton("Delete Layout", container)
@@ -17079,9 +17169,9 @@ class App(QMainWindow):
             getattr(self, "genre_field", None),
         )
         catalog_combo = getattr(getattr(self, "catalog_number_field", None), "combo", None)
-        if any(
-            isinstance(combo, QComboBox) and combo.count() == 0 for combo in lookup_combos
-        ) or (isinstance(catalog_combo, QComboBox) and catalog_combo.count() == 0):
+        if any(isinstance(combo, QComboBox) and combo.count() == 0 for combo in lookup_combos) or (
+            isinstance(catalog_combo, QComboBox) and catalog_combo.count() == 0
+        ):
             self._refresh_add_track_lookup_sources_preserving_text()
 
     def _on_add_track_dock_visibility_changed(self, visible: bool) -> None:
@@ -18698,9 +18788,11 @@ class App(QMainWindow):
             lines.append("Existing tracks on this album already use these numbers:")
             for track_number, conflicts in sorted(existing_conflicts.items()):
                 labels = [
-                    f'#{int(track_id)} "{track_title}"'
-                    if str(track_title or "").strip()
-                    else f"#{int(track_id)}"
+                    (
+                        f'#{int(track_id)} "{track_title}"'
+                        if str(track_title or "").strip()
+                        else f"#{int(track_id)}"
+                    )
                     for track_id, track_title in conflicts
                 ]
                 extra = ""
@@ -18885,9 +18977,7 @@ class App(QMainWindow):
                 else f"Create Track: {payload.track_title}"
             )
             action_type = (
-                "track.create_governed"
-                if governance_mode == "create_new_work"
-                else "track.create"
+                "track.create_governed" if governance_mode == "create_new_work" else "track.create"
             )
             profile_name = self._current_profile_name()
 
@@ -19677,7 +19767,9 @@ class App(QMainWindow):
                 continue
             title = ""
             if title_column is not None:
-                title = str(model.data(model.index(row, title_column), Qt.DisplayRole) or "").strip()
+                title = str(
+                    model.data(model.index(row, title_column), Qt.DisplayRole) or ""
+                ).strip()
             if not title:
                 title = self._get_track_title(track_id)
             artist = (
@@ -19690,11 +19782,7 @@ class App(QMainWindow):
                 if album_column is not None
                 else ""
             )
-            subtitle = " / ".join(
-                part
-                for part in (artist, album)
-                if part
-            )
+            subtitle = " / ".join(part for part in (artist, album) if part)
             choices.append(TrackChoice(track_id=int(track_id), title=title, subtitle=subtitle))
         return choices
 
@@ -22592,9 +22680,7 @@ class App(QMainWindow):
             return
         summary = self.release_service.fetch_release_summary(int(release_id))
         if summary is None:
-            QMessageBox.warning(
-                self, "Release Browser", "The chosen release could not be loaded."
-            )
+            QMessageBox.warning(self, "Release Browser", "The chosen release could not be loaded.")
             return
 
         def _worker(bundle, ctx):
@@ -22613,9 +22699,7 @@ class App(QMainWindow):
                         f"track{'s' if len(selected_ids) != 1 else ''} to the release..."
                     ),
                 )
-                return bundle.release_service.add_tracks_to_release(
-                    int(release_id), selected_ids
-                )
+                return bundle.release_service.add_tracks_to_release(int(release_id), selected_ids)
 
             return run_snapshot_history_action(
                 history_manager=bundle.history_manager,
@@ -23372,9 +23456,7 @@ class App(QMainWindow):
             return
         summary = self.release_service.fetch_release_summary(int(release_id))
         if summary is None:
-            QMessageBox.warning(
-                self, "Delete Release", "The selected release could not be loaded."
-            )
+            QMessageBox.warning(self, "Delete Release", "The selected release could not be loaded.")
             return
         focus_track_id = summary.tracks[0].track_id if summary.tracks else None
 
@@ -27810,9 +27892,7 @@ class App(QMainWindow):
         cell_text = str(index.data(Qt.DisplayRole) or "")
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
         act_filter.triggered.connect(
-            lambda _checked=False, filter_text=cell_text: self._set_catalog_filter_text(
-                filter_text
-            )
+            lambda _checked=False, filter_text=cell_text: self._set_catalog_filter_text(filter_text)
         )
         menu.addAction(act_filter)
 
@@ -28008,9 +28088,9 @@ class App(QMainWindow):
                     self,
                 )
                 action.triggered.connect(
-                    lambda checked=False, track_ids=list(
-                        ordered_effective_track_ids
-                    ), fid=int(custom_field_id), mode=target_mode: self._convert_custom_blob_storage_mode(
+                    lambda checked=False, track_ids=list(ordered_effective_track_ids), fid=int(
+                        custom_field_id
+                    ), mode=target_mode: self._convert_custom_blob_storage_mode(
                         track_ids,
                         fid,
                         mode,
@@ -28230,9 +28310,9 @@ class App(QMainWindow):
             return self._fallback_header_column_key(
                 header_text,
                 prefix="base",
-                logical_index=self.BASE_HEADERS.index(header_text)
-                if header_text in self.BASE_HEADERS
-                else 0,
+                logical_index=(
+                    self.BASE_HEADERS.index(header_text) if header_text in self.BASE_HEADERS else 0
+                ),
             )
         return None
 
@@ -28259,11 +28339,7 @@ class App(QMainWindow):
         except (TypeError, ValueError):
             return None
         return next(
-            (
-                field
-                for field in self.active_custom_fields
-                if int(field.get("id") or 0) == field_id
-            ),
+            (field for field in self.active_custom_fields if int(field.get("id") or 0) == field_id),
             None,
         )
 
@@ -29517,6 +29593,7 @@ class App(QMainWindow):
             return
         refresh_request = self._capture_catalog_refresh_request(focus_id=int(track_id))
         try:
+
             def _worker(bundle, ctx):
                 attach_progress = self._scaled_progress_callback(
                     ctx.report_progress,
@@ -29555,7 +29632,10 @@ class App(QMainWindow):
                     },
                     mutation=_mutation,
                     progress_callback=ctx.report_progress,
-                    post_mutation_progress=(80, f"Capturing {header_label.lower()} history snapshot..."),
+                    post_mutation_progress=(
+                        80,
+                        f"Capturing {header_label.lower()} history snapshot...",
+                    ),
                     record_progress=(88, f"Recording {header_label.lower()} history..."),
                     logger=self.logger,
                 )
@@ -32466,7 +32546,9 @@ class AlbumEntryDialog(QDialog):
                 release_ids=release_ids,
             )
             for track_id, track_payload in zip(track_ids, payloads):
-                self.app._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={track_payload.isrc}")
+                self.app._audit(
+                    "CREATE", "Track", ref_id=track_id, details=f"isrc={track_payload.isrc}"
+                )
             self.app._audit_commit()
             if hasattr(self.app, "statusBar"):
                 self.app.statusBar().showMessage(
@@ -33055,14 +33137,11 @@ class EditDialog(QDialog):
         self.set_length_from_saved_audio_button.clicked.connect(
             self._set_track_length_from_saved_audio
         )
-        can_read_saved_audio = (
-            not self._is_bulk_edit
-            and (
-                bool(self.snapshot.audio_file_path)
-                or normalize_storage_mode(self.snapshot.audio_file_storage_mode, default=None)
-                == STORAGE_MODE_DATABASE
-                or bool(self.snapshot.audio_file_blob_b64)
-            )
+        can_read_saved_audio = not self._is_bulk_edit and (
+            bool(self.snapshot.audio_file_path)
+            or normalize_storage_mode(self.snapshot.audio_file_storage_mode, default=None)
+            == STORAGE_MODE_DATABASE
+            or bool(self.snapshot.audio_file_blob_b64)
         )
         self.set_length_from_saved_audio_button.setEnabled(can_read_saved_audio)
         if self._is_bulk_edit:
