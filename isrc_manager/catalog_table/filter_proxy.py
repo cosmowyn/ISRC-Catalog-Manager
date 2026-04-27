@@ -34,14 +34,14 @@ class CatalogFilterProxyModel(QSortFilterProxyModel):
             return
         self._search_text = normalized
         self._normalized_search_text = normalized.casefold()
-        self.invalidateFilter()
+        self._invalidate_filter_rows()
 
     def set_search_column_key(self, column_key: str | None) -> None:
         normalized = (column_key or "").strip() or None
         if normalized == self._search_column_key:
             return
         self._search_column_key = normalized
-        self.invalidateFilter()
+        self._invalidate_filter_rows()
 
     def set_explicit_track_ids(self, track_ids: Iterable[int] | None) -> None:
         if track_ids is None:
@@ -59,7 +59,7 @@ class CatalogFilterProxyModel(QSortFilterProxyModel):
         if normalized == self._explicit_track_ids:
             return
         self._explicit_track_ids = normalized
-        self.invalidateFilter()
+        self._invalidate_filter_rows()
 
     def search_text(self) -> str:
         return self._search_text
@@ -69,6 +69,16 @@ class CatalogFilterProxyModel(QSortFilterProxyModel):
 
     def explicit_track_ids(self) -> frozenset[int] | None:
         return self._explicit_track_ids
+
+    def _invalidate_filter_rows(self) -> None:
+        begin_filter_change = getattr(self, "beginFilterChange", None)
+        end_filter_change = getattr(self, "endFilterChange", None)
+        direction = getattr(getattr(QSortFilterProxyModel, "Direction", None), "Rows", None)
+        if callable(begin_filter_change) and callable(end_filter_change) and direction is not None:
+            begin_filter_change()
+            end_filter_change(direction)
+            return
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         model = self.sourceModel()

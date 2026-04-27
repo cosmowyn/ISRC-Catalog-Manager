@@ -2476,6 +2476,7 @@ class AppShellTestCase(unittest.TestCase):
         _DeferredMigrationMessageBox.exec_count = 0
         _DeferredMigrationMessageBox.last_text = ""
 
+        expected_logger = app_module.logging.getLogger("ISRCManager")
         with (
             mock.patch.object(app_module, "QMessageBox", _DeferredMigrationMessageBox),
             mock.patch.object(
@@ -2484,11 +2485,13 @@ class AppShellTestCase(unittest.TestCase):
                 return_value=False,
             ),
             mock.patch.object(app_module.App, "migrate_schema", side_effect=RuntimeError("boom")),
+            mock.patch.object(expected_logger, "exception") as logged_exception,
         ):
             self.window = app_module.App(startup_feedback=splash)
             self.window.show()
             self._drain_events()
 
+        logged_exception.assert_called_once()
         self.assertTrue(_DeferredMigrationMessageBox.suspended_during_exec)
         self.assertEqual(_DeferredMigrationMessageBox.exec_count, 1)
         self.assertIn("Database migration failed", _DeferredMigrationMessageBox.last_text)
@@ -7558,7 +7561,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
         self.assertIsNone(submitted.get("on_success"))
 
-        progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+        with mock.patch.object(self.window, "_log_event"):
+            progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
 
         _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
         ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
