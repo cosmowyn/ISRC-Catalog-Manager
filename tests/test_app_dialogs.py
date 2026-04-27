@@ -113,6 +113,10 @@ class _DiagnosticsDialogHost(QWidget):
                 ),
                 "total_text": "3.2 GB",
                 "current_profile_text": "1.4 GB",
+                "safe_budget_detail": (
+                    "5.25 GB for live profile storage + 1 retained snapshot(s) + "
+                    "1 temporary snapshot slot(s) + 25% margin."
+                ),
                 "reclaimable_text": "1.1 GB",
                 "deleted_profile_text": "512.0 MB",
                 "orphaned_text": "420.0 MB",
@@ -127,6 +131,10 @@ class _DiagnosticsDialogHost(QWidget):
                 ),
                 "total_text": "3.2 GB",
                 "current_profile_text": "1.4 GB",
+                "safe_budget_detail": (
+                    "5.25 GB for live profile storage + 1 retained snapshot(s) + "
+                    "1 temporary snapshot slot(s) + 25% margin."
+                ),
                 "reclaimable_text": "1.1 GB",
                 "deleted_profile_text": "512.0 MB",
                 "orphaned_text": "420.0 MB",
@@ -706,6 +714,10 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(dialog.surface_tabs.tabText(1), "Warnings & In Use")
             self.assertEqual(dialog.surface_tabs.tabText(2), "Update Backups")
             self.assertIn("3.2 GB", dialog.summary_label.text())
+            self.assertIn(
+                "temporary snapshot slot",
+                dialog.summary_metric_labels["safe_budget"].text(),
+            )
             self.assertEqual(dialog.cleanup_table.rowCount(), 1)
             self.assertEqual(dialog.warning_table.rowCount(), 1)
             self.assertEqual(dialog.update_backup_table.rowCount(), 1)

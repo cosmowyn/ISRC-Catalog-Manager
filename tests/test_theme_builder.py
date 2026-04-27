@@ -863,24 +863,34 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_settings_dialog_smart_storage_budget_uses_all_profile_sizes(self):
+    def test_application_settings_dialog_smart_storage_budget_uses_profile_footprint(self):
         self.assertEqual(
-            app_module.ApplicationSettingsDialog._smart_history_budget_mb_from_database_size(
-                8 * 1024**3,
+            app_module.ApplicationSettingsDialog._smart_history_budget_mb_from_profile_footprint(
+                (73 * 1024**3) // 10,
                 1,
             ),
-            10240,
+            28672,
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             profile_path = Path(temp_dir) / "large-profile.db"
             with profile_path.open("wb") as handle:
                 handle.truncate(6 * 1024**3)
-            peer_profile_path = Path(temp_dir) / "peer-profile.db"
-            with peer_profile_path.open("wb") as handle:
-                handle.truncate(2 * 1024**3)
+
+            class _BudgetAuditSummary:
+                current_profile_bytes = (73 * 1024**3) // 10
+
+            class _BudgetAudit:
+                summary = _BudgetAuditSummary()
+
+            class _BudgetStorageAdminService:
+                def inspect(self, *, current_db_path=None):
+                    self.current_db_path = current_db_path
+                    return _BudgetAudit()
 
             host = _ThemePreviewHost()
+            storage_service = _BudgetStorageAdminService()
+            host._application_storage_admin_service = lambda: storage_service
             dialog = app_module.ApplicationSettingsDialog(
                 window_title="Catalog",
                 icon_path="",
@@ -912,18 +922,23 @@ class ThemeBuilderTests(unittest.TestCase):
             try:
                 self.assertTrue(dialog.history_storage_budget_smart_button.isEnabled())
                 self.assertIn(
-                    "8 GB across all profile databases x 1",
+                    "7.3 GB current profile attributed storage",
+                    dialog.history_storage_budget_smart_button.toolTip(),
+                )
+                self.assertIn(
+                    "1 temporary snapshot slot",
                     dialog.history_storage_budget_smart_button.toolTip(),
                 )
 
                 dialog.history_storage_budget_smart_button.click()
                 self.app.processEvents()
-                self.assertEqual(dialog.values()["history_storage_budget_mb"], 10240)
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 28672)
+                self.assertEqual(storage_service.current_db_path, profile_path)
 
                 dialog.history_auto_snapshot_keep_latest_spin.setValue(2)
                 dialog.history_storage_budget_smart_button.click()
                 self.app.processEvents()
-                self.assertEqual(dialog.values()["history_storage_budget_mb"], 20480)
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 37888)
                 self.assertEqual(dialog.values()["history_retention_mode"], "custom")
             finally:
                 dialog.close()

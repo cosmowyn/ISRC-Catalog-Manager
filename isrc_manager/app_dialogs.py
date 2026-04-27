@@ -1160,6 +1160,7 @@ class DiagnosticsDialog(QDialog):
             (
                 ("total", "Total app usage"),
                 ("current_profile", "Current profile attributed"),
+                ("safe_budget", "Safe budget suggestion"),
                 ("reclaimable", "Reclaimable now"),
                 ("deleted_profiles", "Deleted-profile residue"),
                 ("orphaned", "Orphaned / unreferenced"),
@@ -1505,6 +1506,11 @@ class DiagnosticsDialog(QDialog):
         mapping = {
             "total": str(payload.get("total_text") or "Not available"),
             "current_profile": str(payload.get("current_profile_text") or "Not available"),
+            "safe_budget": str(
+                payload.get("safe_budget_detail")
+                or payload.get("safe_budget_text")
+                or "Not available"
+            ),
             "reclaimable": str(payload.get("reclaimable_text") or "Not available"),
             "deleted_profiles": str(payload.get("deleted_profile_text") or "Not available"),
             "orphaned": str(payload.get("orphaned_text") or "Not available"),
@@ -1686,6 +1692,7 @@ class ApplicationStorageAdminDialog(QDialog):
             (
                 ("total", "Total app usage"),
                 ("current_profile", "Current profile attributed"),
+                ("safe_budget", "Safe budget suggestion"),
                 ("reclaimable", "Reclaimable now"),
                 ("deleted_profiles", "Deleted-profile residue"),
                 ("orphaned", "Orphaned / unreferenced"),
@@ -1817,6 +1824,11 @@ class ApplicationStorageAdminDialog(QDialog):
         mapping = {
             "total": str(summary.get("total_text") or "Not available"),
             "current_profile": str(summary.get("current_profile_text") or "Not available"),
+            "safe_budget": str(
+                summary.get("safe_budget_detail")
+                or summary.get("safe_budget_text")
+                or "Not available"
+            ),
             "reclaimable": str(summary.get("reclaimable_text") or "Not available"),
             "deleted_profiles": str(summary.get("deleted_profile_text") or "Not available"),
             "orphaned": str(summary.get("orphaned_text") or "Not available"),

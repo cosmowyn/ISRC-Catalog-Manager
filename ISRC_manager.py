@@ -719,6 +719,7 @@ class ApplicationSettingsDialog(QDialog):
     METRIC_FIELD_SPECS = THEME_METRIC_FIELD_SPECS
     THEME_PAGE_SPECS = THEME_PAGE_SPECS
     SMART_HISTORY_BUDGET_MARGIN_PERCENT = 25
+    SMART_HISTORY_BUDGET_TRANSIENT_SNAPSHOT_COUNT = 1
     HISTORY_RETENTION_MODE_SPECS = (
         (
             HISTORY_RETENTION_MODE_MAXIMUM_SAFETY,
@@ -810,6 +811,8 @@ class ApplicationSettingsDialog(QDialog):
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
         self._current_profile_path = Path(current_profile_path) if current_profile_path else None
+        self._smart_history_budget_owner = parent
+        self._smart_history_budget_source_cache: tuple[int, str] | None = None
         self._profile_database_paths = self._discover_profile_database_paths(parent)
         initial_custom_qss = str(self._theme_settings.get("custom_qss") or "")
         self._theme_last_valid_custom_qss_preview = (
@@ -1160,7 +1163,7 @@ class ApplicationSettingsDialog(QDialog):
         history_budget_row.addStretch(1)
         history_budget_layout.addLayout(history_budget_row)
         self.history_storage_budget_hint = self._make_hint(
-            "Set the profile history-storage budget. Values stay exact internally. Use Smart Budget calculates from all profile database sizes, retained snapshot count, and a 25% margin."
+            "Set the profile history-storage budget. Values stay exact internally. Use Smart Budget calculates from the current profile footprint, live profile storage, retained snapshots, one temporary snapshot slot, and a 25% margin."
         )
         history_budget_layout.addWidget(self.history_storage_budget_hint)
         self._add_row(
@@ -1721,18 +1724,35 @@ class ApplicationSettingsDialog(QDialog):
         return (clean_value + clean_divisor - 1) // clean_divisor
 
     @classmethod
+    def _smart_history_budget_copy_count(cls, retained_snapshot_count: int) -> int:
+        retained_snapshots = max(1, int(retained_snapshot_count or 1))
+        transient_snapshots = max(0, int(cls.SMART_HISTORY_BUDGET_TRANSIENT_SNAPSHOT_COUNT))
+        return 1 + retained_snapshots + transient_snapshots
+
+    @classmethod
+    def _smart_history_budget_mb_from_profile_footprint(
+        cls,
+        profile_footprint_bytes: int,
+        retained_snapshot_count: int,
+    ) -> int:
+        size_mb = max(1, cls._ceil_div(profile_footprint_bytes, 1024 * 1024))
+        copy_count = cls._smart_history_budget_copy_count(retained_snapshot_count)
+        margin_percent = 100 + int(cls.SMART_HISTORY_BUDGET_MARGIN_PERCENT)
+        estimate_mb = cls._ceil_div(size_mb * copy_count * margin_percent, 100)
+        round_to_mb = 1024 if estimate_mb >= 1024 else 128
+        rounded_mb = cls._ceil_div(estimate_mb, round_to_mb) * round_to_mb
+        return max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, rounded_mb))
+
+    @classmethod
     def _smart_history_budget_mb_from_database_size(
         cls,
         database_size_bytes: int,
         retained_snapshot_count: int,
     ) -> int:
-        size_mb = max(1, cls._ceil_div(database_size_bytes, 1024 * 1024))
-        snapshot_count = max(1, int(retained_snapshot_count or 1))
-        margin_percent = 100 + int(cls.SMART_HISTORY_BUDGET_MARGIN_PERCENT)
-        estimate_mb = cls._ceil_div(size_mb * snapshot_count * margin_percent, 100)
-        round_to_mb = 1024 if estimate_mb >= 1024 else 128
-        rounded_mb = cls._ceil_div(estimate_mb, round_to_mb) * round_to_mb
-        return max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, rounded_mb))
+        return cls._smart_history_budget_mb_from_profile_footprint(
+            database_size_bytes,
+            retained_snapshot_count,
+        )
 
     def _discover_profile_database_paths(self, owner: object | None) -> list[Path]:
         candidates: list[Path] = []
@@ -1785,6 +1805,41 @@ class ApplicationSettingsDialog(QDialog):
             total_bytes += self._profile_database_bundle_size_bytes(profile_path)
         return max(0, total_bytes)
 
+    def _smart_history_budget_source(self) -> tuple[int, str]:
+        if self._smart_history_budget_source_cache is not None:
+            return self._smart_history_budget_source_cache
+
+        profile_path = self._current_profile_path
+        owner = self._smart_history_budget_owner
+        service_getter = getattr(owner, "_application_storage_admin_service", None)
+        if profile_path is not None and callable(service_getter):
+            try:
+                audit = service_getter().inspect(current_db_path=profile_path)
+                current_profile_bytes = int(audit.summary.current_profile_bytes or 0)
+            except Exception:
+                current_profile_bytes = 0
+            if current_profile_bytes > 0:
+                self._smart_history_budget_source_cache = (
+                    current_profile_bytes,
+                    "current profile attributed storage",
+                )
+                return self._smart_history_budget_source_cache
+
+        if profile_path is not None:
+            profile_database_bytes = self._profile_database_bundle_size_bytes(profile_path)
+            if profile_database_bytes > 0:
+                self._smart_history_budget_source_cache = (
+                    profile_database_bytes,
+                    "current profile database files",
+                )
+                return self._smart_history_budget_source_cache
+
+        self._smart_history_budget_source_cache = (
+            self._profile_database_collection_size_bytes(),
+            "profile database files",
+        )
+        return self._smart_history_budget_source_cache
+
     @staticmethod
     def _profile_database_bundle_size_bytes(profile_path: Path) -> int:
         candidate_paths = [
@@ -1811,30 +1866,35 @@ class ApplicationSettingsDialog(QDialog):
         return max(0, total_bytes)
 
     def _refresh_smart_history_budget_button_state(self, *_args) -> None:
-        database_size_bytes = self._profile_database_collection_size_bytes()
+        source_bytes, source_label = self._smart_history_budget_source()
         auto_cleanup_enabled = self.history_auto_cleanup_enabled_check.isChecked()
-        enabled = bool(auto_cleanup_enabled and database_size_bytes > 0)
+        enabled = bool(auto_cleanup_enabled and source_bytes > 0)
         self.history_storage_budget_smart_button.setEnabled(enabled)
         if not auto_cleanup_enabled:
             tooltip = "Enable automatic cleanup to use the profile-size budget helper."
-        elif database_size_bytes <= 0:
+        elif source_bytes <= 0:
             tooltip = "Open or save a profile database before calculating a smart budget."
         else:
             keep_latest = int(self.history_auto_snapshot_keep_latest_spin.value())
-            smart_budget_mb = self._smart_history_budget_mb_from_database_size(
-                database_size_bytes,
+            smart_budget_mb = self._smart_history_budget_mb_from_profile_footprint(
+                source_bytes,
                 keep_latest,
+            )
+            transient_snapshots = max(
+                0,
+                int(self.SMART_HISTORY_BUDGET_TRANSIENT_SNAPSHOT_COUNT),
             )
             tooltip = (
                 f"Set budget to {format_budget_megabytes(smart_budget_mb)} "
-                f"from {format_storage_bytes(database_size_bytes)} across all profile databases x {keep_latest} retained snapshot(s) "
-                f"+ {self.SMART_HISTORY_BUDGET_MARGIN_PERCENT}% margin."
+                f"from {format_storage_bytes(source_bytes)} {source_label}: live profile storage "
+                f"+ {keep_latest} retained snapshot(s) + {transient_snapshots} temporary "
+                f"snapshot slot(s) + {self.SMART_HISTORY_BUDGET_MARGIN_PERCENT}% margin."
             )
         self.history_storage_budget_smart_button.setToolTip(tooltip)
 
     def _apply_smart_history_budget(self) -> None:
-        database_size_bytes = self._profile_database_collection_size_bytes()
-        if database_size_bytes <= 0:
+        source_bytes, _source_label = self._smart_history_budget_source()
+        if source_bytes <= 0:
             QMessageBox.information(
                 self,
                 "Smart Storage Budget",
@@ -1843,8 +1903,8 @@ class ApplicationSettingsDialog(QDialog):
             self._refresh_smart_history_budget_button_state()
             return
         keep_latest = int(self.history_auto_snapshot_keep_latest_spin.value())
-        smart_budget_mb = self._smart_history_budget_mb_from_database_size(
-            database_size_bytes,
+        smart_budget_mb = self._smart_history_budget_mb_from_profile_footprint(
+            source_bytes,
             keep_latest,
         )
         self.history_storage_budget_spin.setValue(smart_budget_mb)
@@ -8807,6 +8867,28 @@ class App(QMainWindow):
                 f" The active profile {summary.current_profile_name} currently accounts for about "
                 f"{self._human_size(summary.current_profile_bytes)} across database, history, and managed files."
             )
+        safe_budget_text = "Not available"
+        safe_budget_detail = "Open a profile to calculate a safe budget."
+        if summary.current_profile_name and int(summary.current_profile_bytes or 0) > 0:
+            retention_settings = self._current_history_retention_settings()
+            retained_snapshots = int(retention_settings.auto_snapshot_keep_latest or 1)
+            transient_snapshots = max(
+                0,
+                int(ApplicationSettingsDialog.SMART_HISTORY_BUDGET_TRANSIENT_SNAPSHOT_COUNT),
+            )
+            margin_percent = int(ApplicationSettingsDialog.SMART_HISTORY_BUDGET_MARGIN_PERCENT)
+            safe_budget_mb = (
+                ApplicationSettingsDialog._smart_history_budget_mb_from_profile_footprint(
+                    int(summary.current_profile_bytes or 0),
+                    retained_snapshots,
+                )
+            )
+            safe_budget_text = format_budget_megabytes(safe_budget_mb)
+            safe_budget_detail = (
+                f"{safe_budget_text} for live profile storage + {retained_snapshots} retained "
+                f"snapshot(s) + {transient_snapshots} temporary snapshot slot(s) + "
+                f"{margin_percent}% margin."
+            )
         return {
             "available": True,
             "summary": headline,
@@ -8822,6 +8904,8 @@ class App(QMainWindow):
             "deleted_profile_text": self._human_size(summary.deleted_profile_bytes),
             "orphaned_text": self._human_size(summary.orphaned_bytes),
             "warning_text": self._human_size(summary.warning_bytes),
+            "safe_budget_text": safe_budget_text,
+            "safe_budget_detail": safe_budget_detail,
             "warning_items": int(summary.warning_items),
             "reclaimable_items": int(summary.reclaimable_items),
             "total_items": int(summary.total_items),
