@@ -414,9 +414,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
 
         self.assertEqual(len(shared_upc_issues), 2)
         self.assertTrue(all(issue.severity == "info" for issue in shared_upc_issues))
-        self.assertTrue(
-            all("same linked album" in issue.details for issue in shared_upc_issues)
-        )
+        self.assertTrue(all("same linked album" in issue.details for issue in shared_upc_issues))
         self.assertFalse(
             any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
         )
