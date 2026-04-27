@@ -10,7 +10,7 @@ from __future__ import annotations
 from importlib import metadata
 
 PACKAGE_NAME = "isrc-catalog-manager"
-__version__ = "3.6.12"
+__version__ = "3.6.13"
 
 
 def current_app_version(package_names: tuple[str, ...] | None = None) -> str:

@@ -1,7 +1,7 @@
 {
-  "version": "3.6.12",
+  "version": "3.6.13",
   "released_at": "2026-04-27",
-  "summary": "Cancel stalled update downloads",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.12.md",
+  "summary": "Bump the python-runtime-dependencies group with 3 updates",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.13.md",
   "minimum_supported_version": null
 }
