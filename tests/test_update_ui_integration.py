@@ -66,6 +66,7 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             _update_add_data_generated_fields=lambda: calls.append("generated-fields"),
             _schedule_owner_party_bootstrap=lambda: calls.append("owner-bootstrap"),
             _offer_settings_on_first_launch_if_pending=lambda: calls.append("first-launch"),
+            _finalize_update_backup_handoff=lambda **_kwargs: calls.append("backup-cleanup"),
             _schedule_startup_update_check=lambda: calls.append("update-check"),
         )
 
@@ -73,7 +74,13 @@ class UpdateUiIntegrationTests(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["generated-fields", "owner-bootstrap", "first-launch", "update-check"],
+            [
+                "generated-fields",
+                "owner-bootstrap",
+                "first-launch",
+                "backup-cleanup",
+                "update-check",
+            ],
         )
 
     def test_update_backup_handoff_cleanup_logs_failure(self):
@@ -94,19 +101,28 @@ class UpdateUiIntegrationTests(unittest.TestCase):
         self.assertIn("delete blocked", log_events[0][1]["error"])
 
     def test_update_backup_handoff_is_marked_ready_only_after_startup(self):
-        fake_app = SimpleNamespace(_startup_ready_emitted=False)
+        fake_app = SimpleNamespace(_startup_ready_emitted=False, _log_event=mock.Mock())
 
         with mock.patch.object(app_module, "mark_update_backup_ready_for_deletion") as mark_ready:
-            app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+            app_module.App._finalize_update_backup_handoff(fake_app, phase="startup-ready")
 
         mark_ready.assert_not_called()
 
     def test_update_backup_handoff_ready_close_runs_cleanup(self):
+        finalize = mock.Mock()
+        fake_app = SimpleNamespace(_finalize_update_backup_handoff=finalize)
+
+        app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+
+        finalize.assert_called_once_with(phase="close")
+
+    def test_update_backup_handoff_startup_ready_runs_cleanup(self):
         cleanup = mock.Mock()
         fake_app = SimpleNamespace(
             _startup_ready_emitted=True,
             _cleanup_ready_update_backup_handoff=cleanup,
             _cleanup_legacy_update_backup_siblings=mock.Mock(),
+            _cleanup_update_cache_artifacts=mock.Mock(),
         )
 
         with mock.patch.object(
@@ -114,13 +130,14 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             "mark_update_backup_ready_for_deletion",
             return_value={"status": "ready_for_deletion"},
         ) as mark_ready:
-            app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+            app_module.App._finalize_update_backup_handoff(fake_app, phase="startup-ready")
 
         mark_ready.assert_called_once_with()
-        cleanup.assert_called_once_with(phase="close")
+        cleanup.assert_called_once_with(phase="startup-ready")
         fake_app._cleanup_legacy_update_backup_siblings.assert_called_once_with()
+        fake_app._cleanup_update_cache_artifacts.assert_called_once_with()
 
-    def test_legacy_update_backup_cleanup_uses_current_packaged_version(self):
+    def test_legacy_update_backup_cleanup_removes_packaged_backup_siblings(self):
         log_events = []
         fake_app = SimpleNamespace(
             _app_version_text=lambda: "3.6.9",
@@ -140,14 +157,18 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             ) as resolve_target,
             mock.patch.object(
                 app_module,
-                "cleanup_legacy_update_backups_for_version",
+                "cleanup_update_backup_siblings",
                 return_value=[removed_backup],
+            ) as cleanup_siblings,
+            mock.patch.object(
+                app_module, "cleanup_legacy_update_backups_for_version"
             ) as cleanup_legacy,
         ):
             app_module.App._cleanup_legacy_update_backup_siblings(fake_app)
 
         resolve_target.assert_called_once_with()
-        cleanup_legacy.assert_called_once_with(installed_target, "3.6.9")
+        cleanup_siblings.assert_called_once_with(installed_target)
+        cleanup_legacy.assert_not_called()
         self.assertEqual(log_events[0][0][0], "updates.legacy_backup_cleanup")
         self.assertEqual(log_events[0][1]["count"], 1)
 

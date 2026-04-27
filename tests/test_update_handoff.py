@@ -109,6 +109,44 @@ class UpdateBackupHandoffTests(unittest.TestCase):
             self.assertTrue(old_version_backup.exists())
             self.assertTrue(unrelated.exists())
 
+    def test_sibling_cleanup_removes_all_update_backups_for_started_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "Music Catalog Manager.app"
+            installed.mkdir()
+            current_version_backup = (
+                root / "Music Catalog Manager.app.backup-before-v3.7.5-20260427-200000"
+            )
+            current_version_backup.mkdir()
+            older_backup = root / "Music Catalog Manager.app.backup-before-v3.7.4-20260427-190000"
+            older_backup.mkdir()
+            unrelated = root / "manual-backup"
+            unrelated.mkdir()
+
+            removed = update_handoff.cleanup_update_backup_siblings(installed)
+
+            self.assertEqual(removed, [older_backup.resolve(), current_version_backup.resolve()])
+            self.assertFalse(current_version_backup.exists())
+            self.assertFalse(older_backup.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_update_cache_cleanup_removes_workspaces_but_keeps_handoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / update_handoff.UPDATE_BACKUP_HANDOFF_FILENAME
+            state_path.write_text("{}", encoding="utf-8")
+            workspace = root / "v3.7.5-macos"
+            workspace.mkdir()
+            package = root / "download.zip"
+            package.write_bytes(b"pkg")
+
+            removed = update_handoff.cleanup_update_cache_artifacts(update_root=root)
+
+            self.assertEqual(removed, [package.resolve(), workspace.resolve()])
+            self.assertTrue(state_path.exists())
+            self.assertFalse(workspace.exists())
+            self.assertFalse(package.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

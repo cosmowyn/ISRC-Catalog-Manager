@@ -440,6 +440,8 @@ from isrc_manager.update_checker import (
 from isrc_manager.update_handoff import (
     cleanup_legacy_update_backups_for_version,
     cleanup_ready_update_backup,
+    cleanup_update_backup_siblings,
+    cleanup_update_cache_artifacts,
     mark_update_backup_ready_for_deletion,
 )
 from isrc_manager.update_installer import (
@@ -7324,10 +7326,12 @@ class App(QMainWindow):
             return
         try:
             installed_target = resolve_installed_target_path()
-            removed_paths = cleanup_legacy_update_backups_for_version(
-                installed_target,
-                self._app_version_text(),
-            )
+            removed_paths = cleanup_update_backup_siblings(installed_target)
+            if not removed_paths:
+                removed_paths = cleanup_legacy_update_backups_for_version(
+                    installed_target,
+                    self._app_version_text(),
+                )
         except Exception as exc:
             self._log_event(
                 "updates.legacy_backup_cleanup_failed",
@@ -7345,7 +7349,31 @@ class App(QMainWindow):
                 paths=[str(path) for path in removed_paths],
             )
 
-    def _mark_update_backup_handoff_ready_on_close(self) -> None:
+    def _cleanup_update_cache_artifacts(self) -> None:
+        if not getattr(sys, "frozen", False):
+            return
+        try:
+            removed_paths = cleanup_update_cache_artifacts(
+                update_root=self.storage_layout.preferred_data_root / "updates",
+            )
+        except Exception as exc:
+            self._log_event(
+                "updates.cache_cleanup_failed",
+                "Update cache cleanup failed",
+                level=logging.WARNING,
+                error=str(exc),
+            )
+            return
+        if removed_paths:
+            self._log_event(
+                "updates.cache_cleanup",
+                "Removed update cache artifact(s)",
+                level=logging.INFO,
+                count=len(removed_paths),
+                paths=[str(path) for path in removed_paths],
+            )
+
+    def _finalize_update_backup_handoff(self, *, phase: str) -> None:
         if not getattr(self, "_startup_ready_emitted", False):
             return
         try:
@@ -7355,12 +7383,17 @@ class App(QMainWindow):
                 "updates.backup_handoff_ready_failed",
                 "Update backup handoff could not be marked ready for cleanup",
                 level=logging.WARNING,
+                phase=phase,
                 error=str(exc),
             )
             return
         if state is not None:
-            self._cleanup_ready_update_backup_handoff(phase="close")
+            self._cleanup_ready_update_backup_handoff(phase=phase)
         self._cleanup_legacy_update_backup_siblings()
+        self._cleanup_update_cache_artifacts()
+
+    def _mark_update_backup_handoff_ready_on_close(self) -> None:
+        self._finalize_update_backup_handoff(phase="close")
 
     def _schedule_post_ready_startup_tasks(self) -> None:
         if self._post_ready_startup_tasks_scheduled:
@@ -7372,6 +7405,7 @@ class App(QMainWindow):
         self._update_add_data_generated_fields()
         self._schedule_owner_party_bootstrap()
         self._offer_settings_on_first_launch_if_pending()
+        self._finalize_update_backup_handoff(phase="startup-ready")
         self._schedule_startup_update_check()
 
     def _schedule_startup_update_check(self) -> None:

@@ -144,6 +144,44 @@ def cleanup_legacy_update_backups_for_version(
     return removed
 
 
+def cleanup_update_backup_siblings(installed_target: str | Path) -> list[Path]:
+    target = Path(installed_target).expanduser().resolve()
+    parent = target.parent
+    if not parent.is_dir():
+        return []
+
+    removed: list[Path] = []
+    for candidate in sorted(parent.iterdir()):
+        if ".backup-before-v" not in candidate.name:
+            continue
+        try:
+            if candidate.resolve() == target:
+                continue
+        except OSError:
+            pass
+        _remove_path(candidate)
+        removed.append(candidate)
+    return removed
+
+
+def cleanup_update_cache_artifacts(*, update_root: str | Path | None = None) -> list[Path]:
+    root = (
+        Path(update_root).expanduser().resolve()
+        if update_root is not None
+        else preferred_data_root(APP_NAME) / "updates"
+    )
+    if not root.is_dir():
+        return []
+
+    removed: list[Path] = []
+    for candidate in sorted(root.iterdir()):
+        if candidate.name == UPDATE_BACKUP_HANDOFF_FILENAME:
+            continue
+        _remove_path(candidate)
+        removed.append(candidate)
+    return removed
+
+
 def _state_path(state_path: str | Path | None) -> Path:
     if state_path is None:
         return update_backup_handoff_path()

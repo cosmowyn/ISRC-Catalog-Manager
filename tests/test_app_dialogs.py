@@ -5,9 +5,11 @@ from unittest import mock
 
 try:
     from PySide6.QtCore import Qt
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,
+        QDialogButtonBox,
         QMessageBox,
         QTabWidget,
         QVBoxLayout,
@@ -15,8 +17,10 @@ try:
     )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
+    QIcon = None
     QApplication = None
     QDialog = None
+    QDialogButtonBox = None
     QMessageBox = None
     QTabWidget = None
     QVBoxLayout = None
@@ -27,12 +31,18 @@ else:
 
 from isrc_manager.app_dialogs import (
     ActionRibbonDialog,
+    AboutDialog,
     ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
     MasterTransferExportDialog,
+    PAYPAL_DONATE_URL,
     ReleaseNotesDialog,
+)
+from isrc_manager.external_launch import (
+    clear_recorded_external_launches,
+    get_recorded_external_launches,
 )
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
 from isrc_manager.tasks.models import TaskProgressUpdate
@@ -341,12 +351,57 @@ class _DiagnosticsDialogHost(QWidget):
         return f"storage-cleanup-{len(self.storage_cleanup_calls)}"
 
 
+class _AboutDialogHost(QWidget):
+    current_db_path = "/tmp/catalog.db"
+    data_root = Path("/tmp/test-data")
+    logs_dir = Path("/tmp/test-logs")
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Catalog Test")
+
+    def windowIcon(self):
+        return QIcon()
+
+    def _app_version_text(self):
+        return "3.7.5"
+
+    def _get_db_version(self):
+        return 77
+
+
 class AppDialogsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if QApplication is None:
             raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_about_dialog_shows_visible_paypal_donation_section(self):
+        clear_recorded_external_launches()
+        host = _AboutDialogHost()
+        dialog = AboutDialog(host)
+        try:
+            dialog.show()
+            self.app.processEvents()
+            donation_section = dialog.findChild(QWidget, "aboutDonationSection")
+            self.assertIsNotNone(donation_section)
+            self.assertLess(
+                donation_section.geometry().top(),
+                dialog.findChild(QDialogButtonBox).geometry().top(),
+            )
+            self.assertEqual(dialog.donate_button.text(), "Donate with PayPal")
+            self.assertFalse(dialog.donate_button.icon().isNull())
+
+            dialog.donate_button.click()
+
+            requests = get_recorded_external_launches()
+            self.assertEqual(requests[-1].target, PAYPAL_DONATE_URL)
+            self.assertEqual(requests[-1].source, "AboutDialog.donate")
+        finally:
+            dialog.close()
+            host.close()
+            clear_recorded_external_launches()
 
     def test_action_ribbon_dialog_updates_selected_actions(self):
         dialog = ActionRibbonDialog(
