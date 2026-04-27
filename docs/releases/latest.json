@@ -1,7 +1,7 @@
 {
-  "version": "3.6.15",
+  "version": "3.6.16",
   "released_at": "2026-04-27",
-  "summary": "Improve updater handoff and startup storage feedback",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.15.md",
+  "summary": "Assign update handoff tests to CI group",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.16.md",
   "minimum_supported_version": null
 }
