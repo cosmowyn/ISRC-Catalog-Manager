@@ -7661,15 +7661,24 @@ class App(QMainWindow):
             self._present_update_release_notes(manifest, "")
 
     def _present_update_release_notes(self, manifest, release_notes_markdown: str) -> None:
+        install_available = False
+        try:
+            select_platform_asset(manifest)
+            install_available = True
+        except UpdateInstallerError:
+            install_available = False
         dialog = ReleaseNotesDialog(
             version=getattr(manifest, "version", ""),
             released_at=getattr(manifest, "released_at", ""),
             summary=getattr(manifest, "summary", ""),
             release_notes_markdown=release_notes_markdown,
             release_notes_url=getattr(manifest, "release_notes_url", ""),
+            allow_update_install=install_available,
             parent=self,
         )
         dialog.exec()
+        if dialog.install_requested():
+            self._confirm_and_start_update_install(manifest)
 
     def _offer_settings_on_first_launch_if_pending(self) -> None:
         setting_key = "startup/offer_open_settings_on_first_launch_pending"
@@ -8766,7 +8775,17 @@ class App(QMainWindow):
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
     def _application_storage_admin_service(self) -> ApplicationStorageAdminService:
-        return ApplicationStorageAdminService(self.storage_layout)
+        installed_update_target = None
+        if getattr(sys, "frozen", False):
+            try:
+                installed_update_target = resolve_installed_target_path()
+            except Exception:
+                installed_update_target = None
+        return ApplicationStorageAdminService(
+            self.storage_layout,
+            update_root=self.storage_layout.preferred_data_root / "updates",
+            installed_update_target_path=installed_update_target,
+        )
 
     def _application_storage_summary_payload(
         self,

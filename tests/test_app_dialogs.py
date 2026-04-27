@@ -32,6 +32,7 @@ from isrc_manager.app_dialogs import (
     DiagnosticsDialog,
     HelpContentsDialog,
     MasterTransferExportDialog,
+    ReleaseNotesDialog,
 )
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
 from isrc_manager.tasks.models import TaskProgressUpdate
@@ -159,6 +160,21 @@ class _DiagnosticsDialogHost(QWidget):
                     "warning_required": True,
                     "warning": "Deleting this file permanently removes media still referenced by active profiles.",
                     "references_text": "Track #1 'Live Track' audio",
+                },
+                {
+                    "item_key": "update-backup:/tmp/test-app.backup-before-v3.6.9-20260427-010203",
+                    "status_label": "Older Update Backup",
+                    "category_key": "update_install_backup",
+                    "category_label": "Update Install Backup",
+                    "label": "test-app.backup-before-v3.6.9-20260427-010203",
+                    "size_text": "96.0 MB",
+                    "bytes_on_disk": 96 * 1024 * 1024,
+                    "profile_name": "v3.6.9",
+                    "path": "/tmp/test-app.backup-before-v3.6.9-20260427-010203",
+                    "reason": "This is an older packaged-app rollback copy left by the automatic updater.",
+                    "warning_required": False,
+                    "warning": "",
+                    "references_text": "",
                 },
             ],
         }
@@ -506,6 +522,23 @@ class AppDialogsTests(unittest.TestCase):
                 dialog.close()
                 host.close()
 
+    def test_release_notes_dialog_update_button_requests_install(self):
+        dialog = ReleaseNotesDialog(
+            version="3.6.9",
+            released_at="2026-04-27",
+            summary="A useful update.",
+            release_notes_markdown="# Release Notes\n\nDetails.",
+            allow_update_install=True,
+        )
+        try:
+            self.assertFalse(dialog.install_requested())
+            self.assertIsNotNone(dialog.update_button)
+            dialog.update_button.click()
+            self.assertTrue(dialog.install_requested())
+            self.assertEqual(dialog.result(), QDialog.Accepted)
+        finally:
+            dialog.close()
+
     def test_diagnostics_dialog_uses_async_loader(self):
         host = _DiagnosticsDialogHost()
         dialog = DiagnosticsDialog(host)
@@ -671,9 +704,19 @@ class AppDialogsTests(unittest.TestCase):
             self.assertFalse(dialog.loading_panel.isVisible())
             self.assertEqual(dialog.surface_tabs.tabText(0), "Cleanup Candidates")
             self.assertEqual(dialog.surface_tabs.tabText(1), "Warnings & In Use")
+            self.assertEqual(dialog.surface_tabs.tabText(2), "Update Backups")
             self.assertIn("3.2 GB", dialog.summary_label.text())
             self.assertEqual(dialog.cleanup_table.rowCount(), 1)
             self.assertEqual(dialog.warning_table.rowCount(), 1)
+            self.assertEqual(dialog.update_backup_table.rowCount(), 1)
+            self.assertEqual(
+                dialog.update_backup_table.horizontalHeaderItem(4).text(),
+                "Version",
+            )
+
+            dialog.surface_tabs.setCurrentWidget(dialog.update_backup_table)
+            dialog.update_backup_table.selectRow(0)
+            self.assertIn("Version: v3.6.9", dialog.details_edit.toPlainText())
 
             dialog.surface_tabs.setCurrentWidget(dialog.warning_table)
             dialog.warning_table.selectRow(0)

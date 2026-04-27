@@ -1719,8 +1719,10 @@ class ApplicationStorageAdminDialog(QDialog):
 
         self.cleanup_table = self._build_items_table()
         self.warning_table = self._build_items_table()
+        self.update_backup_table = self._build_items_table(owner_header="Version")
         self.surface_tabs.addTab(self.cleanup_table, "Cleanup Candidates")
         self.surface_tabs.addTab(self.warning_table, "Warnings & In Use")
+        self.surface_tabs.addTab(self.update_backup_table, "Update Backups")
 
         details_group = QGroupBox("Details")
         details_layout = QVBoxLayout(details_group)
@@ -1760,14 +1762,17 @@ class ApplicationStorageAdminDialog(QDialog):
         self.surface_tabs.currentChanged.connect(lambda _index: self._sync_selection_details())
         self.cleanup_table.itemSelectionChanged.connect(self._sync_selection_details)
         self.warning_table.itemSelectionChanged.connect(self._sync_selection_details)
+        self.update_backup_table.itemSelectionChanged.connect(self._sync_selection_details)
 
         self.refresh()
         _apply_compact_dialog_control_heights(self)
         self._sync_loading_panel_metrics()
 
-    def _build_items_table(self) -> QTableWidget:
+    def _build_items_table(self, *, owner_header: str = "Profile") -> QTableWidget:
         table = QTableWidget(0, 6, self)
-        table.setHorizontalHeaderLabels(["Status", "Category", "Item", "Size", "Profile", "Path"])
+        table.setHorizontalHeaderLabels(
+            ["Status", "Category", "Item", "Size", owner_header, "Path"]
+        )
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1826,10 +1831,15 @@ class ApplicationStorageAdminDialog(QDialog):
             for item in raw_items
             if str(item.get("item_key") or "").strip()
         }
-        cleanup_items = [item for item in raw_items if not bool(item.get("warning_required"))]
-        warning_items = [item for item in raw_items if bool(item.get("warning_required"))]
+        update_items = [item for item in raw_items if self._is_update_backup_item(item)]
+        non_update_items = [item for item in raw_items if not self._is_update_backup_item(item)]
+        cleanup_items = [
+            item for item in non_update_items if not bool(item.get("warning_required"))
+        ]
+        warning_items = [item for item in non_update_items if bool(item.get("warning_required"))]
         self._populate_items_table(self.cleanup_table, cleanup_items)
         self._populate_items_table(self.warning_table, warning_items)
+        self._populate_items_table(self.update_backup_table, update_items)
         self.details_edit.setPlainText("")
         self._sync_selection_details()
 
@@ -1891,7 +1901,10 @@ class ApplicationStorageAdminDialog(QDialog):
         ]
         profile_name = str(primary.get("profile_name") or "").strip()
         if profile_name:
-            lines.append(f"Profile: {profile_name}")
+            if self._is_update_backup_item(primary):
+                lines.append(f"Version: {profile_name}")
+            else:
+                lines.append(f"Profile: {profile_name}")
         reason = str(primary.get("reason") or "").strip()
         if reason:
             lines.extend(["", reason])
@@ -2008,6 +2021,7 @@ class ApplicationStorageAdminDialog(QDialog):
             self.close_button,
             self.cleanup_table,
             self.warning_table,
+            self.update_backup_table,
         ):
             widget.setEnabled(not self._busy)
         if not self._busy:
@@ -2042,6 +2056,12 @@ class ApplicationStorageAdminDialog(QDialog):
     @staticmethod
     def _display_bytes(value: int) -> str:
         return format_storage_bytes(value, max_decimals=1)
+
+    @staticmethod
+    def _is_update_backup_item(item: dict[str, object]) -> bool:
+        category_key = str(item.get("category_key") or "")
+        item_key = str(item.get("item_key") or "")
+        return category_key.startswith("update_") or item_key.startswith("update-")
 
 
 class AboutDialog(QDialog):
@@ -2168,9 +2188,12 @@ class ReleaseNotesDialog(QDialog):
         summary: str,
         release_notes_markdown: str,
         release_notes_url: str = "",
+        allow_update_install: bool = False,
         parent=None,
     ):
         super().__init__(parent)
+        self._install_requested = False
+        self.update_button = None
         self.setWindowTitle(f"Release Notes - {version}")
         self.resize(900, 680)
         self.setMinimumSize(760, 520)
@@ -2226,10 +2249,23 @@ class ReleaseNotesDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
         buttons.rejected.connect(self.reject)
+        if allow_update_install:
+            self.update_button = buttons.addButton(
+                "Download and Install",
+                QDialogButtonBox.ActionRole,
+            )
+            self.update_button.clicked.connect(self._request_update_install)
         close_button = buttons.button(QDialogButtonBox.Close)
         if close_button is not None:
             close_button.setDefault(True)
         root.addWidget(buttons)
+
+    def install_requested(self) -> bool:
+        return bool(self._install_requested)
+
+    def _request_update_install(self) -> None:
+        self._install_requested = True
+        self.accept()
 
     def _set_notes_markdown(
         self,

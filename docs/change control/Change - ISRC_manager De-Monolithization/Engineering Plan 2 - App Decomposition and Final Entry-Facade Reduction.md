@@ -18,6 +18,7 @@ This plan should only begin after Plan 1 is complete.
 - `App._init_services` and service graph wiring
 - profile/database session logic
 - diagnostics and application storage logic
+- application update check, release-notes, install, and updater-handoff logic
 - theme/settings/history retention logic
 - layout and action ribbon logic
 - catalog workflow logic
@@ -41,6 +42,7 @@ Use or create:
 - `isrc_manager/action_ribbon.py`
 - `isrc_manager/diagnostics/report.py`
 - `isrc_manager/diagnostics/controller.py`
+- `isrc_manager/update_controller.py`
 - `isrc_manager/theme_controller.py`
 - `isrc_manager/settings_controller.py`
 - `isrc_manager/history_retention_controller.py`
@@ -82,6 +84,7 @@ And feature-family modules under existing packages where appropriate.
 
 **Validation**
 - diagnostics dialog/report/storage flows still function
+- application storage admin still reports and cleans update backups/cache artifacts
 
 ### Phase 16 — Theme, Settings, and History Retention Controllers
 **Goal**
@@ -121,6 +124,7 @@ And feature-family modules under existing packages where appropriate.
   - audio
   - authenticity
   - quality
+  - updates
 
 **Rule**
 - one family per run if needed

@@ -461,6 +461,34 @@ class UpdateUiIntegrationTests(unittest.TestCase):
             [("network", False, True)],
         )
 
+    def test_release_notes_dialog_update_button_continues_to_installer(self):
+        manifest = ReleaseManifest.from_mapping(_manifest_mapping())
+        started_versions = []
+        dialog_kwargs = []
+
+        class _FakeReleaseNotesDialog:
+            def __init__(self, **kwargs):
+                dialog_kwargs.append(kwargs)
+
+            def exec(self):
+                return None
+
+            def install_requested(self):
+                return True
+
+        fake_app = SimpleNamespace(
+            _confirm_and_start_update_install=lambda release_manifest: started_versions.append(
+                release_manifest.version
+            )
+        )
+
+        with mock.patch.object(app_module, "ReleaseNotesDialog", _FakeReleaseNotesDialog):
+            app_module.App._present_update_release_notes(fake_app, manifest, "# Notes")
+
+        self.assertEqual(started_versions, ["3.3.1"])
+        self.assertEqual(dialog_kwargs[0]["release_notes_markdown"], "# Notes")
+        self.assertTrue(dialog_kwargs[0]["allow_update_install"])
+
     def test_install_update_prepare_error_surfaces_specific_failure_message(self):
         manifest = ReleaseManifest.from_mapping(_manifest_mapping())
         warnings = []

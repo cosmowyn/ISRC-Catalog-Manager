@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -20,6 +21,14 @@ from isrc_manager.history.manager import HistoryManager
 from isrc_manager.history.session_manager import SessionHistoryManager
 from isrc_manager.paths import MANAGED_STORAGE_SUBDIRS, AppStorageLayout
 from isrc_manager.services.database_admin import ProfileStoreService
+from isrc_manager.update_handoff import (
+    UPDATE_BACKUP_HANDOFF_FILENAME,
+    UPDATE_BACKUP_STATUS_CREATED,
+    UPDATE_BACKUP_STATUS_DESTROYED,
+    UPDATE_BACKUP_STATUS_READY_FOR_DELETION,
+    mark_update_backup_destroyed,
+    read_update_backup_handoff,
+)
 
 STATUS_IN_USE = "in_use"
 STATUS_DELETED_PROFILE = "deleted_profile_residue"
@@ -251,8 +260,29 @@ class ApplicationStorageAdminService:
         ),
     }
 
-    def __init__(self, layout: AppStorageLayout):
+    _UPDATE_BACKUP_MARKER = ".backup-before-v"
+    _UPDATE_BACKUP_NAME_RE = re.compile(
+        r"\.backup-before-v(?P<version>.+?)-(?P<stamp>\d{8}-\d{6})(?:-\d+)?$"
+    )
+
+    def __init__(
+        self,
+        layout: AppStorageLayout,
+        *,
+        update_root: str | Path | None = None,
+        installed_update_target_path: str | Path | None = None,
+    ):
         self.layout = layout
+        self.update_root = (
+            Path(update_root).expanduser().resolve()
+            if update_root is not None
+            else (layout.data_root / "updates").resolve()
+        )
+        self.installed_update_target_path = (
+            Path(installed_update_target_path).expanduser().resolve()
+            if installed_update_target_path is not None
+            else None
+        )
         self.profile_store = ProfileStoreService(layout.database_dir)
         self.managed_stores = {
             name: ManagedFileStorage(data_root=layout.data_root, relative_root=name)
@@ -268,7 +298,7 @@ class ApplicationStorageAdminService:
     ) -> StorageAdminAudit:
         current_profile = self._normalize_existing_path(current_db_path)
         active_profiles = self._active_profile_paths(current_profile)
-        total_steps = max(1, len(active_profiles) + 5)
+        total_steps = max(1, len(active_profiles) + 6)
         active_profile_set = set(active_profiles)
         active_stems = {Path(path).stem for path in active_profiles}
         current_profile_name = Path(current_profile).name if current_profile else None
@@ -328,11 +358,21 @@ class ApplicationStorageAdminService:
         )
 
         if status_callback is not None:
+            status_callback("Auditing update backups and installer cache...")
+        items.extend(self._audit_update_backup_storage())
+        self._report(
+            progress_callback,
+            4 + len(active_profiles),
+            total_steps,
+            "Audited update backups and installer cache.",
+        )
+
+        if status_callback is not None:
             status_callback("Auditing generated exports and log files...")
         items.extend(self._audit_generated_files())
         self._report(
             progress_callback,
-            4 + len(active_profiles),
+            5 + len(active_profiles),
             total_steps,
             "Audited generated exports and log files.",
         )
@@ -370,7 +410,7 @@ class ApplicationStorageAdminService:
     ) -> int:
         current_profile = self._normalize_existing_path(current_db_path)
         active_profiles = self._active_profile_paths(current_profile)
-        return max(1, len(active_profiles) + 5)
+        return max(1, len(active_profiles) + 6)
 
     def cleanup_selected(
         self,
@@ -630,6 +670,224 @@ class ApplicationStorageAdminService:
         )
         items.extend(self._session_snapshot_items(active_profile_set=active_profile_set))
         return items
+
+    def _audit_update_backup_storage(self) -> list[StorageAdminItem]:
+        items: list[StorageAdminItem] = []
+        update_root = self.update_root
+        handoff_path = update_root / UPDATE_BACKUP_HANDOFF_FILENAME
+        handoff_state = read_update_backup_handoff(state_path=handoff_path)
+        handoff_backup_path = self._handoff_backup_path(handoff_state)
+        handoff_backup_identity = (
+            self._path_identity(handoff_backup_path) if handoff_backup_path is not None else ""
+        )
+
+        backup_candidates: list[Path] = []
+        if handoff_backup_path is not None:
+            backup_candidates.append(handoff_backup_path)
+        for scan_root in self._update_backup_scan_roots(handoff_state):
+            if not scan_root.is_dir():
+                continue
+            for candidate in sorted(scan_root.iterdir(), key=lambda path: path.name.lower()):
+                if self._looks_like_update_backup(candidate):
+                    backup_candidates.append(candidate)
+
+        seen_backup_paths: set[str] = set()
+        backup_identities: set[str] = set()
+        for backup_path in backup_candidates:
+            identity = self._path_identity(backup_path)
+            if not identity or identity in seen_backup_paths:
+                continue
+            if not backup_path.exists() and not backup_path.is_symlink():
+                continue
+            seen_backup_paths.add(identity)
+            backup_identities.add(identity)
+            items.append(
+                self._update_backup_item(
+                    backup_path,
+                    handoff_state=handoff_state,
+                    handoff_path=handoff_path,
+                    is_handoff_backup=bool(identity == handoff_backup_identity),
+                )
+            )
+
+        if update_root.exists():
+            for path in sorted(update_root.iterdir(), key=lambda candidate: candidate.name.lower()):
+                if path.name == UPDATE_BACKUP_HANDOFF_FILENAME:
+                    continue
+                if self._path_identity(path) in backup_identities:
+                    continue
+                if not path.exists() and not path.is_symlink():
+                    continue
+                category_key = "update_workspace" if path.is_dir() else "update_cache_file"
+                category_label = (
+                    "Update Installer Workspace" if path.is_dir() else "Update Cache File"
+                )
+                items.append(
+                    StorageAdminItem(
+                        item_key=f"update-cache:{self._path_identity(path)}",
+                        status_key=STATUS_OTHER,
+                        status_label="Update Cache / Installer Workspace",
+                        category_key=category_key,
+                        category_label=category_label,
+                        label=path.name,
+                        path=str(path),
+                        bytes_on_disk=self._path_size(path),
+                        profile_name=self._version_label_from_update_workspace(path),
+                        profile_path=None,
+                        reason=(
+                            "This update workspace can contain downloaded packages, extracted staging files, helper-runtime copies, and install logs from a previous update attempt."
+                        ),
+                        recommended=True,
+                        warning_required=False,
+                        metadata={
+                            "cleanup_kind": "direct_path",
+                            "stored_path": str(path),
+                        },
+                    )
+                )
+        return items
+
+    def _update_backup_item(
+        self,
+        backup_path: Path,
+        *,
+        handoff_state: dict[str, object] | None,
+        handoff_path: Path,
+        is_handoff_backup: bool,
+    ) -> StorageAdminItem:
+        status = str(handoff_state.get("status") or "") if handoff_state else ""
+        expected_version = (
+            str(handoff_state.get("expected_version") or "").strip()
+            if is_handoff_backup and handoff_state
+            else ""
+        )
+        parsed_version, parsed_created_at = self._parse_update_backup_name(backup_path.name)
+        version = expected_version or parsed_version
+        created_at = (
+            str(handoff_state.get("created_at") or "").strip()
+            if is_handoff_backup and handoff_state
+            else parsed_created_at
+        )
+
+        status_key = STATUS_RECOVERABILITY
+        status_label = "Older Update Backup"
+        reason = (
+            "This is an older packaged-app rollback copy left by the automatic updater. "
+            "It is not required by catalog data."
+        )
+        recommended = True
+        warning_required = False
+        warning = ""
+
+        if is_handoff_backup and status == UPDATE_BACKUP_STATUS_CREATED:
+            status_key = STATUS_IN_USE
+            status_label = "Current Update Rollback Backup"
+            reason = "This backup is the updater's current rollback copy. It is normally removed after the updated app reaches a clean startup and closes."
+            recommended = False
+            warning_required = True
+            warning = "Deleting this backup removes the automatic rollback copy for the most recent packaged-app update."
+        elif is_handoff_backup and status == UPDATE_BACKUP_STATUS_READY_FOR_DELETION:
+            status_label = "Ready for Update Cleanup"
+            reason = "The updated app marked this rollback copy ready for deletion, but cleanup did not remove it."
+        elif is_handoff_backup and status == UPDATE_BACKUP_STATUS_DESTROYED:
+            status_label = "Stale Update Backup"
+            reason = "The updater handoff says this rollback copy was already destroyed, but the file or folder is still present."
+
+        details: list[str] = []
+        if version:
+            details.append(f"Target update version: v{version.removeprefix('v')}")
+        if created_at:
+            details.append(f"Created: {created_at}")
+        if is_handoff_backup and status:
+            details.append(f"Handoff status: {status}")
+        if details:
+            reason = f"{reason}\n" + "\n".join(details)
+
+        return StorageAdminItem(
+            item_key=f"update-backup:{self._path_identity(backup_path)}",
+            status_key=status_key,
+            status_label=status_label,
+            category_key="update_install_backup",
+            category_label="Update Install Backup",
+            label=backup_path.name,
+            path=str(backup_path),
+            bytes_on_disk=self._path_size(backup_path),
+            profile_name=f"v{version.removeprefix('v')}" if version else "",
+            profile_path=None,
+            reason=reason,
+            recommended=recommended,
+            warning_required=warning_required,
+            warning=warning,
+            metadata={
+                "cleanup_kind": "update_backup",
+                "stored_path": str(backup_path),
+                "handoff_backup": is_handoff_backup,
+                "handoff_state_path": str(handoff_path),
+            },
+        )
+
+    def _update_backup_scan_roots(
+        self,
+        handoff_state: dict[str, object] | None,
+    ) -> list[Path]:
+        roots: list[Path] = []
+        if self.installed_update_target_path is not None:
+            roots.append(self.installed_update_target_path.parent)
+        if isinstance(handoff_state, dict):
+            for key in ("backup_path", "target_path", "installed_path"):
+                raw_path = str(handoff_state.get(key) or "").strip()
+                if not raw_path:
+                    continue
+                try:
+                    roots.append(Path(raw_path).expanduser().resolve().parent)
+                except Exception:
+                    pass
+        unique_roots: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            identity = self._path_identity(root)
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            unique_roots.append(root)
+        return unique_roots
+
+    def _handoff_backup_path(self, handoff_state: dict[str, object] | None) -> Path | None:
+        if not isinstance(handoff_state, dict):
+            return None
+        raw_path = str(handoff_state.get("backup_path") or "").strip()
+        if not raw_path:
+            return None
+        try:
+            return Path(raw_path).expanduser()
+        except Exception:
+            return None
+
+    def _looks_like_update_backup(self, path: Path) -> bool:
+        return bool(self._UPDATE_BACKUP_MARKER in path.name)
+
+    def _parse_update_backup_name(self, name: str) -> tuple[str, str]:
+        match = self._UPDATE_BACKUP_NAME_RE.search(str(name or ""))
+        if match is None:
+            return "", ""
+        version = str(match.group("version") or "").strip()
+        stamp = str(match.group("stamp") or "").strip()
+        if len(stamp) == 15:
+            created_at = (
+                f"{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]} "
+                f"{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}"
+            )
+        else:
+            created_at = stamp
+        return version, created_at
+
+    @staticmethod
+    def _version_label_from_update_workspace(path: Path) -> str:
+        name = str(path.name or "").strip()
+        if not name.startswith("v"):
+            return ""
+        version = name[1:].split("-", 1)[0].strip()
+        return f"v{version}" if version else ""
 
     def _collect_history_state(
         self,
@@ -1242,7 +1500,11 @@ class ApplicationStorageAdminService:
         current_profile_name: str | None,
     ) -> StorageAdminSummary:
         listed_item_bytes = sum(int(item.bytes_on_disk or 0) for item in items)
-        total_app_bytes = self._path_size(self.layout.data_root)
+        total_app_bytes = self._path_size(self.layout.data_root) + sum(
+            int(item.bytes_on_disk or 0)
+            for item in items
+            if not self._path_is_under(Path(item.path), self.layout.data_root)
+        )
         current_profile_bytes = 0
         if current_profile:
             current_profile_bytes += self._profile_bundle_size(Path(current_profile))
@@ -1294,6 +1556,18 @@ class ApplicationStorageAdminService:
         removed_session_entry_ids: set[int],
     ) -> list[str]:
         cleanup_kind = str(item.metadata.get("cleanup_kind") or "")
+        if cleanup_kind == "update_backup":
+            target = Path(str(item.metadata.get("stored_path") or item.path))
+            self._remove_direct_path(target)
+            if bool(item.metadata.get("handoff_backup")):
+                state_path = str(item.metadata.get("handoff_state_path") or "").strip()
+                if state_path:
+                    mark_update_backup_destroyed(
+                        state_path=state_path,
+                        reason="Update backup deleted from Application Storage Admin.",
+                    )
+            return [str(target)]
+
         if cleanup_kind == "direct_path":
             target = Path(str(item.metadata.get("stored_path") or item.path))
             self._remove_direct_path(target)
@@ -1491,6 +1765,23 @@ class ApplicationStorageAdminService:
         if str(item.profile_path or "").strip() == str(profile_path):
             return True
         return any(reference.profile_path == str(profile_path) for reference in item.references)
+
+    @staticmethod
+    def _path_identity(path: str | Path) -> str:
+        try:
+            return str(Path(path).expanduser().resolve())
+        except Exception:
+            return str(path)
+
+    @staticmethod
+    def _path_is_under(path: Path, root: Path) -> bool:
+        try:
+            candidate = path.expanduser().resolve()
+            root_path = root.expanduser().resolve()
+            candidate.relative_to(root_path)
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _normalize_existing_path(path: object | None) -> str | None:

@@ -12,6 +12,7 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
+from isrc_manager import update_handoff
 from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.paths import resolve_app_storage_layout
 from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService
@@ -278,6 +279,61 @@ class StorageAdminServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(result.removed_session_entry_ids), 1)
         self.assertLess(session_entries_after, session_entries_before)
         self.assertFalse(Path(session_item.path).exists())
+
+    def test_inspect_and_cleanup_update_backups_and_workspaces(self):
+        app_root = self.root / "installed-app"
+        installed_app = app_root / "ISRC Catalog Manager.app"
+        installed_app.mkdir(parents=True)
+        backup = app_root / "ISRC Catalog Manager.app.backup-before-v3.6.9-20260427-010203"
+        (backup / "Contents").mkdir(parents=True)
+        (backup / "Contents" / "old-app").write_bytes(b"old app")
+
+        update_root = self.root / "updates"
+        workspace = update_root / "v3.6.9-macos"
+        (workspace / "staging").mkdir(parents=True)
+        (workspace / "staging" / "replacement").write_bytes(b"new app")
+        state_path = update_root / update_handoff.UPDATE_BACKUP_HANDOFF_FILENAME
+        update_handoff.record_update_backup_created(
+            backup,
+            expected_version="3.6.9",
+            target_path=installed_app,
+            installed_path=installed_app,
+            state_path=state_path,
+        )
+        service = ApplicationStorageAdminService(
+            self.layout,
+            update_root=update_root,
+            installed_update_target_path=installed_app,
+        )
+
+        audit = service.inspect(current_db_path=self.db_path)
+        backup_item = next(
+            item for item in audit.items if item.category_key == "update_install_backup"
+        )
+        workspace_item = next(
+            item for item in audit.items if item.category_key == "update_workspace"
+        )
+
+        self.assertEqual(backup_item.status_key, STATUS_IN_USE)
+        self.assertTrue(backup_item.warning_required)
+        self.assertFalse(backup_item.recommended)
+        self.assertTrue(workspace_item.recommended)
+
+        with self.assertRaises(ValueError):
+            service.cleanup_selected([backup_item.item_key], current_db_path=self.db_path)
+
+        result = service.cleanup_selected(
+            [backup_item.item_key, workspace_item.item_key],
+            current_db_path=self.db_path,
+            allow_warning_deletes=True,
+        )
+
+        state = update_handoff.read_update_backup_handoff(state_path=state_path)
+        self.assertEqual(len(result.removed_item_keys), 2)
+        self.assertFalse(backup.exists())
+        self.assertFalse(workspace.exists())
+        self.assertEqual(state["status"], update_handoff.UPDATE_BACKUP_STATUS_DESTROYED)
+        self.assertIn("Application Storage Admin", state["error"])
 
 
 if __name__ == "__main__":
