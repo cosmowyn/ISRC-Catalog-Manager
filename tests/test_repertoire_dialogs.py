@@ -11,6 +11,7 @@ try:
     from PySide6.QtWidgets import (
         QComboBox,
         QDialogButtonBox,
+        QGridLayout,
         QGroupBox,
         QLabel,
         QLineEdit,
@@ -734,6 +735,24 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertTrue(
                 any(label.text() == dialog.windowTitle() for label in dialog.findChildren(QLabel))
             )
+            checklist_layout = dialog.release_checklist_widget.layout()
+            self.assertIsInstance(checklist_layout, QGridLayout)
+            self.assertIs(checklist_layout.itemAtPosition(0, 0).widget(), dialog.explicit_checkbox)
+            self.assertIs(checklist_layout.itemAtPosition(0, 1).widget(), dialog.metadata_checkbox)
+            self.assertIs(checklist_layout.itemAtPosition(1, 0).widget(), dialog.contract_checkbox)
+            self.assertIs(checklist_layout.itemAtPosition(1, 1).widget(), dialog.rights_checkbox)
+            action_margins = dialog.track_order_actions_cluster.layout().contentsMargins()
+            self.assertEqual(
+                (
+                    action_margins.left(),
+                    action_margins.top(),
+                    action_margins.right(),
+                    action_margins.bottom(),
+                ),
+                (4, 4, 4, 4),
+            )
+            self.assertEqual(dialog.track_order_actions_cluster.layout().horizontalSpacing(), 6)
+            self.assertEqual(dialog.track_order_actions_cluster.layout().verticalSpacing(), 6)
         finally:
             dialog.close()
 

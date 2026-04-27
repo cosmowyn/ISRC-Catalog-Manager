@@ -484,17 +484,29 @@ class QualityDashboardService:
             shared_release_family = self.release_service.releases_share_upc_family(
                 list(zip(release_titles, parsed_release_types, strict=False))
             )
-            issue_type = "shared_release_upc" if shared_release_family else "duplicate_release_upc"
-            severity = "info" if shared_release_family else "error"
+            shared_linked_album = False
+            if not shared_release_family:
+                shared_linked_album = self._releases_share_linked_album(release_ids)
+            shared_upc_context = shared_release_family or shared_linked_album
+            issue_type = "shared_release_upc" if shared_upc_context else "duplicate_release_upc"
+            severity = "info" if shared_upc_context else "error"
             issue_title = (
-                "Shared Release UPC/EAN" if shared_release_family else "Duplicate Release UPC/EAN"
+                "Shared Release UPC/EAN" if shared_upc_context else "Duplicate Release UPC/EAN"
             )
-            details = (
-                f"UPC/EAN {upc} is shared across multiple release rows for the same release family. "
-                "This is often intentional for remix packages, compilations, or other multi-artist editions."
-                if shared_release_family
-                else f"UPC/EAN {upc} is used by multiple releases."
-            )
+            if shared_linked_album:
+                details = (
+                    f"UPC/EAN {upc} is shared across multiple release rows for the same linked "
+                    "album. This is often intentional for VA compilations or other multi-artist "
+                    "editions."
+                )
+            elif shared_release_family:
+                details = (
+                    f"UPC/EAN {upc} is shared across multiple release rows for the same release "
+                    "family. This is often intentional for remix packages, compilations, or other "
+                    "multi-artist editions."
+                )
+            else:
+                details = f"UPC/EAN {upc} is used by multiple releases."
             for release_id in release_ids:
                 issues.append(
                     QualityIssue(
@@ -508,6 +520,46 @@ class QualityDashboardService:
                     )
                 )
         return issues
+
+    def _releases_share_linked_album(self, release_ids: list[int]) -> bool:
+        if len(release_ids) < 2:
+            return False
+        placeholders = ", ".join("?" for _ in release_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                r.id,
+                al.id,
+                COALESCE(al.title, '')
+            FROM Releases r
+            JOIN ReleaseTracks rt ON rt.release_id = r.id
+            JOIN Tracks t ON t.id = rt.track_id
+            LEFT JOIN Albums al ON al.id = t.album_id
+            WHERE r.id IN ({placeholders})
+            ORDER BY r.id, rt.sequence_number, rt.track_id
+            """,
+            tuple(int(release_id) for release_id in release_ids),
+        ).fetchall()
+        album_ids_by_release: dict[int, set[int]] = {
+            int(release_id): set() for release_id in release_ids
+        }
+        album_titles_by_release: dict[int, set[str]] = {
+            int(release_id): set() for release_id in release_ids
+        }
+        for release_id, album_id, album_title in rows:
+            clean_release_id = int(release_id)
+            if album_id is not None:
+                album_ids_by_release.setdefault(clean_release_id, set()).add(int(album_id))
+            normalized_title = self.release_service.normalized_release_family_title(album_title)
+            if normalized_title and normalized_title != "single":
+                album_titles_by_release.setdefault(clean_release_id, set()).add(normalized_title)
+
+        album_id_sets = [album_ids_by_release[int(release_id)] for release_id in release_ids]
+        if all(album_id_sets) and set.intersection(*album_id_sets):
+            return True
+
+        album_title_sets = [album_titles_by_release[int(release_id)] for release_id in release_ids]
+        return bool(all(album_title_sets) and set.intersection(*album_title_sets))
 
     def _media_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []

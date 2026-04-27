@@ -68,6 +68,8 @@ class QualityDashboardDialog(QDialog):
 
         self.setWindowTitle("Data Quality Dashboard")
         self.resize(1180, 780)
+        self.setModal(False)
+        self.setWindowModality(Qt.NonModal)
         _apply_standard_dialog_chrome(self, "qualityDashboardDialog")
 
         root = QVBoxLayout(self)

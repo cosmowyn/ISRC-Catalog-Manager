@@ -2,8 +2,10 @@ import unittest
 from unittest import mock
 
 try:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QListView, QMessageBox
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    Qt = None
     QApplication = None
     QListView = None
     QMessageBox = None
@@ -56,6 +58,8 @@ class QualityDialogTests(unittest.TestCase):
         )
         try:
             self.assertEqual(dialog.property("role"), "panel")
+            self.assertFalse(dialog.isModal())
+            self.assertEqual(dialog.windowModality(), Qt.NonModal)
             self.assertEqual(dialog.total_label.text(), "Total issues: 1")
             self.assertEqual(dialog.warning_label.text(), "Warnings: 1")
             self.assertEqual(dialog.issue_table.rowCount(), 1)

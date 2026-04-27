@@ -329,6 +329,98 @@ class QualityDashboardServiceTests(unittest.TestCase):
             any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
         )
 
+    def test_va_album_track_release_upc_is_reported_as_info_not_error(self):
+        first_track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00201",
+                track_title="North Gate",
+                artist_name="Artist One",
+                additional_artists=[],
+                album_title="Nocturne Compendium",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+                buma_work_number=None,
+                composer=None,
+                publisher=None,
+                comments=None,
+                lyrics=None,
+                audio_file_source_path=None,
+                album_art_source_path=None,
+            )
+        )
+        second_track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00202",
+                track_title="South Gate",
+                artist_name="Artist Two",
+                additional_artists=[],
+                album_title="Nocturne Compendium",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+                buma_work_number=None,
+                composer=None,
+                publisher=None,
+                comments=None,
+                lyrics=None,
+                audio_file_source_path=None,
+                album_art_source_path=None,
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="North Gate",
+                primary_artist="Artist One",
+                release_type="single",
+                upc="8720892724625",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=first_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="South Gate",
+                primary_artist="Artist Two",
+                release_type="single",
+                upc="8720892724625",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=second_track_id,
+                        disc_number=1,
+                        track_number=2,
+                        sequence_number=2,
+                    )
+                ],
+            )
+        )
+
+        result = self.service.scan()
+        shared_upc_issues = [
+            issue for issue in result.issues if issue.issue_type == "shared_release_upc"
+        ]
+
+        self.assertEqual(len(shared_upc_issues), 2)
+        self.assertTrue(all(issue.severity == "info" for issue in shared_upc_issues))
+        self.assertTrue(
+            all("same linked album" in issue.details for issue in shared_upc_issues)
+        )
+        self.assertFalse(
+            any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
+        )
+
     def test_work_quality_rules_prefer_direct_track_work_link_over_shadow_link_table(self):
         work_id = self.work_service.create_work(
             WorkPayload(title="Governed Work", iswc="T-123.456.789-0"),

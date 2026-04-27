@@ -6813,6 +6813,7 @@ class App(QMainWindow):
         self.party_exchange_service = None
         self.quality_service = None
         self.release_browser_dialog = None
+        self.quality_dashboard_dialog = None
         self._explicit_row_filter_track_ids = None
         self._pending_work_track_context: dict[str, object] | None = None
         self._background_write_lock = None
@@ -12418,6 +12419,10 @@ class App(QMainWindow):
     def _close_database_connection(self):
         if hasattr(self, "auto_snapshot_timer"):
             self.auto_snapshot_timer.stop()
+        quality_dashboard = getattr(self, "quality_dashboard_dialog", None)
+        if quality_dashboard is not None:
+            quality_dashboard.close()
+            self.quality_dashboard_dialog = None
         self._last_auto_snapshot_marker = None
         self.database_session.close(self.conn)
         self.conn = None
@@ -26708,7 +26713,15 @@ class App(QMainWindow):
         if self.quality_service is None:
             QMessageBox.warning(self, "Data Quality Dashboard", "Open a profile first.")
             return
-        dlg = QualityDashboardDialog(
+        existing_dialog = getattr(self, "quality_dashboard_dialog", None)
+        if existing_dialog is not None:
+            existing_dialog.refresh_scan()
+            existing_dialog.show()
+            existing_dialog.raise_()
+            existing_dialog.activateWindow()
+            return existing_dialog
+
+        self.quality_dashboard_dialog = QualityDashboardDialog(
             service=self.quality_service,
             scan_callback=self._scan_quality_dashboard_in_background,
             task_manager=self.background_tasks,
@@ -26717,7 +26730,10 @@ class App(QMainWindow):
             open_issue_callback=self._open_issue_from_dashboard,
             parent=self,
         )
-        dlg.exec()
+        self.quality_dashboard_dialog.show()
+        self.quality_dashboard_dialog.raise_()
+        self.quality_dashboard_dialog.activateWindow()
+        return self.quality_dashboard_dialog
 
     def _scan_quality_dashboard_in_background(self):
         with self.background_service_factory.open_bundle() as bundle:

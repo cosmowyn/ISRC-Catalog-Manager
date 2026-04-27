@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -51,7 +53,6 @@ from isrc_manager.ui_common import (
     _configure_standard_form_layout,
     _confirm_destructive_action,
     _create_action_button_cluster,
-    _create_action_button_grid,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -287,17 +288,27 @@ class ReleaseEditorDialog(QDialog):
         self.contract_checkbox = QCheckBox("Contract Signed")
         self.rights_checkbox = QCheckBox("Rights Verified")
         checklist_row = QWidget()
-        checklist_layout = QHBoxLayout(checklist_row)
+        self.release_checklist_widget = checklist_row
+        checklist_layout = QGridLayout(checklist_row)
         checklist_layout.setContentsMargins(0, 0, 0, 0)
-        checklist_layout.setSpacing(8)
-        for widget in (
+        checklist_layout.setHorizontalSpacing(12)
+        checklist_layout.setVerticalSpacing(6)
+        checklist_widgets = (
             self.explicit_checkbox,
             self.metadata_checkbox,
             self.contract_checkbox,
             self.rights_checkbox,
-        ):
-            checklist_layout.addWidget(widget)
-        checklist_layout.addStretch(1)
+        )
+        column_widths = [0, 0]
+        for index, widget in enumerate(checklist_widgets):
+            widget.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            minimum_width = widget.sizeHint().width() + 8
+            widget.setMinimumWidth(minimum_width)
+            column_widths[index % 2] = max(column_widths[index % 2], minimum_width)
+            checklist_layout.addWidget(widget, index // 2, index % 2)
+        for column, minimum_width in enumerate(column_widths):
+            checklist_layout.setColumnMinimumWidth(column, minimum_width)
+            checklist_layout.setColumnStretch(column, 1)
         scheduling_form.addRow("Checklist", checklist_row)
 
         self.artwork_path_edit = QLineEdit()
@@ -356,19 +367,24 @@ class ReleaseEditorDialog(QDialog):
 
         renumber_button = QPushButton("Renumber")
         renumber_button.clicked.connect(self._renumber_rows)
-        tracks_box_layout.addWidget(
-            _create_action_button_grid(
-                tracks_box,
-                [
-                    add_selected_button,
-                    remove_rows_button,
-                    move_up_button,
-                    move_down_button,
-                    renumber_button,
-                ],
-                columns=2,
-            )
+        self.track_order_actions_cluster = _create_action_button_cluster(
+            tracks_box,
+            [
+                add_selected_button,
+                remove_rows_button,
+                move_up_button,
+                move_down_button,
+                renumber_button,
+            ],
+            columns=2,
+            min_button_width=150,
+            outer_margins=(4, 4, 4, 4),
+            horizontal_spacing=6,
+            vertical_spacing=6,
+            span_last_row=True,
         )
+        self.track_order_actions_cluster.setObjectName("releaseTrackOrderActionsCluster")
+        tracks_box_layout.addWidget(self.track_order_actions_cluster)
 
         self.tracks_table = QTableWidget(0, 5, tracks_box)
         self.tracks_table.setHorizontalHeaderLabels(
