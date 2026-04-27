@@ -1,7 +1,7 @@
 {
-  "version": "3.7.3",
+  "version": "3.7.4",
   "released_at": "2026-04-27",
-  "summary": "Implemented the budget refactor.",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.7.3.md",
+  "summary": "Quiet expected test warnings",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.7.4.md",
   "minimum_supported_version": null
 }
