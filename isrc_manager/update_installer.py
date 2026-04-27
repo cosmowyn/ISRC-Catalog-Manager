@@ -25,6 +25,7 @@ from .constants import APP_NAME
 from .paths import preferred_data_root
 from .update_checker import ReleaseAsset, ReleaseManifest, UpdateCheckError
 
+APP_NAME_TEXT = str(APP_NAME)
 HELPER_MODE_ARGUMENT = "--run-updater-helper"
 DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS = 45.0
 MAX_UPDATE_PACKAGE_BYTES = 5 * 1024 * 1024 * 1024
@@ -89,7 +90,7 @@ def select_platform_asset(
 
 
 def update_cache_root() -> Path:
-    root = cast(Path, preferred_data_root(APP_NAME)) / "updates"
+    root = cast(Path, preferred_data_root(APP_NAME_TEXT)) / "updates"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -491,25 +492,68 @@ def _stream_download(
 
 def _safe_extract_zip(package_path: Path, extract_dir: Path) -> None:
     with zipfile.ZipFile(package_path) as archive:
+        members: list[tuple[zipfile.ZipInfo, PurePosixPath, int, str | None]] = []
+        seen_paths: set[PurePosixPath] = set()
+        symlink_paths: set[PurePosixPath] = set()
         for info in archive.infolist():
-            _validate_archive_member(info.filename)
+            member_path = _validate_archive_member(info.filename)
+            if member_path in seen_paths:
+                raise UpdateInstallerError("Update package contains duplicate archive paths.")
+            seen_paths.add(member_path)
             mode = info.external_attr >> 16
+            file_type = stat.S_IFMT(mode)
+            link_target: str | None = None
             if stat.S_ISLNK(mode):
-                raise UpdateInstallerError("Update packages cannot contain symbolic links.")
-        archive.extractall(extract_dir)
+                link_target = _read_zip_symlink_target(archive, info)
+                _validate_archive_link_target(member_path, link_target)
+                symlink_paths.add(member_path)
+            elif not info.is_dir() and file_type and not stat.S_ISREG(mode):
+                raise UpdateInstallerError(
+                    "Update packages can only contain files, directories, and safe symbolic links."
+                )
+            members.append((info, member_path, mode, link_target))
+
+        _reject_entries_below_symlinks(seen_paths, symlink_paths)
+        for info, member_path, mode, link_target in members:
+            destination = _prepare_archive_destination(extract_dir, member_path)
+            if link_target is not None:
+                _create_archive_symlink(destination, link_target)
+            elif info.is_dir():
+                _create_archive_directory(destination, mode)
+            else:
+                _write_zip_file(archive, info, destination, mode)
 
 
 def _safe_extract_tar(package_path: Path, extract_dir: Path) -> None:
     with tarfile.open(package_path, "r:*") as archive:
         members = archive.getmembers()
+        seen_paths: set[PurePosixPath] = set()
+        symlink_paths: set[PurePosixPath] = set()
+        prepared_members: list[tuple[tarfile.TarInfo, PurePosixPath]] = []
         for member in members:
-            _validate_archive_member(member.name)
-            if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
+            member_path = _validate_archive_member(member.name)
+            if member_path in seen_paths:
+                raise UpdateInstallerError("Update package contains duplicate archive paths.")
+            seen_paths.add(member_path)
+            if member.issym():
+                _validate_archive_link_target(member_path, member.linkname)
+                symlink_paths.add(member_path)
+            elif member.islnk() or not (member.isdir() or member.isfile()):
                 raise UpdateInstallerError("Update packages cannot contain unsafe tar entries.")
-        archive.extractall(extract_dir, members=members)
+            prepared_members.append((member, member_path))
+
+        _reject_entries_below_symlinks(seen_paths, symlink_paths)
+        for member, member_path in prepared_members:
+            destination = _prepare_archive_destination(extract_dir, member_path)
+            if member.issym():
+                _create_archive_symlink(destination, member.linkname)
+            elif member.isdir():
+                _create_archive_directory(destination, member.mode)
+            else:
+                _write_tar_file(archive, member, destination)
 
 
-def _validate_archive_member(name: str) -> None:
+def _validate_archive_member(name: str) -> PurePosixPath:
     normalized = str(name or "").replace("\\", "/")
     path = PurePosixPath(normalized)
     if not normalized or normalized.startswith("/") or path.is_absolute():
@@ -518,13 +562,141 @@ def _validate_archive_member(name: str) -> None:
         raise UpdateInstallerError("Update package contains an unsafe relative path.")
     if path.parts and ":" in path.parts[0]:
         raise UpdateInstallerError("Update package contains an unsafe drive-qualified path.")
+    return path
+
+
+def _read_zip_symlink_target(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    try:
+        return archive.read(info).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UpdateInstallerError(
+            "Update package contains a symbolic link with an invalid target."
+        ) from exc
+
+
+def _validate_archive_link_target(member_path: PurePosixPath, target: str) -> None:
+    normalized = str(target or "").replace("\\", "/")
+    target_path = PurePosixPath(normalized)
+    if "\x00" in normalized:
+        raise UpdateInstallerError(
+            "Update package contains a symbolic link with an invalid target."
+        )
+    if not normalized or normalized.startswith("/") or target_path.is_absolute():
+        raise UpdateInstallerError("Update package contains an unsafe symbolic link.")
+    if target_path.parts and ":" in target_path.parts[0]:
+        raise UpdateInstallerError("Update package contains an unsafe symbolic link.")
+    resolved_target = _collapse_archive_path((*member_path.parent.parts, *target_path.parts))
+    if not member_path.parts or resolved_target.parts[0] != member_path.parts[0]:
+        raise UpdateInstallerError(
+            "Update package contains a symbolic link outside its package root."
+        )
+
+
+def _collapse_archive_path(parts: Sequence[str]) -> PurePosixPath:
+    collapsed: list[str] = []
+    for part in parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not collapsed:
+                raise UpdateInstallerError("Update package contains an unsafe symbolic link.")
+            collapsed.pop()
+            continue
+        collapsed.append(part)
+    if not collapsed:
+        raise UpdateInstallerError("Update package contains an unsafe symbolic link.")
+    return PurePosixPath(*collapsed)
+
+
+def _reject_entries_below_symlinks(
+    member_paths: set[PurePosixPath],
+    symlink_paths: set[PurePosixPath],
+) -> None:
+    for member_path in member_paths:
+        for symlink_path in symlink_paths:
+            if _archive_path_is_descendant(member_path, symlink_path):
+                raise UpdateInstallerError("Update package contains entries below a symbolic link.")
+
+
+def _archive_path_is_descendant(
+    member_path: PurePosixPath,
+    parent_path: PurePosixPath,
+) -> bool:
+    return (
+        len(member_path.parts) > len(parent_path.parts)
+        and member_path.parts[: len(parent_path.parts)] == parent_path.parts
+    )
+
+
+def _prepare_archive_destination(extract_dir: Path, member_path: PurePosixPath) -> Path:
+    root = extract_dir.resolve()
+    destination = root.joinpath(*member_path.parts)
+    try:
+        destination.resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise UpdateInstallerError(
+            "Update package contains a path outside the staging folder."
+        ) from exc
+
+    parent = root
+    for part in member_path.parts[:-1]:
+        parent = parent / part
+        if parent.is_symlink():
+            raise UpdateInstallerError("Update package contains entries below a symbolic link.")
+        if parent.exists() and not parent.is_dir():
+            raise UpdateInstallerError("Update package contains conflicting archive paths.")
+        parent.mkdir(exist_ok=True)
+    return destination
+
+
+def _create_archive_directory(destination: Path, mode: int) -> None:
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        raise UpdateInstallerError("Update package contains conflicting archive paths.")
+    destination.mkdir(exist_ok=True)
+    _apply_archive_mode(destination, mode)
+
+
+def _create_archive_symlink(destination: Path, link_target: str) -> None:
+    if destination.exists() or destination.is_symlink():
+        raise UpdateInstallerError("Update package contains conflicting archive paths.")
+    os.symlink(link_target, destination)
+
+
+def _write_zip_file(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    destination: Path,
+    mode: int,
+) -> None:
+    if destination.is_symlink() or destination.is_dir():
+        raise UpdateInstallerError("Update package contains conflicting archive paths.")
+    with archive.open(info) as source, destination.open("wb") as target:
+        shutil.copyfileobj(source, target)
+    _apply_archive_mode(destination, mode)
+
+
+def _write_tar_file(archive: tarfile.TarFile, member: tarfile.TarInfo, destination: Path) -> None:
+    if destination.is_symlink() or destination.is_dir():
+        raise UpdateInstallerError("Update package contains conflicting archive paths.")
+    source = archive.extractfile(member)
+    if source is None:
+        raise UpdateInstallerError("Update package contains an unreadable file entry.")
+    with source, destination.open("wb") as target:
+        shutil.copyfileobj(source, target)
+    _apply_archive_mode(destination, member.mode)
+
+
+def _apply_archive_mode(destination: Path, mode: int) -> None:
+    permissions = mode & 0o777
+    if permissions:
+        destination.chmod(permissions)
 
 
 def _macos_app_executable(app_bundle: Path) -> Path | None:
     macos_dir = app_bundle / "Contents" / "MacOS"
     if not macos_dir.is_dir():
         return None
-    preferred = macos_dir / APP_NAME
+    preferred = macos_dir / APP_NAME_TEXT
     if preferred.is_file():
         return preferred
     executables = sorted(
@@ -534,7 +706,7 @@ def _macos_app_executable(app_bundle: Path) -> Path | None:
 
 
 def _find_executable_in_directory(directory: Path) -> Path | None:
-    preferred_names = (APP_NAME, f"{APP_NAME}.exe")
+    preferred_names = (APP_NAME_TEXT, f"{APP_NAME_TEXT}.exe")
     for name in preferred_names:
         candidate = directory / name
         if candidate.is_file() and os.access(candidate, os.X_OK):
@@ -547,7 +719,7 @@ def _find_executable_in_directory(directory: Path) -> Path | None:
 
 def _prefer_app_named_path(candidates: Sequence[Path]) -> Path:
     for candidate in candidates:
-        if APP_NAME.lower() in candidate.name.lower():
+        if APP_NAME_TEXT.lower() in candidate.name.lower():
             return candidate
     return candidates[0]
 

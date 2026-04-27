@@ -1,4 +1,6 @@
 import hashlib
+import os
+import stat
 import tarfile
 import tempfile
 import unittest
@@ -70,6 +72,22 @@ def _manifest(version="3.5.4"):
     )
 
 
+def _write_zip_file(archive, name, data=b"file", mode=0o644):
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = (stat.S_IFREG | mode) << 16
+    archive.writestr(info, data)
+
+
+def _write_zip_symlink(archive, name, target):
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3
+    info.compress_type = zipfile.ZIP_STORED
+    info.external_attr = (stat.S_IFLNK | 0o777) << 16
+    archive.writestr(info, target)
+
+
 class UpdateInstallerTests(unittest.TestCase):
     def test_detect_platform_key_normalizes_supported_system_names(self):
         self.assertEqual(detect_platform_key("Windows"), "windows")
@@ -136,6 +154,41 @@ class UpdateInstallerTests(unittest.TestCase):
 
             with self.assertRaises(UpdateInstallerError):
                 extract_update_package(package, root / "stage", platform_key="windows")
+
+    def test_safe_zip_extract_preserves_macos_bundle_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "ISRCManager-v3.5.4-macos-arm64.zip"
+            app_name = "ISRCManager-v3.5.4-macos.app"
+            executable_name = f"{app_name}/Contents/MacOS/ISRCManager"
+            framework_name = f"{app_name}/Contents/Frameworks/libexample.dylib"
+            link_name = f"{app_name}/Contents/Resources/libexample.dylib"
+            with zipfile.ZipFile(package, "w") as archive:
+                _write_zip_file(archive, executable_name, b"#!/bin/sh\n", mode=0o755)
+                _write_zip_file(archive, framework_name, b"framework")
+                _write_zip_symlink(archive, link_name, "../Frameworks/libexample.dylib")
+
+            staged = extract_update_package(package, root / "stage", platform_key="macos")
+
+            link_path = staged.replacement_path / "Contents" / "Resources" / "libexample.dylib"
+            executable_path = staged.replacement_path / "Contents" / "MacOS" / "ISRCManager"
+            self.assertTrue(link_path.is_symlink())
+            self.assertEqual(os.readlink(link_path), "../Frameworks/libexample.dylib")
+            self.assertTrue(os.access(executable_path, os.X_OK))
+
+    def test_safe_zip_extract_rejects_symlink_outside_package_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "ISRCManager-v3.5.4-macos-arm64.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                _write_zip_symlink(
+                    archive,
+                    "ISRCManager-v3.5.4-macos.app/Contents/Resources/escape",
+                    "../../../outside",
+                )
+
+            with self.assertRaisesRegex(UpdateInstallerError, "outside its package root"):
+                extract_update_package(package, root / "stage", platform_key="macos")
 
     def test_safe_tar_extract_finds_linux_app_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

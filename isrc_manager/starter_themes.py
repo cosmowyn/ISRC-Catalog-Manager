@@ -30,6 +30,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A clean macOS-inspired light theme with soft panels, subtle chrome, and Apple-style blue accents.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#F5F5F7",
                 "window_fg": "#1D1D1F",
                 "panel_bg": "#FFFFFF",
@@ -107,11 +111,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "tab_selected_border": "#0A84FF",
                 "panel_radius": 10,
                 "button_radius": 8,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 8,
                 "table_radius": 8,
                 "tab_radius": 10,
                 "menu_radius": 10,
+                "help_button_size": 11,
             }
         ),
     ),
@@ -120,6 +125,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A readable macOS-inspired dark palette with graphite surfaces and clear blue focus accents.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#1C1C1E",
                 "window_fg": "#F5F5F7",
                 "panel_bg": "#2C2C2E",
@@ -197,11 +206,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "tab_selected_border": "#0A84FF",
                 "panel_radius": 10,
                 "button_radius": 8,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 8,
                 "table_radius": 8,
                 "tab_radius": 10,
                 "menu_radius": 10,
+                "help_button_size": 11,
             }
         ),
     ),
@@ -321,6 +331,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A deep emerald-and-gold palette inspired by the Aeon Cosmowyn artwork, with luminous teal surfaces and warm metallic highlights.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#0E2F2C",
                 "window_fg": "#EAF4EE",
                 "panel_bg": "#154440",
@@ -404,11 +418,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "tab_selected_border": "#D8B35A",
                 "panel_radius": 10,
                 "button_radius": 8,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 8,
                 "table_radius": 8,
                 "tab_radius": 10,
                 "menu_radius": 10,
+                "help_button_size": 11,
             }
         ),
     ),
@@ -417,6 +432,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A starfield-inspired navy theme drawn from the Tales of the Subconscious artwork, blending cosmic blues with luminous cyan and warm highlights.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#0A1628",
                 "window_fg": "#EAF3FF",
                 "panel_bg": "#10213A",
@@ -500,11 +519,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "tab_selected_border": "#5BC7FF",
                 "panel_radius": 10,
                 "button_radius": 8,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 8,
                 "table_radius": 8,
                 "tab_radius": 10,
                 "menu_radius": 10,
+                "help_button_size": 11,
             }
         ),
     ),
@@ -513,6 +533,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A workhorse developer theme inspired by the Visual Studio Code dark interface.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#1E1E1E",
                 "window_fg": "#D4D4D4",
                 "panel_bg": "#252526",
@@ -590,11 +614,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "tab_selected_border": "#007ACC",
                 "panel_radius": 7,
                 "button_radius": 6,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 6,
                 "table_radius": 6,
                 "tab_radius": 8,
                 "menu_radius": 6,
+                "help_button_size": 11,
             }
         ),
     ),
@@ -603,6 +628,10 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
         description="A soft pastel workspace with airy surfaces, mint accents, and readable warm-neutral text.",
         values=_theme(
             {
+                "font_size": 10,
+                "dialog_title_font_size": 14,
+                "section_title_font_size": 12,
+                "secondary_text_font_size": 9,
                 "window_bg": "#FFF8F2",
                 "window_fg": "#3F3943",
                 "panel_bg": "#FFFFFF",
@@ -688,11 +717,12 @@ STARTER_THEME_SPECS: tuple[StarterThemeSpec, ...] = (
                 "button_radius": 10,
                 "button_padding_v": 7,
                 "button_padding_h": 14,
-                "help_button_radius": 14,
+                "help_button_radius": 6,
                 "input_radius": 10,
                 "table_radius": 10,
                 "tab_radius": 12,
                 "menu_radius": 10,
+                "help_button_size": 11,
             }
         ),
     ),
