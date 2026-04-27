@@ -1,7 +1,7 @@
 {
-  "version": "3.6.14",
+  "version": "3.6.15",
   "released_at": "2026-04-27",
-  "summary": "Merge pull request #7 from cosmowyn/dependabot/pip/python-development-dependencies-1ade3adc80",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.14.md",
+  "summary": "Improve updater handoff and startup storage feedback",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.15.md",
   "minimum_supported_version": null
 }
