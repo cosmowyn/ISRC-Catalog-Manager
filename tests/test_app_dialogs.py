@@ -30,14 +30,14 @@ else:
     QT_IMPORT_ERROR = None
 
 from isrc_manager.app_dialogs import (
-    ActionRibbonDialog,
+    PAYPAL_DONATE_URL,
     AboutDialog,
+    ActionRibbonDialog,
     ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
     MasterTransferExportDialog,
-    PAYPAL_DONATE_URL,
     ReleaseNotesDialog,
 )
 from isrc_manager.external_launch import (

@@ -6,6 +6,12 @@ It combines recording metadata, releases, works, parties, contracts, rights, doc
 
 ![Workspace overview](docs/screenshots/workspace-overview.png)
 
+## Support Development
+
+If ISRC Catalog Manager has created value for you, please consider a small donation. All support is greatly appreciated.
+
+[Donate with PayPal](https://paypal.me/cosmowyn)
+
 ## What The App Covers
 
 The app is built for the operational layer around a real music catalog. It helps you maintain:
@@ -492,7 +498,7 @@ fails, the helper restores the backup and writes an install log in the update wo
 
 ## Support
 
-If you find a bug or want to improve the project, open an issue or pull request on GitHub. The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
+If you find a bug or want to improve the project, open an issue or pull request on GitHub. If the app has helped your catalog work, small donations are welcome through [PayPal](https://paypal.me/cosmowyn). The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
 
 ## License
 
