@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
 RELEASE_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "release-build.yml"
+MIN_PYINSTALLER_PYTHON_314_VERSION = (6, 19, 0)
 
 
 def _section_text(text: str, section_name: str) -> str:
@@ -39,6 +40,25 @@ def _optional_dependency_values(text: str, key: str) -> list[str]:
     return _list_values(section, key)
 
 
+def _pinned_requirement_version(requirements: list[str], package_name: str) -> str:
+    prefix = f"{package_name.lower()}=="
+    matches = [
+        requirement.split("==", 1)[1].strip()
+        for requirement in requirements
+        if requirement.lower().startswith(prefix)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"Expected one pinned {package_name} requirement")
+    return matches[0]
+
+
+def _release_version_tuple(version: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        raise AssertionError(f"Expected a stable release version, got {version!r}")
+    return tuple(int(part) for part in match.groups())
+
+
 class Python314CompatibilityTests(unittest.TestCase):
     def test_python_314_supported_in_project_metadata(self):
         text = PYPROJECT_PATH.read_text(encoding="utf-8")
@@ -51,9 +71,15 @@ class Python314CompatibilityTests(unittest.TestCase):
     def test_pyinstaller_pin_uses_python_314_supported_release(self):
         pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8")
         requirements = REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines()
+        pyproject_pin = _pinned_requirement_version(
+            _optional_dependency_values(pyproject_text, "build"), "pyinstaller"
+        )
+        requirements_pin = _pinned_requirement_version(requirements, "pyinstaller")
 
-        self.assertIn("pyinstaller==6.19.0", _optional_dependency_values(pyproject_text, "build"))
-        self.assertIn("pyinstaller==6.19.0", requirements)
+        self.assertEqual(pyproject_pin, requirements_pin)
+        self.assertGreaterEqual(
+            _release_version_tuple(pyproject_pin), MIN_PYINSTALLER_PYTHON_314_VERSION
+        )
 
     def test_binary_runtime_pins_have_python_314_release_wheels(self):
         pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8")
