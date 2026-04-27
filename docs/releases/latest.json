@@ -1,7 +1,7 @@
 {
-  "version": "3.7.6",
+  "version": "3.7.7",
   "released_at": "2026-04-27",
-  "summary": "Fixed the Storage Admin crash",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.7.6.md",
+  "summary": "Clean update backups after startup",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.7.7.md",
   "minimum_supported_version": null
 }
