@@ -1,5 +1,6 @@
 import json
 import os
+import plistlib
 import stat
 import subprocess
 import tarfile
@@ -11,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import build
+from scripts import smoke_packaged_app
 
 
 def _completed_process(args, returncode=0, stdout="", stderr=""):
@@ -883,6 +885,82 @@ class ArtifactStagingTests(unittest.TestCase):
                     f"{build.PACKAGE_APP_NAME}/{build.PACKAGE_APP_NAME}",
                     archive.getnames(),
                 )
+
+
+class PackagedSmokeScriptTests(unittest.TestCase):
+    def test_resolves_macos_app_bundle_executable_from_info_plist(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle = Path(tmpdir) / f"{build.PACKAGE_APP_NAME}.app"
+            macos_dir = bundle / "Contents" / "MacOS"
+            macos_dir.mkdir(parents=True)
+            executable = macos_dir / "CustomExecutable"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+            info_plist = bundle / "Contents" / "Info.plist"
+            with info_plist.open("wb") as plist_file:
+                plistlib.dump({"CFBundleExecutable": executable.name}, plist_file)
+
+            resolved = smoke_packaged_app.resolve_executable(
+                bundle,
+                platform_key="macos",
+                app_name=build.PACKAGE_APP_NAME,
+            )
+
+        self.assertEqual(resolved, executable)
+
+    def test_resolves_linux_onedir_executable_by_app_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact = Path(tmpdir) / build.PACKAGE_APP_NAME
+            artifact.mkdir()
+            executable = artifact / build.PACKAGE_APP_NAME
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+
+            resolved = smoke_packaged_app.resolve_executable(
+                artifact,
+                platform_key="linux",
+                app_name=build.PACKAGE_APP_NAME,
+            )
+
+        self.assertEqual(resolved, executable)
+
+    def test_main_launches_manifest_artifact_with_packaged_smoke_flag(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            executable = root / f"{build.PACKAGE_APP_NAME}.exe"
+            executable.write_bytes(b"binary")
+            manifest = root / "dist" / "release_manifest.json"
+            manifest.parent.mkdir()
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "platform": "windows",
+                        "app_name": build.PACKAGE_APP_NAME,
+                        "release_artifact": str(executable),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = _completed_process(
+                [str(executable), smoke_packaged_app.PACKAGED_SMOKE_TEST_ARGUMENT],
+                returncode=0,
+                stdout="ok\n",
+            )
+            with mock.patch.object(
+                smoke_packaged_app.subprocess,
+                "run",
+                return_value=completed,
+            ) as run:
+                exit_code = smoke_packaged_app.main(["--manifest", str(manifest), "--timeout", "3"])
+
+        self.assertEqual(exit_code, 0)
+        run.assert_called_once()
+        self.assertEqual(
+            run.call_args.args[0],
+            [str(executable), smoke_packaged_app.PACKAGED_SMOKE_TEST_ARGUMENT],
+        )
+        self.assertEqual(run.call_args.kwargs["timeout"], 3.0)
 
 
 if __name__ == "__main__":

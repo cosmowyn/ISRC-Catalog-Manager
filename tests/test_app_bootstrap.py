@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from tests.qt_test_helpers import require_qapplication
 try:
     from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QToolBar, QVBoxLayout, QWidget
 
+    from isrc_manager import packaged_smoke
     from isrc_manager import settings as app_settings
     from isrc_manager.app_bootstrap import get_or_create_application, run_desktop_application
     from isrc_manager.catalog_workspace import CatalogWorkspaceDock
@@ -22,6 +24,7 @@ except Exception as exc:  # pragma: no cover - environment-specific fallback
     QVBoxLayout = None
     QWidget = None
     app_settings = None
+    packaged_smoke = None
     get_or_create_application = None
     run_desktop_application = None
     SETTINGS_BASENAME = None
@@ -47,6 +50,7 @@ class _FakeApplication:
         self.argv = list(argv)
         self.exec_calls = 0
         self.process_events_calls = 0
+        self.quit_calls = 0
         self._single_instance_lock = None
         self._emit_ready_on_process_events = None
         type(self)._instance = self
@@ -65,6 +69,9 @@ class _FakeApplication:
     def exec(self):
         self.exec_calls += 1
         return 42
+
+    def quit(self):
+        self.quit_calls += 1
 
 
 class _FakeWindow:
@@ -351,6 +358,58 @@ class EntryPointDelegationTests(unittest.TestCase):
         self.assertIs(kwargs["install_qt_message_filter"], app_module._install_qt_message_filter)
         self.assertIs(kwargs["enforce_single_instance"], app_module.enforce_single_instance)
         self.assertIs(kwargs["window_factory"], app_module.App)
+
+    def test_main_runs_packaged_smoke_before_desktop_bootstrap(self):
+        if app_module is None:
+            raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
+
+        argv = ["ISRC_manager.py", app_module.PACKAGED_SMOKE_TEST_ARGUMENT]
+        with (
+            mock.patch.object(app_module.sys, "argv", argv),
+            mock.patch.object(app_module, "run_packaged_smoke_test", return_value=0) as smoke,
+            mock.patch.object(app_module, "run_desktop_application") as desktop,
+        ):
+            result = app_module.main()
+
+        self.assertEqual(result, 0)
+        smoke.assert_called_once_with(argv)
+        desktop.assert_not_called()
+
+
+class PackagedSmokeTests(unittest.TestCase):
+    def test_smoke_entrypoint_creates_qapplication_and_filters_smoke_flag(self):
+        if BOOTSTRAP_IMPORT_ERROR is not None:
+            raise unittest.SkipTest(f"Bootstrap helpers unavailable: {BOOTSTRAP_IMPORT_ERROR}")
+
+        calls = []
+        output = io.StringIO()
+        _FakeApplication._instance = None
+        self.addCleanup(setattr, _FakeApplication, "_instance", None)
+
+        def init_settings():
+            calls.append("settings")
+
+        def install_message_filter():
+            calls.append("message-filter")
+
+        with (
+            mock.patch.object(packaged_smoke, "init_settings", side_effect=init_settings),
+            mock.patch.object(packaged_smoke, "current_app_version", return_value="9.8.7"),
+        ):
+            result = packaged_smoke.run_packaged_smoke_test(
+                ["app", packaged_smoke.PACKAGED_SMOKE_TEST_ARGUMENT, "--extra"],
+                application_factory=_FakeApplication,
+                install_qt_message_filter=install_message_filter,
+                output=output,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(calls, ["settings", "message-filter"])
+        self.assertIsNotNone(_FakeApplication._instance)
+        self.assertEqual(_FakeApplication._instance.argv, ["app", "--extra"])
+        self.assertEqual(_FakeApplication._instance.process_events_calls, 1)
+        self.assertEqual(_FakeApplication._instance.quit_calls, 1)
+        self.assertIn("9.8.7", output.getvalue())
 
 
 class AppWindowStatusTests(unittest.TestCase):

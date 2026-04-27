@@ -246,6 +246,10 @@ jobs:
           print(f"Validated release package: {package} ({package.stat().st_size} bytes)")
           PY
 
+      - name: Smoke test packaged binary
+        shell: bash
+        run: python scripts/smoke_packaged_app.py --manifest dist/release_manifest.json
+
       - name: Upload platform package artifact
         uses: actions/upload-artifact@v7
         with:

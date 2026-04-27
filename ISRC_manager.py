@@ -112,6 +112,10 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.app_bootstrap import run_desktop_application
+from isrc_manager.packaged_smoke import (
+    PACKAGED_SMOKE_TEST_ARGUMENT,
+    run_packaged_smoke_test,
+)
 from isrc_manager.app_dialogs import (
     AboutDialog,
     ActionRibbonDialog,
@@ -36228,6 +36232,8 @@ def main() -> int:
         from isrc_manager.updater_helper import main as updater_helper_main
 
         return updater_helper_main(argv[helper_index + 1 :])
+    if PACKAGED_SMOKE_TEST_ARGUMENT in argv:
+        return run_packaged_smoke_test(argv)
     return run_desktop_application(
         argv=argv,
         init_settings=init_settings,
