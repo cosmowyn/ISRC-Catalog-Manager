@@ -8848,9 +8848,31 @@ class App(QMainWindow):
             installed_update_target_path=installed_update_target,
         )
 
+    def _history_retention_settings_for_storage_summary(
+        self,
+        current_db_path: str | Path | None,
+    ) -> HistoryRetentionSettings:
+        if current_db_path:
+            try:
+                profile_path = Path(current_db_path).expanduser().resolve()
+            except Exception:
+                profile_path = None
+            if profile_path is not None and profile_path.exists():
+                try:
+                    connection = sqlite3.connect(str(profile_path))
+                    try:
+                        return SettingsReadService(connection).load_history_retention_settings()
+                    finally:
+                        connection.close()
+                except Exception:
+                    return HistoryRetentionSettings()
+        return self._current_history_retention_settings()
+
     def _application_storage_summary_payload(
         self,
         audit,
+        *,
+        current_db_path: str | Path | None = None,
     ) -> dict[str, object]:
         summary = audit.summary
         current_profile_text = (
@@ -8870,7 +8892,9 @@ class App(QMainWindow):
         safe_budget_text = "Not available"
         safe_budget_detail = "Open a profile to calculate a safe budget."
         if summary.current_profile_name and int(summary.current_profile_bytes or 0) > 0:
-            retention_settings = self._current_history_retention_settings()
+            retention_settings = self._history_retention_settings_for_storage_summary(
+                current_db_path
+            )
             retained_snapshots = int(retention_settings.auto_snapshot_keep_latest or 1)
             transient_snapshots = max(
                 0,
@@ -8948,7 +8972,12 @@ class App(QMainWindow):
             progress_callback=progress_callback,
         )
         return {
-            "summary": self._application_storage_summary_payload(audit),
+            "summary": self._application_storage_summary_payload(
+                audit,
+                current_db_path=(
+                    current_db_path if current_db_path is not None else self.current_db_path
+                ),
+            ),
             "items": [self._application_storage_item_payload(item) for item in audit.items],
         }
 
@@ -9857,7 +9886,8 @@ class App(QMainWindow):
                 ),
             )
             application_storage_summary = self._application_storage_summary_payload(
-                application_storage_audit
+                application_storage_audit,
+                current_db_path=current_path or None,
             )
             progress.complete(
                 "Inspected application-wide storage.",

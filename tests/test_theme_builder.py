@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +22,7 @@ try:
     import ISRC_manager as app_module
     from isrc_manager.parties import PartyRecord
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
+    from isrc_manager.storage_admin import StorageAdminAudit, StorageAdminSummary
     from isrc_manager.theme_builder import (
         build_theme_style,
         build_theme_stylesheet,
@@ -55,6 +57,24 @@ class _PartyServiceStub:
 
     def fetch_party(self, party_id):
         return self._records.get(int(party_id))
+
+
+class _FailingSettingsReadService:
+    def load_history_retention_settings(self):
+        raise AssertionError("storage summary should use a worker-local profile connection")
+
+
+class _StorageSummaryHost(QWidget):
+    _application_storage_summary_payload = app_module.App._application_storage_summary_payload
+    _history_retention_settings_for_storage_summary = (
+        app_module.App._history_retention_settings_for_storage_summary
+    )
+    _current_history_retention_settings = app_module.App._current_history_retention_settings
+    _human_size = app_module.App._human_size
+
+    def __init__(self):
+        super().__init__()
+        self.settings_reads = _FailingSettingsReadService()
 
 
 class _ThemeApplyHost(QWidget):
@@ -947,6 +967,55 @@ class ThemeBuilderTests(unittest.TestCase):
             finally:
                 dialog.close()
                 host.close()
+
+    def test_application_storage_summary_uses_worker_local_retention_connection(self):
+        host = _StorageSummaryHost()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                profile_path = Path(tmpdir) / "catalog.db"
+                connection = sqlite3.connect(profile_path)
+                try:
+                    connection.execute("CREATE TABLE app_kv(key TEXT PRIMARY KEY, value TEXT)")
+                    connection.executemany(
+                        "INSERT INTO app_kv(key, value) VALUES (?, ?)",
+                        (
+                            ("history_auto_snapshot_keep_latest", "2"),
+                            ("history_storage_budget_mb", "1024"),
+                        ),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+
+                audit = StorageAdminAudit(
+                    summary=StorageAdminSummary(
+                        total_app_bytes=9 * 1024**3,
+                        listed_item_bytes=0,
+                        current_profile_bytes=(73 * 1024**3) // 10,
+                        reclaimable_bytes=0,
+                        deleted_profile_bytes=0,
+                        orphaned_bytes=0,
+                        warning_bytes=0,
+                        in_use_bytes=0,
+                        recoverability_bytes=0,
+                        other_bytes=0,
+                        total_items=0,
+                        reclaimable_items=0,
+                        warning_items=0,
+                        current_profile_name=profile_path.name,
+                    ),
+                    items=(),
+                )
+
+                payload = host._application_storage_summary_payload(
+                    audit,
+                    current_db_path=profile_path,
+                )
+
+                self.assertIn("37 GB", payload["safe_budget_detail"])
+                self.assertIn("2 retained snapshot(s)", payload["safe_budget_detail"])
+        finally:
+            host.close()
 
     def test_apply_theme_with_loading_prepares_payload_before_ui_apply(self):
         host = _ThemeApplyHost()
