@@ -51,11 +51,14 @@ def wait_for_process_exit(
     raise UpdaterHelperError("The application did not exit before the update timeout.")
 
 
-def replace_installation(target: Path, replacement: Path, backup: Path, log: TextIO) -> None:
+def replace_installation(target: Path, replacement: Path, backup: Path, log: TextIO) -> Path:
     if not target.exists():
         raise UpdaterHelperError(f"Installed application was not found: {target}")
     if not replacement.exists():
         raise UpdaterHelperError(f"Staged replacement was not found: {replacement}")
+    install_target = _install_target_for_replacement(target, replacement)
+    if install_target != target and install_target.exists():
+        raise UpdaterHelperError(f"The renamed install target already exists: {install_target}")
     if backup.exists():
         _remove_path(backup)
 
@@ -66,12 +69,15 @@ def replace_installation(target: Path, replacement: Path, backup: Path, log: Tex
         raise UpdaterHelperError(f"Could not create update backup: {exc}") from exc
 
     try:
-        _log(log, f"Moving staged replacement into place: {target}")
-        shutil.move(str(replacement), str(target))
+        _log(log, f"Moving staged replacement into place: {install_target}")
+        shutil.move(str(replacement), str(install_target))
     except Exception as exc:
         _log(log, f"Replacement failed, attempting rollback: {exc}")
+        if install_target != target and install_target.exists():
+            _remove_path(install_target)
         _restore_backup(target, backup, log)
         raise UpdaterHelperError(f"Could not install update: {exc}") from exc
+    return install_target
 
 
 def restart_application(restart_command: list[str], log: TextIO) -> None:
@@ -115,7 +121,7 @@ def run_update(args: argparse.Namespace) -> int:
             return EXIT_WAIT_TIMEOUT
 
         try:
-            replace_installation(target, replacement, backup, log)
+            install_target = replace_installation(target, replacement, backup, log)
         except UpdaterHelperError as exc:
             _log(log, str(exc))
             return EXIT_REPLACEMENT_FAILED
@@ -125,11 +131,12 @@ def run_update(args: argparse.Namespace) -> int:
         except UpdaterHelperError as exc:
             _log(log, str(exc))
             try:
-                _restore_backup(target, backup, log)
+                _restore_backup(target, backup, log, installed_target=install_target)
             except UpdaterHelperError as rollback_exc:
                 _log(log, f"Rollback after restart failure also failed: {rollback_exc}")
             return EXIT_RESTART_FAILED
 
+        _remove_successful_backup(backup, log)
         _log(log, "Update helper completed successfully.")
         return EXIT_SUCCESS
 
@@ -162,9 +169,17 @@ def _parse_restart_command(value: str) -> list[str]:
     return command
 
 
-def _restore_backup(target: Path, backup: Path, log: TextIO) -> None:
+def _restore_backup(
+    target: Path,
+    backup: Path,
+    log: TextIO,
+    *,
+    installed_target: Path | None = None,
+) -> None:
     if not backup.exists():
         raise UpdaterHelperError("Backup was not available for rollback.")
+    if installed_target is not None and installed_target != target and installed_target.exists():
+        _remove_path(installed_target)
     if target.exists():
         _remove_path(target)
     _log(log, f"Restoring backup: {backup} -> {target}")
@@ -174,11 +189,29 @@ def _restore_backup(target: Path, backup: Path, log: TextIO) -> None:
         raise UpdaterHelperError(f"Could not restore the previous installation: {exc}") from exc
 
 
+def _remove_successful_backup(backup: Path, log: TextIO) -> None:
+    if not backup.exists():
+        _log(log, "Update backup was already removed.")
+        return
+    _log(log, f"Removing successful update backup: {backup}")
+    try:
+        _remove_path(backup)
+    except Exception as exc:
+        _log(log, f"Update backup cleanup failed: {exc}")
+
+
 def _remove_path(path: Path) -> None:
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     else:
         path.unlink()
+
+
+def _install_target_for_replacement(target: Path, replacement: Path) -> Path:
+    replacement_name = str(replacement.name or "").strip()
+    if replacement_name and replacement_name != target.name:
+        return target.parent / replacement_name
+    return target
 
 
 def _process_exists(pid: int) -> bool:

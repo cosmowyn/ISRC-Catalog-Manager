@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+from isrc_manager.constants import PACKAGED_APP_NAME
 from isrc_manager.update_checker import ReleaseAsset, ReleaseManifest
 from isrc_manager.update_installer import (
     HELPER_MODE_ARGUMENT,
@@ -18,10 +19,12 @@ from isrc_manager.update_installer import (
     detect_platform_key,
     download_update_asset,
     extract_update_package,
+    install_target_for_replacement,
     launch_update_helper,
     locate_replacement_candidate,
     prepare_update_install_plan,
     resolve_installed_target_path,
+    restart_command_for_prepared_install,
     restart_command_for_target,
     select_platform_asset,
 )
@@ -139,11 +142,11 @@ class UpdateInstallerTests(unittest.TestCase):
             root = Path(tmp)
             package = root / "ISRCManager-v3.5.4-windows-x64.zip"
             with zipfile.ZipFile(package, "w") as archive:
-                archive.writestr("ISRCManager-v3.5.4-windows.exe", b"exe")
+                archive.writestr(f"{PACKAGED_APP_NAME}.exe", b"exe")
 
             staged = extract_update_package(package, root / "stage", platform_key="windows")
 
-            self.assertEqual(staged.replacement_path.name, "ISRCManager-v3.5.4-windows.exe")
+            self.assertEqual(staged.replacement_path.name, f"{PACKAGED_APP_NAME}.exe")
 
     def test_safe_zip_extract_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,8 +162,8 @@ class UpdateInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             package = root / "ISRCManager-v3.5.4-macos-arm64.zip"
-            app_name = "ISRCManager-v3.5.4-macos.app"
-            executable_name = f"{app_name}/Contents/MacOS/ISRCManager"
+            app_name = f"{PACKAGED_APP_NAME}.app"
+            executable_name = f"{app_name}/Contents/MacOS/{PACKAGED_APP_NAME}"
             framework_name = f"{app_name}/Contents/Frameworks/libexample.dylib"
             link_name = f"{app_name}/Contents/Resources/libexample.dylib"
             with zipfile.ZipFile(package, "w") as archive:
@@ -171,7 +174,7 @@ class UpdateInstallerTests(unittest.TestCase):
             staged = extract_update_package(package, root / "stage", platform_key="macos")
 
             link_path = staged.replacement_path / "Contents" / "Resources" / "libexample.dylib"
-            executable_path = staged.replacement_path / "Contents" / "MacOS" / "ISRCManager"
+            executable_path = staged.replacement_path / "Contents" / "MacOS" / PACKAGED_APP_NAME
             self.assertTrue(link_path.is_symlink())
             self.assertEqual(os.readlink(link_path), "../Frameworks/libexample.dylib")
             self.assertTrue(os.access(executable_path, os.X_OK))
@@ -183,7 +186,7 @@ class UpdateInstallerTests(unittest.TestCase):
             with zipfile.ZipFile(package, "w") as archive:
                 _write_zip_symlink(
                     archive,
-                    "ISRCManager-v3.5.4-macos.app/Contents/Resources/escape",
+                    f"{PACKAGED_APP_NAME}.app/Contents/Resources/escape",
                     "../../../outside",
                 )
 
@@ -193,9 +196,9 @@ class UpdateInstallerTests(unittest.TestCase):
     def test_safe_tar_extract_finds_linux_app_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source_dir = root / "payload" / "ISRCManager-v3.5.4-linux"
+            source_dir = root / "payload" / PACKAGED_APP_NAME
             source_dir.mkdir(parents=True)
-            executable = source_dir / "ISRCManager"
+            executable = source_dir / PACKAGED_APP_NAME
             executable.write_text("#!/bin/sh\n", encoding="utf-8")
             executable.chmod(0o755)
             package = root / "ISRCManager-v3.5.4-linux-x64.tar.gz"
@@ -204,14 +207,14 @@ class UpdateInstallerTests(unittest.TestCase):
 
             staged = extract_update_package(package, root / "stage", platform_key="linux")
 
-            self.assertEqual(staged.replacement_path.name, "ISRCManager-v3.5.4-linux")
+            self.assertEqual(staged.replacement_path.name, PACKAGED_APP_NAME)
 
     def test_locate_replacement_candidate_finds_macos_app_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app = Path(tmp) / "ISRCManager-v3.5.4-macos.app"
+            app = Path(tmp) / f"{PACKAGED_APP_NAME}.app"
             macos_dir = app / "Contents" / "MacOS"
             macos_dir.mkdir(parents=True)
-            executable = macos_dir / "ISRCManager"
+            executable = macos_dir / PACKAGED_APP_NAME
             executable.write_text("#!/bin/sh\n", encoding="utf-8")
             executable.chmod(0o755)
 
@@ -220,20 +223,20 @@ class UpdateInstallerTests(unittest.TestCase):
     def test_installed_target_detection_handles_platform_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            mac_exe = root / "ISRCManager.app" / "Contents" / "MacOS" / "ISRCManager"
+            mac_exe = root / f"{PACKAGED_APP_NAME}.app" / "Contents" / "MacOS" / PACKAGED_APP_NAME
             mac_exe.parent.mkdir(parents=True)
             mac_exe.write_text("", encoding="utf-8")
-            win_exe = root / "ISRCManager.exe"
+            win_exe = root / f"{PACKAGED_APP_NAME}.exe"
             win_exe.write_text("", encoding="utf-8")
-            linux_dir = root / "ISRCManager"
+            linux_dir = root / PACKAGED_APP_NAME
             linux_dir.mkdir()
-            linux_exe = linux_dir / "ISRCManager"
+            linux_exe = linux_dir / PACKAGED_APP_NAME
             linux_exe.write_text("", encoding="utf-8")
             (linux_dir / "_internal").mkdir()
 
             self.assertEqual(
                 resolve_installed_target_path(executable=mac_exe, platform_key="macos"),
-                (root / "ISRCManager.app").resolve(),
+                (root / f"{PACKAGED_APP_NAME}.app").resolve(),
             )
             self.assertEqual(
                 resolve_installed_target_path(executable=win_exe, platform_key="windows"),
@@ -246,9 +249,9 @@ class UpdateInstallerTests(unittest.TestCase):
 
     def test_restart_command_and_backup_path_are_predictable(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app = Path(tmp) / "ISRCManager.app"
+            app = Path(tmp) / f"{PACKAGED_APP_NAME}.app"
             app.mkdir()
-            target = Path(tmp) / "ISRCManager"
+            target = Path(tmp) / PACKAGED_APP_NAME
             target.write_text("#!/bin/sh\n", encoding="utf-8")
             target.chmod(0o755)
 
@@ -261,18 +264,36 @@ class UpdateInstallerTests(unittest.TestCase):
             )
             self.assertEqual(
                 backup_path_for_target(target, "3.5.4", timestamp="20260426").name,
-                "ISRCManager.backup-before-v3.5.4-20260426",
+                f"{PACKAGED_APP_NAME}.backup-before-v3.5.4-20260426",
+            )
+
+    def test_prepared_install_renames_versioned_target_to_packaged_app_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "ISRCManager-3.6.10-macos.app"
+            replacement = root / "stage" / f"{PACKAGED_APP_NAME}.app"
+            replacement_exe = replacement / "Contents" / "MacOS" / PACKAGED_APP_NAME
+            replacement_exe.parent.mkdir(parents=True)
+            replacement_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+            replacement_exe.chmod(0o755)
+
+            install_target = install_target_for_replacement(target, replacement)
+
+            self.assertEqual(install_target, (root / f"{PACKAGED_APP_NAME}.app").resolve())
+            self.assertEqual(
+                restart_command_for_prepared_install(target, replacement, platform_key="macos"),
+                ("open", "-n", str(install_target)),
             )
 
     def test_helper_command_contains_required_arguments(self):
         command = build_helper_command(
             Path("/tmp/helper"),
             current_pid=123,
-            target_path=Path("/Applications/ISRCManager.app"),
-            replacement_path=Path("/tmp/new.app"),
+            target_path=Path(f"/Applications/{PACKAGED_APP_NAME}.app"),
+            replacement_path=Path(f"/tmp/{PACKAGED_APP_NAME}.app"),
             expected_version="3.5.4",
-            backup_path=Path("/Applications/ISRCManager.app.backup"),
-            restart_command=("open", "-n", "/Applications/ISRCManager.app"),
+            backup_path=Path(f"/Applications/{PACKAGED_APP_NAME}.app.backup"),
+            restart_command=("open", "-n", f"/Applications/{PACKAGED_APP_NAME}.app"),
             log_path=Path("/tmp/update.log"),
         )
 
@@ -283,14 +304,14 @@ class UpdateInstallerTests(unittest.TestCase):
     def test_prepare_update_plan_rejects_macos_app_translocation_target(self):
         manifest = _manifest()
         translocated_target = Path(
-            "/private/var/folders/example/AppTranslocation/UUID/d/ISRCManager.app"
+            f"/private/var/folders/example/AppTranslocation/UUID/d/{PACKAGED_APP_NAME}.app"
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             staged = StagedUpdatePackage(
                 package_path=root / "package.zip",
                 staging_dir=root / "staging",
-                replacement_path=root / "staging" / "ISRCManager.app",
+                replacement_path=root / "staging" / f"{PACKAGED_APP_NAME}.app",
                 platform_key="macos",
             )
 

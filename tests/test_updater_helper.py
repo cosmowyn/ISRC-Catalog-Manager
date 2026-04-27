@@ -37,24 +37,48 @@ class UpdaterHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "app.txt"
-            replacement = root / "new.txt"
+            replacement = root / "stage" / "app.txt"
             backup = root / "app.backup"
             target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
             replacement.write_text("new", encoding="utf-8")
 
-            updater_helper.replace_installation(target, replacement, backup, io.StringIO())
+            installed = updater_helper.replace_installation(
+                target, replacement, backup, io.StringIO()
+            )
 
+            self.assertEqual(installed, target)
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
             self.assertEqual(backup.read_text(encoding="utf-8"), "old")
             self.assertFalse(replacement.exists())
+
+    def test_replace_installation_uses_replacement_name_when_it_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "ISRCManager-3.6.10-macos.app"
+            replacement = root / "stage" / "Music Catalog Manager.app"
+            backup = root / "app.backup"
+            target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
+            replacement.write_text("new", encoding="utf-8")
+
+            installed = updater_helper.replace_installation(
+                target, replacement, backup, io.StringIO()
+            )
+
+            self.assertEqual(installed, root / "Music Catalog Manager.app")
+            self.assertFalse(target.exists())
+            self.assertEqual(installed.read_text(encoding="utf-8"), "new")
+            self.assertEqual(backup.read_text(encoding="utf-8"), "old")
 
     def test_replace_installation_rolls_back_when_second_move_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "app.txt"
-            replacement = root / "new.txt"
+            replacement = root / "stage" / "app.txt"
             backup = root / "app.backup"
             target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
             replacement.write_text("new", encoding="utf-8")
             real_move = updater_helper.shutil.move
             calls = 0
@@ -76,10 +100,11 @@ class UpdaterHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "app.txt"
-            replacement = root / "new.txt"
+            replacement = root / "stage" / "new.txt"
             backup = root / "app.backup"
             log = root / "update.log"
             target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
             replacement.write_text("new", encoding="utf-8")
             args = argparse.Namespace(
                 current_pid=0,
@@ -101,7 +126,76 @@ class UpdaterHelperTests(unittest.TestCase):
 
             self.assertEqual(exit_code, updater_helper.EXIT_RESTART_FAILED)
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
+            self.assertFalse((root / "new.txt").exists())
             self.assertIn("restart failed", log.read_text(encoding="utf-8"))
+
+    def test_run_update_removes_backup_after_successful_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "app.txt"
+            replacement = root / "stage" / "app.txt"
+            backup = root / "app.backup"
+            log = root / "update.log"
+            target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
+            replacement.write_text("new", encoding="utf-8")
+            args = argparse.Namespace(
+                current_pid=0,
+                target=str(target),
+                replacement=str(replacement),
+                expected_version="3.5.4",
+                backup=str(backup),
+                restart_json=json.dumps([str(target)]),
+                log=str(log),
+                wait_timeout=1.0,
+            )
+
+            with mock.patch.object(updater_helper, "restart_application"):
+                exit_code = updater_helper.run_update(args)
+
+            self.assertEqual(exit_code, updater_helper.EXIT_SUCCESS)
+            self.assertEqual(target.read_text(encoding="utf-8"), "new")
+            self.assertFalse(backup.exists())
+            log_text = log.read_text(encoding="utf-8")
+            self.assertIn("Removing successful update backup", log_text)
+            self.assertIn("Update helper completed successfully", log_text)
+
+    def test_run_update_succeeds_when_successful_backup_cleanup_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "app.txt"
+            replacement = root / "stage" / "app.txt"
+            backup = root / "app.backup"
+            log = root / "update.log"
+            target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
+            replacement.write_text("new", encoding="utf-8")
+            args = argparse.Namespace(
+                current_pid=0,
+                target=str(target),
+                replacement=str(replacement),
+                expected_version="3.5.4",
+                backup=str(backup),
+                restart_json=json.dumps([str(target)]),
+                log=str(log),
+                wait_timeout=1.0,
+            )
+            real_remove_path = updater_helper._remove_path
+            resolved_backup = backup.resolve()
+
+            def _remove_path(path):
+                if Path(path).resolve() == resolved_backup:
+                    raise OSError("cleanup blocked")
+                return real_remove_path(path)
+
+            with mock.patch.object(updater_helper, "restart_application"):
+                with mock.patch.object(updater_helper, "_remove_path", side_effect=_remove_path):
+                    exit_code = updater_helper.run_update(args)
+
+            self.assertEqual(exit_code, updater_helper.EXIT_SUCCESS)
+            self.assertEqual(target.read_text(encoding="utf-8"), "new")
+            self.assertTrue(backup.exists())
+            self.assertIn("Update backup cleanup failed", log.read_text(encoding="utf-8"))
 
     def test_run_update_rejects_invalid_restart_json(self):
         with tempfile.TemporaryDirectory() as tmp:

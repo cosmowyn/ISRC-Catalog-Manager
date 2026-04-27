@@ -21,11 +21,12 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 from urllib.parse import urlparse
 
-from .constants import APP_NAME
+from .constants import APP_NAME, PACKAGED_APP_NAME
 from .paths import preferred_data_root
 from .update_checker import ReleaseAsset, ReleaseManifest, UpdateCheckError
 
 APP_NAME_TEXT = str(APP_NAME)
+PACKAGED_APP_NAME_TEXT = str(PACKAGED_APP_NAME)
 HELPER_MODE_ARGUMENT = "--run-updater-helper"
 DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS = 45.0
 MAX_UPDATE_PACKAGE_BYTES = 5 * 1024 * 1024 * 1024
@@ -256,6 +257,35 @@ def restart_command_for_target(
     return (str(target),)
 
 
+def install_target_for_replacement(target_path: Path, replacement_path: Path) -> Path:
+    target = target_path.resolve()
+    replacement_name = str(replacement_path.name or "").strip()
+    if replacement_name and replacement_name != target.name:
+        return (target.parent / replacement_name).resolve()
+    return target
+
+
+def restart_command_for_prepared_install(
+    target_path: Path,
+    replacement_path: Path,
+    *,
+    platform_key: str | None = None,
+) -> tuple[str, ...]:
+    key = platform_key or detect_platform_key()
+    install_target = install_target_for_replacement(target_path, replacement_path)
+    if key == "macos" and install_target.suffix == ".app":
+        return ("open", "-n", str(install_target))
+    if replacement_path.is_dir():
+        executable = _find_executable_in_directory(replacement_path)
+        if executable is None:
+            raise UpdateInstallerError(
+                f"No restart executable was found inside {replacement_path}."
+            )
+        relative_executable = executable.relative_to(replacement_path)
+        return (str((install_target / relative_executable).resolve()),)
+    return (str(install_target),)
+
+
 def backup_path_for_target(
     target_path: Path,
     expected_version: str,
@@ -299,7 +329,13 @@ def prepare_update_install_plan(
     )
     target = resolve_installed_target_path(platform_key=key)
     validate_install_target_is_replaceable(target, platform_key=key)
-    restart_command = restart_command_for_target(target, platform_key=key)
+    install_target = install_target_for_replacement(target, staged.replacement_path)
+    validate_install_destination_is_available(target, install_target)
+    restart_command = restart_command_for_prepared_install(
+        target,
+        staged.replacement_path,
+        platform_key=key,
+    )
     backup_path = backup_path_for_target(target, manifest.version)
     log_path = workspace / "install.log"
     helper_executable = create_helper_runtime_copy(
@@ -320,7 +356,7 @@ def prepare_update_install_plan(
     _report(progress_callback, 90, 100, "Update installer prepared.")
     return UpdateInstallPlan(
         helper_command=helper_command,
-        target_path=target,
+        target_path=install_target,
         replacement_path=staged.replacement_path,
         backup_path=backup_path,
         restart_command=restart_command,
@@ -349,6 +385,17 @@ def validate_install_target_is_replaceable(
             "Automatic updates cannot replace the installed application because its folder is "
             f"not writable: {target.parent}. Move the app to a writable install folder, then "
             "check for updates again."
+        )
+
+
+def validate_install_destination_is_available(current_target: Path, install_target: Path) -> None:
+    current = current_target.resolve()
+    destination = install_target.resolve()
+    if destination != current and destination.exists():
+        raise UpdateInstallerError(
+            "Automatic updates cannot rename the installed application because the target name "
+            f"already exists: {destination}. Move or remove that app, then check for updates "
+            "again."
         )
 
 
@@ -696,9 +743,10 @@ def _macos_app_executable(app_bundle: Path) -> Path | None:
     macos_dir = app_bundle / "Contents" / "MacOS"
     if not macos_dir.is_dir():
         return None
-    preferred = macos_dir / APP_NAME_TEXT
-    if preferred.is_file():
-        return preferred
+    for preferred_name in _preferred_executable_names():
+        preferred = macos_dir / preferred_name
+        if preferred.is_file():
+            return preferred
     executables = sorted(
         path for path in macos_dir.iterdir() if path.is_file() and os.access(path, os.X_OK)
     )
@@ -706,8 +754,7 @@ def _macos_app_executable(app_bundle: Path) -> Path | None:
 
 
 def _find_executable_in_directory(directory: Path) -> Path | None:
-    preferred_names = (APP_NAME_TEXT, f"{APP_NAME_TEXT}.exe")
-    for name in preferred_names:
+    for name in _preferred_executable_names(include_windows_suffix=True):
         candidate = directory / name
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
@@ -718,10 +765,26 @@ def _find_executable_in_directory(directory: Path) -> Path | None:
 
 
 def _prefer_app_named_path(candidates: Sequence[Path]) -> Path:
+    preferred_fragments = (
+        PACKAGED_APP_NAME_TEXT.lower(),
+        APP_NAME_TEXT.lower(),
+    )
     for candidate in candidates:
-        if APP_NAME_TEXT.lower() in candidate.name.lower():
+        candidate_name = candidate.name.lower()
+        if any(fragment in candidate_name for fragment in preferred_fragments):
             return candidate
     return candidates[0]
+
+
+def _preferred_executable_names(*, include_windows_suffix: bool = False) -> tuple[str, ...]:
+    names = [PACKAGED_APP_NAME_TEXT, APP_NAME_TEXT]
+    if include_windows_suffix:
+        names.extend(f"{name}.exe" for name in (PACKAGED_APP_NAME_TEXT, APP_NAME_TEXT))
+    deduped: list[str] = []
+    for name in names:
+        if name and name not in deduped:
+            deduped.append(name)
+    return tuple(deduped)
 
 
 def _supported_package_name(name: str) -> bool:

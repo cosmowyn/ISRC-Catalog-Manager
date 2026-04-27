@@ -4,6 +4,7 @@ from isrc_manager.domain.standard_fields import default_base_headers, promoted_c
 
 APP_ORG = "GenericVendor"
 APP_NAME = "ISRCManager"
+PACKAGED_APP_NAME = "Music Catalog Manager"
 SETTINGS_BASENAME = "settings.ini"
 
 QSETTINGS_ORG = APP_ORG

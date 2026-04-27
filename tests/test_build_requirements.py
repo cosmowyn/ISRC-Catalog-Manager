@@ -489,7 +489,7 @@ class CommandConstructionTests(unittest.TestCase):
             cmd = build._pyinstaller_cmd(
                 pyinstaller_launcher=launcher,
                 entry_script=entry_script,
-                app_name=build.APP_NAME,
+                app_name=build.PACKAGE_APP_NAME,
                 icon="/project/build_assets/icons/app_logo.ico",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )
@@ -514,7 +514,7 @@ class CommandConstructionTests(unittest.TestCase):
             cmd = build._pyinstaller_cmd(
                 pyinstaller_launcher=launcher,
                 entry_script=entry_script,
-                app_name=build.APP_NAME,
+                app_name=build.PACKAGE_APP_NAME,
                 icon="/project/build_assets/icons/app_logo.png",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )
@@ -537,7 +537,7 @@ class CommandConstructionTests(unittest.TestCase):
             cmd = build._pyinstaller_cmd(
                 pyinstaller_launcher=launcher,
                 entry_script=entry_script,
-                app_name=build.APP_NAME,
+                app_name=build.PACKAGE_APP_NAME,
                 icon="/project/build_assets/icons/app_logo.icns",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )
@@ -547,6 +547,8 @@ class CommandConstructionTests(unittest.TestCase):
         self.assertNotIn("--splash", cmd)
         self.assertIn("--add-data", cmd)
         self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
+        self.assertIn("--osx-bundle-identifier", cmd)
+        self.assertIn(build.PACKAGE_BUNDLE_IDENTIFIER, cmd)
 
 
 class MainFlowTests(unittest.TestCase):
@@ -559,8 +561,8 @@ class MainFlowTests(unittest.TestCase):
             dist_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "stale.txt").write_text("stale", encoding="utf-8")
             (dist_dir / "stale.txt").write_text("stale", encoding="utf-8")
-            artifact = root / "dist" / build.APP_NAME
-            staged = root / "dist" / "release" / build.APP_NAME
+            artifact = root / "dist" / build.PACKAGE_APP_NAME
+            staged = root / "dist" / "release" / build.PACKAGE_APP_NAME
 
             selection = build.PyInstallerSelection(
                 launcher_prefix=("pyinstaller",),
@@ -703,7 +705,7 @@ class ArtifactStagingTests(unittest.TestCase):
     def test_find_built_artifact_prefers_macos_app_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            app_bundle = root / "dist" / f"{build.APP_NAME}.app"
+            app_bundle = root / "dist" / f"{build.PACKAGE_APP_NAME}.app"
             app_bundle.mkdir(parents=True, exist_ok=True)
 
             with (
@@ -719,7 +721,7 @@ class ArtifactStagingTests(unittest.TestCase):
             root = Path(tmpdir)
             dist_dir = root / "dist"
             dist_dir.mkdir(parents=True, exist_ok=True)
-            artifact = dist_dir / f"{build.APP_NAME}.exe"
+            artifact = dist_dir / f"{build.PACKAGE_APP_NAME}.exe"
             artifact.write_bytes(b"binary")
 
             with (
@@ -733,13 +735,13 @@ class ArtifactStagingTests(unittest.TestCase):
                 )
 
             self.assertTrue(staged.exists())
-            self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.1-windows.exe")
+            self.assertEqual(staged.name, f"{build.PACKAGE_APP_NAME}.exe")
             self.assertFalse((dist_dir / "release_manifest.json").exists())
 
     def test_stage_release_artifact_preserves_macos_app_bundle_suffix(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
-            app_bundle = dist_dir / f"{build.APP_NAME}.app"
+            app_bundle = dist_dir / f"{build.PACKAGE_APP_NAME}.app"
             contents = app_bundle / "Contents"
             contents.mkdir(parents=True)
             (contents / "Info.plist").write_text("plist", encoding="utf-8")
@@ -755,15 +757,15 @@ class ArtifactStagingTests(unittest.TestCase):
                     app_version="3.1.1",
                 )
 
-            self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.1-macos.app")
+            self.assertEqual(staged.name, f"{build.PACKAGE_APP_NAME}.app")
             self.assertTrue((staged / "Contents" / "Info.plist").is_file())
 
     def test_write_release_manifest_includes_package_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
             dist_dir.mkdir()
-            source = dist_dir / f"{build.APP_NAME}.exe"
-            staged = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-windows.exe"
+            source = dist_dir / f"{build.PACKAGE_APP_NAME}.exe"
+            staged = dist_dir / "release" / f"{build.PACKAGE_APP_NAME}.exe"
             package = dist_dir / "release" / "packages" / f"{build.APP_NAME}-v3.1.1-windows-x64.zip"
 
             with (
@@ -790,7 +792,7 @@ class ArtifactStagingTests(unittest.TestCase):
     def test_package_release_artifact_zips_macos_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
-            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-macos.app"
+            bundle = dist_dir / "release" / f"{build.PACKAGE_APP_NAME}.app"
             contents = bundle / "Contents"
             contents.mkdir(parents=True)
             (contents / "Info.plist").write_text("plist", encoding="utf-8")
@@ -820,11 +822,11 @@ class ArtifactStagingTests(unittest.TestCase):
             self.assertGreater(package.stat().st_size, 0)
             with zipfile.ZipFile(package) as archive:
                 self.assertIn(
-                    f"{build.APP_NAME}-3.1.1-macos.app/Contents/Info.plist",
+                    f"{build.PACKAGE_APP_NAME}.app/Contents/Info.plist",
                     archive.namelist(),
                 )
                 symlink_info = archive.getinfo(
-                    f"{build.APP_NAME}-3.1.1-macos.app/Contents/Frameworks/"
+                    f"{build.PACKAGE_APP_NAME}.app/Contents/Frameworks/"
                     "Example.framework/Versions/Current"
                 )
                 self.assertEqual(stat.S_IFMT(symlink_info.external_attr >> 16), stat.S_IFLNK)
@@ -836,7 +838,7 @@ class ArtifactStagingTests(unittest.TestCase):
     def test_stage_release_artifact_preserves_macos_bundle_symlinks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
-            bundle = dist_dir / f"{build.APP_NAME}.app"
+            bundle = dist_dir / f"{build.PACKAGE_APP_NAME}.app"
             versions_dir = bundle / "Contents" / "Frameworks" / "Example.framework" / "Versions"
             real_version_dir = versions_dir / "A"
             real_version_dir.mkdir(parents=True)
@@ -858,9 +860,9 @@ class ArtifactStagingTests(unittest.TestCase):
     def test_package_release_artifact_creates_linux_tarball(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = Path(tmpdir) / "dist"
-            bundle = dist_dir / "release" / f"{build.APP_NAME}-3.1.1-linux"
+            bundle = dist_dir / "release" / build.PACKAGE_APP_NAME
             bundle.mkdir(parents=True)
-            (bundle / build.APP_NAME).write_text("binary", encoding="utf-8")
+            (bundle / build.PACKAGE_APP_NAME).write_text("binary", encoding="utf-8")
 
             with (
                 mock.patch.object(build, "_is_windows", return_value=False),
@@ -878,7 +880,7 @@ class ArtifactStagingTests(unittest.TestCase):
             self.assertGreater(package.stat().st_size, 0)
             with tarfile.open(package, "r:gz") as archive:
                 self.assertIn(
-                    f"{build.APP_NAME}-3.1.1-linux/{build.APP_NAME}",
+                    f"{build.PACKAGE_APP_NAME}/{build.PACKAGE_APP_NAME}",
                     archive.getnames(),
                 )
 

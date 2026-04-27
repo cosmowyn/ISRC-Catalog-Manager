@@ -7,7 +7,7 @@ Behavior:
 - Prefers assets from ``build_assets/`` and falls back to older local layouts.
 - Bundles an optional runtime splash into ``build_assets/`` for packaged builds.
 - Cleans ``build/`` and ``dist/`` before each run.
-- Stages a versioned release artifact under ``dist/release/``.
+- Stages a stable-named release artifact under ``dist/release/``.
 - Creates an upload-ready release archive under ``dist/release/packages/``.
 
 Notes:
@@ -33,12 +33,16 @@ from pathlib import Path
 
 try:
     from isrc_manager.constants import APP_NAME as DEFAULT_APP_NAME
+    from isrc_manager.constants import PACKAGED_APP_NAME as DEFAULT_PACKAGED_APP_NAME
 except Exception:
     DEFAULT_APP_NAME = "ISRCManager"
+    DEFAULT_PACKAGED_APP_NAME = "Music Catalog Manager"
 
 
 ENTRY_SCRIPT = "ISRC_manager.py"
 APP_NAME = DEFAULT_APP_NAME
+PACKAGE_APP_NAME = DEFAULT_PACKAGED_APP_NAME
+PACKAGE_BUNDLE_IDENTIFIER = "com.cosmowyn.music-catalog-manager"
 PROJECT_ROOT = Path(__file__).resolve().parent
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 BUILD_ASSETS_DIR = PROJECT_ROOT / "build_assets"
@@ -112,10 +116,6 @@ def _project_version(pyproject_path: Path) -> str:
     if not match:
         raise RuntimeError(f"Could not determine project version from {pyproject_path}")
     return match.group(1).strip()
-
-
-def _release_basename(version: str) -> str:
-    return f"{APP_NAME}-{version}-{_platform_tag()}"
 
 
 def _architecture_tag(machine: str | None = None) -> str:
@@ -841,16 +841,19 @@ def _pyinstaller_cmd(
     if icon:
         cmd.extend(["--icon", icon])
 
+    if _is_macos():
+        cmd.extend(["--osx-bundle-identifier", PACKAGE_BUNDLE_IDENTIFIER])
+
     return cmd
 
 
 def _expected_artifact_candidates(project_root: Path) -> list[Path]:
     dist_dir = project_root / "dist"
     if _is_windows():
-        return [dist_dir / f"{APP_NAME}.exe"]
+        return [dist_dir / f"{PACKAGE_APP_NAME}.exe"]
     if _is_macos():
-        return [dist_dir / f"{APP_NAME}.app", dist_dir / APP_NAME]
-    return [dist_dir / APP_NAME]
+        return [dist_dir / f"{PACKAGE_APP_NAME}.app", dist_dir / PACKAGE_APP_NAME]
+    return [dist_dir / PACKAGE_APP_NAME]
 
 
 def _find_built_artifact(project_root: Path) -> Path:
@@ -871,7 +874,7 @@ def _write_release_manifest(
 ) -> Path:
     manifest_path = dist_dir / "release_manifest.json"
     payload = {
-        "app_name": APP_NAME,
+        "app_name": PACKAGE_APP_NAME,
         "app_version": app_version,
         "platform": _platform_tag(),
         "architecture": _architecture_tag(),
@@ -890,15 +893,12 @@ def _stage_release_artifact(source_artifact: Path, dist_dir: Path, *, app_versio
     release_dir.mkdir(parents=True, exist_ok=True)
 
     if source_artifact.is_dir():
-        target_name = _release_basename(app_version)
-        if source_artifact.suffix:
-            target_name = f"{target_name}{source_artifact.suffix}"
-        target = release_dir / target_name
+        target = release_dir / source_artifact.name
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(source_artifact, target, symlinks=True)
     else:
-        target = release_dir / f"{_release_basename(app_version)}{source_artifact.suffix}"
+        target = release_dir / source_artifact.name
         target.unlink(missing_ok=True)
         shutil.copy2(source_artifact, target)
 
@@ -1043,7 +1043,7 @@ def main() -> int:
     cmd = _pyinstaller_cmd(
         pyinstaller_launcher=pyinstaller.launcher_prefix,
         entry_script=entry_script,
-        app_name=APP_NAME,
+        app_name=PACKAGE_APP_NAME,
         icon=str(icon_result.path) if icon_result.path else None,
         runtime_splash_asset=str(splash_result.path) if splash_result.path else None,
     )
@@ -1098,7 +1098,7 @@ def main() -> int:
         print("\nPossible causes:")
         print("- Antivirus or endpoint protection quarantined the output immediately.")
         print("- Build actually failed but only logged to stderr.")
-        print("- APP_NAME mismatch versus the produced artifact name.")
+        print("- packaged app name mismatch versus the produced artifact name.")
         return 2
 
     staged_artifact = _stage_release_artifact(
