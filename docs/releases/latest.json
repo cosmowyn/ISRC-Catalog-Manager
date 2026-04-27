@@ -1,7 +1,7 @@
 {
-  "version": "3.6.10",
+  "version": "3.6.11",
   "released_at": "2026-04-27",
-  "summary": "allow newer pyinstaller pins",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.10.md",
+  "summary": "Use stable packaged app name",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.6.11.md",
   "minimum_supported_version": null
 }
