@@ -114,8 +114,7 @@ class _ThemeApplyHost(QWidget):
     def _reset_blob_badge_render_cache(self):
         self.blob_badge_reset_count += 1
 
-    def _set_application_theme_stylesheet(self, app, stylesheet):
-        app.setStyleSheet(str(stylesheet))
+    def _set_application_theme_stylesheet(self, _app, stylesheet):
         self.applied_stylesheets.append(str(stylesheet))
 
     def _submit_background_task(self, **kwargs):
@@ -1058,7 +1057,8 @@ class ThemeBuilderTests(unittest.TestCase):
         finally:
             self.app.setFont(previous_font)
             self.app.setPalette(previous_palette)
-            self.app.setStyleSheet(previous_stylesheet)
+            if self.app.styleSheet() != previous_stylesheet:
+                self.app.setStyleSheet(previous_stylesheet)
             restored_style = QStyleFactory.create(previous_style_key)
             if restored_style is not None:
                 self.app.setStyle(restored_style)
@@ -1124,7 +1124,8 @@ class ThemeBuilderTests(unittest.TestCase):
         finally:
             self.app.setFont(previous_font)
             self.app.setPalette(previous_palette)
-            self.app.setStyleSheet(previous_stylesheet)
+            if self.app.styleSheet() != previous_stylesheet:
+                self.app.setStyleSheet(previous_stylesheet)
             restored_style = QStyleFactory.create(previous_style_key)
             if restored_style is not None:
                 self.app.setStyle(restored_style)
