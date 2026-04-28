@@ -40,6 +40,11 @@ class StartupSplashHelperTests(unittest.TestCase):
             )
         cls.app = require_qapplication()
 
+    def _dispose_splash(self, splash):
+        splash.close()
+        splash.deleteLater()
+        self.app.processEvents()
+
     def test_resolve_runtime_splash_asset_prefers_png(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -103,6 +108,7 @@ class StartupSplashHelperTests(unittest.TestCase):
             finally:
                 window.close()
                 window.deleteLater()
+                self._dispose_splash(controller._splash)
                 self.app.processEvents()
 
     def test_controller_processes_events_after_show_phase_and_finish(self):
@@ -119,7 +125,7 @@ class StartupSplashHelperTests(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
-            splash.close()
+            self._dispose_splash(splash)
         self.assertEqual(fake_app.process_events_calls, 3)
 
     def test_readable_splash_overlay_panel_is_inset_and_contains_progress_track(self):
@@ -127,15 +133,18 @@ class StartupSplashHelperTests(unittest.TestCase):
         pixmap.fill(QColor("#204b6f"))
         splash = startup_splash._ReadableSplashScreen(pixmap)
 
-        panel_rect = splash._overlay_panel_rect()
-        progress_rect = splash._progress_rect(panel_rect)
+        try:
+            panel_rect = splash._overlay_panel_rect()
+            progress_rect = splash._progress_rect(panel_rect)
 
-        self.assertGreater(panel_rect.left(), 0)
-        self.assertLess(panel_rect.right(), splash.width())
-        self.assertLess(panel_rect.bottom(), splash.height())
-        self.assertGreater(progress_rect.left(), panel_rect.left())
-        self.assertLess(progress_rect.right(), panel_rect.right())
-        self.assertGreater(progress_rect.top(), panel_rect.top())
+            self.assertGreater(panel_rect.left(), 0)
+            self.assertLess(panel_rect.right(), splash.width())
+            self.assertLess(panel_rect.bottom(), splash.height())
+            self.assertGreater(progress_rect.left(), panel_rect.left())
+            self.assertLess(progress_rect.right(), panel_rect.right())
+            self.assertGreater(progress_rect.top(), panel_rect.top())
+        finally:
+            self._dispose_splash(splash)
 
     def test_finish_is_idempotent_and_closes_without_window_handle(self):
         fake_app = _FakeApplication()
@@ -143,13 +152,16 @@ class StartupSplashHelperTests(unittest.TestCase):
         pixmap.fill(QColor("#204b6f"))
         splash = startup_splash._ReadableSplashScreen(pixmap)
         controller = startup_splash.StartupSplashController(fake_app, splash)
-        controller.show()
-        controller.set_phase(StartupPhase.PREPARING_DATABASE)
-        controller.finish(object())
-        controller.finish(object())
-        self.assertEqual(controller.current_phase, StartupPhase.READY)
-        self.assertEqual(controller.current_progress, 100)
-        self.assertGreaterEqual(fake_app.process_events_calls, 3)
+        try:
+            controller.show()
+            controller.set_phase(StartupPhase.PREPARING_DATABASE)
+            controller.finish(object())
+            controller.finish(object())
+            self.assertEqual(controller.current_phase, StartupPhase.READY)
+            self.assertEqual(controller.current_progress, 100)
+            self.assertGreaterEqual(fake_app.process_events_calls, 3)
+        finally:
+            self._dispose_splash(splash)
 
     def test_suspend_resume_preserves_current_phase(self):
         fake_app = _FakeApplication()
@@ -157,18 +169,21 @@ class StartupSplashHelperTests(unittest.TestCase):
         pixmap.fill(QColor("#204b6f"))
         splash = startup_splash._ReadableSplashScreen(pixmap)
         controller = startup_splash.StartupSplashController(fake_app, splash)
-        controller.show()
-        controller.set_phase(StartupPhase.RESOLVING_STORAGE, "Waiting for migration decision…")
-        controller.report_progress(
-            42,
-            "Waiting for migration decision…",
-            phase=StartupPhase.RESOLVING_STORAGE,
-        )
-        controller.suspend()
-        controller.resume()
-        self.assertEqual(controller.current_phase, StartupPhase.RESOLVING_STORAGE)
-        self.assertEqual(controller.current_message, "Waiting for migration decision…")
-        self.assertEqual(controller.current_progress, 42)
+        try:
+            controller.show()
+            controller.set_phase(StartupPhase.RESOLVING_STORAGE, "Waiting for migration decision…")
+            controller.report_progress(
+                42,
+                "Waiting for migration decision…",
+                phase=StartupPhase.RESOLVING_STORAGE,
+            )
+            controller.suspend()
+            controller.resume()
+            self.assertEqual(controller.current_phase, StartupPhase.RESOLVING_STORAGE)
+            self.assertEqual(controller.current_message, "Waiting for migration decision…")
+            self.assertEqual(controller.current_progress, 42)
+        finally:
+            self._dispose_splash(splash)
 
     def test_report_progress_is_monotonic_and_keeps_latest_phase_message(self):
         fake_app = _FakeApplication()
@@ -176,17 +191,22 @@ class StartupSplashHelperTests(unittest.TestCase):
         pixmap.fill(QColor("#204b6f"))
         splash = startup_splash._ReadableSplashScreen(pixmap)
         controller = startup_splash.StartupSplashController(fake_app, splash)
-        controller.show()
+        try:
+            controller.show()
 
-        controller.set_phase(StartupPhase.LOADING_CATALOG, "Loading catalog rows…")
-        controller.report_progress(64, "Loaded catalog rows.", phase=StartupPhase.LOADING_CATALOG)
-        controller.report_progress(
-            61, "Older progress should not win.", phase=StartupPhase.LOADING_CATALOG
-        )
+            controller.set_phase(StartupPhase.LOADING_CATALOG, "Loading catalog rows…")
+            controller.report_progress(
+                64, "Loaded catalog rows.", phase=StartupPhase.LOADING_CATALOG
+            )
+            controller.report_progress(
+                61, "Older progress should not win.", phase=StartupPhase.LOADING_CATALOG
+            )
 
-        self.assertEqual(controller.current_phase, StartupPhase.LOADING_CATALOG)
-        self.assertEqual(controller.current_progress, 64)
-        self.assertEqual(controller.current_message, "Older progress should not win.")
+            self.assertEqual(controller.current_phase, StartupPhase.LOADING_CATALOG)
+            self.assertEqual(controller.current_progress, 64)
+            self.assertEqual(controller.current_message, "Older progress should not win.")
+        finally:
+            self._dispose_splash(splash)
 
     def test_controller_queues_background_thread_updates_to_splash_thread(self):
         pixmap = QPixmap(32, 18)
@@ -228,7 +248,7 @@ class StartupSplashHelperTests(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
-            splash.close()
+            self._dispose_splash(splash)
             self.app.processEvents()
 
 

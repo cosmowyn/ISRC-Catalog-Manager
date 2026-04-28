@@ -1809,7 +1809,7 @@ class AppShellTestCase(unittest.TestCase):
             help_texts,
             [
                 "Help Contents…",
-                "About ISRC Catalog Manager…",
+                "About Music Catalog Manager…",
                 "Check for Updates…",
                 "Diagnostics…",
                 "Application Storage Admin…",

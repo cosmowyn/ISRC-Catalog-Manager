@@ -26,7 +26,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("application-updates", HELP_CHAPTERS_BY_ID)
 
     def test_rendered_help_contains_contents_index_and_anchors(self):
-        html = render_help_html("ISRC Catalog Manager", "1.2.3")
+        html = render_help_html("Music Catalog Manager", "1.2.3")
 
         self.assertIn("Table of Contents", html)
         self.assertIn("Keyword Index", html)
@@ -41,7 +41,7 @@ class HelpContentTests(unittest.TestCase):
 
     def test_rendered_help_can_follow_theme_palette(self):
         html = render_help_html(
-            "ISRC Catalog Manager",
+            "Music Catalog Manager",
             "1.2.3",
             theme={
                 "input_bg": "#0F172A",
@@ -156,7 +156,7 @@ class HelpContentTests(unittest.TestCase):
 
     def test_application_updates_help_documents_installer_workflow(self):
         chapter = HELP_CHAPTERS_BY_ID["application-updates"]
-        html = render_help_html("ISRC Catalog Manager", "3.6.5")
+        html = render_help_html("Music Catalog Manager", "3.6.5")
 
         self.assertIn("Download and Install", chapter.content_html)
         self.assertIn("SHA-256", chapter.content_html)

@@ -7544,7 +7544,7 @@ class App(QMainWindow):
         except UpdateInstallerError as exc:
             installer_unavailable = f"\n\nAutomatic installation is not available: {exc}"
         text = (
-            "A newer version of ISRC Catalog Manager is available.\n\n"
+            "A newer version of Music Catalog Manager is available.\n\n"
             f"Installed version: {result.current_version}\n"
             f"Latest version: {manifest.version}\n\n"
             f"{manifest.summary}"
@@ -8430,7 +8430,7 @@ class App(QMainWindow):
 
     def _help_html(self) -> str:
         return render_help_html(
-            "ISRC Catalog Manager",
+            "Music Catalog Manager",
             self._app_version_text(),
             theme=self._effective_theme_settings(),
         )

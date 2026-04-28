@@ -52,7 +52,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "bandcamp promo codes",
         ),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
+        <p><strong>Music Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
         <p>It is designed for independent artists, labels, managers, and catalog owners who need more than a basic track list and want a reliable system for both metadata and catalog operations.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
@@ -976,7 +976,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The About dialog summarizes the current version, the local-first design of the app, and where the active workspace data lives on disk.</p>
         <p>Use the Help menu to reach:</p>
         <ul>
-          <li><strong>About ISRC Catalog Manager…</strong> for version and workspace context.</li>
+          <li><strong>About Music Catalog Manager…</strong> for version and workspace context.</li>
           <li><strong>Check for Updates…</strong> for a manual update check. See <strong>Application Updates</strong> for the full update, install-helper, and troubleshooting workflow.</li>
           <li><strong>Diagnostics…</strong> for profile health checks and repair paths.</li>
           <li><strong>Application Log…</strong> for readable and structured troubleshooting logs.</li>

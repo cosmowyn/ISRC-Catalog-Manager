@@ -958,7 +958,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     help_menu.addAction(app.help_contents_action)
 
     app.view_info_action = app._create_action(
-        "About ISRC Catalog Manager…",
+        "About Music Catalog Manager…",
         slot=app.show_settings_summary,
     )
     help_menu.addAction(app.view_info_action)

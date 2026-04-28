@@ -58,7 +58,7 @@ class _HelpDialogHost(QWidget):
         return self._help_path
 
     def _help_html(self) -> str:
-        return render_help_html("ISRC Catalog Manager", "test")
+        return render_help_html("Music Catalog Manager", "test")
 
     def _open_local_path(self, path, _title):
         self.opened_paths.append(Path(path))
@@ -558,7 +558,7 @@ class AppDialogsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             help_path = Path(tmpdir) / "help.html"
             help_path.write_text(
-                render_help_html("ISRC Catalog Manager", "test"),
+                render_help_html("Music Catalog Manager", "test"),
                 encoding="utf-8",
             )
             host = _HelpDialogHost(help_path)

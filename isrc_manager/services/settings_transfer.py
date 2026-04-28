@@ -326,7 +326,7 @@ class ApplicationSettingsTransferService:
             raise ApplicationSettingsTransferError("The settings bundle payload is invalid.")
         if str(payload.get("bundle_format") or "").strip() != self.BUNDLE_FORMAT:
             raise ApplicationSettingsTransferError(
-                "The selected ZIP file is not an ISRC Catalog Manager settings bundle."
+                "The selected ZIP file is not a Music Catalog Manager settings bundle."
             )
         bundle_version = int(payload.get("bundle_version") or 0)
         if bundle_version != self.BUNDLE_VERSION:

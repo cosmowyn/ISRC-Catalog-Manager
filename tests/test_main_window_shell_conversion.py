@@ -117,7 +117,7 @@ class MainWindowShellConversionTests(unittest.TestCase):
             help_texts = [action.text() for action in help_menu.actions() if action.text()]
             self.assertIn("Check for Updates…", help_texts)
             self.assertLess(
-                help_texts.index("About ISRC Catalog Manager…"),
+                help_texts.index("About Music Catalog Manager…"),
                 help_texts.index("Check for Updates…"),
             )
             self.assertLess(

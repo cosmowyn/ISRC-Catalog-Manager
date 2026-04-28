@@ -412,7 +412,7 @@ def validate_install_target_is_replaceable(
     if key == "macos" and _is_macos_app_translocation_path(target):
         raise UpdateInstallerError(
             "Automatic updates cannot replace an app running from macOS App Translocation. "
-            "Move ISRC Catalog Manager to /Applications, or another writable install folder, "
+            "Move Music Catalog Manager to /Applications, or another writable install folder, "
             "launch it from there, then check for updates again."
         )
     if not target.exists():

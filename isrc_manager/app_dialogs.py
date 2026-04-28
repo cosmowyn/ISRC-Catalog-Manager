@@ -2109,7 +2109,7 @@ class AboutDialog(QDialog):
         self.setObjectName("aboutDialog")
         self.setProperty("role", "panel")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setWindowTitle("About ISRC Catalog Manager")
+        self.setWindowTitle("About Music Catalog Manager")
         self.resize(720, 520)
         self.setMinimumSize(640, 460)
         _apply_standard_dialog_chrome(self, "aboutDialog")
@@ -2161,7 +2161,7 @@ class AboutDialog(QDialog):
 
         intro_layout = QVBoxLayout()
         intro_layout.setSpacing(8)
-        title = QLabel("ISRC Catalog Manager")
+        title = QLabel("Music Catalog Manager")
         title.setObjectName("aboutTitle")
         title.setProperty("role", "dialogTitle")
         intro_layout.addWidget(title)
@@ -2350,7 +2350,7 @@ class ReleaseNotesDialog(QDialog):
         markdown = str(release_notes_markdown or "").strip()
         if not markdown:
             fallback_lines = [
-                f"# ISRC Catalog Manager {version}",
+                f"# Music Catalog Manager {version}",
                 "",
                 str(summary or "").strip() or "No release-note details were provided.",
                 "",
