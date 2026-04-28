@@ -4464,6 +4464,7 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "Catalog",
                 "Release Browser…",
+                "Promo Code Ledger…",
                 "Deliverables & Asset Versions…",
                 "Derivative Ledger…",
                 "Global Search and Relationships…",
