@@ -1,7 +1,7 @@
 {
-  "version": "3.9.1",
+  "version": "3.9.2",
   "released_at": "2026-04-28",
-  "summary": "formatted",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.9.1.md",
+  "summary": "fixed test failure",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.9.2.md",
   "minimum_supported_version": null
 }
