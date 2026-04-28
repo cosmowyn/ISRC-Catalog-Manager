@@ -258,10 +258,61 @@ class StorageMigrationServiceTests(unittest.TestCase):
             )
         )
         self.assertIn("Checking migrated profile databases...", messages)
+        self.assertTrue(
+            any(
+                message.startswith("Running SQLite integrity test PRAGMA integrity_check")
+                and str(self.db_path.name) in message
+                for message in messages
+            )
+        )
         self.assertIn("Storage migration completed.", messages)
         values = [value for value, _maximum, _message in progress_updates]
         self.assertEqual(values, sorted(values))
         self.assertTrue(all(maximum == 100 for _value, maximum, _message in progress_updates))
+
+    def test_preferred_root_startup_validation_reports_lightweight_sqlite_commands(self):
+        initial_service = self._build_service()
+        initial_service.migrate()
+        self.settings.setValue("storage/migration_state", "failed")
+        self.settings.setValue("storage/legacy_data_root", str(self.source_root.resolve()))
+        self.settings.setValue("storage/active_data_root", str(self.source_root.resolve()))
+        self.settings.sync()
+
+        progress_updates: list[tuple[int, int, str]] = []
+        service = self._build_service(
+            progress_reporter=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            )
+        )
+
+        inspection = service.inspect()
+
+        self.assertEqual(inspection.preferred_state, "valid_complete")
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertTrue(
+            any(
+                message.startswith("Found ") and "SQLite startup metadata test" in message
+                for message in messages
+            )
+        )
+        self.assertTrue(
+            any("Running SQLite command PRAGMA schema_version" in message for message in messages)
+        )
+        self.assertTrue(
+            any("Running SQLite command PRAGMA user_version" in message for message in messages)
+        )
+        self.assertTrue(
+            any(
+                "Running SQLite command SELECT name FROM sqlite_master LIMIT 1" in message
+                for message in messages
+            )
+        )
+        self.assertFalse(
+            any("PRAGMA integrity_check" in message for message in messages),
+            "normal startup preferred-root validation should not run full integrity checks",
+        )
+        values = [value for value, _maximum, _message in progress_updates]
+        self.assertEqual(values, sorted(values))
 
     def test_migrate_copies_live_wal_backed_profile_database_safely(self):
         live_conn = sqlite3.connect(str(self.db_path))

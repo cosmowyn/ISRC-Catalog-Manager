@@ -48,14 +48,14 @@ class StartupProgressSection:
 
 
 STARTUP_PROGRESS_PLAN: tuple[StartupProgressSection, ...] = (
-    StartupProgressSection(StartupPhase.RESOLVING_STORAGE, 2),
+    StartupProgressSection(StartupPhase.RESOLVING_STORAGE, 8),
     StartupProgressSection(StartupPhase.INITIALIZING_SETTINGS, 3),
     StartupProgressSection(StartupPhase.OPENING_PROFILE_DB, 1),
     StartupProgressSection(StartupPhase.PREPARING_DATABASE, 4),
     StartupProgressSection(StartupPhase.LOADING_SERVICES, 7),
     StartupProgressSection(StartupPhase.FINALIZING_INTERFACE, 5),
     StartupProgressSection(StartupPhase.RESTORING_WORKSPACE, 8),
-    StartupProgressSection(StartupPhase.LOADING_CATALOG, 16),
+    StartupProgressSection(StartupPhase.LOADING_CATALOG, 10),
 )
 
 

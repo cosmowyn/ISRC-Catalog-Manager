@@ -116,6 +116,70 @@ class UpdateUiIntegrationTests(unittest.TestCase):
 
         finalize.assert_called_once_with(phase="close")
 
+    def test_update_backup_handoff_close_defers_cleanup_while_helper_installs(self):
+        finalize = mock.Mock()
+        log_events = []
+        fake_app = SimpleNamespace(
+            _update_install_handoff_in_progress=True,
+            _finalize_update_backup_handoff=finalize,
+            _log_event=lambda *args, **kwargs: log_events.append((args, kwargs)),
+        )
+
+        app_module.App._mark_update_backup_handoff_ready_on_close(fake_app)
+
+        finalize.assert_not_called()
+        self.assertEqual(log_events[0][0][0], "updates.cache_cleanup_deferred")
+        self.assertEqual(log_events[0][1]["phase"], "close")
+
+    def test_launch_prepared_update_marks_close_as_update_handoff(self):
+        information_messages = []
+        log_events = []
+        quit_calls = []
+
+        class _FakeMessageBox:
+            @staticmethod
+            def information(_parent, title, text):
+                information_messages.append((title, text))
+
+        class _FakeApplication:
+            def quit(self):
+                quit_calls.append("quit")
+
+        fake_app = SimpleNamespace(
+            _is_closing=False,
+            _update_install_handoff_in_progress=False,
+            _log_event=lambda *args, **kwargs: log_events.append((args, kwargs)),
+        )
+        plan = app_module.UpdateInstallPlan(
+            helper_command=("/tmp/helper", app_module.HELPER_MODE_ARGUMENT),
+            target_path=Path("/Applications/Music Catalog Manager.app"),
+            replacement_path=Path("/tmp/update-workspace/staging/Music Catalog Manager.app"),
+            backup_path=Path("/Applications/Music Catalog Manager.app.backup-before-v3.9.2"),
+            handoff_path=Path("/tmp/update-workspace/update_backup_handoff.json"),
+            restart_command=("/usr/bin/open", "/Applications/Music Catalog Manager.app"),
+            log_path=Path("/tmp/update-workspace/install.log"),
+            expected_version="3.9.2",
+        )
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _FakeMessageBox),
+            mock.patch.object(app_module, "launch_update_helper") as launch_helper,
+            mock.patch.object(app_module.QApplication, "instance", return_value=_FakeApplication()),
+            mock.patch.object(
+                app_module.QTimer,
+                "singleShot",
+                side_effect=lambda _delay, callback: callback(),
+            ),
+        ):
+            app_module.App._launch_prepared_update(fake_app, plan)
+
+        launch_helper.assert_called_once_with(plan.helper_command)
+        self.assertTrue(fake_app._update_install_handoff_in_progress)
+        self.assertTrue(fake_app._is_closing)
+        self.assertEqual(quit_calls, ["quit"])
+        self.assertEqual(information_messages[0][0], "Installing Update")
+        self.assertEqual(log_events[0][0][0], "updates.helper_launched")
+
     def test_update_backup_handoff_startup_ready_runs_cleanup(self):
         cleanup = mock.Mock()
         fake_app = SimpleNamespace(

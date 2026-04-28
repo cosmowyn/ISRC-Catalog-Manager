@@ -6831,6 +6831,7 @@ class App(QMainWindow):
         self._suspend_layout_history = False
         self._suspend_dock_state_sync = False
         self._is_closing = False
+        self._update_install_handoff_in_progress = False
         self._is_restoring_workspace_layout = False
         self._workspace_layout_restore_pending = True
         self._workspace_layout_restore_scheduled = False
@@ -7395,6 +7396,14 @@ class App(QMainWindow):
         self._cleanup_update_cache_artifacts()
 
     def _mark_update_backup_handoff_ready_on_close(self) -> None:
+        if getattr(self, "_update_install_handoff_in_progress", False):
+            self._log_event(
+                "updates.cache_cleanup_deferred",
+                "Deferred update backup/cache cleanup while update helper is installing",
+                level=logging.INFO,
+                phase="close",
+            )
+            return
         self._finalize_update_backup_handoff(phase="close")
 
     def _schedule_post_ready_startup_tasks(self) -> None:
@@ -7705,6 +7714,7 @@ class App(QMainWindow):
             handoff=str(plan.handoff_path),
             log=str(plan.log_path),
         )
+        self._update_install_handoff_in_progress = True
         QMessageBox.information(
             self,
             "Installing Update",

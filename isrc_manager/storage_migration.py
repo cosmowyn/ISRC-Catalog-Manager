@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,6 +131,9 @@ class StorageMigrationService:
 
     SQLITE_COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
     SAFE_HELP_FILE = Path(HELP_SUBDIR) / "isrc_catalog_manager_help.html"
+    SQLITE_VERIFY_PROGRESS_OPCODES = 25_000
+    SQLITE_VERIFY_PROGRESS_INTERVAL_SECONDS = 0.35
+    SQLITE_VERIFY_PROGRESS_ESTIMATE_CHUNKS = 80
 
     def __init__(
         self,
@@ -370,7 +374,13 @@ class StorageMigrationService:
                 self._rewrite_target_storage(source_root, stage_root, progress_value=86)
             )
             self._progress(90, 100, "Checking migrated profile databases...")
-            verified = list(self._verify_target_databases(stage_root, progress_value=90))
+            verified = list(
+                self._verify_target_databases(
+                    stage_root,
+                    progress_value=90,
+                    progress_end=94,
+                )
+            )
             self._progress(94, 100, "Activating preferred storage root...")
             self._promote_stage_root(stage_root, target_root)
             self._rewrite_settings_paths(source_root, target_root)
@@ -583,7 +593,12 @@ class StorageMigrationService:
             if not required_path.exists():
                 return False
         try:
-            self._verify_target_databases(target_root, progress_value=40)
+            self._verify_target_databases(
+                target_root,
+                progress_value=40,
+                progress_end=46,
+                integrity_check=False,
+            )
         except Exception:
             return False
         validation_root = legacy_root or self._journal_path_value(journal.get("source_root"))
@@ -592,7 +607,7 @@ class StorageMigrationService:
                 if self._find_legacy_references(
                     validation_root.resolve(),
                     target_root,
-                    progress_value=40,
+                    progress_value=46,
                     label="preferred storage",
                 ):
                     return False
@@ -697,7 +712,13 @@ class StorageMigrationService:
             else ()
         )
         self._progress(82, 100, "Checking staged profile databases...")
-        verified = list(self._verify_target_databases(stage_root, progress_value=82))
+        verified = list(
+            self._verify_target_databases(
+                stage_root,
+                progress_value=82,
+                progress_end=86,
+            )
+        )
         if (
             self._find_legacy_references(
                 rewrite_root,
@@ -759,7 +780,14 @@ class StorageMigrationService:
         if not copied_items:
             copied_items = list(inspection.preferred_items)
         self._progress(64, 100, "Checking preferred storage databases...")
-        verified = list(self._verify_target_databases(target_root, progress_value=64))
+        verified = list(
+            self._verify_target_databases(
+                target_root,
+                progress_value=64,
+                progress_end=72,
+                integrity_check=False,
+            )
+        )
         source_inventory_count = self._adoption_inventory_count(
             source_root,
             copied_items,
@@ -1282,20 +1310,214 @@ class StorageMigrationService:
         target_root: Path,
         *,
         progress_value: int,
+        progress_end: int | None = None,
+        integrity_check: bool = True,
     ) -> tuple[str, ...]:
+        db_paths = tuple(sorted(target_root.rglob("*.db")))
+        start_value = int(progress_value)
+        end_value = max(start_value, int(progress_end if progress_end is not None else start_value))
+        total = len(db_paths)
+        if total == 0:
+            self._progress_path(start_value, 100, "No storage databases found under", target_root)
+            return ()
+
+        check_label = (
+            "full SQLite integrity test" if integrity_check else "SQLite startup metadata test"
+        )
+        self._progress_path(
+            start_value,
+            100,
+            f"Found {total} storage database(s) for {check_label} under",
+            target_root,
+        )
         verified: list[str] = []
-        for db_path in sorted(target_root.rglob("*.db")):
-            self._progress_path(progress_value, 100, "Verifying storage database", db_path)
+        for index, db_path in enumerate(db_paths, start=1):
+            self._progress_path(
+                self._database_verify_progress_value(
+                    start_value,
+                    end_value,
+                    database_index=index,
+                    database_total=total,
+                    step=0,
+                    steps_per_database=4,
+                ),
+                100,
+                f"Opening storage database {index}/{total}",
+                db_path,
+            )
             conn = sqlite3.connect(str(db_path))
             try:
-                row = conn.execute("PRAGMA integrity_check").fetchone()
+                conn.execute("PRAGMA busy_timeout = 5000")
+                try:
+                    conn.execute("PRAGMA query_only = ON")
+                except sqlite3.DatabaseError:
+                    pass
+                if integrity_check:
+                    row = self._run_integrity_check_with_progress(
+                        conn,
+                        db_path,
+                        database_index=index,
+                        database_total=total,
+                        progress_start=start_value,
+                        progress_end=end_value,
+                    )
+                    result = str(row[0] if row else "unknown")
+                    if result.lower() != "ok":
+                        raise RuntimeError(
+                            f"Integrity check failed for migrated database: {db_path}"
+                        )
+                else:
+                    self._run_startup_metadata_check_with_progress(
+                        conn,
+                        db_path,
+                        database_index=index,
+                        database_total=total,
+                        progress_start=start_value,
+                        progress_end=end_value,
+                    )
             finally:
                 conn.close()
-            result = str(row[0] if row else "unknown")
-            if result.lower() != "ok":
-                raise RuntimeError(f"Integrity check failed for migrated database: {db_path}")
+            self._progress_path(
+                self._database_verify_progress_value(
+                    start_value,
+                    end_value,
+                    database_index=index,
+                    database_total=total,
+                    step=4,
+                    steps_per_database=4,
+                ),
+                100,
+                f"Verified storage database {index}/{total}",
+                db_path,
+            )
             verified.append(str(db_path))
         return tuple(verified)
+
+    def _run_startup_metadata_check_with_progress(
+        self,
+        conn: sqlite3.Connection,
+        db_path: Path,
+        *,
+        database_index: int,
+        database_total: int,
+        progress_start: int,
+        progress_end: int,
+    ) -> None:
+        commands = (
+            "PRAGMA schema_version",
+            "PRAGMA user_version",
+            "SELECT name FROM sqlite_master LIMIT 1",
+        )
+        for command_index, command in enumerate(commands, start=1):
+            self._progress_path(
+                self._database_verify_progress_value(
+                    progress_start,
+                    progress_end,
+                    database_index=database_index,
+                    database_total=database_total,
+                    step=command_index,
+                    steps_per_database=4,
+                ),
+                100,
+                f"Running SQLite command {command} on database {database_index}/{database_total}",
+                db_path,
+            )
+            conn.execute(command).fetchone()
+
+    def _run_integrity_check_with_progress(
+        self,
+        conn: sqlite3.Connection,
+        db_path: Path,
+        *,
+        database_index: int,
+        database_total: int,
+        progress_start: int,
+        progress_end: int,
+    ) -> tuple[Any, ...] | None:
+        self._progress_path(
+            self._database_verify_progress_value(
+                progress_start,
+                progress_end,
+                database_index=database_index,
+                database_total=database_total,
+                step=1,
+                steps_per_database=4,
+            ),
+            100,
+            (
+                "Running SQLite integrity test PRAGMA integrity_check "
+                f"on database {database_index}/{database_total}"
+            ),
+            db_path,
+        )
+        progress_calls = 0
+        last_reported_at = 0.0
+
+        def _progress_handler() -> int:
+            nonlocal progress_calls, last_reported_at
+            progress_calls += 1
+            now = time.monotonic()
+            if (
+                progress_calls == 1
+                or now - last_reported_at >= self.SQLITE_VERIFY_PROGRESS_INTERVAL_SECONDS
+            ):
+                last_reported_at = now
+                bounded_step = 1 + min(
+                    2.75,
+                    (progress_calls / max(1, self.SQLITE_VERIFY_PROGRESS_ESTIMATE_CHUNKS)) * 2.75,
+                )
+                self._progress_path(
+                    self._database_verify_progress_value(
+                        progress_start,
+                        progress_end,
+                        database_index=database_index,
+                        database_total=database_total,
+                        step=bounded_step,
+                        steps_per_database=4,
+                    ),
+                    100,
+                    (
+                        "Still running SQLite integrity test PRAGMA integrity_check "
+                        f"on database {database_index}/{database_total} "
+                        f"({progress_calls} progress chunk(s))"
+                    ),
+                    db_path,
+                )
+            return 0
+
+        set_progress_handler = getattr(conn, "set_progress_handler", None)
+        if callable(set_progress_handler):
+            set_progress_handler(
+                _progress_handler,
+                self.SQLITE_VERIFY_PROGRESS_OPCODES,
+            )
+        try:
+            return conn.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            if callable(set_progress_handler):
+                set_progress_handler(None, 0)
+
+    @staticmethod
+    def _database_verify_progress_value(
+        start: int,
+        end: int,
+        *,
+        database_index: int,
+        database_total: int,
+        step: int | float,
+        steps_per_database: int,
+    ) -> int:
+        start_value = int(start)
+        end_value = max(start_value, int(end))
+        if database_total <= 0 or steps_per_database <= 0 or end_value <= start_value:
+            return start_value
+        completed_units = ((max(1, int(database_index)) - 1) * steps_per_database) + max(
+            0.0,
+            min(float(steps_per_database), float(step)),
+        )
+        total_units = max(1, int(database_total) * int(steps_per_database))
+        ratio = max(0.0, min(1.0, completed_units / total_units))
+        return start_value + int(round((end_value - start_value) * ratio))
 
     def _rewrite_json_file(self, path: Path, source_root: Path, target_root: Path) -> bool:
         try:
