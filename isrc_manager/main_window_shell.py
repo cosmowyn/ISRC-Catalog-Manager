@@ -604,6 +604,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+Shift+K", "Meta+Alt+Shift+K"),
     )
     workspace_create_menu.addAction(app.code_registry_workspace_action)
+    app.promo_code_ledger_action = app._create_action(
+        "Promo Code Ledger…",
+        slot=app.open_promo_code_ledger,
+        shortcuts=("Ctrl+Alt+Shift+Y", "Meta+Alt+Shift+Y"),
+    )
+    workspace_browse_menu.addAction(app.promo_code_ledger_action)
     app.contract_template_workspace_action = app._create_action(
         "Contract Template Workspace…",
         slot=app.open_contract_template_workspace,

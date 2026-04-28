@@ -66,6 +66,7 @@ packages = [
   "isrc_manager.history",
   "isrc_manager.media",
   "isrc_manager.parties",
+  "isrc_manager.promo_codes",
   "isrc_manager.quality",
   "isrc_manager.releases",
   "isrc_manager.rights",
