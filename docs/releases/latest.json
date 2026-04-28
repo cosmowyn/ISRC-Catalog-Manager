@@ -1,7 +1,7 @@
 {
-  "version": "3.8.1",
-  "released_at": "2026-04-27",
-  "summary": "Rename project in README to 'Music Catalog Manager'",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.8.1.md",
+  "version": "3.9.0",
+  "released_at": "2026-04-28",
+  "summary": "Add Bandcamp promo code ledger",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.9.0.md",
   "minimum_supported_version": null
 }
