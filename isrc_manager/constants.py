@@ -61,7 +61,7 @@ HISTORY_RETENTION_MODE_PRESETS = {
 FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blob_audio"]
 
 SCHEMA_BASELINE = 1
-SCHEMA_TARGET = 41
+SCHEMA_TARGET = 42
 
 DEFAULT_BASE_HEADERS = default_base_headers()
 

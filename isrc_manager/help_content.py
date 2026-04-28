@@ -49,6 +49,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quality dashboard",
             "background tasks",
             "threading",
+            "bandcamp promo codes",
         ),
         content_html="""
         <p><strong>ISRC Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
@@ -67,8 +68,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Assets</strong>: managed deliverables and artwork variants with approval and primary-version tracking.</li>
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
-          <li><strong>Docked catalog workspace</strong>: code registry, release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
-          <li><strong>Import, exchange, and conversion</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, template conversion, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, filling external templates, attaching media, exporting it, and archiving it safely.</li>
+          <li><strong>Docked catalog workspace</strong>: code registry, promo-code ledger, release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
+          <li><strong>Import, exchange, and conversion</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, Bandcamp promo-code, template conversion, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, filling external templates, attaching media, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
@@ -102,7 +103,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Code Registry Workspace, Promo Code Ledger, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
           <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup lives with Diagnostics so integrity review and cleanup follow-up stay together.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
@@ -124,6 +125,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "album art",
             "global search",
             "derivative ledger",
+            "promo code ledger",
         ),
         content_html="""
         <p>The app keeps shortcuts focused on high-value actions. The goal is fast access to the main catalog workflows without turning every control into a shortcut puzzle.</p>
@@ -146,6 +148,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release Browser</strong>: <code>Ctrl+Alt+Shift+R</code> / <code>Cmd+Option+Shift+R</code></li>
           <li><strong>Global Search and Relationships</strong>: <code>Ctrl+Alt+F</code> / <code>Cmd+Option+F</code></li>
           <li><strong>Deliverables and Asset Versions</strong>: <code>Ctrl+Alt+A</code> / <code>Cmd+Option+A</code></li>
+          <li><strong>Promo Code Ledger</strong>: <code>Ctrl+Alt+Shift+Y</code> / <code>Cmd+Option+Shift+Y</code></li>
           <li><strong>Derivative Ledger</strong>: <code>Ctrl+Alt+Shift+A</code> / <code>Cmd+Option+Shift+A</code></li>
           <li><strong>Data Quality Dashboard</strong>: <code>Ctrl+Shift+Q</code> / <code>Cmd+Shift+Q</code></li>
         </ul>
@@ -476,6 +479,40 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Import classification</strong>: canonical values that match a configured internal prefix and the expected structure can enter the internal registry directly, while unknown, malformed, or foreign values are preserved as external identifiers and reported clearly.</li>
         </ul>
         <p><strong>Registry SHA-256 Key</strong> is a code-registry feature, not an audio-authenticity key. It does not replace watermark keys or signing keys, and it stays separate in naming, symbol resolution, workspace actions, and tests.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="promo-code-ledger",
+        title="Promo Code Ledger",
+        summary="Import Bandcamp promo-code sheets, refresh active-code exports, and track who received each code.",
+        keywords=(
+            "promo codes",
+            "promo code ledger",
+            "bandcamp",
+            "csv",
+            "redeemed",
+            "active codes",
+            "available codes",
+            "recipient",
+            "email",
+            "copy code",
+            "fuzzy search",
+            "gift codes",
+        ),
+        content_html="""
+        <p><strong>Catalog &gt; Workspace &gt; Browse / Review &gt; Promo Code Ledger...</strong> opens the Bandcamp promo-code manager as a docked catalog workspace. It is built for Bandcamp promo-code CSV exports where each sheet represents one Bandcamp code set.</p>
+        <ul>
+          <li><strong>Import or Update CSV...</strong>: choose a Bandcamp promo-code export. New code sets create a separate sheet in the database; matching code sets update the existing sheet instead of merging everything into one large table.</li>
+          <li><strong>Active-code refresh</strong>: Bandcamp exports only unredeemed codes. When you import a newer active-code export for an existing sheet, stored codes missing from the new CSV are marked redeemed automatically.</li>
+          <li><strong>Separate sheets</strong>: sheets remain separated by Bandcamp code-set metadata and profile. If more than one stored sheet matches the same update metadata, the app stops rather than guessing.</li>
+          <li><strong>Status filters</strong>: switch between available, redeemed, and all codes without losing the selected sheet.</li>
+          <li><strong>Fuzzy search</strong>: search across code, recipient name, recipient email, notes, and status text to find a code or ledger entry quickly.</li>
+          <li><strong>Quick copy</strong>: select a code and copy it directly to the clipboard.</li>
+          <li><strong>Ledger fields</strong>: optionally store the recipient name, recipient email address, notes, and redemption state for the selected code.</li>
+          <li><strong>Undo history</strong>: CSV imports, active-code updates, and ledger edits are recorded through snapshot history, so undo and redo restore the database state.</li>
+          <li><strong>Background work</strong>: imports run as background write tasks with progress updates, keeping the main workspace responsive during larger code sheets.</li>
+        </ul>
+        <p>Use the import/update action whenever Bandcamp gives you a fresh active-code export. The sheet summary shows Bandcamp metadata, stored code totals, redeemed counts, and available counts so you can confirm the database and the current Bandcamp export agree.</p>
         """,
     ),
     HelpChapter(
@@ -971,6 +1008,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "bulk-audio-attach": "Daily Workflows",
     "releases": "Daily Workflows",
     "code-registry": "Daily Workflows",
+    "promo-code-ledger": "Daily Workflows",
     "media-preview": "Daily Workflows",
     "repertoire-knowledge": "Deep Dives",
     "storage-modes": "Deep Dives",

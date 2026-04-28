@@ -515,6 +515,7 @@ class DatabaseSchemaService:
         self._ensure_authenticity_tables()
         self._ensure_derivative_export_tables()
         self._ensure_forensic_watermark_tables()
+        self._ensure_promo_code_tables()
         self._ensure_blob_icon_schema()
         self._backfill_dual_storage_defaults()
 
@@ -755,6 +756,9 @@ class DatabaseSchemaService:
             elif version == 40:
                 self._apply_migration(40, self._mig_40_to_41)
                 version = 41
+            elif version == 41:
+                self._apply_migration(41, self._mig_41_to_42)
+                version = 42
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -1733,6 +1737,9 @@ class DatabaseSchemaService:
               AND id IN (SELECT track_id FROM consistent_track_numbers)
             """
         )
+
+    def _mig_41_to_42(self) -> None:
+        self._ensure_promo_code_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -4872,6 +4879,97 @@ class DatabaseSchemaService:
             """
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_created_at
             ON ForensicWatermarkExports(created_at)
+            """
+        )
+
+    def _ensure_promo_code_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS PromoCodeSheets (
+                id INTEGER PRIMARY KEY,
+                code_set_name TEXT NOT NULL,
+                album TEXT,
+                bandcamp_date_created TEXT,
+                bandcamp_date_exported TEXT,
+                quantity_created INTEGER,
+                quantity_redeemed_to_date INTEGER,
+                redeem_url TEXT,
+                source_path TEXT,
+                source_filename TEXT,
+                source_sha256 TEXT,
+                code_sequence_sha256 TEXT NOT NULL,
+                profile_name TEXT,
+                imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                notes TEXT
+            )
+            """
+        )
+        sheet_columns = self._table_columns("PromoCodeSheets")
+        for column_name, column_sql in (
+            ("source_sha256", "TEXT"),
+            ("code_sequence_sha256", "TEXT NOT NULL DEFAULT ''"),
+            ("profile_name", "TEXT"),
+            ("updated_at", "TEXT"),
+            ("notes", "TEXT"),
+        ):
+            if column_name not in sheet_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE PromoCodeSheets ADD COLUMN {column_name} {column_sql}"
+                )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS PromoCodes (
+                id INTEGER PRIMARY KEY,
+                sheet_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                redeemed INTEGER NOT NULL DEFAULT 0,
+                recipient_name TEXT,
+                recipient_email TEXT,
+                ledger_notes TEXT,
+                provided_at TEXT,
+                redeemed_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (sheet_id) REFERENCES PromoCodeSheets(id) ON DELETE CASCADE,
+                UNIQUE(sheet_id, code)
+            )
+            """
+        )
+        code_columns = self._table_columns("PromoCodes")
+        for column_name, column_sql in (
+            ("provided_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            if column_name not in code_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE PromoCodes ADD COLUMN {column_name} {column_sql}"
+                )
+
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_source_sha256
+            ON PromoCodeSheets(source_sha256)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_sequence
+            ON PromoCodeSheets(code_sequence_sha256)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_promo_codes_sheet_status
+            ON PromoCodes(sheet_id, redeemed, sort_order)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_promo_codes_code
+            ON PromoCodes(code)
             """
         )
 
