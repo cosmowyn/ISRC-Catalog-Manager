@@ -141,14 +141,13 @@ class PromoCodeLedgerPanel(QWidget):
         self,
         *,
         service_provider: Callable[[], PromoCodeService | None],
-        import_handler: Callable[
-            [str, QWidget | None, Callable[[PromoCodeImportResult], None] | None], object
-        ]
-        | None = None,
-        ledger_update_handler: Callable[
-            [int, bool, str | None, str | None, str | None], PromoCodeRecord
-        ]
-        | None = None,
+        import_handler: (
+            Callable[[str, QWidget | None, Callable[[PromoCodeImportResult], None] | None], object]
+            | None
+        ) = None,
+        ledger_update_handler: (
+            Callable[[int, bool, str | None, str | None, str | None], PromoCodeRecord] | None
+        ) = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -270,7 +269,9 @@ class PromoCodeLedgerPanel(QWidget):
         self.table.customContextMenuRequested.connect(self._open_table_context_menu)
         selection_model = self.table.selectionModel()
         if selection_model is not None:
-            selection_model.selectionChanged.connect(lambda *_args: self._on_code_selection_changed())
+            selection_model.selectionChanged.connect(
+                lambda *_args: self._on_code_selection_changed()
+            )
         layout.addWidget(self.table, 1)
 
         button_row = QHBoxLayout()

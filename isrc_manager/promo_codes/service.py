@@ -149,9 +149,7 @@ class PromoCodeService:
             if row and row[1]
         }
         if column_name not in columns:
-            self.conn.execute(
-                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"
-            )
+            self.conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
     @staticmethod
     def parse_bandcamp_csv(path: str | Path) -> ParsedBandcampPromoCsv:

@@ -4944,9 +4944,7 @@ class DatabaseSchemaService:
             ("updated_at", "TEXT"),
         ):
             if column_name not in code_columns:
-                self.cursor.execute(
-                    f"ALTER TABLE PromoCodes ADD COLUMN {column_name} {column_sql}"
-                )
+                self.cursor.execute(f"ALTER TABLE PromoCodes ADD COLUMN {column_name} {column_sql}")
 
         self.cursor.execute(
             """
