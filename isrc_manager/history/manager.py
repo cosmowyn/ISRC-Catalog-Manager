@@ -412,7 +412,15 @@ class HistoryManager:
             self._remove_path(Path(str(target) + suffix) if suffix else target)
 
         for file_info in state.get("files", []):
-            artifact = Path(file_info["artifact_path"])
+            raw_artifact_path = (
+                file_info.get("artifact_path") if isinstance(file_info, dict) else None
+            )
+            if not raw_artifact_path:
+                raise HistoryRecoveryError(
+                    "History file restore could not proceed because a stored artifact path is missing.\n\n"
+                    "Run Diagnostics and use the history repair action to reconcile backup and file artifacts."
+                )
+            artifact = Path(raw_artifact_path)
             if not artifact.exists():
                 raise HistoryRecoveryError(
                     "History file restore could not proceed because a stored artifact is missing.\n"
@@ -2343,14 +2351,24 @@ class HistoryManager:
 
     def _file_state_missing_paths(self, state: dict) -> list[Path]:
         missing_paths: list[Path] = []
+        if not isinstance(state, dict):
+            return [Path("<invalid file state>")]
         for file_info in state.get("files", []):
-            artifact_path = Path(str(file_info.get("artifact_path") or ""))
-            if artifact_path and not artifact_path.exists():
+            raw_artifact_path = (
+                file_info.get("artifact_path") if isinstance(file_info, dict) else None
+            )
+            if not raw_artifact_path:
+                missing_paths.append(Path("<missing artifact path>"))
+                continue
+            artifact_path = Path(raw_artifact_path)
+            if not artifact_path.exists():
                 missing_paths.append(artifact_path)
         return missing_paths
 
     def _state_has_all_artifacts(self, state: dict) -> bool:
-        return not self._file_state_missing_paths(state)
+        if not isinstance(state, dict):
+            return False
+        return bool(state.get("files")) and not self._file_state_missing_paths(state)
 
     def _archived_snapshot_missing_paths(self, archived_snapshot: dict) -> list[Path]:
         missing_paths: list[Path] = []

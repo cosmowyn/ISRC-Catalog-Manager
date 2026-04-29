@@ -1,6 +1,7 @@
 """Exchange adapters for CSV, XLSX, JSON, and packaged exports."""
 
 from .master_transfer import (
+    MasterTransferExportIssue,
     MasterTransferExportOption,
     MasterTransferExportPreview,
     MasterTransferExportResult,
@@ -34,6 +35,7 @@ __all__ = [
     "ExchangeCatalogClassificationOutcome",
     "ExchangeService",
     "MasterTransferExportOption",
+    "MasterTransferExportIssue",
     "MasterTransferExportPreview",
     "MasterTransferExportResult",
     "MasterTransferImportResult",

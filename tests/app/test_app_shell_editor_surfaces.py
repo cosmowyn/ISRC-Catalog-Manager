@@ -162,6 +162,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history = (
         AppShellTestCase.case_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history
     )
+    test_audio_drop_on_empty_catalog_creates_tracks_and_works_from_metadata = (
+        AppShellTestCase.case_audio_drop_on_empty_catalog_creates_tracks_and_works_from_metadata
+    )
+    test_standard_album_art_preview_without_media_shows_informational_message = (
+        AppShellTestCase.case_standard_album_art_preview_without_media_shows_informational_message
+    )
     test_audio_attach_unique_match_requires_confirmation_before_write = (
         AppShellTestCase.case_audio_attach_unique_match_requires_confirmation_before_write
     )

@@ -11,6 +11,9 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
     test_repertoire_exchange_package_round_trip_preserves_files_and_document_chain = (
         SearchAndRepertoireExchangeTestCase.case_repertoire_exchange_package_round_trip_preserves_files_and_document_chain
     )
+    test_repertoire_import_skips_unresolved_catalog_release_links = (
+        SearchAndRepertoireExchangeTestCase.case_repertoire_import_skips_unresolved_catalog_release_links
+    )
     test_repertoire_exchange_package_round_trip_preserves_database_backed_files = (
         SearchAndRepertoireExchangeTestCase.case_repertoire_exchange_package_round_trip_preserves_database_backed_files
     )

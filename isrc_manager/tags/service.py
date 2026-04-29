@@ -60,6 +60,8 @@ from .models import (
     BulkAudioAttachPlan,
     BulkAudioAttachPlanItem,
     BulkAudioAttachTrackCandidate,
+    DroppedAudioImportItem,
+    DroppedAudioImportPlan,
     TaggedAudioExportItem,
     TaggedAudioExportResult,
 )
@@ -603,6 +605,41 @@ class BulkAudioAttachService:
     def __init__(self, tag_service: AudioTagService):
         self.tag_service = tag_service
 
+    def build_import_plan(
+        self,
+        *,
+        file_paths: list[str | Path],
+        progress_callback=None,
+    ) -> DroppedAudioImportPlan:
+        warnings: list[str] = []
+        items: list[DroppedAudioImportItem] = []
+        detected_artists: list[str] = []
+        total = len(file_paths)
+
+        for index, raw_path in enumerate(file_paths, start=1):
+            path = Path(raw_path)
+            if progress_callback is not None:
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Reading audio metadata {index} of {total}: {path.name}",
+                )
+            item, item_warning = self._build_import_item(path)
+            if item_warning:
+                warnings.append(item_warning)
+            if item.artist:
+                detected_artists.append(item.artist)
+            items.append(item)
+
+        if progress_callback is not None:
+            progress_callback(total, total, "Audio metadata import preview is ready.")
+
+        return DroppedAudioImportPlan(
+            items=items,
+            warnings=warnings,
+            suggested_artist=self._suggest_artist(detected_artists),
+        )
+
     def build_plan(
         self,
         *,
@@ -641,6 +678,71 @@ class BulkAudioAttachService:
             warnings=warnings,
             suggested_artist=self._suggest_artist(detected_artists),
         )
+
+    def _build_import_item(self, path: Path) -> tuple[DroppedAudioImportItem, str | None]:
+        tag_data = None
+        warning_parts: list[str] = []
+        try:
+            tag_data = self.tag_service.read_tags(path)
+        except Exception as exc:
+            warning_parts.append(f"{path.name}: {exc}")
+
+        title_candidates, stem_artist = self._filename_candidates(path.stem)
+        title = _clean_text(getattr(tag_data, "title", None))
+        if not title and title_candidates:
+            title = _clean_text(title_candidates[0][0])
+        if not title:
+            title = _clean_filename_title_token(path.stem) or path.stem
+
+        artist = (
+            _clean_text(getattr(tag_data, "artist", None))
+            or _clean_text(getattr(tag_data, "album_artist", None))
+            or stem_artist
+        )
+        tag_warnings = list(getattr(tag_data, "warnings", []) or []) if tag_data else []
+        for tag_warning in tag_warnings:
+            clean_warning = _clean_text(tag_warning)
+            if clean_warning:
+                warning_parts.append(clean_warning)
+
+        warning = "\n".join(warning_parts) or None
+        return (
+            DroppedAudioImportItem(
+                source_path=str(path),
+                source_name=path.name,
+                title=title,
+                artist=artist,
+                album=_clean_text(getattr(tag_data, "album", None)),
+                album_artist=_clean_text(getattr(tag_data, "album_artist", None)),
+                track_number=getattr(tag_data, "track_number", None) if tag_data else None,
+                release_date=_clean_text(getattr(tag_data, "release_date", None)),
+                duration_seconds=self._derive_audio_duration_seconds(path),
+                isrc=_clean_isrc(getattr(tag_data, "isrc", None)),
+                upc=_clean_text(getattr(tag_data, "upc", None)),
+                genre=_clean_text(getattr(tag_data, "genre", None)),
+                composer=_clean_text(getattr(tag_data, "composer", None)),
+                publisher=_clean_text(getattr(tag_data, "publisher", None)),
+                comments=_clean_text(getattr(tag_data, "comments", None)),
+                lyrics=_clean_text(getattr(tag_data, "lyrics", None)),
+                artwork=getattr(tag_data, "artwork", None) if tag_data else None,
+                warning=warning,
+            ),
+            warning,
+        )
+
+    @staticmethod
+    def _derive_audio_duration_seconds(path: Path) -> int | None:
+        if MutagenFile is None:
+            return None
+        try:
+            audio = MutagenFile(str(path))
+            info = getattr(audio, "info", None) if audio is not None else None
+            duration = getattr(info, "length", None) if info is not None else None
+            if duration is None:
+                return None
+            return max(0, int(float(duration)))
+        except Exception:
+            return None
 
     def _build_plan_item(
         self,
@@ -736,7 +838,6 @@ class BulkAudioAttachService:
 
         clean_stem = str(stem or "").replace("_", " ").strip()
         stem_artist = None
-        _remember(clean_stem)
         for separator in (" - ", " – ", " — "):
             if separator not in clean_stem:
                 continue
@@ -749,6 +850,7 @@ class BulkAudioAttachService:
             if len(fallback) == 2 and fallback[1].strip():
                 stem_artist = _clean_text(fallback[0])
                 _remember(fallback[1])
+        _remember(clean_stem)
         return candidates, stem_artist
 
     @staticmethod

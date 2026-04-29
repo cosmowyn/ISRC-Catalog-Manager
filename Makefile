@@ -1,4 +1,5 @@
-PYTHON ?= python3
+VENV_PYTHON := .venv/bin/python
+PYTHON ?= $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),python3)
 BLACK ?= $(PYTHON) -m black
 COVERAGE ?= $(PYTHON) -m coverage
 MYPY ?= $(PYTHON) -m mypy
@@ -6,11 +7,13 @@ RUFF ?= $(PYTHON) -m ruff
 
 CHECK_PATHS = build.py isrc_manager scripts tests
 
-.PHONY: all-checks check fix compile lint format format-check type-check test coverage
+.PHONY: all-checks check fix compile lint format black format-check type-check test coverage
 
 all-checks: fix type-check coverage
 
 fix: lint format
+
+black: format
 
 check: compile
 	$(RUFF) check $(CHECK_PATHS)

@@ -372,6 +372,10 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
             self.set_zoom_percent(int(self._last_fit_percent), user_initiated=False)
             self._finish_fit_transition()
             return
+        if self._document_css_width <= 0:
+            fallback_width = self._fallback_document_css_width()
+            if fallback_width > 0:
+                self._document_css_width = fallback_width
         self._fit_guard_timer.start(250)
         if self._document_css_width > 0:
             self._apply_fit_if_needed(force=True, finalize=False)
@@ -424,10 +428,24 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
             self._fit_guard_timer.start(250)
             self._schedule_fit(delay_ms=140)
 
+    def _fallback_document_css_width(self) -> float:
+        if QWebEngineView is None:  # pragma: no cover - runtime guard
+            return 0.0
+        try:
+            return float(self.page().contentsSize().width()) / max(
+                0.1,
+                float(self.zoomFactor()),
+            )
+        except Exception:
+            return 0.0
+
     def _fit_zoom_percent(self) -> int:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return self._last_fit_percent
-        contents_width = max(1.0, float(self._document_css_width or 0.0))
+        contents_width = float(self._document_css_width or 0.0)
+        if contents_width <= 0:
+            contents_width = self._fallback_document_css_width()
+        contents_width = max(1.0, contents_width)
         viewport_width = max(1.0, float(self.contentsRect().width() - 40))
         ratio = min(1.0, viewport_width / contents_width) if contents_width > 0 else 1.0
         return max(self._MIN_ZOOM_PERCENT, min(100, int(round(ratio * 100.0))))

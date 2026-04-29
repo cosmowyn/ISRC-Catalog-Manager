@@ -448,6 +448,42 @@ class BulkAudioAttachServiceTests(unittest.TestCase):
         self.assertIsNone(plan.items[0].matched_track_id)
         self.assertEqual(plan.items[0].candidate_track_ids, [11, 22])
 
+    def test_bulk_audio_attach_service_builds_import_plan_from_tags_and_filename(self):
+        service = BulkAudioAttachService(
+            _StubAudioTagReader(
+                {
+                    "01 - Orbit.wav": AudioTagData(
+                        title="Orbit",
+                        artist="Artist One",
+                        album="Dawn Atlas",
+                        track_number=1,
+                        isrc="NL-C5X-26-00001",
+                        composer="Writer One",
+                        publisher="Publisher One",
+                        artwork=ArtworkPayload(data=b"\x89PNGfake", mime_type="image/png"),
+                    )
+                }
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tagged_path = Path(tmpdir) / "01 - Orbit.wav"
+            fallback_path = Path(tmpdir) / "Artist Two - Aurora.wav"
+            tagged_path.write_bytes(b"")
+            fallback_path.write_bytes(b"")
+
+            plan = service.build_import_plan(file_paths=[tagged_path, fallback_path])
+
+        self.assertEqual(plan.items[0].title, "Orbit")
+        self.assertEqual(plan.items[0].artist, "Artist One")
+        self.assertEqual(plan.items[0].album, "Dawn Atlas")
+        self.assertEqual(plan.items[0].track_number, 1)
+        self.assertEqual(plan.items[0].isrc, "NL-C5X-26-00001")
+        self.assertEqual(plan.items[0].artwork.mime_type, "image/png")
+        self.assertEqual(plan.items[1].title, "Aurora")
+        self.assertEqual(plan.items[1].artist, "Artist Two")
+        self.assertIsNone(plan.items[1].artwork)
+        self.assertEqual(plan.suggested_artist, None)
+
 
 if __name__ == "__main__":
     unittest.main()

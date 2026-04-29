@@ -472,11 +472,16 @@ _RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
     "asctime",
     "event",
 }
-from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
+from isrc_manager.tags.dialogs import (
+    BulkAudioAttachDialog,
+    DroppedAudioImportDialog,
+    TagPreviewDialog,
+)
 from isrc_manager.tags.models import (
     ArtworkPayload,
     AudioTagData,
     BulkAudioAttachTrackCandidate,
+    DroppedAudioImportItem,
     TaggedAudioExportItem,
     TaggedAudioExportPlanItem,
 )
@@ -11056,6 +11061,10 @@ class App(QMainWindow):
             except Exception:
                 pass
             try:
+                widget.setPalette(palette)
+            except Exception:
+                pass
+            try:
                 widget.update()
             except Exception:
                 pass
@@ -21239,6 +21248,38 @@ class App(QMainWindow):
         selected_section_ids = list(dialog.selected_section_ids())
         return selected_section_ids if selected_section_ids else None
 
+    @staticmethod
+    def _master_transfer_export_issue_prompt_lines(issues: list[object]) -> list[str]:
+        lines = [
+            (
+                "Some items cannot be read and would make the master catalog transfer export "
+                "fail."
+            ),
+            "",
+            "Proceed anyway and omit these items from the ZIP?",
+            "",
+        ]
+        for issue in issues[:10]:
+            section = str(
+                getattr(issue, "section_label", "")
+                or getattr(issue, "section_id", "")
+                or "Export item"
+            ).strip()
+            label = str(
+                getattr(issue, "label", "") or getattr(issue, "item_id", "") or "Unnamed item"
+            ).strip()
+            reason = str(getattr(issue, "reason", "") or "").strip()
+            lines.append(f"- {section}: {label} ({reason})")
+        if len(issues) > 10:
+            lines.append(f"- ...and {len(issues) - 10} more")
+        lines.extend(
+            [
+                "",
+                "A troubleshooting log will be written inside the ZIP as export_omissions.log.",
+            ]
+        )
+        return lines
+
     def export_master_transfer_package(self) -> None:
         if self.exchange_service is None or self.repertoire_exchange_service is None:
             QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
@@ -21273,9 +21314,32 @@ class App(QMainWindow):
             selected_section_ids = preview_service.validate_export_section_selection(
                 selected_section_ids
             )
+            export_issues = preview_service.preflight_export(
+                include_sections=selected_section_ids
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
             return
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Master Catalog Transfer",
+                f"Could not prepare the export preflight:\n{exc}",
+            )
+            return
+
+        continue_on_item_errors = False
+        if export_issues:
+            answer = QMessageBox.question(
+                self,
+                "Master Catalog Transfer",
+                "\n".join(self._master_transfer_export_issue_prompt_lines(export_issues)),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+            continue_on_item_errors = True
 
         def _worker(bundle, ctx):
             export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
@@ -21286,6 +21350,7 @@ class App(QMainWindow):
                     include_sections=selected_section_ids,
                     progress_callback=export_progress,
                     cancel_callback=ctx.raise_if_cancelled,
+                    continue_on_item_errors=continue_on_item_errors,
                 )
 
             return run_file_history_action(
@@ -21301,6 +21366,9 @@ class App(QMainWindow):
                     "format": "master_transfer",
                     "section_ids": [section.section_id for section in result.sections],
                     "warnings": list(result.warnings),
+                    "omitted_items": [
+                        issue.to_dict() for issue in getattr(result, "omitted_items", []) or []
+                    ],
                 },
                 progress_callback=ctx.report_progress,
                 post_mutation_progress=(96, "Capturing master transfer export history..."),
@@ -24433,6 +24501,403 @@ class App(QMainWindow):
             if temp_artwork_path:
                 Path(temp_artwork_path).unlink(missing_ok=True)
 
+    @staticmethod
+    def _dropped_audio_import_dialog_row(
+        item: DroppedAudioImportItem,
+        *,
+        warning: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "source_path": item.source_path,
+            "source_name": item.source_name,
+            "title": item.title,
+            "artist": item.artist,
+            "album": item.album,
+            "track_number": item.track_number,
+            "release_date": item.release_date,
+            "duration_seconds": item.duration_seconds,
+            "isrc": item.isrc,
+            "upc": item.upc,
+            "genre": item.genre,
+            "composer": item.composer,
+            "publisher": item.publisher,
+            "comments": item.comments,
+            "lyrics": item.lyrics,
+            "artwork": item.artwork,
+            "warning": warning if warning is not None else item.warning,
+        }
+
+    @staticmethod
+    def _materialize_artwork_payload(artwork: ArtworkPayload) -> str:
+        suffix = mimetypes.guess_extension(artwork.mime_type or "image/jpeg") or ".img"
+        handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            handle.write(bytes(artwork.data or b""))
+            return str(handle.name)
+        finally:
+            handle.close()
+
+    def _build_dropped_audio_import_payloads(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        storage_mode: str,
+    ) -> tuple[list[TrackCreatePayload], list[str], list[str]]:
+        errors: list[str] = []
+        seen_isrc: dict[str, int] = {}
+        normalized_rows: list[dict[str, object]] = []
+        for index, row in enumerate(rows, start=1):
+            row_errors: list[str] = []
+            title = str(row.get("title") or "").strip()
+            artist = str(row.get("artist") or "").strip()
+            source_path = str(row.get("source_path") or "").strip()
+            if not title:
+                row_errors.append(f"Row {index}: track title is required.")
+            if not artist:
+                row_errors.append(f"Row {index}: artist is required.")
+            if not source_path:
+                row_errors.append(f"Row {index}: source audio path is missing.")
+
+            iso_isrc = ""
+            raw_isrc = str(row.get("isrc") or "").strip()
+            if raw_isrc:
+                iso_candidate = to_iso_isrc(raw_isrc)
+                compact_candidate = to_compact_isrc(iso_candidate or raw_isrc)
+                if not iso_candidate or not compact_candidate or not is_valid_isrc_compact_or_iso(
+                    iso_candidate
+                ):
+                    row_errors.append(f"Row {index}: ISRC '{raw_isrc}' is not valid.")
+                elif compact_candidate in seen_isrc:
+                    row_errors.append(
+                        f"Row {index}: ISRC {iso_candidate} is already queued on row "
+                        f"{seen_isrc[compact_candidate]}."
+                    )
+                elif self.is_isrc_taken_normalized(iso_candidate):
+                    row_errors.append(f"Row {index}: ISRC {iso_candidate} already exists.")
+                else:
+                    seen_isrc[compact_candidate] = index
+                    iso_isrc = iso_candidate
+
+            if row_errors:
+                errors.extend(row_errors)
+                continue
+
+            normalized_row = dict(row)
+            normalized_row.update(
+                {
+                    "title": title,
+                    "artist": artist,
+                    "source_path": source_path,
+                    "iso_isrc": iso_isrc,
+                }
+            )
+            normalized_rows.append(normalized_row)
+
+        if errors:
+            return [], errors, []
+
+        payloads: list[TrackCreatePayload] = []
+        temp_artwork_paths: list[str] = []
+        for row in normalized_rows:
+            album_art_source_path = None
+            artwork = row.get("artwork")
+            if (
+                bool(row.get("import_artwork"))
+                and isinstance(artwork, ArtworkPayload)
+                and artwork.data
+            ):
+                album_art_source_path = self._materialize_artwork_payload(artwork)
+                temp_artwork_paths.append(album_art_source_path)
+            payloads.append(
+                TrackCreatePayload(
+                    isrc=str(row.get("iso_isrc") or ""),
+                    track_title=str(row.get("title") or ""),
+                    artist_name=str(row.get("artist") or ""),
+                    additional_artists=[],
+                    album_title=str(row.get("album") or "").strip() or None,
+                    release_date=str(row.get("release_date") or "").strip() or None,
+                    track_length_sec=int(row.get("duration_seconds") or 0),
+                    iswc=None,
+                    upc=str(row.get("upc") or "").strip() or None,
+                    genre=str(row.get("genre") or "").strip() or None,
+                    track_number=self._normalize_track_number_value(row.get("track_number")),
+                    buma_work_number=None,
+                    composer=str(row.get("composer") or "").strip() or None,
+                    publisher=str(row.get("publisher") or "").strip() or None,
+                    comments=str(row.get("comments") or "").strip() or None,
+                    lyrics=str(row.get("lyrics") or "").strip() or None,
+                    relationship_type="original",
+                    audio_file_source_path=str(row.get("source_path") or ""),
+                    audio_file_storage_mode=storage_mode,
+                    album_art_source_path=album_art_source_path,
+                    album_art_storage_mode=storage_mode if album_art_source_path else None,
+                )
+            )
+        return payloads, errors, temp_artwork_paths
+
+    def _create_tracks_from_dropped_audio_files(
+        self,
+        file_paths: list[str],
+        *,
+        title: str = "Create Tracks from Audio Files",
+    ) -> None:
+        if self.audio_tag_service is None or self.track_service is None or self.work_service is None:
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return
+        prepared_paths = [
+            str(path)
+            for path in file_paths
+            if str(path or "").strip()
+            and Path(str(path)).exists()
+            and self._is_supported_media_attach_path(str(path), "audio_file")
+        ]
+        if not prepared_paths:
+            QMessageBox.information(self, title, "No supported audio files were selected.")
+            return
+
+        def _preview_worker(bundle, ctx):
+            matcher = BulkAudioAttachService(bundle.audio_tag_service)
+            plan = matcher.build_import_plan(
+                file_paths=prepared_paths,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+            )
+            return {"plan": plan}
+
+        def _preview_success(result: dict[str, object]) -> None:
+            plan = result.get("plan")
+            plan_items = list(getattr(plan, "items", []) or [])
+            plan_warnings = list(getattr(plan, "warnings", []) or [])
+            if not plan_items:
+                QMessageBox.information(
+                    self,
+                    title,
+                    "The selected audio files could not be prepared for import.",
+                )
+                return
+
+            dialog_rows: list[dict[str, object]] = []
+            for item in plan_items:
+                warning_parts: list[str] = []
+                item_warning = str(getattr(item, "warning", "") or "").strip()
+                if item_warning:
+                    warning_parts.append(item_warning)
+                lossy_warning = self._lossy_primary_audio_warning_text(
+                    path_value=getattr(item, "source_path", ""),
+                    filename=getattr(item, "source_name", ""),
+                    short=True,
+                )
+                if lossy_warning and lossy_warning not in warning_parts:
+                    warning_parts.append(lossy_warning)
+                dialog_rows.append(
+                    self._dropped_audio_import_dialog_row(
+                        item,
+                        warning="\n".join(warning_parts),
+                    )
+                )
+
+            dlg = DroppedAudioImportDialog(
+                title=title,
+                intro=(
+                    "Review the metadata read from the dropped audio files. "
+                    "Edit the prefilled fields before creating linked Works and Tracks."
+                ),
+                items=dialog_rows,
+                party_service=self.party_service,
+                default_storage_mode=STORAGE_MODE_MANAGED_FILE,
+                create_button_text="Create Works + Tracks",
+                parent=self,
+            )
+            if dlg.exec() != QDialog.Accepted:
+                return
+
+            selected_rows = dlg.selected_imports()
+            selected_paths = [str(row.get("source_path") or "") for row in selected_rows]
+            if not self._confirm_lossy_primary_audio_selection(
+                selected_paths,
+                title=title,
+                action_label="Creating these tracks",
+            ):
+                return
+
+            storage_mode = dlg.selected_storage_mode()
+            (
+                payloads,
+                validation_errors,
+                temp_artwork_paths,
+            ) = self._build_dropped_audio_import_payloads(
+                selected_rows,
+                storage_mode=storage_mode,
+            )
+            if validation_errors:
+                QMessageBox.warning(
+                    self,
+                    title,
+                    "Some dropped audio files still need attention before import.\n\n"
+                    + "\n".join(validation_errors[:16]),
+                )
+                return
+            if not payloads:
+                QMessageBox.information(self, title, "No audio files were queued for import.")
+                return
+
+            profile_name = self._current_profile_name()
+            artwork_payload_count = sum(
+                1 for payload in payloads if payload.album_art_source_path
+            )
+
+            def _apply_worker(bundle, ctx):
+                governed_service = GovernedImportCoordinator(
+                    bundle.conn,
+                    track_service=bundle.track_service,
+                    party_service=bundle.party_service,
+                    work_service=bundle.work_service,
+                    profile_name=profile_name,
+                )
+
+                def _mutation():
+                    created_track_ids: list[int] = []
+                    created_work_ids: list[int] = []
+                    total = max(1, len(payloads))
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        batch_cache: dict[str, int] = {}
+                        for index, payload in enumerate(payloads, start=1):
+                            result = governed_service.create_governed_track(
+                                payload,
+                                cursor=cur,
+                                batch_cache=batch_cache,
+                                governance_mode="create_new_work",
+                                profile_name=profile_name,
+                            )
+                            created_track_ids.append(int(result.track_id))
+                            if result.created_work_id is not None:
+                                created_work_ids.append(int(result.created_work_id))
+                            ctx.report_progress(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Creating track {index} of {total} from dropped audio..."
+                                ),
+                            )
+                        release_ids = self._sync_releases_for_tracks(
+                            created_track_ids,
+                            cursor=cur,
+                            track_service=bundle.track_service,
+                            release_service=bundle.release_service,
+                            profile_name=profile_name,
+                        )
+                    return {
+                        "track_ids": created_track_ids,
+                        "work_ids": created_work_ids,
+                        "release_ids": list(release_ids),
+                    }
+
+                try:
+                    return run_snapshot_history_action(
+                        history_manager=bundle.history_manager,
+                        action_label=f"Create Tracks from Audio Files ({len(payloads)} tracks)",
+                        action_type="track.audio_drop_import",
+                        entity_type="Track",
+                        entity_id="batch",
+                        payload={
+                            "source_paths": [
+                                payload.audio_file_source_path for payload in payloads
+                            ],
+                            "storage_mode": storage_mode,
+                            "embedded_artwork_count": artwork_payload_count,
+                        },
+                        mutation=_mutation,
+                        logger=self.logger,
+                    )
+                finally:
+                    for temp_path in temp_artwork_paths:
+                        Path(temp_path).unlink(missing_ok=True)
+
+            def _apply_success(apply_result: dict[str, object]) -> None:
+                created_track_ids = list(apply_result.get("track_ids") or [])
+                created_work_ids = list(apply_result.get("work_ids") or [])
+                release_ids = list(apply_result.get("release_ids") or [])
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._refresh_history_actions()
+                self._log_event(
+                    "track.audio_drop_import",
+                    "Created tracks from dropped audio files",
+                    track_ids=created_track_ids,
+                    work_ids=created_work_ids,
+                    release_ids=release_ids,
+                    storage_mode=storage_mode,
+                    embedded_artwork_count=artwork_payload_count,
+                    warnings=plan_warnings,
+                )
+                self._audit(
+                    "CREATE",
+                    "DroppedAudioImport",
+                    ref_id="batch",
+                    details=(
+                        f"tracks={len(created_track_ids)}; works={len(created_work_ids)}; "
+                        f"embedded_artwork={artwork_payload_count}; storage_mode={storage_mode}"
+                    ),
+                )
+                self._audit_commit()
+                self.populate_all_comboboxes()
+                self.refresh_table_preserve_view(
+                    focus_id=created_track_ids[0] if created_track_ids else None
+                )
+                try:
+                    self._refresh_work_manager_panel()
+                    self._refresh_release_browser_panel()
+                except Exception:
+                    pass
+                QMessageBox.information(
+                    self,
+                    title,
+                    f"Created {len(created_track_ids)} track(s) and "
+                    f"{len(created_work_ids)} linked Work(s) from dropped audio."
+                    + (
+                        f"\nAttached embedded album art to {artwork_payload_count} track(s)."
+                        if artwork_payload_count
+                        else ""
+                    )
+                    + ("\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12]) if plan_warnings else ""),
+                )
+
+            self._submit_background_bundle_task(
+                title=title,
+                description="Creating catalog tracks from dropped audio files...",
+                task_fn=_apply_worker,
+                kind="write",
+                unique_key="track.audio_drop_import",
+                cancellable=False,
+                on_success=_apply_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    title,
+                    failure,
+                    user_message="Could not create tracks from the dropped audio files:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description="Reading metadata from dropped audio files...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="track.audio_drop_import.preview",
+            cancellable=False,
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not prepare the dropped audio import preview:",
+            ),
+        )
+
     def bulk_attach_audio_files(
         self,
         track_ids: list[int] | None = None,
@@ -24445,14 +24910,6 @@ class App(QMainWindow):
             return
 
         scope_track_ids, scope_label = self._bulk_audio_attach_scope_track_ids(track_ids)
-        if not scope_track_ids:
-            QMessageBox.information(
-                self,
-                title,
-                "Select one or more tracks first, or leave the catalog rows visible so audio files can be matched against them.",
-            )
-            return
-
         chosen_files = list(file_paths or [])
         if not chosen_files:
             chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
@@ -24475,6 +24932,12 @@ class App(QMainWindow):
             ),
         )
         if not file_paths:
+            return
+        if not scope_track_ids:
+            self._create_tracks_from_dropped_audio_files(
+                file_paths,
+                title="Create Tracks from Audio Files",
+            )
             return
 
         def _preview_worker(bundle, ctx):
@@ -24579,6 +25042,9 @@ class App(QMainWindow):
                         "warning": "\n".join(warning_parts),
                     }
                 )
+            has_unresolved_audio = any(
+                row.get("matched_track_id") in (None, "") for row in dialog_rows
+            )
             dlg = BulkAudioAttachDialog(
                 title=title,
                 intro=(
@@ -24593,13 +25059,26 @@ class App(QMainWindow):
                 party_service=self.party_service,
                 default_storage_mode=STORAGE_MODE_MANAGED_FILE,
                 attach_button_text="Attach Audio",
-                allow_create_track=(len(file_paths) == 1),
+                create_track_button_text=(
+                    "Create New Track from Unmatched…"
+                    if len(file_paths) == 1
+                    else "Create New Tracks from Unmatched…"
+                ),
+                allow_create_track=has_unresolved_audio,
                 parent=self,
             )
             if dlg.exec() != QDialog.Accepted:
                 return
             if dlg.create_track_requested():
-                self._open_add_track_with_media_source("audio_file", file_paths[0])
+                unmatched_paths = [
+                    str(row.get("source_path") or "")
+                    for row in dialog_rows
+                    if row.get("matched_track_id") in (None, "")
+                ]
+                self._create_tracks_from_dropped_audio_files(
+                    [path for path in unmatched_paths if path] or file_paths,
+                    title="Create Tracks from Audio Files",
+                )
                 return
 
             assignments = dlg.selected_matches()
@@ -30164,7 +30643,15 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Track Media Error", f"Failed to remove file:\n{e}")
 
     def _preview_standard_media_for_track(self, track_id: int, media_key: str):
+        media_label = "audio file" if media_key == "audio_file" else "album art"
         try:
+            if not self.track_has_media(track_id, media_key):
+                QMessageBox.information(
+                    self,
+                    "Track Media",
+                    f"No stored {media_label} is available for this track.",
+                )
+                return
             if media_key == "audio_file":
                 self._open_audio_preview_for_track(
                     int(track_id),
@@ -30175,6 +30662,16 @@ class App(QMainWindow):
             data, _mime = self.track_fetch_media(track_id, media_key)
             title = self._get_track_title(track_id)
             self._open_image_preview(data, title)
+        except FileNotFoundError as e:
+            self.logger.warning("Preview %s skipped for track %s: %s", media_key, track_id, e)
+            QMessageBox.information(
+                self,
+                "Track Media",
+                (
+                    f"The stored {media_label} could not be found. "
+                    "Reattach it or run storage diagnostics."
+                ),
+            )
         except Exception as e:
             self.conn.rollback()
             self.logger.exception(f"Preview {media_key} failed: {e}")

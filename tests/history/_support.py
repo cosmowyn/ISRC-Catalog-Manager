@@ -1093,6 +1093,51 @@ class HistoryManagerTestCase(unittest.TestCase):
             all(Path(file_info["artifact_path"]).exists() for file_info in refreshed_state["files"])
         )
 
+    def case_repair_recovery_state_removes_missing_backup_with_invalid_history_artifact(self):
+        backup_path = self._write_backup_file("invalid_artifact_backup.db")
+        before_state = {
+            "target_path": str(backup_path),
+            "companion_suffixes": [],
+            "exists": False,
+            "files": [],
+        }
+        after_state = self.history.capture_file_state(backup_path)
+        for file_info in after_state["files"]:
+            file_info["artifact_path"] = None
+        entry = self.history.record_file_write_action(
+            label="Create Database Backup",
+            action_type="file.db_backup",
+            target_path=backup_path,
+            before_state=before_state,
+            after_state=after_state,
+            entity_type="DB",
+            entity_id=str(backup_path),
+            payload={"path": str(backup_path), "method": "file_copy"},
+        )
+        backup_record = self.history.register_backup(
+            backup_path,
+            kind="manual",
+            label="Invalid Artifact Backup",
+            source_db_path=self.db_path,
+            metadata={"method": "file_copy"},
+        )
+        backup_path.unlink()
+
+        issues_before = self.history.inspect_recovery_state()
+        missing_backup_issue = next(
+            issue
+            for issue in issues_before
+            if issue.issue_type == "missing_backup_file"
+            and issue.backup_id == backup_record.backup_id
+        )
+        self.assertEqual(missing_backup_issue.entry_id, entry.entry_id)
+        self.assertFalse(missing_backup_issue.details["recoverable_from_history"])
+
+        repair_result = self.history.repair_recovery_state()
+        self.assertTrue(repair_result.changes)
+        self.assertFalse(repair_result.unresolved)
+        self.assertIsNone(self.history.fetch_backup(backup_record.backup_id))
+
     def case_run_snapshot_history_action_rolls_back_when_history_recording_fails(self):
         with patch.object(
             self.history,

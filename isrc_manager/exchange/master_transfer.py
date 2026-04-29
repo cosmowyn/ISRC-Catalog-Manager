@@ -34,6 +34,7 @@ MASTER_TRANSFER_DOCUMENT_TYPE = "master_transfer_package"
 MASTER_TRANSFER_PACKAGE_FORMAT = "logical_catalog_transfer"
 MASTER_TRANSFER_FORMAT_VERSION = 2
 MASTER_TRANSFER_MANIFEST = "manifest.json"
+MASTER_TRANSFER_OMISSION_LOG = "export_omissions.log"
 MASTER_TRANSFER_APP_NAME = "Music Catalog Manager"
 LICENSE_SECTION_SCHEMA_VERSION = 1
 CONTRACT_TEMPLATE_SECTION_SCHEMA_VERSION = 1
@@ -130,6 +131,34 @@ class MasterTransferExportResult:
     sections: list[MasterTransferSection]
     warnings: list[str] = field(default_factory=list)
     manifest: dict[str, object] = field(default_factory=dict)
+    omitted_items: list["MasterTransferExportIssue"] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class MasterTransferExportIssue:
+    section_id: str
+    section_label: str
+    item_type: str
+    item_id: str
+    label: str
+    reason: str
+    action: str = "omitted"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "section_id": self.section_id,
+            "section_label": self.section_label,
+            "item_type": self.item_type,
+            "item_id": self.item_id,
+            "label": self.label,
+            "reason": self.reason,
+            "action": self.action,
+        }
+
+    @property
+    def summary(self) -> str:
+        clean_label = self.label.strip() or f"{self.item_type} {self.item_id}".strip()
+        return f"{self.section_label}: {clean_label} - {self.reason}"
 
 
 @dataclass(slots=True)
@@ -362,6 +391,303 @@ class MasterTransferService:
             ranges.append((stage_start, max(stage_start, stage_end)))
         return ranges
 
+    @staticmethod
+    def _issue_signature(issue: MasterTransferExportIssue) -> tuple[str, str, str, str]:
+        return (
+            str(issue.section_id or "").strip(),
+            str(issue.item_type or "").strip(),
+            str(issue.item_id or "").strip(),
+            str(issue.reason or "").strip(),
+        )
+
+    @classmethod
+    def _append_export_issue(
+        cls,
+        issues: list[MasterTransferExportIssue],
+        *,
+        section_id: str,
+        item_type: str,
+        item_id: object,
+        label: object,
+        reason: object,
+        action: str = "omitted",
+    ) -> None:
+        issue = MasterTransferExportIssue(
+            section_id=str(section_id or "").strip(),
+            section_label=SECTION_LABELS.get(str(section_id or "").strip(), str(section_id)),
+            item_type=str(item_type or "").strip(),
+            item_id=str(item_id or "").strip(),
+            label=str(label or "").strip(),
+            reason=str(reason or "").strip(),
+            action=str(action or "omitted").strip() or "omitted",
+        )
+        if not issue.section_id or not issue.item_type or not issue.reason:
+            return
+        signature = cls._issue_signature(issue)
+        if any(cls._issue_signature(existing) == signature for existing in issues):
+            return
+        issues.append(issue)
+
+    def _preflight_repertoire_export_issues(
+        self,
+        issues: list[MasterTransferExportIssue],
+        *,
+        progress_callback=None,
+    ) -> None:
+        payload = self.repertoire_exchange_service.export_payload(
+            progress_callback=progress_callback
+        )
+        for contract in list(payload.get("contracts") or []):
+            contract = dict(contract)
+            contract_id = int(contract.get("id") or 0)
+            contract_label = (
+                str(contract.get("title") or "").strip() or f"Contract {contract_id or 'unknown'}"
+            )
+            for document in list(contract.get("documents") or []):
+                document = dict(document)
+                document_id = int(document.get("id") or 0)
+                filename = coalesce_filename(
+                    document.get("filename"),
+                    default_stem=f"contract-document-{document_id or contract_id or 'file'}",
+                )
+                stored_path = str(document.get("file_path") or "").strip()
+                abs_path = self.repertoire_exchange_service.contract_service.resolve_document_path(
+                    stored_path
+                )
+                if stored_path and abs_path is not None and abs_path.exists():
+                    continue
+                if document_id <= 0:
+                    self._append_export_issue(
+                        issues,
+                        section_id=REPERTOIRE_SECTION_ID,
+                        item_type="contract_document",
+                        item_id=f"{contract_id}:unpersisted",
+                        label=f"{contract_label} / {filename}",
+                        reason="Document has no readable file-backed source.",
+                    )
+                    continue
+                try:
+                    self.repertoire_exchange_service.contract_service.fetch_document_bytes(
+                        document_id
+                    )
+                except Exception as exc:
+                    self._append_export_issue(
+                        issues,
+                        section_id=REPERTOIRE_SECTION_ID,
+                        item_type="contract_document",
+                        item_id=document_id,
+                        label=f"{contract_label} / {filename}",
+                        reason=str(exc) or exc.__class__.__name__,
+                    )
+        for asset in list(payload.get("assets") or []):
+            asset = dict(asset)
+            asset_id = int(asset.get("id") or 0)
+            filename = coalesce_filename(
+                asset.get("filename"),
+                default_stem=f"asset-{asset_id or 'file'}",
+            )
+            stored_path = str(asset.get("stored_path") or "").strip()
+            abs_path = self.repertoire_exchange_service.asset_service.resolve_asset_path(
+                stored_path
+            )
+            if stored_path and abs_path is not None and abs_path.exists():
+                continue
+            if asset_id <= 0:
+                self._append_export_issue(
+                    issues,
+                    section_id=REPERTOIRE_SECTION_ID,
+                    item_type="asset",
+                    item_id="unpersisted",
+                    label=filename,
+                    reason="Asset has no readable file-backed source.",
+                )
+                continue
+            try:
+                self.repertoire_exchange_service.asset_service.fetch_asset_bytes(asset_id)
+            except Exception as exc:
+                self._append_export_issue(
+                    issues,
+                    section_id=REPERTOIRE_SECTION_ID,
+                    item_type="asset",
+                    item_id=asset_id,
+                    label=filename,
+                    reason=str(exc) or exc.__class__.__name__,
+                )
+
+    def _preflight_license_export_issues(
+        self,
+        issues: list[MasterTransferExportIssue],
+        *,
+        progress_callback=None,
+    ) -> None:
+        if self.license_service is None:
+            if self._table_row_count("Licenses") > 0:
+                self._append_export_issue(
+                    issues,
+                    section_id=LICENSES_SECTION_ID,
+                    item_type="license",
+                    item_id="section",
+                    label="License Archive",
+                    reason="License service is unavailable.",
+                    action="section omitted",
+                )
+            return
+        source_rows = list(self.license_service.list_rows())
+        total_rows = max(len(source_rows), 1)
+        for index, item in enumerate(source_rows, start=1):
+            self._report_progress(
+                progress_callback,
+                int(((index - 1) / total_rows) * 100),
+                f"Checking license {index} of {len(source_rows)}...",
+            )
+            label = str(item.licensee or item.filename or f"License {item.record_id}").strip()
+            try:
+                record = self.license_service.fetch_license(item.record_id)
+                if record is None:
+                    raise ValueError(f"License record {item.record_id} was not found.")
+                self.license_service.fetch_license_bytes(item.record_id)
+            except Exception as exc:
+                self._append_export_issue(
+                    issues,
+                    section_id=LICENSES_SECTION_ID,
+                    item_type="license",
+                    item_id=item.record_id,
+                    label=label,
+                    reason=str(exc) or exc.__class__.__name__,
+                )
+
+    def _preflight_contract_template_export_issues(
+        self,
+        issues: list[MasterTransferExportIssue],
+        *,
+        progress_callback=None,
+    ) -> None:
+        if self.contract_template_service is None:
+            if self._table_row_count("ContractTemplates") > 0:
+                self._append_export_issue(
+                    issues,
+                    section_id=CONTRACT_TEMPLATES_SECTION_ID,
+                    item_type="contract_template",
+                    item_id="section",
+                    label="Contract Templates",
+                    reason="Contract template service is unavailable.",
+                    action="section omitted",
+                )
+            return
+        templates = sorted(
+            self.contract_template_service.list_templates(include_archived=True),
+            key=lambda item: item.template_id,
+        )
+        total_templates = max(len(templates), 1)
+        for index, template in enumerate(templates, start=1):
+            self._report_progress(
+                progress_callback,
+                int(((index - 1) / total_templates) * 100),
+                f"Checking contract template {index} of {len(templates)}...",
+            )
+            template_label = str(template.name or "").strip() or f"Template {template.template_id}"
+            revisions = sorted(
+                self.contract_template_service.list_revisions(template.template_id),
+                key=lambda item: item.revision_id,
+            )
+            for revision in revisions:
+                revision_label = (
+                    str(revision.revision_label or revision.source_filename or "").strip()
+                    or f"Revision {revision.revision_id}"
+                )
+                try:
+                    self.contract_template_service.load_revision_source_bytes(revision.revision_id)
+                except Exception as exc:
+                    self._append_export_issue(
+                        issues,
+                        section_id=CONTRACT_TEMPLATES_SECTION_ID,
+                        item_type="contract_template_revision",
+                        item_id=revision.revision_id,
+                        label=f"{template_label} / {revision_label}",
+                        reason=str(exc) or exc.__class__.__name__,
+                    )
+
+    def preflight_export(
+        self,
+        *,
+        include_sections=None,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> list[MasterTransferExportIssue]:
+        selected_section_ids = self.validate_export_section_selection(include_sections)
+        selected_section_set = set(selected_section_ids)
+        stage_count = sum(
+            1
+            for section_id in (
+                REPERTOIRE_SECTION_ID,
+                LICENSES_SECTION_ID,
+                CONTRACT_TEMPLATES_SECTION_ID,
+            )
+            if section_id in selected_section_set
+        )
+        stage_ranges = self._progress_ranges(stage_count, start=0, end=100)
+        stage_index = 0
+        issues: list[MasterTransferExportIssue] = []
+
+        if REPERTOIRE_SECTION_ID in selected_section_set:
+            stage_start, stage_end = stage_ranges[stage_index]
+            stage_index += 1
+            self._report_progress(
+                progress_callback,
+                stage_start,
+                "Checking Contracts and Rights export attachments...",
+            )
+            self._preflight_repertoire_export_issues(
+                issues,
+                progress_callback=self._scaled_progress(
+                    progress_callback,
+                    start=stage_start,
+                    end=stage_end,
+                ),
+            )
+            if cancel_callback is not None:
+                cancel_callback()
+
+        if LICENSES_SECTION_ID in selected_section_set:
+            stage_start, stage_end = stage_ranges[stage_index]
+            stage_index += 1
+            self._report_progress(
+                progress_callback,
+                stage_start,
+                "Checking license archive files...",
+            )
+            self._preflight_license_export_issues(
+                issues,
+                progress_callback=self._scaled_progress(
+                    progress_callback,
+                    start=stage_start,
+                    end=stage_end,
+                ),
+            )
+            if cancel_callback is not None:
+                cancel_callback()
+
+        if CONTRACT_TEMPLATES_SECTION_ID in selected_section_set:
+            stage_start, stage_end = stage_ranges[stage_index]
+            self._report_progress(
+                progress_callback,
+                stage_start,
+                "Checking contract template revision sources...",
+            )
+            self._preflight_contract_template_export_issues(
+                issues,
+                progress_callback=self._scaled_progress(
+                    progress_callback,
+                    start=stage_start,
+                    end=stage_end,
+                ),
+            )
+            if cancel_callback is not None:
+                cancel_callback()
+
+        self._report_progress(progress_callback, 100, "Master transfer export preflight complete.")
+        return issues
+
     def export_package(
         self,
         path: str | Path,
@@ -369,6 +695,7 @@ class MasterTransferService:
         include_sections=None,
         progress_callback=None,
         cancel_callback=None,
+        continue_on_item_errors: bool = False,
     ) -> MasterTransferExportResult:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -377,6 +704,14 @@ class MasterTransferService:
         selected_section_set = set(selected_section_ids)
         stage_ranges = self._progress_ranges(len(selected_section_ids) + 2, start=4, end=95)
         stage_index = 0
+        omitted_items: list[MasterTransferExportIssue] = []
+        if continue_on_item_errors:
+            omitted_items.extend(
+                self.preflight_export(
+                    include_sections=selected_section_ids,
+                    cancel_callback=cancel_callback,
+                )
+            )
 
         with tempfile.TemporaryDirectory(prefix="master-transfer-export-") as temp_dir:
             root = Path(temp_dir)
@@ -423,6 +758,16 @@ class MasterTransferService:
                         start=stage_start,
                         end=stage_end,
                     ),
+                    continue_on_item_errors=continue_on_item_errors,
+                    omission_callback=lambda issue: self._append_export_issue(
+                        omitted_items,
+                        section_id=REPERTOIRE_SECTION_ID,
+                        item_type=issue.get("item_type"),
+                        item_id=issue.get("item_id"),
+                        label=issue.get("label"),
+                        reason=issue.get("reason"),
+                        action=issue.get("action") or "omitted",
+                    ),
                 )
                 sections.append(self._build_repertoire_section(repertoire_path))
                 if cancel_callback is not None:
@@ -445,6 +790,8 @@ class MasterTransferService:
                         start=stage_start,
                         end=stage_end,
                     ),
+                    continue_on_item_errors=continue_on_item_errors,
+                    omitted_items=omitted_items,
                 )
                 sections.append(
                     self._build_license_section_summary(licenses_payload_path, license_rows)
@@ -471,6 +818,8 @@ class MasterTransferService:
                         start=stage_start,
                         end=stage_end,
                     ),
+                    continue_on_item_errors=continue_on_item_errors,
+                    omitted_items=omitted_items,
                 )
                 sections.append(
                     self._build_contract_template_section_summary(
@@ -481,6 +830,9 @@ class MasterTransferService:
 
             format_omitted_sections = self._omitted_sections()
             export_selection = self._build_export_selection(selected_section_ids)
+            omitted_items = self._dedupe_export_issues(omitted_items)
+            if omitted_items:
+                self._write_export_omission_log(root / MASTER_TRANSFER_OMISSION_LOG, omitted_items)
             export_warnings = self._dedupe_preserve_order(
                 [
                     *(
@@ -504,6 +856,7 @@ class MasterTransferService:
                 omitted_sections=format_omitted_sections,
                 export_selection=export_selection,
                 warnings=export_warnings,
+                omitted_items=[issue.to_dict() for issue in omitted_items],
             )
 
             self._report_progress(
@@ -533,6 +886,7 @@ class MasterTransferService:
             sections=sections,
             warnings=warnings,
             manifest=manifest,
+            omitted_items=omitted_items,
         )
 
     def inspect_package(
@@ -882,6 +1236,7 @@ class MasterTransferService:
                 *dependency_warnings,
                 *skipped_stage_warnings,
                 *([] if catalog_report is None else catalog_report.warnings),
+                *([] if repertoire_report is None else repertoire_report.warnings),
             ]
         )
         self._report_progress(progress_callback, 100, "Master transfer import complete.")
@@ -918,6 +1273,7 @@ class MasterTransferService:
         omitted_sections: list[dict[str, str]],
         export_selection: dict[str, object],
         warnings: list[str] | None = None,
+        omitted_items: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         return {
             "document_type": MASTER_TRANSFER_DOCUMENT_TYPE,
@@ -971,6 +1327,7 @@ class MasterTransferService:
             "files": files,
             "warnings": list(warnings or []),
             "omitted_sections": omitted_sections,
+            "omitted_items": list(omitted_items or []),
         }
 
     def _build_export_selection(self, included_section_ids: list[str]) -> dict[str, object]:
@@ -1116,14 +1473,40 @@ class MasterTransferService:
         )
 
     def _write_license_section(
-        self, payload_path: Path, *, progress_callback=None
+        self,
+        payload_path: Path,
+        *,
+        progress_callback=None,
+        continue_on_item_errors: bool = False,
+        omitted_items: list[MasterTransferExportIssue] | None = None,
     ) -> list[dict[str, object]]:
-        if self.license_service is None and self._table_row_count("Licenses") > 0:
-            raise ValueError("License service is unavailable for logical transfer export.")
+        if self.license_service is None:
+            if self._table_row_count("Licenses") > 0:
+                message = "License service is unavailable for logical transfer export."
+                if not continue_on_item_errors:
+                    raise ValueError(message)
+                if omitted_items is not None:
+                    self._append_export_issue(
+                        omitted_items,
+                        section_id=LICENSES_SECTION_ID,
+                        item_type="license",
+                        item_id="section",
+                        label="License Archive",
+                        reason=message,
+                        action="section omitted",
+                    )
+            payload_path.write_text(
+                _json_dumps(
+                    {
+                        "schema_version": LICENSE_SECTION_SCHEMA_VERSION,
+                        "rows": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return []
         rows: list[dict[str, object]] = []
-        source_rows = (
-            list(self.license_service.list_rows()) if self.license_service is not None else []
-        )
+        source_rows = list(self.license_service.list_rows())
         total_rows = max(len(source_rows), 1)
         for index, item in enumerate(source_rows, start=1):
             self._report_progress(
@@ -1133,8 +1516,34 @@ class MasterTransferService:
             )
             record = self.license_service.fetch_license(item.record_id)
             if record is None:
-                raise ValueError(f"License record {item.record_id} disappeared during export.")
-            data, mime_type = self.license_service.fetch_license_bytes(item.record_id)
+                message = f"License record {item.record_id} disappeared during export."
+                if not continue_on_item_errors:
+                    raise ValueError(message)
+                if omitted_items is not None:
+                    self._append_export_issue(
+                        omitted_items,
+                        section_id=LICENSES_SECTION_ID,
+                        item_type="license",
+                        item_id=item.record_id,
+                        label=item.licensee or item.filename or f"License {item.record_id}",
+                        reason=message,
+                    )
+                continue
+            try:
+                data, mime_type = self.license_service.fetch_license_bytes(item.record_id)
+            except Exception as exc:
+                if not continue_on_item_errors:
+                    raise
+                if omitted_items is not None:
+                    self._append_export_issue(
+                        omitted_items,
+                        section_id=LICENSES_SECTION_ID,
+                        item_type="license",
+                        item_id=item.record_id,
+                        label=item.licensee or item.filename or f"License {item.record_id}",
+                        reason=str(exc) or exc.__class__.__name__,
+                    )
+                continue
             filename = coalesce_filename(
                 record.filename,
                 default_stem=f"license-{item.record_id}",
@@ -1194,25 +1603,41 @@ class MasterTransferService:
         payload_path: Path,
         *,
         progress_callback=None,
+        continue_on_item_errors: bool = False,
+        omitted_items: list[MasterTransferExportIssue] | None = None,
     ) -> dict[str, int]:
-        if (
-            self.contract_template_service is None
-            and self._table_row_count("ContractTemplates") > 0
-        ):
-            raise ValueError(
-                "Contract template service is unavailable for logical transfer export."
+        if self.contract_template_service is None:
+            if self._table_row_count("ContractTemplates") > 0:
+                message = "Contract template service is unavailable for logical transfer export."
+                if not continue_on_item_errors:
+                    raise ValueError(message)
+                if omitted_items is not None:
+                    self._append_export_issue(
+                        omitted_items,
+                        section_id=CONTRACT_TEMPLATES_SECTION_ID,
+                        item_type="contract_template",
+                        item_id="section",
+                        label="Contract Templates",
+                        reason=message,
+                        action="section omitted",
+                    )
+            payload_path.write_text(
+                _json_dumps(
+                    {
+                        "schema_version": CONTRACT_TEMPLATE_SECTION_SCHEMA_VERSION,
+                        "templates": [],
+                    }
+                ),
+                encoding="utf-8",
             )
+            return {"templates": 0, "revisions": 0}
 
         templates_payload: list[dict[str, object]] = []
         template_count = 0
         revision_count = 0
-        templates = (
-            sorted(
-                self.contract_template_service.list_templates(include_archived=True),
-                key=lambda item: item.template_id,
-            )
-            if self.contract_template_service is not None
-            else []
+        templates = sorted(
+            self.contract_template_service.list_templates(include_archived=True),
+            key=lambda item: item.template_id,
         )
         total_templates = max(len(templates), 1)
         for index, template in enumerate(templates, start=1):
@@ -1229,10 +1654,27 @@ class MasterTransferService:
                 key=lambda item: item.revision_id,
             )
             for revision in revisions:
+                try:
+                    source_bytes = self.contract_template_service.load_revision_source_bytes(
+                        revision.revision_id
+                    )
+                except Exception as exc:
+                    if not continue_on_item_errors:
+                        raise
+                    if omitted_items is not None:
+                        self._append_export_issue(
+                            omitted_items,
+                            section_id=CONTRACT_TEMPLATES_SECTION_ID,
+                            item_type="contract_template_revision",
+                            item_id=revision.revision_id,
+                            label=(
+                                f"{template.name or f'Template {template.template_id}'} / "
+                                f"{revision.revision_label or revision.source_filename or f'Revision {revision.revision_id}'}"
+                            ),
+                            reason=str(exc) or exc.__class__.__name__,
+                        )
+                    continue
                 revision_count += 1
-                source_bytes = self.contract_template_service.load_revision_source_bytes(
-                    revision.revision_id
-                )
                 filename = coalesce_filename(
                     revision.source_filename,
                     default_stem=f"template-revision-{revision.revision_id}",
@@ -1824,6 +2266,15 @@ class MasterTransferService:
             reason = str(section.get("reason") or "").strip()
             if section_id and reason:
                 warnings.append(f"Omitted from this package: {section_id} - {reason}")
+        for item in manifest.get("omitted_items") or []:
+            issue = dict(item)
+            section_label = str(
+                issue.get("section_label") or issue.get("section_id") or "Export item"
+            ).strip()
+            label = str(issue.get("label") or issue.get("item_id") or "Unnamed item").strip()
+            reason = str(issue.get("reason") or "").strip()
+            if section_label and label and reason:
+                warnings.append(f"Omitted export item: {section_label}: {label} - {reason}")
         return warnings
 
     def _section_manifest_warnings(self, package_path: Path) -> list[str]:
@@ -1884,6 +2335,50 @@ class MasterTransferService:
             seen.add(clean_value)
             deduped.append(clean_value)
         return deduped
+
+    @classmethod
+    def _dedupe_export_issues(
+        cls,
+        issues: list[MasterTransferExportIssue],
+    ) -> list[MasterTransferExportIssue]:
+        seen: set[tuple[str, str, str, str]] = set()
+        deduped: list[MasterTransferExportIssue] = []
+        for issue in issues:
+            signature = cls._issue_signature(issue)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            deduped.append(issue)
+        return deduped
+
+    @staticmethod
+    def _write_export_omission_log(
+        path: Path,
+        issues: list[MasterTransferExportIssue],
+    ) -> None:
+        lines = [
+            "Master catalog transfer export omissions",
+            f"Generated at: {_utc_timestamp()}",
+            "",
+            (
+                "The items below were intentionally omitted after export preflight found "
+                "unreadable or unavailable source files."
+            ),
+            "",
+        ]
+        for index, issue in enumerate(issues, start=1):
+            lines.extend(
+                [
+                    f"{index}. {issue.section_label}",
+                    f"   Item type: {issue.item_type}",
+                    f"   Item id: {issue.item_id or 'unknown'}",
+                    f"   Label: {issue.label or 'Unnamed item'}",
+                    f"   Action: {issue.action or 'omitted'}",
+                    f"   Reason: {issue.reason}",
+                    "",
+                ]
+            )
+        path.write_text("\n".join(lines), encoding="utf-8")
 
     def _raise_for_catalog_failures(self, report: ExchangeImportReport) -> None:
         if report.failed <= 0 and not report.repair_queue_entry_ids:

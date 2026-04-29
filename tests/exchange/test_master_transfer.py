@@ -519,6 +519,116 @@ class MasterTransferServiceTests(unittest.TestCase):
             )
         )
 
+    def test_master_transfer_preflights_and_omits_unreadable_license_when_confirmed(self):
+        license_service = self.source["license_service"]
+        license_id = self.source_ids["license_id"]
+        record = license_service.fetch_license(license_id)
+        self.assertIsNotNone(record)
+        resolved_license = license_service.resolve_path(record.file_path)
+        resolved_license.unlink()
+
+        issues = self.source["master_transfer_service"].preflight_export(
+            include_sections=["catalog", "licenses"]
+        )
+
+        self.assertTrue(
+            any(
+                issue.section_id == "licenses" and issue.item_id == str(license_id)
+                for issue in issues
+            )
+        )
+        with self.assertRaises(FileNotFoundError):
+            self.source["master_transfer_service"].export_package(
+                self.root / "master-transfer-missing-license-fails.zip",
+                include_sections=["catalog", "licenses"],
+            )
+
+        package_path = self.root / "master-transfer-missing-license.zip"
+        result = self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog", "licenses"],
+            continue_on_item_errors=True,
+        )
+        inspection = self.source["master_transfer_service"].inspect_package(package_path)
+
+        self.assertTrue(result.omitted_items)
+        self.assertTrue(any("License Archive" in warning for warning in result.warnings))
+        self.assertTrue(any("Omitted export item" in warning for warning in inspection.warnings))
+        with ZipFile(package_path, "r") as archive:
+            names = set(archive.namelist())
+            self.assertIn("export_omissions.log", names)
+            log_text = archive.read("export_omissions.log").decode("utf-8")
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            licenses_payload = json.loads(
+                archive.read("sections/licenses/licenses.json").decode("utf-8")
+            )
+
+        self.assertIn("Moonwake Rights", log_text)
+        self.assertEqual(licenses_payload["rows"], [])
+        self.assertTrue(
+            any(
+                item.get("section_id") == "licenses" and item.get("item_id") == str(license_id)
+                for item in manifest.get("omitted_items") or []
+            )
+        )
+        file_paths = {entry["path"] for entry in manifest["files"]}
+        self.assertIn("export_omissions.log", file_paths)
+
+    def test_master_transfer_omits_unreadable_repertoire_asset_and_logs_lineage_change(self):
+        asset_service = self.source["asset_service"]
+        master_asset_id = self.source_ids["master_asset_id"]
+        derivative_asset_id = self.source_ids["derivative_asset_id"]
+        asset = asset_service.fetch_asset(master_asset_id)
+        self.assertIsNotNone(asset)
+        resolved_asset = asset_service.resolve_asset_path(asset.stored_path)
+        self.assertIsNotNone(resolved_asset)
+        resolved_asset.unlink()
+
+        issues = self.source["master_transfer_service"].preflight_export(
+            include_sections=["catalog", "repertoire"]
+        )
+
+        self.assertTrue(
+            any(
+                issue.section_id == "repertoire" and issue.item_id == str(master_asset_id)
+                for issue in issues
+            )
+        )
+
+        package_path = self.root / "master-transfer-missing-asset.zip"
+        result = self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog", "repertoire"],
+            continue_on_item_errors=True,
+        )
+
+        self.assertTrue(
+            any(issue.item_id == str(master_asset_id) for issue in result.omitted_items)
+        )
+        self.assertTrue(any(issue.action == "cleared" for issue in result.omitted_items))
+        with ZipFile(package_path, "r") as archive:
+            root_manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            log_text = archive.read("export_omissions.log").decode("utf-8")
+            with tempfile.TemporaryDirectory() as inner_tmp:
+                inner_path = Path(inner_tmp) / "repertoire.zip"
+                inner_path.write_bytes(archive.read("sections/repertoire/package.zip"))
+                with ZipFile(inner_path, "r") as repertoire_archive:
+                    repertoire_manifest = json.loads(
+                        repertoire_archive.read("manifest.json").decode("utf-8")
+                    )
+
+        exported_asset_ids = {int(asset["id"]) for asset in repertoire_manifest["assets"]}
+        self.assertNotIn(master_asset_id, exported_asset_ids)
+        self.assertIn(derivative_asset_id, exported_asset_ids)
+        derivative_rows = [
+            asset
+            for asset in repertoire_manifest["assets"]
+            if int(asset["id"]) == derivative_asset_id
+        ]
+        self.assertEqual(derivative_rows[0].get("derived_from_asset_id"), None)
+        self.assertIn(str(master_asset_id), log_text)
+        self.assertTrue(root_manifest.get("omitted_items"))
+
     def test_master_transfer_import_round_trip_rehydrates_sections_via_real_logic(self):
         package_path = self.root / "master-transfer.zip"
         self.source["master_transfer_service"].export_package(package_path)

@@ -110,6 +110,35 @@ class BulkAudioAttachPlan:
 
 
 @dataclass(slots=True)
+class DroppedAudioImportItem:
+    source_path: str
+    source_name: str
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    album_artist: str | None = None
+    track_number: int | None = None
+    release_date: str | None = None
+    duration_seconds: int | None = None
+    isrc: str | None = None
+    upc: str | None = None
+    genre: str | None = None
+    composer: str | None = None
+    publisher: str | None = None
+    comments: str | None = None
+    lyrics: str | None = None
+    artwork: ArtworkPayload | None = None
+    warning: str | None = None
+
+
+@dataclass(slots=True)
+class DroppedAudioImportPlan:
+    items: list[DroppedAudioImportItem]
+    warnings: list[str] = field(default_factory=list)
+    suggested_artist: str | None = None
+
+
+@dataclass(slots=True)
 class BulkAudioAttachResult:
     attached_count: int
     artist_updated_count: int

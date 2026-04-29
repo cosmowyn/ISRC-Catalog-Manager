@@ -263,7 +263,7 @@ class BulkAudioAttachDialog(QDialog):
         root.addWidget(self.table, 1)
 
         buttons = QHBoxLayout()
-        if self._allow_create_track and len(self._items) == 1:
+        if self._allow_create_track:
             create_track = QPushButton(create_track_button_text)
             _connect_noarg_signal(create_track.clicked, create_track, self._request_create_track)
             buttons.addWidget(create_track)
@@ -544,6 +544,253 @@ class BulkAudioAttachDialog(QDialog):
                 self.windowTitle(),
                 "Each track can receive only one attached audio file per batch.\n\n"
                 f"Duplicate track IDs: {', '.join(duplicates)}",
+            )
+            return
+        super().accept()
+
+
+class DroppedAudioImportDialog(QDialog):
+    """Review dropped audio files before creating governed catalog records."""
+
+    FIELD_COLUMNS = {
+        "title": 1,
+        "artist": 2,
+        "album": 3,
+        "isrc": 4,
+        "track_number": 5,
+        "release_date": 6,
+        "duration_seconds": 7,
+        "genre": 8,
+        "composer": 9,
+        "publisher": 10,
+    }
+    ARTWORK_COLUMN = 11
+    SOURCE_COLUMN = 12
+    WARNING_COLUMN = 13
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        intro: str,
+        items: list[dict[str, object]],
+        party_service: PartyService | None = None,
+        default_storage_mode: str | None = STORAGE_MODE_MANAGED_FILE,
+        create_button_text: str = "Create Works + Tracks",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(1180, 720)
+        self._items = list(items)
+        self.party_service = party_service
+        _apply_standard_dialog_chrome(self, "droppedAudioImportDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=title,
+            subtitle=intro,
+        )
+
+        storage_row = QHBoxLayout()
+        storage_row.setContentsMargins(0, 0, 0, 0)
+        storage_row.setSpacing(8)
+        storage_label = QLabel("Storage mode")
+        storage_label.setProperty("role", "secondary")
+        storage_row.addWidget(storage_label)
+        self.storage_combo = QComboBox(self)
+        self.storage_combo.addItem("Managed local files", STORAGE_MODE_MANAGED_FILE)
+        self.storage_combo.addItem("Internal database storage", STORAGE_MODE_DATABASE)
+        normalized_default_mode = normalize_storage_mode(default_storage_mode, default=None)
+        index = self.storage_combo.findData(normalized_default_mode)
+        self.storage_combo.setCurrentIndex(index if index >= 0 else 0)
+        storage_row.addWidget(self.storage_combo)
+        storage_row.addStretch(1)
+        root.addLayout(storage_row)
+
+        self.summary_label = QLabel("")
+        self.summary_label.setProperty("role", "secondary")
+        root.addWidget(self.summary_label)
+
+        self.table = QTableWidget(0, 14, self)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "Create",
+                "Title",
+                "Artist",
+                "Album",
+                "ISRC",
+                "Track #",
+                "Release Date",
+                "Seconds",
+                "Genre",
+                "Composer",
+                "Publisher",
+                "Album Art",
+                "Source File",
+                "Warning",
+            ]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        confirm = QPushButton(create_button_text)
+        confirm.setDefault(True)
+        _connect_noarg_signal(confirm.clicked, confirm, self.accept)
+        cancel = QPushButton("Cancel")
+        _connect_noarg_signal(cancel.clicked, cancel, self.reject)
+        buttons.addWidget(confirm)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
+
+        self.populate_rows(self._items)
+        _apply_compact_dialog_control_heights(self)
+
+    @staticmethod
+    def _int_or_none(value: object) -> int | None:
+        try:
+            parsed = int(str(value or "").strip())
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def populate_rows(self, items: list[dict[str, object]]) -> None:
+        self._items = list(items)
+        self.table.setRowCount(len(self._items))
+        for row_index, row in enumerate(self._items):
+            create_item = QTableWidgetItem("")
+            create_item.setFlags(create_item.flags() | Qt.ItemIsUserCheckable)
+            create_item.setCheckState(Qt.Checked)
+            create_item.setData(Qt.UserRole, str(row.get("source_path") or ""))
+            self.table.setItem(row_index, 0, create_item)
+
+            for key, column in self.FIELD_COLUMNS.items():
+                value = row.get(key)
+                item = QTableWidgetItem("" if value is None else str(value))
+                self.table.setItem(row_index, column, item)
+
+            artwork = row.get("artwork")
+            has_artwork = bool(getattr(artwork, "data", b"") if artwork is not None else b"")
+            artwork_item = QTableWidgetItem(
+                "Import embedded art" if has_artwork else "No embedded art"
+            )
+            if has_artwork:
+                artwork_item.setFlags(artwork_item.flags() | Qt.ItemIsUserCheckable)
+                artwork_item.setCheckState(Qt.Checked)
+                mime_type = str(getattr(artwork, "mime_type", "") or "").strip()
+                if mime_type:
+                    artwork_item.setToolTip(mime_type)
+            else:
+                artwork_item.setFlags(artwork_item.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row_index, self.ARTWORK_COLUMN, artwork_item)
+
+            source_item = QTableWidgetItem(str(row.get("source_name") or ""))
+            source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row_index, self.SOURCE_COLUMN, source_item)
+
+            warning_text = str(row.get("warning") or "").strip()
+            warning_item = QTableWidgetItem(warning_text)
+            warning_item.setFlags(warning_item.flags() & ~Qt.ItemIsEditable)
+            if warning_text:
+                warning_item.setToolTip(warning_text)
+            self.table.setItem(row_index, self.WARNING_COLUMN, warning_item)
+        self._refresh_summary()
+        self.table.itemChanged.connect(lambda _item: self._refresh_summary())
+
+    def _row_is_selected(self, row_index: int) -> bool:
+        item = self.table.item(row_index, 0)
+        return item is not None and item.checkState() == Qt.Checked
+
+    def _cell_text(self, row_index: int, column: int) -> str:
+        item = self.table.item(row_index, column)
+        return str(item.text() if item is not None else "").strip()
+
+    def _row_imports_artwork(self, row_index: int) -> bool:
+        item = self.table.item(row_index, self.ARTWORK_COLUMN)
+        if item is None or item.checkState() != Qt.Checked:
+            return False
+        artwork = self._items[row_index].get("artwork") if row_index < len(self._items) else None
+        return bool(getattr(artwork, "data", b"") if artwork is not None else b"")
+
+    def _refresh_summary(self) -> None:
+        selected = sum(1 for row in range(self.table.rowCount()) if self._row_is_selected(row))
+        artwork_count = sum(
+            1
+            for row in range(self.table.rowCount())
+            if self._row_is_selected(row) and self._row_imports_artwork(row)
+        )
+        total = self.table.rowCount()
+        summary = f"{selected} of {total} audio file(s) are queued to create new tracks."
+        if artwork_count:
+            summary += f" {artwork_count} embedded artwork image(s) will be attached."
+        self.summary_label.setText(summary)
+
+    def selected_storage_mode(self) -> str:
+        return str(self.storage_combo.currentData() or STORAGE_MODE_MANAGED_FILE)
+
+    def selected_imports(self) -> list[dict[str, object]]:
+        imports: list[dict[str, object]] = []
+        for row_index, original in enumerate(self._items):
+            if not self._row_is_selected(row_index):
+                continue
+            source_path = str(
+                self.table.item(row_index, 0).data(Qt.UserRole)
+                if self.table.item(row_index, 0) is not None
+                else original.get("source_path") or ""
+            )
+            imports.append(
+                {
+                    "source_path": source_path,
+                    "source_name": str(original.get("source_name") or ""),
+                    "title": self._cell_text(row_index, self.FIELD_COLUMNS["title"]),
+                    "artist": self._cell_text(row_index, self.FIELD_COLUMNS["artist"]),
+                    "album": self._cell_text(row_index, self.FIELD_COLUMNS["album"]),
+                    "isrc": self._cell_text(row_index, self.FIELD_COLUMNS["isrc"]),
+                    "track_number": self._int_or_none(
+                        self._cell_text(row_index, self.FIELD_COLUMNS["track_number"])
+                    ),
+                    "release_date": self._cell_text(row_index, self.FIELD_COLUMNS["release_date"]),
+                    "duration_seconds": self._int_or_none(
+                        self._cell_text(row_index, self.FIELD_COLUMNS["duration_seconds"])
+                    ),
+                    "upc": str(original.get("upc") or "").strip(),
+                    "genre": self._cell_text(row_index, self.FIELD_COLUMNS["genre"]),
+                    "composer": self._cell_text(row_index, self.FIELD_COLUMNS["composer"]),
+                    "publisher": self._cell_text(row_index, self.FIELD_COLUMNS["publisher"]),
+                    "comments": str(original.get("comments") or "").strip(),
+                    "lyrics": str(original.get("lyrics") or "").strip(),
+                    "artwork": (
+                        original.get("artwork") if self._row_imports_artwork(row_index) else None
+                    ),
+                    "import_artwork": self._row_imports_artwork(row_index),
+                }
+            )
+        return imports
+
+    def accept(self) -> None:
+        imports = self.selected_imports()
+        if not imports:
+            QMessageBox.warning(self, self.windowTitle(), "Choose at least one file to import.")
+            return
+        missing_rows = [
+            str(index + 1)
+            for index, row in enumerate(imports)
+            if not str(row.get("title") or "").strip() or not str(row.get("artist") or "").strip()
+        ]
+        if missing_rows:
+            QMessageBox.warning(
+                self,
+                self.windowTitle(),
+                "Each imported file needs a track title and artist before tracks can be created.\n\n"
+                f"Rows needing attention: {', '.join(missing_rows[:12])}",
             )
             return
         super().accept()

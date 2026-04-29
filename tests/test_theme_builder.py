@@ -1100,6 +1100,7 @@ class ThemeBuilderTests(unittest.TestCase):
                 "window_fg": "#F8FAFC",
                 "accent": "#F97316",
             }
+            self.app.setStyleSheet("QMenuBar { color: #000000; } QMenu { color: #000000; }")
 
             host._apply_theme()
 

@@ -13,7 +13,10 @@ from isrc_manager.contracts import (
     ContractPayload,
     ContractService,
 )
-from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
+from isrc_manager.exchange.repertoire_service import (
+    RepertoireExchangeService,
+    RepertoireImportOptions,
+)
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.rights import RightPayload, RightsService
@@ -488,6 +491,66 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             assert asset_path is not None
             self.assertTrue(asset_path.exists())
             self.assertEqual(asset_path.read_bytes(), b"RIFFdemo")
+        finally:
+            new_conn.close()
+
+    def case_repertoire_import_skips_unresolved_catalog_release_links(self):
+        ids = self._seed_repertoire()
+        package_path = self.data_root / "repertoire-missing-release-link.zip"
+        self.exchange_service.export_package(package_path)
+
+        target_root = Path(tempfile.mkdtemp(prefix="repertoire-missing-release-import-"))
+        self.addCleanup(shutil.rmtree, target_root, True)
+        new_conn = sqlite3.connect(":memory:")
+        new_conn.execute("PRAGMA foreign_keys = ON")
+        new_services = self._build_services(new_conn, target_root)
+        try:
+            imported_track_id = new_services["track_service"].create_track(
+                TrackCreatePayload(
+                    isrc="NL-ABC-26-00009",
+                    track_title="Midnight Circuit",
+                    artist_name="Nova",
+                    additional_artists=[],
+                    album_title="Night Runs",
+                    release_date="2026-03-16",
+                    track_length_sec=222,
+                    iswc="T-222.333.444-5",
+                    upc="036000291452",
+                    genre="Synth",
+                )
+            )
+            party_phase = new_services["exchange_service"].import_package(
+                package_path,
+                options=RepertoireImportOptions(phase="parties_only"),
+            )
+            report = new_services["exchange_service"].import_package(
+                package_path,
+                options=RepertoireImportOptions(
+                    phase="remaining",
+                    source_party_id_map=party_phase.source_party_id_map,
+                    source_track_id_map={ids["track_id"]: imported_track_id},
+                    source_release_id_map={},
+                ),
+            )
+
+            self.assertEqual(report.imported_contracts, 1)
+            self.assertEqual(report.imported_rights, 1)
+            self.assertEqual(report.imported_assets, 1)
+            self.assertTrue(
+                any("release reference" in warning.lower() for warning in report.warnings)
+            )
+            self.assertEqual(
+                new_conn.execute("SELECT COUNT(*) FROM ContractReleaseLinks").fetchone()[0],
+                0,
+            )
+            right_release = new_conn.execute(
+                "SELECT release_id FROM RightsRecords ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            asset_release = new_conn.execute(
+                "SELECT release_id FROM AssetVersions ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            self.assertIsNone(right_release)
+            self.assertIsNone(asset_release)
         finally:
             new_conn.close()
 

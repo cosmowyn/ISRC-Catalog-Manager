@@ -2,6 +2,7 @@ import unittest
 from unittest import mock
 
 try:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
@@ -10,7 +11,12 @@ else:
     QT_IMPORT_ERROR = None
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
-from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
+from isrc_manager.tags.dialogs import (
+    BulkAudioAttachDialog,
+    DroppedAudioImportDialog,
+    TagPreviewDialog,
+)
+from isrc_manager.tags.models import ArtworkPayload
 
 
 class TagDialogTests(unittest.TestCase):
@@ -132,6 +138,47 @@ class TagDialogTests(unittest.TestCase):
             with mock.patch("isrc_manager.tags.dialogs.QMessageBox.warning") as warning_mock:
                 dialog.accept()
             warning_mock.assert_called_once()
+        finally:
+            dialog.close()
+
+    def test_dropped_audio_import_dialog_returns_edited_track_rows(self):
+        dialog = DroppedAudioImportDialog(
+            title="Create Tracks from Audio Files",
+            intro="Review dropped audio metadata before import.",
+            items=[
+                {
+                    "source_path": "/tmp/orbit.wav",
+                    "source_name": "orbit.wav",
+                    "title": "Orbit",
+                    "artist": "Artist One",
+                    "album": "Dawn Atlas",
+                    "isrc": "NL-C5X-26-00001",
+                    "track_number": 1,
+                    "release_date": "2026-04-29",
+                    "duration_seconds": 188,
+                    "genre": "Ambient",
+                    "composer": "Writer One",
+                    "publisher": "Publisher One",
+                    "artwork": ArtworkPayload(data=b"\x89PNGfake", mime_type="image/png"),
+                }
+            ],
+            default_storage_mode=STORAGE_MODE_DATABASE,
+        )
+        try:
+            self.assertEqual(dialog.selected_storage_mode(), STORAGE_MODE_DATABASE)
+            dialog.table.item(0, dialog.FIELD_COLUMNS["title"]).setText("Orbit Edit")
+            self.assertEqual(dialog.table.item(0, dialog.ARTWORK_COLUMN).checkState(), Qt.Checked)
+            rows = dialog.selected_imports()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["title"], "Orbit Edit")
+            self.assertEqual(rows[0]["artist"], "Artist One")
+            self.assertEqual(rows[0]["track_number"], 1)
+            self.assertEqual(rows[0]["duration_seconds"], 188)
+            self.assertEqual(rows[0]["genre"], "Ambient")
+            self.assertTrue(rows[0]["import_artwork"])
+            self.assertEqual(rows[0]["artwork"].mime_type, "image/png")
+            self.assertIn("1 of 1", dialog.summary_label.text())
+            self.assertIn("1 embedded artwork", dialog.summary_label.text())
         finally:
             dialog.close()
 

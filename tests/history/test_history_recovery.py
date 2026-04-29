@@ -8,6 +8,9 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
     test_repair_recovery_state_rebuilds_missing_backup_history_artifacts = (
         HistoryManagerTestCase.case_repair_recovery_state_rebuilds_missing_backup_history_artifacts
     )
+    test_repair_recovery_state_removes_missing_backup_with_invalid_history_artifact = (
+        HistoryManagerTestCase.case_repair_recovery_state_removes_missing_backup_with_invalid_history_artifact
+    )
     test_repair_recovery_state_quarantines_referenced_missing_snapshot = (
         HistoryManagerTestCase.case_repair_recovery_state_quarantines_referenced_missing_snapshot
     )

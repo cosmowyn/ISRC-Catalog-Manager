@@ -61,6 +61,7 @@ class RepertoireImportResult:
     source_contract_id_map: dict[str, int] = field(default_factory=dict)
     source_right_id_map: dict[str, int] = field(default_factory=dict)
     source_asset_id_map: dict[str, int] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _stage_progress(start: int, end: int, index: int, total: int) -> int:
@@ -204,11 +205,47 @@ class RepertoireExchangeService:
                     )
         self._report_progress(progress_callback, 90, "Repertoire CSV bundle written.")
 
-    def export_package(self, path: str | Path, *, progress_callback=None) -> None:
+    def export_package(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        continue_on_item_errors: bool = False,
+        omission_callback=None,
+    ) -> None:
         payload = self.export_payload(progress_callback=progress_callback)
         packaged_files: dict[str, str] = {}
+        warnings: list[str] = []
+        omitted_asset_ids: set[int] = set()
         package_path = Path(path)
         package_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _record_omission(
+            *,
+            item_type: str,
+            item_id: object,
+            label: object,
+            reason: object,
+            action: str = "omitted",
+        ) -> None:
+            clean_label = str(label or "").strip() or f"{item_type} {item_id}".strip()
+            clean_reason = str(reason or "").strip()
+            warning = (
+                "Contracts and Rights package " f"{action} {clean_label}: {clean_reason}"
+            ).strip()
+            if warning not in warnings:
+                warnings.append(warning)
+            if omission_callback is not None:
+                omission_callback(
+                    {
+                        "item_type": item_type,
+                        "item_id": str(item_id or "").strip(),
+                        "label": clean_label,
+                        "reason": clean_reason,
+                        "action": action,
+                    }
+                )
+
         with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
             contracts = list(payload["contracts"])
             total_contracts = max(len(contracts), 1)
@@ -219,7 +256,13 @@ class RepertoireExchangeService:
                     f"Packaging repertoire contract files ({index} of {total_contracts})...",
                 )
                 contract_id = int(contract.get("id") or 0)
+                contract_label = (
+                    str(contract.get("title") or "").strip()
+                    or f"contract {contract_id or 'unknown'}"
+                )
+                kept_documents: list[dict[str, object]] = []
                 for document in contract.get("documents", []):
+                    document = dict(document)
                     stored_path = str(document.get("file_path") or "").strip()
                     document_id = int(document.get("id") or 0)
                     filename = coalesce_filename(
@@ -235,18 +278,35 @@ class RepertoireExchangeService:
                         if arcname not in packaged_files.values():
                             archive.write(abs_path, arcname=arcname)
                         packaged_files[package_key] = arcname
+                        kept_documents.append(document)
                         continue
                     if document_id <= 0:
-                        raise ValueError(
+                        message = (
                             "Contract document export could not resolve a file-backed source for "
                             f"contract {contract_id or 'unknown'} document '{filename}'."
                         )
+                        if not continue_on_item_errors:
+                            raise ValueError(message)
+                        _record_omission(
+                            item_type="contract_document",
+                            item_id=f"{contract_id}:unpersisted",
+                            label=f"{contract_label} / {filename}",
+                            reason=message,
+                        )
+                        continue
                     try:
                         data, _ = self.contract_service.fetch_document_bytes(document_id)
                     except Exception as exc:
-                        raise ValueError(
-                            f"Contract document {document_id} could not be packaged: {exc}"
-                        ) from exc
+                        message = f"Contract document {document_id} could not be packaged: {exc}"
+                        if not continue_on_item_errors:
+                            raise ValueError(message) from exc
+                        _record_omission(
+                            item_type="contract_document",
+                            item_id=document_id,
+                            label=f"{contract_label} / {filename}",
+                            reason=str(exc) or exc.__class__.__name__,
+                        )
+                        continue
                     package_key = (
                         f"embedded/contracts/{contract_id or 'contract'}/{document_id}/{filename}"
                     )
@@ -254,7 +314,10 @@ class RepertoireExchangeService:
                         archive.writestr(arcname, data)
                     document["file_path"] = package_key
                     packaged_files[package_key] = arcname
+                    kept_documents.append(document)
+                contract["documents"] = kept_documents
             assets = list(payload["assets"])
+            kept_assets: list[dict[str, object]] = []
             total_assets = max(len(assets), 1)
             for index, asset in enumerate(assets, start=1):
                 self._report_progress(
@@ -275,22 +338,66 @@ class RepertoireExchangeService:
                     if arcname not in packaged_files.values():
                         archive.write(abs_path, arcname=arcname)
                     packaged_files[package_key] = arcname
+                    kept_assets.append(asset)
                     continue
                 if asset_id <= 0:
-                    raise ValueError(
+                    message = (
                         "Asset export could not resolve a file-backed source for an asset row "
                         f"without a persisted id ('{filename}')."
                     )
+                    if not continue_on_item_errors:
+                        raise ValueError(message)
+                    _record_omission(
+                        item_type="asset",
+                        item_id="unpersisted",
+                        label=filename,
+                        reason=message,
+                    )
+                    continue
                 try:
                     data, _ = self.asset_service.fetch_asset_bytes(asset_id)
                 except Exception as exc:
-                    raise ValueError(f"Asset {asset_id} could not be packaged: {exc}") from exc
+                    message = f"Asset {asset_id} could not be packaged: {exc}"
+                    if not continue_on_item_errors:
+                        raise ValueError(message) from exc
+                    omitted_asset_ids.add(asset_id)
+                    _record_omission(
+                        item_type="asset",
+                        item_id=asset_id,
+                        label=filename,
+                        reason=str(exc) or exc.__class__.__name__,
+                    )
+                    continue
                 package_key = f"embedded/assets/{asset_id}/{filename}"
                 if arcname not in packaged_files.values():
                     archive.writestr(arcname, data)
                 asset["stored_path"] = package_key
                 packaged_files[package_key] = arcname
+                kept_assets.append(asset)
+            if omitted_asset_ids:
+                for asset in kept_assets:
+                    derived_from_asset_id = int(asset.get("derived_from_asset_id") or 0)
+                    if derived_from_asset_id not in omitted_asset_ids:
+                        continue
+                    asset_id = int(asset.get("id") or 0)
+                    filename = coalesce_filename(
+                        asset.get("filename"),
+                        default_stem=f"asset-{asset_id or 'file'}",
+                    )
+                    asset["derived_from_asset_id"] = None
+                    _record_omission(
+                        item_type="asset_lineage_reference",
+                        item_id=asset_id,
+                        label=filename,
+                        reason=(
+                            f"Derived-from asset {derived_from_asset_id} was omitted from this "
+                            "export."
+                        ),
+                        action="cleared",
+                    )
+            payload["assets"] = kept_assets
             payload["packaged_files"] = packaged_files
+            payload["warnings"] = warnings
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
         self._report_progress(progress_callback, 90, "Repertoire package written.")
 
@@ -802,6 +909,41 @@ class RepertoireExchangeService:
             if cancel_callback is not None:
                 cancel_callback()
 
+        def _append_import_warning(message: str) -> None:
+            clean_message = str(message or "").strip()
+            if clean_message and clean_message not in result.warnings:
+                result.warnings.append(clean_message)
+
+        def _resolve_optional_seeded_reference(
+            raw_value: object,
+            *,
+            mapping: dict[int, int],
+            table_name: str,
+            entity_label: str,
+            context: str,
+        ) -> int | None:
+            if raw_value in (None, ""):
+                return None
+            try:
+                source_id = int(raw_value)
+            except Exception:
+                raise ValueError(f"Invalid source {entity_label} id: {raw_value!r}") from None
+            if source_id <= 0:
+                return None
+            resolved_id = self._resolve_seeded_entity_id(
+                source_id,
+                mapping=mapping,
+                table_name=table_name,
+                strict=False,
+                entity_label=entity_label,
+            )
+            if resolved_id is None and import_remaining:
+                _append_import_warning(
+                    f"Skipped {context} {entity_label} reference {source_id} because it "
+                    "could not be resolved in the current profile."
+                )
+            return resolved_id
+
         def _resolve_party_reference(raw_value: object) -> int | None:
             return self._resolve_seeded_entity_id(
                 raw_value,
@@ -811,22 +953,30 @@ class RepertoireExchangeService:
                 entity_label="party",
             )
 
-        def _resolve_track_reference(raw_value: object) -> int | None:
-            return self._resolve_seeded_entity_id(
+        def _resolve_track_reference(
+            raw_value: object,
+            *,
+            context: str = "repertoire",
+        ) -> int | None:
+            return _resolve_optional_seeded_reference(
                 raw_value,
                 mapping=track_id_map,
                 table_name="Tracks",
-                strict=(phase == "remaining"),
                 entity_label="track",
+                context=context,
             )
 
-        def _resolve_release_reference(raw_value: object) -> int | None:
-            return self._resolve_seeded_entity_id(
+        def _resolve_release_reference(
+            raw_value: object,
+            *,
+            context: str = "repertoire",
+        ) -> int | None:
+            return _resolve_optional_seeded_reference(
                 raw_value,
                 mapping=release_id_map,
                 table_name="Releases",
-                strict=(phase == "remaining"),
                 entity_label="release",
+                context=context,
             )
 
         def _find_existing_work_id(
@@ -971,10 +1121,17 @@ class RepertoireExchangeService:
                             notes=contributor.get("notes"),
                         )
                     )
+                work_label = str(source.get("title") or old_id or "work").strip()
                 track_ids = [
                     resolved_track_id
                     for track_id in source.get("track_ids", []) or []
-                    if (resolved_track_id := _resolve_track_reference(track_id)) is not None
+                    if (
+                        resolved_track_id := _resolve_track_reference(
+                            track_id,
+                            context=f"work '{work_label}'",
+                        )
+                    )
+                    is not None
                 ]
                 work_payload = WorkPayload(
                     title=source.get("title") or "",
@@ -1088,15 +1245,28 @@ class RepertoireExchangeService:
                         raise ValueError(
                             f"Work reference {old_work_id} could not be resolved during repertoire import."
                         )
+                contract_label = str(source.get("title") or old_id or "contract").strip()
                 track_ids = [
                     resolved_track_id
                     for item in source.get("track_ids", []) or []
-                    if (resolved_track_id := _resolve_track_reference(item)) is not None
+                    if (
+                        resolved_track_id := _resolve_track_reference(
+                            item,
+                            context=f"contract '{contract_label}'",
+                        )
+                    )
+                    is not None
                 ]
                 release_ids = [
                     resolved_release_id
                     for item in source.get("release_ids", []) or []
-                    if (resolved_release_id := _resolve_release_reference(item)) is not None
+                    if (
+                        resolved_release_id := _resolve_release_reference(
+                            item,
+                            context=f"contract '{contract_label}'",
+                        )
+                    )
+                    is not None
                 ]
                 new_id = self.contract_service.create_contract(
                     ContractPayload(
@@ -1239,6 +1409,7 @@ class RepertoireExchangeService:
                         raise ValueError(
                             f"Work reference {old_work_id} could not be resolved during repertoire import."
                         )
+                right_label = str(source.get("title") or source.get("id") or "right").strip()
                 self.rights_service.create_right(
                     RightPayload(
                         title=source.get("title"),
@@ -1260,8 +1431,14 @@ class RepertoireExchangeService:
                         ),
                         source_contract_id=source_contract_id,
                         work_id=work_id,
-                        track_id=_resolve_track_reference(source.get("track_id")),
-                        release_id=_resolve_release_reference(source.get("release_id")),
+                        track_id=_resolve_track_reference(
+                            source.get("track_id"),
+                            context=f"right '{right_label}'",
+                        ),
+                        release_id=_resolve_release_reference(
+                            source.get("release_id"),
+                            context=f"right '{right_label}'",
+                        ),
                         notes=source.get("notes"),
                         profile_name=source.get("profile_name"),
                     )
@@ -1277,6 +1454,7 @@ class RepertoireExchangeService:
                     f"Importing Asset records ({index} of {len(assets)})...",
                 )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
+                asset_label = str(source.get("filename") or source.get("id") or "asset").strip()
                 new_asset_id = self.asset_service.create_asset(
                     AssetVersionPayload(
                         asset_type=source.get("asset_type") or "other",
@@ -1306,8 +1484,14 @@ class RepertoireExchangeService:
                         primary_flag=bool(source.get("primary_flag")),
                         version_status=source.get("version_status"),
                         notes=source.get("notes"),
-                        track_id=_resolve_track_reference(source.get("track_id")),
-                        release_id=_resolve_release_reference(source.get("release_id")),
+                        track_id=_resolve_track_reference(
+                            source.get("track_id"),
+                            context=f"asset '{asset_label}'",
+                        ),
+                        release_id=_resolve_release_reference(
+                            source.get("release_id"),
+                            context=f"asset '{asset_label}'",
+                        ),
                     )
                 )
                 old_asset_id = int(source.get("id") or 0)

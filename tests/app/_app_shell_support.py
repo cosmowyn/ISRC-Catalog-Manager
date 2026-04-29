@@ -4715,6 +4715,115 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Attached audio to 2 track(s).", info_mock.call_args.args[2])
         self.assertIn("Updated the main artist on 2 matched track(s).", info_mock.call_args.args[2])
 
+    def case_audio_drop_on_empty_catalog_creates_tracks_and_works_from_metadata(self):
+        audio_path = self._create_wav_file("Artist One - Orbit.wav")
+        artwork_payload = self._create_png_file("embedded-cover.png").read_bytes()
+        captured_dialog: dict[str, object] = {}
+
+        class _AcceptingImportDialog:
+            def __init__(self, *args, **kwargs):
+                del args
+                captured_dialog.update(kwargs)
+
+            def exec(self):
+                return app_module.QDialog.Accepted
+
+            def selected_imports(self):
+                rows = []
+                for row in captured_dialog["items"]:
+                    copied = dict(row)
+                    copied["import_artwork"] = bool(copied.get("artwork"))
+                    rows.append(copied)
+                return rows
+
+            def selected_storage_mode(self):
+                return app_module.STORAGE_MODE_DATABASE
+
+        tag_data = SimpleNamespace(
+            title="Orbit",
+            artist="Artist One",
+            album="Dawn Atlas",
+            album_artist="Artist One",
+            track_number=1,
+            release_date="2026-04-29",
+            isrc="",
+            upc="",
+            genre="Ambient",
+            composer="Writer One",
+            publisher="Publisher One",
+            comments="",
+            lyrics="",
+            artwork=app_module.ArtworkPayload(
+                data=artwork_payload,
+                mime_type="image/png",
+            ),
+            warnings=[],
+        )
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module.AudioTagService, "read_tags", return_value=tag_data),
+            mock.patch.object(app_module, "DroppedAudioImportDialog", _AcceptingImportDialog),
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.window.bulk_attach_audio_files(file_paths=[str(audio_path)])
+
+        choices = self.window._all_catalog_track_choices()
+        self.assertEqual(len(choices), 1)
+        track_id = choices[0].track_id
+        snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertEqual(snapshot.track_title, "Orbit")
+        self.assertEqual(snapshot.artist_name, "Artist One")
+        self.assertEqual(snapshot.album_title, "Dawn Atlas")
+        self.assertEqual(snapshot.genre, "Ambient")
+        self.assertEqual(snapshot.composer, "Writer One")
+        self.assertTrue(self.window.track_service.has_media(track_id, "audio_file"))
+        self.assertTrue(self.window.track_service.has_media(track_id, "album_art"))
+        audio_bytes, _mime_type = self.window.track_service.fetch_media_bytes(
+            track_id, "audio_file"
+        )
+        self.assertTrue(audio_bytes)
+        artwork_bytes, artwork_mime = self.window.track_service.fetch_media_bytes(
+            track_id, "album_art"
+        )
+        self.assertEqual(artwork_bytes, artwork_payload)
+        self.assertEqual(artwork_mime, "image/png")
+        with mock.patch.object(self.window, "_open_image_preview") as image_preview_mock:
+            self.window._preview_standard_media_for_track(track_id, "album_art")
+        image_preview_mock.assert_called_once_with(artwork_payload, "Orbit")
+        linked_works = self.window.work_service.list_works_for_track(track_id)
+        self.assertEqual(len(linked_works), 1)
+        self.assertEqual(linked_works[0].title, "Orbit")
+        self.assertEqual(captured_dialog["items"][0]["title"], "Orbit")
+        self.assertEqual(captured_dialog["items"][0]["artist"], "Artist One")
+        self.assertEqual(captured_dialog["items"][0]["artwork"].mime_type, "image/png")
+        info_mock.assert_called_once()
+        self.assertIn("Created 1 track(s)", info_mock.call_args.args[2])
+        self.assertIn("Attached embedded album art to 1 track(s).", info_mock.call_args.args[2])
+
+    def case_standard_album_art_preview_without_media_shows_informational_message(self):
+        track_id = self._create_track(
+            index=409,
+            title="No Cover Track",
+            album_title="Single",
+        )
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+
+        with (
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+            mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
+        ):
+            self.window._preview_standard_media_for_track(track_id, "album_art")
+
+        critical_mock.assert_not_called()
+        info_mock.assert_called_once()
+        self.assertIn("No stored album art", info_mock.call_args.args[2])
+
     def case_audio_attach_unique_match_requires_confirmation_before_write(self):
         track_id = self._create_track(index=411, title="Orbit Lines")
         self.window.refresh_table_preserve_view(focus_id=track_id)
