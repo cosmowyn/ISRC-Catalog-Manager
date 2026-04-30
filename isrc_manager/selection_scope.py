@@ -88,12 +88,14 @@ class SelectionScopeBanner(QWidget):
         show_header: bool = True,
         show_use_current_button: bool = True,
         show_choose_button: bool = True,
+        show_clear_override_button: bool = True,
         content_margins: tuple[int, int, int, int] = (12, 12, 12, 12),
     ):
         super().__init__(parent)
         self._syncing_height = False
         self._show_use_current_button = bool(show_use_current_button)
         self._show_choose_button = bool(show_choose_button)
+        self._show_clear_override_button = bool(show_clear_override_button)
         self.setObjectName("selectionScopeBanner")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         _apply_standard_widget_chrome(self, "selectionScopeBanner")
@@ -157,10 +159,11 @@ class SelectionScopeBanner(QWidget):
         override_active = bool(state.override_active)
         self.use_current_button.setVisible(self._show_use_current_button)
         self.choose_button.setVisible(self._show_choose_button)
+        show_clear_override = override_active and self._show_clear_override_button
         self.clear_override_button.setEnabled(override_active)
-        self.clear_override_button.setVisible(override_active)
+        self.clear_override_button.setVisible(show_clear_override)
         self.action_cluster.setVisible(
-            self._show_use_current_button or self._show_choose_button or override_active
+            self._show_use_current_button or self._show_choose_button or show_clear_override
         )
         self.action_cluster.updateGeometry()
         self._sync_layout_height()

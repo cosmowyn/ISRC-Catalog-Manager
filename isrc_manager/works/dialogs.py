@@ -754,9 +754,10 @@ class WorkEditorDialog(QDialog):
 class WorkBrowserPanel(QWidget):
     """Browse, create, duplicate, and link first-class work records inside a workspace panel."""
 
-    ACTION_CLUSTER_OUTER_MARGINS = (3, 3, 3, 3)
-    ACTION_CLUSTER_HORIZONTAL_SPACING = 3
-    ACTION_CLUSTER_VERTICAL_SPACING = 3
+    ACTION_CLUSTER_OUTER_MARGINS = (4, 4, 4, 4)
+    ACTION_CLUSTER_HORIZONTAL_SPACING = 8
+    ACTION_CLUSTER_VERTICAL_SPACING = 8
+    ACTION_CLUSTER_COLUMNS = 3
 
     filter_requested = Signal(list)
     create_requested = Signal(object)
@@ -803,13 +804,14 @@ class WorkBrowserPanel(QWidget):
 
         controls_box, controls_layout = _create_standard_section(
             self,
-            "Find and Manage",
-            "Search by work title, alternate title, ISWC, or registration number, then inspect, link, filter, and manage the selected work and its related tracks.",
+            "Find, Manage, and Scope",
+            "Search works, review the active catalog track scope, and manage linked-track actions from one place.",
         )
         self._controls_box = controls_box
+        controls_layout.setSpacing(8)
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(10)
+        controls.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search works by title, alternate title, ISWC, or registration #..."
@@ -833,6 +835,21 @@ class WorkBrowserPanel(QWidget):
         _connect_noarg_signal(duplicate_button.clicked, duplicate_button, self.duplicate_selected)
         link_button = QPushButton("Link Selected Tracks")
         _connect_noarg_signal(link_button.clicked, link_button, self.link_selected_tracks)
+        choose_tracks_button = QPushButton("Choose Tracks")
+        _connect_noarg_signal(
+            choose_tracks_button.clicked,
+            choose_tracks_button,
+            self._choose_tracks,
+        )
+        clear_scope_button = QPushButton("Clear Track Scope")
+        _connect_noarg_signal(
+            clear_scope_button.clicked,
+            clear_scope_button,
+            self._clear_selection_override,
+        )
+        clear_scope_button.setVisible(False)
+        clear_scope_button.setEnabled(False)
+        self.clear_scope_button = clear_scope_button
         delete_button = QPushButton("Delete")
         _connect_noarg_signal(delete_button.clicked, delete_button, self.delete_selected)
         open_filter_button = QPushButton("Filter Main Table")
@@ -842,58 +859,44 @@ class WorkBrowserPanel(QWidget):
             self.filter_by_work_tracks,
         )
         controls_layout.addLayout(controls)
+        self._manage_action_buttons = [
+            create_button,
+            add_track_button,
+            add_album_button,
+            edit_button,
+            duplicate_button,
+            link_button,
+            choose_tracks_button,
+            open_filter_button,
+            delete_button,
+            clear_scope_button,
+        ]
         self.manage_actions_cluster = _create_action_button_cluster(
             self,
-            [
-                create_button,
-                add_track_button,
-                add_album_button,
-                edit_button,
-                duplicate_button,
-                link_button,
-                delete_button,
-                open_filter_button,
-            ],
-            columns=2,
-            min_button_width=180,
+            self._manage_action_buttons,
+            columns=self.ACTION_CLUSTER_COLUMNS,
+            min_button_width=160,
             outer_margins=self.ACTION_CLUSTER_OUTER_MARGINS,
             horizontal_spacing=self.ACTION_CLUSTER_HORIZONTAL_SPACING,
             vertical_spacing=self.ACTION_CLUSTER_VERTICAL_SPACING,
+            span_last_row=True,
+            lock_minimum_height=False,
         )
         self.manage_actions_cluster.setObjectName("workManagerActionsCluster")
         self._apply_action_cluster_layout_metrics()
         controls_layout.addWidget(self.manage_actions_cluster)
-        root.addWidget(controls_box)
 
-        selection_box, selection_layout = _create_standard_section(
-            self,
-            "Catalog Selection",
-            "Choose the catalog tracks this manager should use when linking, filtering, or creating related work records.",
-        )
-        self._selection_box = selection_box
         self.selection_banner = SelectionScopeBanner(
             chooser_label="Choose Tracks",
-            parent=selection_box,
+            parent=controls_box,
             show_header=False,
+            show_use_current_button=False,
+            show_choose_button=False,
+            show_clear_override_button=False,
             content_margins=(0, 0, 0, 0),
         )
-        _connect_noarg_signal(
-            self.selection_banner.use_current_button.clicked,
-            self.selection_banner.use_current_button,
-            self._use_current_selection,
-        )
-        _connect_noarg_signal(
-            self.selection_banner.choose_button.clicked,
-            self.selection_banner.choose_button,
-            self._choose_tracks,
-        )
-        _connect_noarg_signal(
-            self.selection_banner.clear_override_button.clicked,
-            self.selection_banner.clear_override_button,
-            self._clear_selection_override,
-        )
-        selection_layout.addWidget(self.selection_banner)
-        root.addWidget(selection_box)
+        controls_layout.addWidget(self.selection_banner)
+        root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(
             self,
@@ -907,6 +910,7 @@ class WorkBrowserPanel(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setMinimumHeight(280)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -1028,7 +1032,13 @@ class WorkBrowserPanel(QWidget):
         )
 
     def refresh_selection_scope(self) -> None:
-        self.selection_banner.set_state(self.selection_scope_state())
+        state = self.selection_scope_state()
+        self.selection_banner.set_state(state)
+        clear_scope_button = getattr(self, "clear_scope_button", None)
+        if isinstance(clear_scope_button, QPushButton):
+            clear_scope_button.setEnabled(state.override_active)
+            clear_scope_button.setVisible(state.override_active)
+            self.manage_actions_cluster.updateGeometry()
         self._schedule_control_height_sync()
 
     def _schedule_control_height_sync(self) -> None:
@@ -1051,6 +1061,38 @@ class WorkBrowserPanel(QWidget):
         layout.setContentsMargins(*self.ACTION_CLUSTER_OUTER_MARGINS)
         layout.setHorizontalSpacing(self.ACTION_CLUSTER_HORIZONTAL_SPACING)
         layout.setVerticalSpacing(self.ACTION_CLUSTER_VERTICAL_SPACING)
+        self._sync_action_cluster_minimum_height(cluster, layout)
+
+    def _sync_action_cluster_minimum_height(self, cluster: QWidget, layout: QGridLayout) -> None:
+        visible_buttons = [
+            button
+            for button in getattr(self, "_manage_action_buttons", [])
+            if isinstance(button, QPushButton) and not button.isHidden()
+        ]
+        if not visible_buttons:
+            cluster.setMinimumHeight(0)
+            cluster.updateGeometry()
+            return
+        columns = max(1, int(self.ACTION_CLUSTER_COLUMNS))
+        rows = ((len(visible_buttons) - 1) // columns) + 1
+        margins = layout.contentsMargins()
+        button_height = max(
+            max(
+                int(button.minimumHeight()),
+                int(button.minimumSizeHint().height()),
+                int(button.sizeHint().height()),
+            )
+            for button in visible_buttons
+        )
+        target_height = (
+            margins.top()
+            + margins.bottom()
+            + (button_height * rows)
+            + (layout.verticalSpacing() * max(0, rows - 1))
+        )
+        if cluster.minimumHeight() != target_height:
+            cluster.setMinimumHeight(target_height)
+        cluster.updateGeometry()
 
     def _sync_control_height_constraints(self) -> None:
         self._control_height_sync_pending = False
@@ -1061,7 +1103,6 @@ class WorkBrowserPanel(QWidget):
             getattr(self, "manage_actions_cluster", None),
             getattr(self, "selection_banner", None),
             getattr(self, "_controls_box", None),
-            getattr(self, "_selection_box", None),
         ):
             if not isinstance(widget, QWidget) or not _qt_object_is_valid(widget):
                 continue
@@ -1071,6 +1112,7 @@ class WorkBrowserPanel(QWidget):
                 if layout is not None:
                     layout.activate()
                 target_height = max(
+                    int(widget.minimumHeight()),
                     int(widget.minimumSizeHint().height()),
                     int(widget.sizeHint().height()),
                 )

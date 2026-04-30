@@ -3772,6 +3772,7 @@ class AppShellTestCase(unittest.TestCase):
                 _bounds_in(button, panel.manage_actions_cluster)[3]
                 <= panel.manage_actions_cluster.rect().bottom()
                 for button in panel.manage_actions_cluster.findChildren(app_module.QPushButton)
+                if not button.isHidden()
             )
         )
         self.assertTrue(
@@ -4291,12 +4292,27 @@ class AppShellTestCase(unittest.TestCase):
         link_button = self._button_by_text(
             work_panel.manage_actions_cluster, "Link Selected Tracks"
         )
+        choose_tracks_button = self._button_by_text(
+            work_panel.manage_actions_cluster, "Choose Tracks"
+        )
+        filter_button = self._button_by_text(work_panel.manage_actions_cluster, "Filter Main Table")
         delete_button = self._button_by_text(work_panel.manage_actions_cluster, "Delete")
 
-        self.assertGreater(edit_button.geometry().left() - create_button.geometry().right(), 0)
-        self.assertGreater(duplicate_button.geometry().top() - create_button.geometry().bottom(), 0)
+        self.assertGreater(
+            add_track_button.geometry().left() - create_button.geometry().right(),
+            0,
+        )
+        self.assertGreater(
+            add_album_button.geometry().left() - add_track_button.geometry().right(),
+            0,
+        )
+        self.assertGreater(edit_button.geometry().top() - create_button.geometry().bottom(), 0)
         self.assertGreater(link_button.geometry().left() - duplicate_button.geometry().right(), 0)
-        self.assertGreater(delete_button.geometry().top() - edit_button.geometry().bottom(), 0)
+        self.assertGreater(
+            choose_tracks_button.geometry().top() - edit_button.geometry().bottom(),
+            0,
+        )
+        self.assertGreater(delete_button.geometry().left() - filter_button.geometry().right(), 0)
         for button in (
             create_button,
             add_track_button,
@@ -4304,6 +4320,8 @@ class AppShellTestCase(unittest.TestCase):
             edit_button,
             duplicate_button,
             link_button,
+            choose_tracks_button,
+            filter_button,
             delete_button,
         ):
             self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
@@ -4314,6 +4332,7 @@ class AppShellTestCase(unittest.TestCase):
         ]
         self.assertIn("Add Track to Work", cluster_texts)
         self.assertIn("Add Album to Work", cluster_texts)
+        self.assertIn("Choose Tracks", cluster_texts)
 
     def case_diagnostics_catalog_cleanup_uses_tabs_and_focus_requested_tab(self):
         dialog = app_module.DiagnosticsDialog(self.window)

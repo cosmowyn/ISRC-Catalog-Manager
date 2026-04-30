@@ -1508,14 +1508,20 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertGreaterEqual(dialog.manage_actions_cluster.minimumSizeHint().width(), 0)
             layout = dialog.manage_actions_cluster.layout()
             margins = layout.contentsMargins()
-            self.assertEqual(layout.horizontalSpacing(), 3)
-            self.assertEqual(layout.verticalSpacing(), 3)
+            self.assertEqual(layout.horizontalSpacing(), 8)
+            self.assertEqual(layout.verticalSpacing(), 8)
             self.assertEqual(
                 (margins.left(), margins.top(), margins.right(), margins.bottom()),
-                (3, 3, 3, 3),
+                (4, 4, 4, 4),
             )
+            action_texts = {
+                button.text() for button in dialog.manage_actions_cluster.findChildren(QPushButton)
+            }
+            self.assertIn("Choose Tracks", action_texts)
+            self.assertIn("Clear Track Scope", action_texts)
             group_titles = {group.title() for group in dialog.findChildren(QGroupBox)}
-            self.assertIn("Catalog Selection", group_titles)
+            self.assertIn("Find, Manage, and Scope", group_titles)
+            self.assertNotIn("Catalog Selection", group_titles)
             self.assertTrue(dialog.selection_banner.scope_label.isHidden())
             banner_margins = dialog.selection_banner.layout().contentsMargins()
             self.assertEqual(
@@ -1528,9 +1534,10 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                 (0, 0, 0, 0),
             )
             self.assertTrue(dialog.selection_banner.clear_override_button.isHidden())
+            self.assertTrue(dialog.clear_scope_button.isHidden())
             layout.setHorizontalSpacing(24)
             dialog.panel.stabilize_layout_after_restore()
-            self.assertEqual(layout.horizontalSpacing(), 3)
+            self.assertEqual(layout.horizontalSpacing(), 8)
         finally:
             dialog.close()
 
