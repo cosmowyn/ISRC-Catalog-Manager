@@ -1,7 +1,7 @@
 {
-  "version": "3.9.6",
-  "released_at": "2026-04-29",
-  "summary": "Improve transfer resilience and audio imports",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.9.6.md",
+  "version": "3.9.7",
+  "released_at": "2026-04-30",
+  "summary": "fix work manager layout",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.9.7.md",
   "minimum_supported_version": null
 }
