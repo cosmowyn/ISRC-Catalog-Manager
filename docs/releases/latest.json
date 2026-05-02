@@ -1,7 +1,7 @@
 {
-  "version": "3.10.1",
+  "version": "3.11.0",
   "released_at": "2026-05-02",
-  "summary": "Add ISRC registry test to CI group",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.10.1.md",
+  "summary": "Fix add track save without generated ISRC",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.11.0.md",
   "minimum_supported_version": null
 }
