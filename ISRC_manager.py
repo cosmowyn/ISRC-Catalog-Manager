@@ -19160,7 +19160,9 @@ class App(QMainWindow):
                 cursor=self.cursor,
             ):
                 return True
-        return self._isrc_registry_conflict(candidate, exclude_track_id=exclude_track_id) is not None
+        return (
+            self._isrc_registry_conflict(candidate, exclude_track_id=exclude_track_id) is not None
+        )
 
     @staticmethod
     def _normalize_track_number_value(value) -> int | None:
@@ -21545,9 +21547,7 @@ class App(QMainWindow):
             selected_section_ids = preview_service.validate_export_section_selection(
                 selected_section_ids
             )
-            export_issues = preview_service.preflight_export(
-                include_sections=selected_section_ids
-            )
+            export_issues = preview_service.preflight_export(include_sections=selected_section_ids)
         except ValueError as exc:
             QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
             return
@@ -24794,8 +24794,10 @@ class App(QMainWindow):
             if raw_isrc:
                 iso_candidate = to_iso_isrc(raw_isrc)
                 compact_candidate = to_compact_isrc(iso_candidate or raw_isrc)
-                if not iso_candidate or not compact_candidate or not is_valid_isrc_compact_or_iso(
-                    iso_candidate
+                if (
+                    not iso_candidate
+                    or not compact_candidate
+                    or not is_valid_isrc_compact_or_iso(iso_candidate)
                 ):
                     row_errors.append(f"Row {index}: ISRC '{raw_isrc}' is not valid.")
                 elif compact_candidate in seen_isrc:
@@ -24872,7 +24874,11 @@ class App(QMainWindow):
         *,
         title: str = "Create Tracks from Audio Files",
     ) -> None:
-        if self.audio_tag_service is None or self.track_service is None or self.work_service is None:
+        if (
+            self.audio_tag_service is None
+            or self.track_service is None
+            or self.work_service is None
+        ):
             QMessageBox.warning(self, title, "Open a profile first.")
             return
         prepared_paths = [
@@ -24976,9 +24982,7 @@ class App(QMainWindow):
                 return
 
             profile_name = self._current_profile_name()
-            artwork_payload_count = sum(
-                1 for payload in payloads if payload.album_art_source_path
-            )
+            artwork_payload_count = sum(1 for payload in payloads if payload.album_art_source_path)
 
             def _apply_worker(bundle, ctx):
                 governed_service = GovernedImportCoordinator(
@@ -25097,7 +25101,11 @@ class App(QMainWindow):
                         if artwork_payload_count
                         else ""
                     )
-                    + ("\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12]) if plan_warnings else ""),
+                    + (
+                        "\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12])
+                        if plan_warnings
+                        else ""
+                    ),
                 )
 
             self._submit_background_bundle_task(
