@@ -837,7 +837,13 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertIn("-dn", command)
 
     def test_audio_conversion_service_reports_unavailable_without_ffmpeg(self):
-        with mock.patch("isrc_manager.media.conversion.shutil.which", return_value=None):
+        with (
+            mock.patch("isrc_manager.media.conversion.shutil.which", return_value=None),
+            mock.patch(
+                "isrc_manager.media.conversion._ffmpeg_candidate_paths",
+                return_value=tuple(),
+            ),
+        ):
             service = AudioConversionService()
         self.assertFalse(service.is_available())
         self.assertEqual(service.managed_target_ids(), tuple())
@@ -845,6 +851,23 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(service.external_target_ids(), tuple())
         with self.assertRaises(RuntimeError):
             service.require_available()
+
+    def test_audio_conversion_service_finds_common_ffmpeg_location_when_path_misses(self):
+        fake_ffmpeg = self.root / "homebrew" / "bin" / "ffmpeg"
+        fake_ffmpeg.parent.mkdir(parents=True)
+        fake_ffmpeg.write_text("", encoding="utf-8")
+
+        with (
+            mock.patch("isrc_manager.media.conversion.shutil.which", return_value=None),
+            mock.patch(
+                "isrc_manager.media.conversion._ffmpeg_candidate_paths",
+                return_value=(fake_ffmpeg,),
+            ),
+        ):
+            service = AudioConversionService()
+
+        self.assertTrue(service.is_available())
+        self.assertEqual(service.ffmpeg_path(), fake_ffmpeg)
 
     def test_managed_lossy_target_profiles_exclude_raw_aac(self):
         self.assertEqual(

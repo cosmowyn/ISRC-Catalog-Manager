@@ -10670,7 +10670,7 @@ class App(QMainWindow):
         external_message = (
             "Utility conversion only: no catalog metadata, no watermarking, and no managed derivative registration."
             if external_available
-            else "External audio conversion requires ffmpeg on PATH."
+            else "External audio conversion requires ffmpeg."
         )
         forensic_message = (
             "Export recipient-specific lossy delivery copies for leak tracing. This stays separate from signed authenticity master exports."
@@ -26007,8 +26007,8 @@ class App(QMainWindow):
             or not self.audio_conversion_service.is_available()
         ):
             return (
-                "Managed audio derivative export requires ffmpeg on PATH. "
-                "Install ffmpeg to enable derivative export and the external conversion utility."
+                "Managed audio derivative export requires ffmpeg. "
+                "Install ffmpeg or add it to PATH to enable derivative export and the external conversion utility."
             )
         if self.track_service is None:
             return "Managed audio derivative export requires an open profile."
@@ -26456,8 +26456,8 @@ class App(QMainWindow):
             QMessageBox.warning(
                 self,
                 title,
-                "External audio conversion requires ffmpeg on PATH. "
-                "Install ffmpeg to enable plain file conversion.",
+                "External audio conversion requires ffmpeg. "
+                "Install ffmpeg or add it to PATH to enable plain file conversion.",
             )
             return
         chosen_files, _selected_filter = QFileDialog.getOpenFileNames(

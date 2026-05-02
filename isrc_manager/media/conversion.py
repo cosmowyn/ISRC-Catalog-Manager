@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import wave
 from dataclasses import dataclass
@@ -21,6 +24,63 @@ from .audio_formats import (
 )
 
 _ENCODER_LINE_PATTERN = re.compile(r"^\s*[A-Z\.]{6}\s+([^\s]+)")
+
+
+def _ffmpeg_candidate_paths() -> tuple[Path, ...]:
+    """Return common ffmpeg locations missed when GUI apps launch without shell PATH."""
+    candidates: list[Path] = []
+    for env_name in ("ISRC_MANAGER_FFMPEG", "FFMPEG_BINARY"):
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            candidates.append(Path(value))
+
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        root = Path(str(bundle_root))
+        candidates.extend((root / "ffmpeg", root / "bin" / "ffmpeg"))
+
+    executable = Path(sys.executable).resolve()
+    candidates.extend((executable.with_name("ffmpeg"), executable.parent / "bin" / "ffmpeg"))
+
+    system_name = platform.system().lower()
+    if system_name == "darwin":
+        candidates.extend(
+            Path(path)
+            for path in (
+                "/opt/homebrew/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/opt/local/bin/ffmpeg",
+            )
+        )
+    elif system_name == "windows":
+        candidates.extend(
+            Path(os.path.expandvars(path))
+            for path in (
+                r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe",
+                r"%USERPROFILE%\scoop\shims\ffmpeg.exe",
+                r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
+                r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+                r"C:\ffmpeg\bin\ffmpeg.exe",
+            )
+        )
+    else:
+        candidates.extend(
+            Path(path)
+            for path in (
+                "/usr/local/bin/ffmpeg",
+                "/usr/bin/ffmpeg",
+                "/snap/bin/ffmpeg",
+            )
+        )
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.expanduser())
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return tuple(unique)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +152,13 @@ class AudioConversionService:
     @staticmethod
     def _find_ffmpeg() -> Path | None:
         executable = shutil.which("ffmpeg")
-        return Path(executable) if executable else None
+        if executable:
+            return Path(executable)
+        for candidate in _ffmpeg_candidate_paths():
+            path = Path(candidate).expanduser()
+            if path.exists():
+                return path
+        return None
 
     def ffmpeg_path(self) -> Path | None:
         return self._ffmpeg_path
@@ -104,7 +170,7 @@ class AudioConversionService:
         executable = self.ffmpeg_path()
         if executable is None or not executable.exists():
             raise RuntimeError(
-                "Audio conversion requires ffmpeg on PATH. Install ffmpeg and try again."
+                "Audio conversion requires ffmpeg. Install ffmpeg or add it to PATH and try again."
             )
         return executable
 
