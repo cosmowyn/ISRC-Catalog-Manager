@@ -277,6 +277,7 @@ from isrc_manager.history import (
 )
 from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
 from isrc_manager.import_review_dialog import ImportReviewDialog
+from isrc_manager.isrc_registry import ApplicationISRCRegistryService, ISRCRegistryConflict
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.media import AudioConversionService
 from isrc_manager.media.derivatives import (
@@ -1171,7 +1172,7 @@ class ApplicationSettingsDialog(QDialog):
         history_budget_row.addStretch(1)
         history_budget_layout.addLayout(history_budget_row)
         self.history_storage_budget_hint = self._make_hint(
-            "Set the profile history-storage budget. Values stay exact internally. Use Smart Budget calculates from the current profile footprint, live profile storage, retained snapshots, one temporary snapshot slot, and a 25% margin."
+            "Set the application-wide history-storage budget. Values stay exact internally. Use Smart Budget calculates from total tracked app storage, retained snapshots, one temporary snapshot slot, and a 25% margin."
         )
         history_budget_layout.addWidget(self.history_storage_budget_hint)
         self._add_row(
@@ -1823,13 +1824,13 @@ class ApplicationSettingsDialog(QDialog):
         if profile_path is not None and callable(service_getter):
             try:
                 audit = service_getter().inspect(current_db_path=profile_path)
-                current_profile_bytes = int(audit.summary.current_profile_bytes or 0)
+                app_storage_bytes = int(audit.summary.total_app_bytes or 0)
             except Exception:
-                current_profile_bytes = 0
-            if current_profile_bytes > 0:
+                app_storage_bytes = 0
+            if app_storage_bytes > 0:
                 self._smart_history_budget_source_cache = (
-                    current_profile_bytes,
-                    "current profile attributed storage",
+                    app_storage_bytes,
+                    "application-wide tracked storage",
                 )
                 return self._smart_history_budget_source_cache
 
@@ -1894,7 +1895,7 @@ class ApplicationSettingsDialog(QDialog):
             )
             tooltip = (
                 f"Set budget to {format_budget_megabytes(smart_budget_mb)} "
-                f"from {format_storage_bytes(source_bytes)} {source_label}: live profile storage "
+                f"from {format_storage_bytes(source_bytes)} {source_label}: tracked app storage "
                 f"+ {keep_latest} retained snapshot(s) + {transient_snapshots} temporary "
                 f"snapshot slot(s) + {self.SMART_HISTORY_BUDGET_MARGIN_PERCENT}% margin."
             )
@@ -6741,6 +6742,8 @@ class App(QMainWindow):
         self.profile_store = ProfileStoreService(self.database_dir)
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
         self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
+        self.application_isrc_registry = ApplicationISRCRegistryService(self.data_root)
+        self.application_isrc_registry.ensure_schema()
         self.background_tasks = BackgroundTaskManager(self)
         self.background_tasks.task_state_changed.connect(
             lambda: self._on_background_task_state_changed()
@@ -6887,6 +6890,7 @@ class App(QMainWindow):
         self._explicit_row_filter_track_ids = None
         self._pending_work_track_context: dict[str, object] | None = None
         self._background_write_lock = None
+        self._last_isrc_registry_sync_summary = None
         self._report_startup_phase(StartupPhase.OPENING_PROFILE_DB)
         startup_db_prepared = self._prepare_database_for_open_blocking(
             last_db,
@@ -7874,6 +7878,10 @@ class App(QMainWindow):
                 backups_dir=self.backups_dir,
                 settings_path=self.settings.fileName(),
             )
+        registry = getattr(self, "application_isrc_registry", None)
+        if registry is not None:
+            self.application_isrc_registry = ApplicationISRCRegistryService(self.data_root)
+            self.application_isrc_registry.ensure_schema()
 
     def _reconcile_startup_storage_root(self) -> Path:
         inspection = self.storage_migration_service.inspect()
@@ -8912,11 +8920,19 @@ class App(QMainWindow):
                 try:
                     connection = sqlite3.connect(str(profile_path))
                     try:
-                        return SettingsReadService(connection).load_history_retention_settings()
+                        settings = SettingsReadService(connection).load_history_retention_settings()
+                        settings.storage_budget_mb = self._application_history_storage_budget_mb(
+                            default=settings.storage_budget_mb
+                        )
+                        return settings
                     finally:
                         connection.close()
                 except Exception:
-                    return HistoryRetentionSettings()
+                    settings = HistoryRetentionSettings()
+                    settings.storage_budget_mb = self._application_history_storage_budget_mb(
+                        default=settings.storage_budget_mb
+                    )
+                    return settings
         return self._current_history_retention_settings()
 
     def _application_storage_summary_payload(
@@ -8941,8 +8957,8 @@ class App(QMainWindow):
                 f"{self._human_size(summary.current_profile_bytes)} across database, history, and managed files."
             )
         safe_budget_text = "Not available"
-        safe_budget_detail = "Open a profile to calculate a safe budget."
-        if summary.current_profile_name and int(summary.current_profile_bytes or 0) > 0:
+        safe_budget_detail = "Application storage has not been inspected yet."
+        if int(summary.total_app_bytes or 0) > 0:
             retention_settings = self._history_retention_settings_for_storage_summary(
                 current_db_path
             )
@@ -8954,13 +8970,13 @@ class App(QMainWindow):
             margin_percent = int(ApplicationSettingsDialog.SMART_HISTORY_BUDGET_MARGIN_PERCENT)
             safe_budget_mb = (
                 ApplicationSettingsDialog._smart_history_budget_mb_from_profile_footprint(
-                    int(summary.current_profile_bytes or 0),
+                    int(summary.total_app_bytes or 0),
                     retained_snapshots,
                 )
             )
             safe_budget_text = format_budget_megabytes(safe_budget_mb)
             safe_budget_detail = (
-                f"{safe_budget_text} for live profile storage + {retained_snapshots} retained "
+                f"{safe_budget_text} for application-wide tracked storage + {retained_snapshots} retained "
                 f"snapshot(s) + {transient_snapshots} temporary snapshot slot(s) + "
                 f"{margin_percent}% margin."
             )
@@ -11200,8 +11216,28 @@ class App(QMainWindow):
 
     def _current_history_retention_settings(self) -> HistoryRetentionSettings:
         if self.settings_reads is None:
-            return HistoryRetentionSettings()
-        return self.settings_reads.load_history_retention_settings()
+            settings = HistoryRetentionSettings()
+        else:
+            settings = self.settings_reads.load_history_retention_settings()
+        settings.storage_budget_mb = self._application_history_storage_budget_mb(
+            default=settings.storage_budget_mb
+        )
+        return settings
+
+    def _application_history_storage_budget_mb(self, *, default: int) -> int:
+        registry = getattr(self, "application_isrc_registry", None)
+        if registry is None:
+            return int(default)
+        try:
+            return int(registry.read_history_storage_budget_mb(default))
+        except Exception:
+            return int(default)
+
+    def _set_application_history_storage_budget_mb(self, value: int) -> int:
+        registry = getattr(self, "application_isrc_registry", None)
+        if registry is None:
+            return int(value)
+        return int(registry.write_history_storage_budget_mb(int(value)))
 
     def _apply_history_snapshot_retention_policy(
         self,
@@ -11902,23 +11938,26 @@ class App(QMainWindow):
                 after_values["history_storage_budget_mb"]
                 != before_values["history_storage_budget_mb"]
             ):
-                self.settings_mutations.set_history_storage_budget_mb(
+                saved_budget_mb = self._set_application_history_storage_budget_mb(
                     int(after_values["history_storage_budget_mb"])
                 )
+                # Mirror the app-wide budget into the open profile so older app builds still
+                # read a safe value if this database is opened there.
+                self.settings_mutations.set_history_storage_budget_mb(saved_budget_mb)
                 self._log_event(
                     "settings.history_storage_budget_mb",
                     "History storage budget updated",
-                    budget_mb=int(after_values["history_storage_budget_mb"]),
+                    budget_mb=saved_budget_mb,
                 )
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
                         key="history_storage_budget_mb",
                         label=(
                             f"Set History Storage Budget: "
-                            f"{format_budget_megabytes(int(after_values['history_storage_budget_mb']))}"
+                            f"{format_budget_megabytes(saved_budget_mb)}"
                         ),
                         before_value=before_values["history_storage_budget_mb"],
-                        after_value=after_values["history_storage_budget_mb"],
+                        after_value=saved_budget_mb,
                     )
                 changed_count += 1
                 history_policy_changed = True
@@ -12180,6 +12219,7 @@ class App(QMainWindow):
                     trigger_label="settings update",
                     interactive=True,
                 )
+            self._sync_application_isrc_registry()
             self._update_add_data_generated_fields()
             self._refresh_history_actions()
             if show_confirmation:
@@ -12521,6 +12561,7 @@ class App(QMainWindow):
             result = self.profile_workflows.delete_profile(
                 path, getattr(self, "current_db_path", None)
             )
+            self._sync_application_isrc_registry()
 
             self._reload_profiles_list(select_path=None)
 
@@ -13036,6 +13077,7 @@ class App(QMainWindow):
             _advance("Completed schema migrations and history checks.")
 
         self._migrate_legacy_owner_party_if_needed()
+        self._sync_application_isrc_registry()
         self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
         self._refresh_catalog_workspace_docks()
@@ -16501,6 +16543,181 @@ class App(QMainWindow):
     def load_active_custom_fields(self):
         return self.custom_field_definitions.list_active_fields()
 
+    def _profile_paths_for_isrc_registry(self) -> list[Path]:
+        candidates: list[Path] = []
+        profile_store = getattr(self, "profile_store", None)
+        if profile_store is not None:
+            try:
+                candidates.extend(Path(path) for path in profile_store.list_profiles())
+            except Exception:
+                pass
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if current_path:
+            candidates.append(Path(current_path))
+        seen: set[str] = set()
+        paths: list[Path] = []
+        for candidate in candidates:
+            normalized = str(Path(candidate).expanduser().resolve(strict=False))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            paths.append(Path(normalized))
+        return paths
+
+    def _sync_application_isrc_registry(self) -> None:
+        registry = getattr(self, "application_isrc_registry", None)
+        if registry is None:
+            return
+        try:
+            summary = registry.sync_profiles(self._profile_paths_for_isrc_registry())
+            self._last_isrc_registry_sync_summary = summary
+            if summary.conflict_count:
+                self._log_event(
+                    "isrc.registry.sync_conflicts",
+                    "Cross-profile ISRC registry found duplicate claims",
+                    level=logging.WARNING,
+                    profiles=summary.profile_count,
+                    conflicts=summary.conflict_count,
+                )
+        except Exception as exc:
+            self.logger.warning("Application ISRC registry sync failed: %s", exc)
+
+    @staticmethod
+    def _format_isrc_registry_conflict(conflict: ISRCRegistryConflict) -> str:
+        profile_label = conflict.profile_name or Path(conflict.profile_path).name
+        track_bits = []
+        if conflict.track_id is not None:
+            track_bits.append(f"track #{conflict.track_id}")
+        if conflict.track_title:
+            track_bits.append(f"'{conflict.track_title}'")
+        track_text = " ".join(track_bits).strip() or "an existing track"
+        return f"{conflict.isrc_iso or conflict.isrc_compact} is already claimed by {track_text} in {profile_label}."
+
+    def _isrc_registry_conflict(
+        self,
+        candidate: str,
+        *,
+        exclude_track_id: int | None = None,
+    ) -> ISRCRegistryConflict | None:
+        registry = getattr(self, "application_isrc_registry", None)
+        if registry is None:
+            return None
+        current_path = str(getattr(self, "current_db_path", "") or "").strip() or None
+        try:
+            return registry.find_conflict(
+                candidate,
+                profile_path=current_path,
+                exclude_track_id=exclude_track_id,
+            )
+        except Exception as exc:
+            self.logger.warning("Application ISRC registry lookup failed: %s", exc)
+            return None
+
+    def _reserve_isrc_claim_for_profile(
+        self,
+        isrc: str,
+        *,
+        track_title: str | None = None,
+        claim_kind: str = "generated",
+        exclude_track_id: int | None = None,
+        parent_widget: QWidget | None = None,
+    ) -> bool:
+        registry = getattr(self, "application_isrc_registry", None)
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if registry is None or not current_path or not to_compact_isrc(isrc):
+            return True
+        try:
+            conflict = registry.reserve_isrc(
+                isrc,
+                profile_path=current_path,
+                profile_name=self._current_profile_name(),
+                track_title=track_title,
+                claim_kind=claim_kind,
+                exclude_track_id=exclude_track_id,
+            )
+        except Exception as exc:
+            self.logger.warning("Application ISRC registry reservation failed: %s", exc)
+            return True
+        if conflict is None:
+            return True
+        QMessageBox.warning(
+            parent_widget or self,
+            "Duplicate ISRC",
+            self._format_isrc_registry_conflict(conflict),
+        )
+        return False
+
+    def _activate_isrc_claim_for_track(
+        self,
+        isrc: str,
+        *,
+        track_id: int,
+        track_title: str,
+        claim_kind: str = "profile_sync",
+    ) -> None:
+        registry = getattr(self, "application_isrc_registry", None)
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if registry is None or not current_path or not to_compact_isrc(isrc):
+            return
+        try:
+            conflict = registry.activate_isrc(
+                isrc,
+                profile_path=current_path,
+                profile_name=self._current_profile_name(),
+                track_id=int(track_id),
+                track_title=track_title,
+                claim_kind=claim_kind,
+            )
+            if conflict is not None:
+                self._log_event(
+                    "isrc.registry.activate_conflict",
+                    "Could not activate ISRC claim because another profile already owns it",
+                    level=logging.WARNING,
+                    isrc=isrc,
+                    conflict_profile=conflict.profile_name,
+                    conflict_track_id=conflict.track_id,
+                )
+        except Exception as exc:
+            self.logger.warning("Application ISRC registry activation failed: %s", exc)
+
+    def _release_reserved_isrc_claim(self, isrc: str) -> None:
+        registry = getattr(self, "application_isrc_registry", None)
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if registry is None or not current_path or not to_compact_isrc(isrc):
+            return
+        try:
+            registry.release_reserved_isrc(isrc, profile_path=current_path)
+        except Exception as exc:
+            self.logger.warning("Application ISRC registry reservation release failed: %s", exc)
+
+    def _claim_next_generated_isrc(
+        self,
+        *,
+        release_date: QDate | None = None,
+        use_release_year: bool = False,
+        reserved_compacts: set[str] | None = None,
+        track_title: str | None = None,
+        parent_widget: QWidget | None = None,
+    ) -> str:
+        blocked_compacts = set(reserved_compacts or set())
+        while True:
+            candidate = self._next_generated_isrc(
+                release_date=release_date,
+                use_release_year=use_release_year,
+                reserved_compacts=blocked_compacts,
+            )
+            compact = to_compact_isrc(candidate)
+            if not compact:
+                return ""
+            if self._reserve_isrc_claim_for_profile(
+                candidate,
+                track_title=track_title,
+                claim_kind="generated",
+                parent_widget=parent_widget,
+            ):
+                return candidate
+            blocked_compacts.add(compact)
+
     def _isrc_generation_state(self) -> tuple[str, str]:
         prefix = (self.load_isrc_prefix() or "").upper().strip()
         if not prefix:
@@ -18936,11 +19153,14 @@ class App(QMainWindow):
     # ISRC duplicate check across formats (uses new compact column)
     # =============================================================================
     def is_isrc_taken_normalized(self, candidate: str, exclude_track_id: int | None = None) -> bool:
-        return self.track_service.is_isrc_taken_normalized(
-            candidate,
-            exclude_track_id=exclude_track_id,
-            cursor=self.cursor,
-        )
+        if self.track_service is not None:
+            if self.track_service.is_isrc_taken_normalized(
+                candidate,
+                exclude_track_id=exclude_track_id,
+                cursor=self.cursor,
+            ):
+                return True
+        return self._isrc_registry_conflict(candidate, exclude_track_id=exclude_track_id) is not None
 
     @staticmethod
     def _normalize_track_number_value(value) -> int | None:
@@ -19071,30 +19291,7 @@ class App(QMainWindow):
                     return
 
             generated_iso = ""
-            comp = ""
-            if self._isrc_generation_state()[0] == "ready":
-                generated_iso = self.generate_isrc()
-                if not generated_iso:
-                    QMessageBox.critical(
-                        self,
-                        "ISRC Error",
-                        "No free ISRC sequence is currently available for the active year and artist code.",
-                    )
-                    return
-                comp = to_compact_isrc(generated_iso)
-                if not comp or not is_valid_isrc_compact_or_iso(generated_iso):
-                    QMessageBox.critical(
-                        self,
-                        "ISRC Error",
-                        "Generated ISRC is invalid. Check prefix and artist-code settings.",
-                    )
-                    return
-
-                if self.is_isrc_taken_normalized(generated_iso):
-                    QMessageBox.critical(
-                        self, "ISRC Error", "A track with this ISRC already exists."
-                    )
-                    return
+            generation_ready = self._isrc_generation_state()[0] == "ready"
 
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
 
@@ -19200,6 +19397,30 @@ class App(QMainWindow):
             if media_modes is None:
                 return
             payload.audio_file_storage_mode, payload.album_art_storage_mode = media_modes
+            if generation_ready:
+                generated_iso = self._claim_next_generated_isrc(
+                    release_date=self.release_date_field.selectedDate(),
+                    use_release_year=bool(self.prev_release_toggle.isChecked()),
+                    track_title=payload.track_title,
+                    parent_widget=self,
+                )
+                if not generated_iso:
+                    QMessageBox.critical(
+                        self,
+                        "ISRC Error",
+                        "No free ISRC sequence is currently available for the active year and artist code.",
+                    )
+                    return
+                comp = to_compact_isrc(generated_iso)
+                if not comp or not is_valid_isrc_compact_or_iso(generated_iso):
+                    self._release_reserved_isrc_claim(generated_iso)
+                    QMessageBox.critical(
+                        self,
+                        "ISRC Error",
+                        "Generated ISRC is invalid. Check prefix and artist-code settings.",
+                    )
+                    return
+                payload.isrc = generated_iso
 
             refresh_request = self._capture_catalog_refresh_request()
             action_label = (
@@ -19289,6 +19510,12 @@ class App(QMainWindow):
                     self.conn.commit()
                 except Exception:
                     pass
+                self._activate_isrc_claim_for_track(
+                    generated_iso,
+                    track_id=int(result_payload["track_id"]),
+                    track_title=payload.track_title,
+                    claim_kind="generated" if generation_ready else "profile_sync",
+                )
                 refresh_payload = dict(refresh_request)
                 refresh_payload["focus_id"] = int(result_payload["track_id"])
                 self._apply_catalog_refresh_request(
@@ -19351,10 +19578,13 @@ class App(QMainWindow):
                 worker_completion_progress=(89, "Finalizing background track save..."),
                 on_success_before_cleanup=_before_cleanup,
                 on_success_after_cleanup=_after_cleanup,
-                on_error=lambda failure: self._show_background_task_error(
-                    "Save Track",
-                    failure,
-                    user_message="Failed to save record:",
+                on_error=lambda failure: (
+                    self._release_reserved_isrc_claim(generated_iso),
+                    self._show_background_task_error(
+                        "Save Track",
+                        failure,
+                        user_message="Failed to save record:",
+                    ),
                 ),
             )
         except sqlite3.IntegrityError as e:
@@ -24825,6 +25055,7 @@ class App(QMainWindow):
                     self.conn.commit()
                 except Exception:
                     pass
+                self._sync_application_isrc_registry()
                 self._refresh_history_actions()
                 self._log_event(
                     "track.audio_drop_import",
@@ -33341,6 +33572,20 @@ class AlbumEntryDialog(QDialog):
         payloads = self._build_track_payloads()
         if payloads is None:
             return
+        reserved_isrcs: list[str] = []
+        for payload in payloads:
+            if not payload.isrc:
+                continue
+            if not self.app._reserve_isrc_claim_for_profile(
+                payload.isrc,
+                track_title=payload.track_title,
+                claim_kind="album_batch",
+                parent_widget=self,
+            ):
+                for reserved_isrc in reserved_isrcs:
+                    self.app._release_reserved_isrc_claim(reserved_isrc)
+                return
+            reserved_isrcs.append(payload.isrc)
 
         album_title = payloads[0].album_title or "Album"
         refresh_request = self.app._capture_catalog_refresh_request()
@@ -33428,6 +33673,13 @@ class AlbumEntryDialog(QDialog):
                 pass
             focus_id = None
             track_ids = list(result_payload.get("track_ids") or [])
+            for track_id, track_payload in zip(track_ids, payloads):
+                self.app._activate_isrc_claim_for_track(
+                    track_payload.isrc,
+                    track_id=int(track_id),
+                    track_title=track_payload.track_title,
+                    claim_kind="album_batch",
+                )
             if track_ids:
                 focus_id = int(track_ids[0])
             refresh_payload = dict(refresh_request)
@@ -33489,10 +33741,13 @@ class AlbumEntryDialog(QDialog):
             worker_completion_progress=(89, "Finalizing background album save..."),
             on_success_before_cleanup=_before_cleanup,
             on_success_after_cleanup=_after_cleanup,
-            on_error=lambda failure: self.app._show_background_task_error(
-                "Save Album",
-                failure,
-                user_message="Could not save the album:",
+            on_error=lambda failure: (
+                [self.app._release_reserved_isrc_claim(isrc) for isrc in reserved_isrcs],
+                self.app._show_background_task_error(
+                    "Save Album",
+                    failure,
+                    user_message="Could not save the album:",
+                ),
             ),
         )
 
@@ -35218,6 +35473,7 @@ class EditDialog(QDialog):
                     parent.conn.commit()
                 except Exception:
                     pass
+                parent._sync_application_isrc_registry()
                 parent._apply_catalog_refresh_request(
                     dict(result.get("dataset") or {}),
                     refresh_request,

@@ -69,6 +69,7 @@ class _StorageSummaryHost(QWidget):
     _history_retention_settings_for_storage_summary = (
         app_module.App._history_retention_settings_for_storage_summary
     )
+    _application_history_storage_budget_mb = app_module.App._application_history_storage_budget_mb
     _current_history_retention_settings = app_module.App._current_history_retention_settings
     _human_size = app_module.App._human_size
 
@@ -887,7 +888,7 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_settings_dialog_smart_storage_budget_uses_profile_footprint(self):
+    def test_application_settings_dialog_smart_storage_budget_uses_app_wide_footprint(self):
         self.assertEqual(
             app_module.ApplicationSettingsDialog._smart_history_budget_mb_from_profile_footprint(
                 (73 * 1024**3) // 10,
@@ -903,6 +904,7 @@ class ThemeBuilderTests(unittest.TestCase):
 
             class _BudgetAuditSummary:
                 current_profile_bytes = (73 * 1024**3) // 10
+                total_app_bytes = 9 * 1024**3
 
             class _BudgetAudit:
                 summary = _BudgetAuditSummary()
@@ -946,7 +948,7 @@ class ThemeBuilderTests(unittest.TestCase):
             try:
                 self.assertTrue(dialog.history_storage_budget_smart_button.isEnabled())
                 self.assertIn(
-                    "7.3 GB current profile attributed storage",
+                    "9 GB application-wide tracked storage",
                     dialog.history_storage_budget_smart_button.toolTip(),
                 )
                 self.assertIn(
@@ -956,13 +958,13 @@ class ThemeBuilderTests(unittest.TestCase):
 
                 dialog.history_storage_budget_smart_button.click()
                 self.app.processEvents()
-                self.assertEqual(dialog.values()["history_storage_budget_mb"], 28672)
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 34816)
                 self.assertEqual(storage_service.current_db_path, profile_path)
 
                 dialog.history_auto_snapshot_keep_latest_spin.setValue(2)
                 dialog.history_storage_budget_smart_button.click()
                 self.app.processEvents()
-                self.assertEqual(dialog.values()["history_storage_budget_mb"], 37888)
+                self.assertEqual(dialog.values()["history_storage_budget_mb"], 46080)
                 self.assertEqual(dialog.values()["history_retention_mode"], "custom")
             finally:
                 dialog.close()
@@ -1012,7 +1014,7 @@ class ThemeBuilderTests(unittest.TestCase):
                     current_db_path=profile_path,
                 )
 
-                self.assertIn("37 GB", payload["safe_budget_detail"])
+                self.assertIn("45 GB", payload["safe_budget_detail"])
                 self.assertIn("2 retained snapshot(s)", payload["safe_budget_detail"])
         finally:
             host.close()

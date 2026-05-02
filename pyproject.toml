@@ -114,6 +114,7 @@ files = [
   "isrc_manager/domain/standard_fields.py",
   "isrc_manager/domain/timecode.py",
   "isrc_manager/exchange/models.py",
+  "isrc_manager/isrc_registry.py",
   "isrc_manager/quality/models.py",
   "isrc_manager/releases/models.py",
   "isrc_manager/services/bulk_edit.py",
