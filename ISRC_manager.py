@@ -38,7 +38,6 @@ from PySide6.QtCore import (
     QSettings,
     QSize,
     QSortFilterProxyModel,
-    QStandardPaths,
     Qt,
     QTimer,
     QtMsgType,
@@ -90,7 +89,6 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPinchGesture,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -112,10 +110,6 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.app_bootstrap import run_desktop_application
-from isrc_manager.packaged_smoke import (
-    PACKAGED_SMOKE_TEST_ARGUMENT,
-    run_packaged_smoke_test,
-)
 from isrc_manager.app_dialogs import (
     AboutDialog,
     ActionRibbonDialog,
@@ -154,6 +148,10 @@ from isrc_manager.blob_icons import (
     normalize_blob_icon_spec,
 )
 from isrc_manager.catalog_table import (
+    CATALOG_ZOOM_LAYOUT_KEY,
+    CATALOG_ZOOM_MAX_PERCENT,
+    CATALOG_ZOOM_MIN_PERCENT,
+    CATALOG_ZOOM_STEP_PERCENT,
     CatalogCellValue,
     CatalogColumnSpec,
     CatalogFilterProxyModel,
@@ -163,11 +161,6 @@ from isrc_manager.catalog_table import (
     CatalogTableController,
     CatalogTableModel,
     CatalogZoomController,
-    CATALOG_ZOOM_DEFAULT_PERCENT,
-    CATALOG_ZOOM_LAYOUT_KEY,
-    CATALOG_ZOOM_MAX_PERCENT,
-    CATALOG_ZOOM_MIN_PERCENT,
-    CATALOG_ZOOM_STEP_PERCENT,
     ColumnKeyRole,
     RawValueRole,
 )
@@ -178,7 +171,6 @@ from isrc_manager.catalog_workspace import (
 )
 from isrc_manager.code_registry import CatalogIdentifierField, CodeRegistryWorkspacePanel
 from isrc_manager.constants import (
-    APP_NAME,
     BLOB_AUDIO_EXTS,
     BLOB_IMAGE_EXTS,
     DEFAULT_AUTO_SNAPSHOT_ENABLED,
@@ -216,7 +208,6 @@ from isrc_manager.contracts.dialogs import ContractBrowserPanel
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
 from isrc_manager.conversion.dialogs import ConversionDialog
 from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
-from isrc_manager.draggable_label import DraggableLabel
 from isrc_manager.domain.codes import (
     is_blank,
     is_valid_isrc_compact_or_iso,
@@ -233,6 +224,7 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.draggable_label import DraggableLabel
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.master_transfer import MasterTransferService
 from isrc_manager.exchange.models import (
@@ -289,6 +281,10 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportCoordinator,
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
+)
+from isrc_manager.packaged_smoke import (
+    PACKAGED_SMOKE_TEST_ARGUMENT,
+    run_packaged_smoke_test,
 )
 from isrc_manager.parties import (
     PartyExchangeInspection,
@@ -432,47 +428,6 @@ from isrc_manager.tags import (
     merge_imported_tags,
     write_catalog_export_tags,
 )
-from isrc_manager.update_checker import (
-    DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS,
-    UpdateChecker,
-    UpdateCheckResult,
-    UpdateCheckStatus,
-    fetch_release_notes_text,
-)
-from isrc_manager.update_handoff import (
-    cleanup_legacy_update_backups_for_version,
-    cleanup_ready_update_backup,
-    cleanup_update_backup_siblings,
-    cleanup_update_cache_artifacts,
-    mark_update_backup_ready_for_deletion,
-)
-from isrc_manager.update_installer import (
-    HELPER_MODE_ARGUMENT,
-    UpdateInstallPlan,
-    UpdateInstallerError,
-    detect_platform_key,
-    download_update_asset,
-    launch_update_helper,
-    prepare_update_install_plan,
-    resolve_installed_target_path,
-    select_platform_asset,
-    update_workspace_root,
-    validate_install_target_is_replaceable,
-)
-from isrc_manager.version import current_app_version
-from isrc_manager.workspace_debug import (
-    summarize_catalog_workspace_dock,
-    summarize_panel_layout_snapshot,
-    summarize_panel_layout_state,
-    workspace_debug_enabled,
-    workspace_debug_log,
-)
-
-_RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
-    "message",
-    "asctime",
-    "event",
-}
 from isrc_manager.tags.dialogs import (
     BulkAudioAttachDialog,
     DroppedAudioImportDialog,
@@ -557,11 +512,52 @@ from isrc_manager.ui_common import (
     _create_standard_section,
     _prompt_compact_choice_dialog,
 )
+from isrc_manager.update_checker import (
+    DEFAULT_RELEASE_NOTES_TIMEOUT_SECONDS,
+    UpdateChecker,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+    fetch_release_notes_text,
+)
+from isrc_manager.update_handoff import (
+    cleanup_legacy_update_backups_for_version,
+    cleanup_ready_update_backup,
+    cleanup_update_backup_siblings,
+    cleanup_update_cache_artifacts,
+    mark_update_backup_ready_for_deletion,
+)
+from isrc_manager.update_installer import (
+    HELPER_MODE_ARGUMENT,
+    UpdateInstallerError,
+    UpdateInstallPlan,
+    detect_platform_key,
+    download_update_asset,
+    launch_update_helper,
+    prepare_update_install_plan,
+    resolve_installed_target_path,
+    select_platform_asset,
+    update_workspace_root,
+    validate_install_target_is_replaceable,
+)
+from isrc_manager.version import current_app_version
 from isrc_manager.works import WorkService
 from isrc_manager.works.dialogs import (
     WorkBrowserPanel,
     WorkEditorDialog,
 )
+from isrc_manager.workspace_debug import (
+    summarize_catalog_workspace_dock,
+    summarize_panel_layout_snapshot,
+    summarize_panel_layout_state,
+    workspace_debug_enabled,
+    workspace_debug_log,
+)
+
+_RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "message",
+    "asctime",
+    "event",
+}
 
 
 def _get_name_from_editable_choice_dialog(
@@ -4805,12 +4801,15 @@ class LicenseUploadDialog(QDialog):
                 return
 
             app = self.parentWidget()
-            mutation = lambda: self.license_service.add_license(
-                track_id=track_id,
-                licensee_name=lic_text,
-                source_pdf_path=self._picked_path,
-                storage_mode=self.storage_mode_combo.currentData(),
-            )
+
+            def mutation():
+                return self.license_service.add_license(
+                    track_id=track_id,
+                    licensee_name=lic_text,
+                    source_pdf_path=self._picked_path,
+                    storage_mode=self.storage_mode_combo.currentData(),
+                )
+
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
                     action_label="Add License PDF",
@@ -5236,7 +5235,10 @@ class LicensesBrowserPanel(QWidget):
         suggested_name = record.filename or "license.pdf"
         dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", suggested_name, "PDF (*.pdf)")
         if dst:
-            mutation = lambda: Path(dst).write_bytes(data)
+
+            def mutation():
+                return Path(dst).write_bytes(data)
+
             if self.app is not None and hasattr(self.app, "_run_file_history_action"):
                 self.app._run_file_history_action(
                     action_label=f"Download License PDF: {Path(dst).name}",
@@ -5342,12 +5344,15 @@ class LicensesBrowserPanel(QWidget):
         if not new_name:
             new_name = lic_combo.currentText().strip() or ""
         try:
-            mutation = lambda: service.update_license(
-                record_id=rec_id,
-                licensee_name=new_name,
-                replacement_pdf_path=new_path["p"],
-                storage_mode=storage_mode_combo.currentData(),
-            )
+
+            def mutation():
+                return service.update_license(
+                    record_id=rec_id,
+                    licensee_name=new_name,
+                    replacement_pdf_path=new_path["p"],
+                    storage_mode=storage_mode_combo.currentData(),
+                )
+
             if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
                 self.app._run_snapshot_history_action(
                     action_label="Edit License",
@@ -5380,7 +5385,10 @@ class LicensesBrowserPanel(QWidget):
         if current_mode == clean_target:
             return
         try:
-            mutation = lambda: service.convert_storage_mode(record.record_id, clean_target)
+
+            def mutation():
+                return service.convert_storage_mode(record.record_id, clean_target)
+
             if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
                 self.app._run_snapshot_history_action(
                     action_label=f"Convert License Storage: {record.filename or record.record_id}",
@@ -5433,7 +5441,10 @@ class LicensesBrowserPanel(QWidget):
             if service is None:
                 QMessageBox.warning(self, "Delete Licenses", "Open a profile first.")
                 return
-            mutation = lambda: service.delete_licenses(ids, delete_files=delete_files)
+
+            def mutation():
+                return service.delete_licenses(ids, delete_files=delete_files)
+
             if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
                 self.app._run_snapshot_history_action(
                     action_label=f"Delete Licenses: {len(ids)}",
@@ -5567,7 +5578,10 @@ class LicenseeManagerDialog(QDialog):
             return
         try:
             app = self.parentWidget()
-            mutation = lambda: self.catalog_service.ensure_licensee(text.strip())
+
+            def mutation():
+                return self.catalog_service.ensure_licensee(text.strip())
+
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
                     action_label=f"Add Licensee: {text.strip()}",
@@ -5594,9 +5608,10 @@ class LicenseeManagerDialog(QDialog):
             return
         try:
             app = self.parentWidget()
-            mutation = lambda: self.catalog_service.rename_licensee(
-                it.data(Qt.UserRole), text.strip()
-            )
+
+            def mutation():
+                return self.catalog_service.rename_licensee(it.data(Qt.UserRole), text.strip())
+
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
                     action_label=f"Rename Licensee: {old}",
@@ -5647,7 +5662,10 @@ class LicenseeManagerDialog(QDialog):
 
         try:
             app = self.parentWidget()
-            mutation = lambda: self.catalog_service.delete_licensee(lid)
+
+            def mutation():
+                return self.catalog_service.delete_licensee(lid)
+
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
                     action_label=f"Delete Licensee: {name}",
@@ -22904,9 +22922,6 @@ class App(QMainWindow):
                     )
 
                 def _import_success(report: PartyImportReport):
-                    changed_ids = list(report.created_parties or []) + list(
-                        report.updated_parties or []
-                    )
                     self._log_event(
                         f"party.import.{normalized_format}",
                         f"Imported {normalized_format.upper()} Party data",
@@ -29032,7 +29047,6 @@ class App(QMainWindow):
                 audio_menu.addAction(act_verify_authenticity)
 
         menu.addSeparator()
-        model = index.model()
         cell_text = str(index.data(Qt.DisplayRole) or "")
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
         act_filter.triggered.connect(
