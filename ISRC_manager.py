@@ -45,6 +45,9 @@ from PySide6.QtCore import (
     Signal,
     qInstallMessageHandler,
 )
+from PySide6.QtCore import (
+    QStandardPaths as QStandardPaths,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -146,6 +149,9 @@ from isrc_manager.blob_icons import (
     icon_from_blob_icon_spec,
     normalize_blob_icon_settings,
     normalize_blob_icon_spec,
+)
+from isrc_manager.catalog_table import (
+    CATALOG_ZOOM_DEFAULT_PERCENT as CATALOG_ZOOM_DEFAULT_PERCENT,
 )
 from isrc_manager.catalog_table import (
     CATALOG_ZOOM_LAYOUT_KEY,
