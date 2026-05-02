@@ -19291,6 +19291,7 @@ class App(QMainWindow):
                     return
 
             generated_iso = ""
+            comp = ""
             generation_ready = self._isrc_generation_state()[0] == "ready"
 
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
