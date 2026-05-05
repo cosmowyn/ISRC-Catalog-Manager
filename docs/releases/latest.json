@@ -1,7 +1,7 @@
 {
-  "version": "3.11.8",
+  "version": "3.12.0",
   "released_at": "2026-05-05",
-  "summary": "Polish media player controls and visualization",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.11.8.md",
+  "summary": "Add media player shuffle and gain release",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.12.0.md",
   "minimum_supported_version": null
 }
