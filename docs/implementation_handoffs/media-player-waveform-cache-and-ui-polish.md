@@ -74,3 +74,33 @@ Test harness note: `tests/app/_app_shell_support.py` now patches both informatio
 ## CI Notes
 
 Pushes to `main` should trigger the `CI` and `Version Bump` workflows. A successful version bump may trigger release metadata updates and, if tagged, release-build workflow handling. Watch the pushed commit SHA first, then watch any follow-up bot commit from the version bump workflow.
+
+## 2026-05-05 Follow-Up: Album Art, Export Placement, Spectrum Scale, And Release Polish
+
+### User-Facing Changes
+
+- Album artwork now opens in the existing picture viewer from either double-click or the artwork context menu.
+- Removed the dimming layer from album artwork so embedded cover colors display at their original strength.
+- The export control moved from its own group into the Playback group as an icon-only button using `icons/box-arrow-down.svg`; the removed Export group space is now given to Play Next.
+- The frequency spectrum supports a context menu with `Linear view` and `Log view`, keeps the vivid color mapping, and uses slimmer bars for a higher-resolution look.
+- The live peak meter and spectrum now behave more like a DAW: attack is immediate and release decays smoothly toward silence when playback pauses or stops.
+
+### Implementation Notes
+
+- `_HiDpiArtworkLabel` emits an activation signal and no longer paints the old translucent overlay.
+- `_AudioPreviewDialog` stores current artwork bytes/mime for picture-viewer reuse and builds artwork/export context menus without adding new viewer/export subsystems.
+- `SpectrumGraphWidget` keeps cached FFT values linear and applies log remapping only at paint/display time, so switching scale does not require re-analysis.
+- `StereoPeakMeterWidget` and `SpectrumGraphWidget` expose release state helpers so the preview timer can continue only while a decay is visually active.
+- The export-button relocation intentionally leaves Playback and Volume fixed while Play Next absorbs the freed width.
+
+### Validation
+
+Latest local production check before this push:
+
+- `.venv/bin/python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests`
+- `.venv/bin/python -m ruff check ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests`
+- `.venv/bin/python -m black --check ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests`
+- `.venv/bin/python -m mypy`
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_editor_surfaces.py -q` passed with 65 tests.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m tests.run_group ui-app-workflows --module-timeout-seconds 300 --group-timeout-seconds 2400 --verbosity 1` passed in 222.42s.
+- `git diff --check`

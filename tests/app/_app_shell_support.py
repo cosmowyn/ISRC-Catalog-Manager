@@ -9716,7 +9716,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsNotNone(playback_group)
         self.assertIsNotNone(volume_group)
         self.assertIsNotNone(play_next_group)
-        self.assertIsNotNone(export_group)
+        self.assertIsNone(export_group)
         self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
         self.assertIs(dialog.layout().itemAt(1).widget(), media_group)
         self.assertTrue(media_group.isAncestorOf(waveform_panel))
@@ -9745,11 +9745,32 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(artwork_pixmap.devicePixelRatioF(), 2.0)
         self.assertGreaterEqual(artwork_pixmap.width(), dialog.artwork_label.width() * 2)
         self.assertGreaterEqual(artwork_pixmap.height(), dialog.artwork_label.height() * 2)
+        self.assertEqual(dialog.artwork_label.contextMenuPolicy(), Qt.CustomContextMenu)
+        self.assertEqual(dialog.artwork_container.contextMenuPolicy(), Qt.CustomContextMenu)
+        with mock.patch.object(self.window, "_open_image_preview") as image_preview_mock:
+            double_click = _FakeMouseDoubleClickEvent()
+            dialog.artwork_label.mouseDoubleClickEvent(double_click)
+            self.assertTrue(double_click.accepted)
+            image_preview_mock.assert_called_once()
+            preview_data, preview_title = image_preview_mock.call_args.args
+            self.assertTrue(bytes(preview_data).startswith(b"\x89PNG"))
+            self.assertEqual(preview_title, "Grouped Preview")
+        with mock.patch.object(dialog, "_open_artwork_preview") as open_artwork_mock:
+            menu = dialog._create_artwork_context_menu()
+            self.assertEqual(menu.actions()[0].text(), "View Album Art")
+            menu.actions()[0].trigger()
+            open_artwork_mock.assert_called_once()
         self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
+        self.assertTrue(playback_group.isAncestorOf(dialog.export_button))
+        self.assertEqual(dialog.export_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.export_button.text(), "")
+        self.assertFalse(dialog.export_button.icon().isNull())
+        self.assertEqual(dialog.export_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertEqual(dialog.export_button.toolTip(), "Export")
         self.assertTrue(volume_group.isAncestorOf(dialog.volume_slider))
         self.assertTrue(volume_group.isAncestorOf(dialog.volume_label))
         self.assertTrue(volume_group.isAncestorOf(dialog.peak_meter))
-        for control_group in (playback_group, volume_group, play_next_group, export_group):
+        for control_group in (playback_group, volume_group, play_next_group):
             layout_margins = control_group.layout().contentsMargins()
             self.assertLessEqual(layout_margins.left(), 10)
             self.assertLessEqual(layout_margins.top(), 10)
@@ -9844,12 +9865,14 @@ class AppShellTestCase(unittest.TestCase):
         footer_row = playback_band_layout.itemAt(2).layout()
         self.assertIsNotNone(footer_row)
         self.assertIs(footer_row.itemAt(0).widget(), dialog.auto_advance_check)
+        self.assertIs(footer_row.itemAt(2).widget(), dialog.export_button)
 
         startup_metadata_height = metadata_group.height()
         startup_media_height = media_group.height()
         startup_status_height = dialog.playback_status_panel.height()
         startup_playback_height = playback_group.height()
         startup_playback_width = playback_group.width()
+        startup_volume_width = volume_group.width()
         startup_play_next_width = play_next_group.width()
         startup_wave_height = dialog.wave.height()
         startup_artwork_size = dialog.artwork_label.height()
@@ -9861,7 +9884,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(playback_group.height(), startup_playback_height)
         self.assertEqual(volume_group.height(), startup_playback_height)
         self.assertEqual(play_next_group.height(), startup_playback_height)
-        self.assertEqual(export_group.height(), startup_playback_height)
+        self.assertLessEqual(abs(volume_group.width() - startup_volume_width), 2)
         self.assertGreater(media_group.height(), startup_media_height)
         self.assertGreater(dialog.wave.height(), startup_wave_height)
         self.assertGreater(dialog.artwork_label.height(), startup_artwork_size)
@@ -9877,10 +9900,6 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(
             playback_group.height(),
-            export_group.height(),
-        )
-        self.assertEqual(
-            playback_group.height(),
             play_next_group.height(),
         )
         self.assertLessEqual(
@@ -9889,23 +9908,13 @@ class AppShellTestCase(unittest.TestCase):
         self.assertLessEqual(
             abs(playback_group.geometry().top() - play_next_group.geometry().top()), 2
         )
-        self.assertLessEqual(
-            abs(playback_group.geometry().top() - export_group.geometry().top()), 2
-        )
         self.assertLess(
             volume_group.geometry().right(),
             play_next_group.geometry().left(),
         )
-        self.assertLess(
-            play_next_group.geometry().right(),
-            export_group.geometry().left(),
-        )
-        self.assertGreater(play_next_group.width(), export_group.width())
-        self.assertLessEqual(export_group.width(), 170)
         self.assertFalse(media_group.geometry().intersects(playback_group.geometry()))
         self.assertFalse(media_group.geometry().intersects(volume_group.geometry()))
         self.assertFalse(media_group.geometry().intersects(play_next_group.geometry()))
-        self.assertFalse(media_group.geometry().intersects(export_group.geometry()))
         large_minimum_hint = dialog.minimumSizeHint()
         self.assertLessEqual(large_minimum_hint.width(), dialog.DEFAULT_WINDOW_WIDTH + 80)
         self.assertLessEqual(large_minimum_hint.height(), dialog.DEFAULT_WINDOW_HEIGHT + 80)
@@ -9922,7 +9931,6 @@ class AppShellTestCase(unittest.TestCase):
         self.assertFalse(media_group.geometry().intersects(playback_group.geometry()))
         self.assertFalse(media_group.geometry().intersects(volume_group.geometry()))
         self.assertFalse(media_group.geometry().intersects(play_next_group.geometry()))
-        self.assertFalse(media_group.geometry().intersects(export_group.geometry()))
 
         selectors = {entry.selector for entry in collect_qss_reference_entries([dialog])}
         for selector in (
@@ -9938,7 +9946,6 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewPlayNextList",
             "#audioPreviewVolumeSlider",
             "#audioPreviewVolumeLabel",
-            "#audioPreviewExportGroup",
             "#audioPreviewArtworkContainer",
             "#audioPreviewAlbumLabel",
             "#audioPreviewTimeLabel",
@@ -10168,6 +10175,19 @@ class AppShellTestCase(unittest.TestCase):
             ]
         )
         scope_widget.set_playhead_ms(500)
+        self.assertEqual(scope_widget.frequency_scale(), scope_widget.SPECTRUM_SCALE_LINEAR)
+        scale_menu = scope_widget._create_frequency_scale_context_menu()
+        scale_actions = {action.text(): action for action in scale_menu.actions()}
+        self.assertIn("Linear view", scale_actions)
+        self.assertIn("Log view", scale_actions)
+        self.assertTrue(scale_actions["Linear view"].isChecked())
+        self.assertFalse(scale_actions["Log view"].isChecked())
+        scale_actions["Log view"].trigger()
+        self.assertEqual(scope_widget.frequency_scale(), scope_widget.SPECTRUM_SCALE_LOG)
+        log_scale_menu = scope_widget._create_frequency_scale_context_menu()
+        log_scale_actions = {action.text(): action for action in log_scale_menu.actions()}
+        self.assertFalse(log_scale_actions["Linear view"].isChecked())
+        self.assertTrue(log_scale_actions["Log view"].isChecked())
         self.assertTrue(scope_widget.has_live_visualization())
         scope_rect = scope_widget._spectrum_graph_rect(scope_widget.rect())
         self.assertAlmostEqual(scope_rect.top(), scope_widget.rect().top() + 1.0, delta=0.001)
@@ -10179,23 +10199,45 @@ class AppShellTestCase(unittest.TestCase):
         self.assertGreater(quiet_color.alphaF(), 0.35)
         self.assertGreater(hot_color.alphaF(), 0.85)
         self.assertGreater(hot_color.hslSaturationF(), 0.85)
+        self.assertGreater(hot_color.value(), quiet_color.value())
         self.assertLess(scope_widget.SPECTRUM_LINE_WIDTH, 1.0)
         self.assertEqual(scope_widget._fade_opacity, 0.0)
         scope_widget.start_fade_in()
         self.assertTrue(scope_widget._fade_timer.isActive())
+        self.assertGreaterEqual(scope_widget._fade_opacity, 0.7)
         for _step in range(5):
             scope_widget._advance_fade_in()
         self.assertEqual(scope_widget._fade_opacity, 1.0)
         self.assertFalse(scope_widget._fade_timer.isActive())
+        scope_widget.start_release()
+        self.assertTrue(scope_widget.is_releasing())
+        self.assertTrue(scope_widget.advance_release(300))
+        self.assertGreater(scope_widget._fade_opacity, 0.0)
+        self.assertLess(scope_widget._fade_opacity, 1.0)
+        scope_widget.advance_release(scope_widget.SPECTRUM_RELEASE_MS)
+        self.assertEqual(scope_widget._fade_opacity, 0.0)
+        self.assertFalse(scope_widget.is_releasing())
+        scope_widget.start_fade_in()
+        self.assertGreaterEqual(scope_widget._fade_opacity, 0.7)
+        for _step in range(5):
+            scope_widget._advance_fade_in()
         silence_segments = scope_widget._spectrum_line_segments([0.0] * 128, scope_rect)
         self.assertTrue(silence_segments)
         self.assertTrue(
             all(abs(top - bottom) < 0.001 for _x, top, bottom, _value in silence_segments)
         )
+        scope_widget.set_frequency_scale(scope_widget.SPECTRUM_SCALE_LINEAR)
         graph_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
         self.assertEqual(len(graph_segments), len(rising_frame))
         self.assertLess(graph_segments[0][0], graph_segments[-1][0])
         self.assertLess(graph_segments[-1][1], graph_segments[0][1])
+        scope_widget.set_frequency_scale(scope_widget.SPECTRUM_SCALE_LOG)
+        log_graph_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
+        self.assertEqual(len(log_graph_segments), len(rising_frame))
+        midpoint = len(rising_frame) // 2
+        self.assertGreater(log_graph_segments[midpoint][1], graph_segments[midpoint][1])
+        self.assertLess(log_graph_segments[-1][1], log_graph_segments[midpoint][1])
+        scope_widget.set_frequency_scale(scope_widget.SPECTRUM_SCALE_LINEAR)
         first_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
         scope_widget.set_playhead_ms(900)
         second_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
@@ -10266,6 +10308,21 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(peak_meter._hold_db, 3.0)
         peak_meter.set_playhead_ms(500)
         self.assertEqual(peak_meter._hold_db, 3.0)
+        release_start = peak_meter._current_db
+        peak_meter.begin_release()
+        self.assertTrue(peak_meter.is_releasing())
+        peak_meter.set_playhead_ms(1000)
+        self.assertEqual(peak_meter._current_db, release_start)
+        self.assertTrue(peak_meter.advance_release(300))
+        self.assertLess(peak_meter._current_db[0], release_start[0])
+        self.assertGreater(peak_meter._current_db[0], peak_meter.DB_FLOOR)
+        self.assertEqual(peak_meter._hold_db, 3.0)
+        peak_meter.advance_release(peak_meter.RELEASE_MS)
+        self.assertEqual(peak_meter._current_db, (peak_meter.DB_FLOOR, peak_meter.DB_FLOOR))
+        self.assertFalse(peak_meter.is_releasing())
+        peak_meter.mark_signal_activity()
+        peak_meter.set_playhead_ms(500)
+        self.assertEqual(peak_meter._hold_db, 3.0)
         peak_meter.set_gain(0.0)
         self.assertEqual(peak_meter._current_db, (peak_meter.DB_FLOOR, peak_meter.DB_FLOOR))
         self.assertEqual(peak_meter._hold_db, 3.0)
@@ -10280,8 +10337,15 @@ class AppShellTestCase(unittest.TestCase):
         with mock.patch.object(dialog, "_is_media_playing", return_value=True):
             dialog._start_scope_visualization_if_playing()
         self.assertTrue(dialog.scope._fade_timer.isActive())
+        self.assertGreaterEqual(dialog.scope._fade_opacity, 0.7)
         dialog.scope._fade_timer.stop()
         dialog.scope._fade_opacity = 1.0
+        with mock.patch.object(dialog, "_is_media_playing", return_value=False):
+            dialog._sync_visualization_timer()
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog._visualization_timer.isActive())
+        dialog._visualization_timer.stop()
+        dialog.scope._release_active = False
         with mock.patch.object(
             app_module,
             "load_audio_spectrum_frames",

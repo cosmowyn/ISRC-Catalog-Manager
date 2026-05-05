@@ -36741,6 +36741,8 @@ class _ImagePreviewDialog(QDialog):
 
 
 class _HiDpiArtworkLabel(QLabel):
+    artworkActivated = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._paint_pixmap = QPixmap()
@@ -36772,6 +36774,17 @@ class _HiDpiArtworkLabel(QLabel):
 
     def pixmap(self) -> QPixmap:
         return QPixmap(self._paint_pixmap)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if (
+            not self._paint_pixmap.isNull()
+            and hasattr(event, "button")
+            and event.button() == Qt.LeftButton
+        ):
+            self.artworkActivated.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def paintEvent(self, event) -> None:
         if self._paint_pixmap.isNull():
@@ -36805,15 +36818,12 @@ class _HiDpiArtworkLabel(QLabel):
             shadow = QColor(0, 0, 0, 72 if light_mode else 108)
             border = QColor(self.palette().highlight().color())
             border.setAlphaF(0.42 if light_mode else 0.36)
-            sheen = QColor(255, 255, 255, 22 if light_mode else 28)
 
             painter.fillRect(frame_rect.translated(2.0, 2.0), shadow)
             painter.save()
             painter.setClipRect(frame_rect)
-            painter.setOpacity(0.96)
             painter.drawPixmap(draw_rect, self._paint_pixmap, QRectF(self._paint_pixmap.rect()))
             painter.restore()
-            painter.fillRect(frame_rect.adjusted(1.0, 1.0, -1.0, -1.0), sheen)
             painter.setPen(QPen(border, 1.0))
             painter.drawRect(frame_rect.adjusted(0.5, 0.5, -0.5, -0.5))
         finally:
@@ -36823,6 +36833,7 @@ class _HiDpiArtworkLabel(QLabel):
 class _AudioPreviewDialog(QDialog):
     SCRUB_STEP_MS = 1000
     JUMP_STEP_MS = 10000
+    VISUALIZATION_TIMER_MS = 16
     STOP_BUTTON_FONT_SCALE = 2.5
     MEDIA_ICON_SIZE = QSize(18, 18)
     ARTWORK_SIZE = 200
@@ -36851,6 +36862,7 @@ class _AudioPreviewDialog(QDialog):
         "repeat-one": "repeat-1.svg",
         "volume-up": "volume-up-fill.svg",
         "volume-mute": "volume-mute-fill.svg",
+        "export": "box-arrow-down.svg",
     }
 
     def __init__(self, app, parent=None):
@@ -36866,6 +36878,8 @@ class _AudioPreviewDialog(QDialog):
         self._current_title = ""
         self._current_artist = ""
         self._current_album = ""
+        self._current_artwork_data = b""
+        self._current_artwork_mime = "image/png"
         self._artwork_pixmap = QPixmap()
         self._handling_end_of_media = False
         self._loop_mode = self.LOOP_MODE_OFF
@@ -36994,11 +37008,18 @@ class _AudioPreviewDialog(QDialog):
         self.artwork_label.setObjectName("audioPreviewArtworkLabel")
         self.artwork_label.setProperty("role", "mediaArtwork")
         self.artwork_label.setAlignment(Qt.AlignCenter)
+        self.artwork_label.setCursor(Qt.PointingHandCursor)
+        self.artwork_label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.artwork_label.setToolTip("Open album art preview")
         self.artwork_label.setMinimumSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
         self.artwork_label.setMaximumSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
         self.artwork_label.set_target_extent(self.ARTWORK_SIZE)
         self.artwork_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.artwork_label.artworkActivated.connect(self._open_artwork_preview)
+        self.artwork_label.customContextMenuRequested.connect(self._show_artwork_context_menu)
         artwork_layout.addWidget(self.artwork_label, 0, Qt.AlignCenter)
+        self.artwork_container.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.artwork_container.customContextMenuRequested.connect(self._show_artwork_context_menu)
         self.artwork_container.hide()
         content_row.addWidget(self.artwork_container, 0)
         media_layout.addLayout(content_row)
@@ -37126,8 +37147,22 @@ class _AudioPreviewDialog(QDialog):
         self.auto_advance_check.setObjectName("audioPreviewAutoAdvanceCheck")
         self.auto_advance_check.setProperty("role", "mediaToggle")
         self.auto_advance_check.setChecked(True)
-        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft)
+        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft | Qt.AlignBottom)
         playback_footer.addStretch(1)
+        self.export_button = QToolButton(playback_group)
+        self.export_button.setObjectName("audioPreviewExportButton")
+        self.export_button.setProperty("role", "mediaExportButton")
+        self.export_button.setPopupMode(QToolButton.InstantPopup)
+        self.export_button.setAutoRaise(False)
+        self.export_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.export_button.setFixedSize(42, 34)
+        self._set_icon_button_content(self.export_button, "export", "Export")
+        self.export_button.setToolTip("Export")
+        self.export_button.setAccessibleName("Export")
+        self.export_menu = QMenu(self.export_button)
+        self.export_button.setMenu(self.export_menu)
+        self.export_button.setEnabled(False)
+        playback_footer.addWidget(self.export_button, 0, Qt.AlignRight | Qt.AlignBottom)
         self.playback_control_band = QWidget(playback_group)
         self.playback_control_band.setObjectName("audioPreviewPlaybackControlBand")
         self.playback_control_band.setFixedHeight(self.CONTROL_BAND_HEIGHT)
@@ -37239,44 +37274,15 @@ class _AudioPreviewDialog(QDialog):
         play_next_layout.addSpacing(self.CONTROL_ROW_TOP_OFFSET)
         play_next_layout.addWidget(self.play_next_list)
         controls_row.addWidget(play_next_group, 1)
-
-        export_group, export_layout = _create_standard_section(self, "Export")
-        export_group.setObjectName("audioPreviewExportGroup")
-        export_group.setProperty("role", "panel")
-        export_group.setMinimumWidth(110)
-        export_group.setMaximumWidth(130)
-        export_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        export_layout.setContentsMargins(
-            self.CONTROL_GROUP_MARGIN,
-            self.CONTROL_GROUP_MARGIN,
-            self.CONTROL_GROUP_MARGIN,
-            self.CONTROL_GROUP_MARGIN,
-        )
-        self.export_button = QToolButton(export_group)
-        self.export_button.setObjectName("audioPreviewExportButton")
-        self.export_button.setProperty("role", "mediaExportButton")
-        self.export_button.setText("Export")
-        self.export_button.setPopupMode(QToolButton.InstantPopup)
-        self.export_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.export_menu = QMenu(self.export_button)
-        self.export_button.setMenu(self.export_menu)
-        self.export_button.setEnabled(False)
-        export_layout.setSpacing(0)
-        export_layout.addSpacing(self.CONTROL_ROW_TOP_OFFSET)
-        export_layout.addWidget(self.export_button)
-        export_layout.addStretch(1)
-        controls_row.addWidget(export_group, 0)
         controls_row.setStretch(0, 0)
         controls_row.setStretch(1, 0)
         controls_row.setStretch(2, 1)
-        controls_row.setStretch(3, 0)
         control_group_height = max(
             playback_group.sizeHint().height(),
             volume_group.sizeHint().height(),
             play_next_group.sizeHint().height(),
-            export_group.sizeHint().height(),
         )
-        for group in (playback_group, volume_group, play_next_group, export_group):
+        for group in (playback_group, volume_group, play_next_group):
             group.setMinimumHeight(control_group_height)
         self._apply_play_next_font()
         root.addLayout(controls_row, 0)
@@ -37287,7 +37293,7 @@ class _AudioPreviewDialog(QDialog):
         self._resize_timer.timeout.connect(self._reload_peaks_for_current_width)
 
         self._visualization_timer = QTimer(self)
-        self._visualization_timer.setInterval(33)
+        self._visualization_timer.setInterval(self.VISUALIZATION_TIMER_MS)
         self._visualization_timer.timeout.connect(self._refresh_live_visualization)
 
         self._player.durationChanged.connect(self._on_duration_changed)
@@ -37570,6 +37576,9 @@ class _AudioPreviewDialog(QDialog):
             self._sync_loop_button()
         if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
             self._sync_mute_button()
+        export_button = getattr(self, "export_button", None)
+        if isinstance(export_button, QToolButton):
+            self._set_icon_button_content(export_button, "export", "Export")
 
     def _create_loop_button(self) -> QToolButton:
         button = QToolButton(self)
@@ -37886,6 +37895,33 @@ class _AudioPreviewDialog(QDialog):
             action.triggered.connect(handler)
         self.export_button.setEnabled(bool(self.export_menu.actions()))
 
+    def _open_artwork_preview(self) -> None:
+        if not self._current_artwork_data:
+            return
+        opener = getattr(self.app, "_open_image_preview", None)
+        if callable(opener):
+            opener(bytes(self._current_artwork_data), self._current_title or "Album Art")
+
+    def _create_artwork_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        if self._current_artwork_data:
+            view_action = menu.addAction("View Album Art")
+            view_action.triggered.connect(self._open_artwork_preview)
+        return menu
+
+    def _show_artwork_context_menu(self, pos: QPoint) -> None:
+        if not self._current_artwork_data:
+            return
+        source = self.sender()
+        menu = self._create_artwork_context_menu()
+        if not menu.actions():
+            return
+        if isinstance(source, QWidget):
+            global_pos = source.mapToGlobal(pos)
+        else:
+            global_pos = QCursor.pos()
+        menu.exec(global_pos)
+
     def _sync_volume_controls(self) -> None:
         percent = max(0, min(100, int(round(float(self._audio_out.volume()) * 100))))
         self.volume_slider.blockSignals(True)
@@ -37927,10 +37963,16 @@ class _AudioPreviewDialog(QDialog):
 
     def _apply_artwork(self, artwork_payload) -> None:
         self._artwork_pixmap = QPixmap()
+        self._current_artwork_data = b""
+        self._current_artwork_mime = "image/png"
         data = getattr(artwork_payload, "data", b"") if artwork_payload is not None else b""
         if data:
             image = QImage.fromData(data)
             if not image.isNull():
+                self._current_artwork_data = bytes(data)
+                self._current_artwork_mime = (
+                    str(getattr(artwork_payload, "mime_type", "") or "").strip() or "image/png"
+                )
                 self._artwork_pixmap = QPixmap.fromImage(image)
         has_artwork = not self._artwork_pixmap.isNull()
         self.artwork_container.setVisible(has_artwork)
@@ -37979,8 +38021,8 @@ class _AudioPreviewDialog(QDialog):
 
     def _stop_playback(self) -> None:
         self._player.stop()
+        self._begin_visualization_release()
         self._seek_to_ms(0)
-        self.peak_meter.reset_signal_activity()
 
     def _jump_by_ms(self, delta_ms: int) -> None:
         self._seek_to_ms(self._player.position() + int(delta_ms))
@@ -38019,10 +38061,12 @@ class _AudioPreviewDialog(QDialog):
         self._label_time.setText(f"{self._format_time(position)} / {self._format_time(duration)}")
 
     def _refresh_live_visualization(self) -> None:
-        if not self._is_media_playing():
+        if self._is_media_playing():
+            self._start_scope_visualization_if_playing()
+            self._apply_position(self._player.position(), self._player.duration())
             return
-        self._start_scope_visualization_if_playing()
-        self._apply_position(self._player.position(), self._player.duration())
+        if not self._advance_visualization_release():
+            self._visualization_timer.stop()
 
     def _is_media_playing(self) -> bool:
         playing_state = getattr(QMediaPlayer, "PlaybackState", QMediaPlayer).PlayingState
@@ -38033,9 +38077,28 @@ class _AudioPreviewDialog(QDialog):
             self.peak_meter.mark_signal_activity()
             self.scope.start_fade_in()
 
+    def _begin_visualization_release(self) -> None:
+        if hasattr(self, "peak_meter"):
+            self.peak_meter.begin_release()
+        if hasattr(self, "scope"):
+            self.scope.start_release()
+
+    def _advance_visualization_release(self) -> bool:
+        active = False
+        if hasattr(self, "peak_meter"):
+            active = bool(self.peak_meter.advance_release(self.VISUALIZATION_TIMER_MS)) or active
+        if hasattr(self, "scope"):
+            active = bool(self.scope.advance_release(self.VISUALIZATION_TIMER_MS)) or active
+        return active
+
     def _sync_visualization_timer(self, *_args) -> None:
         if self._is_media_playing():
             self._start_scope_visualization_if_playing()
+            if not self._visualization_timer.isActive():
+                self._visualization_timer.start()
+            return
+        self._begin_visualization_release()
+        if self.peak_meter.is_releasing() or self.scope.is_releasing():
             if not self._visualization_timer.isActive():
                 self._visualization_timer.start()
             return
@@ -38188,6 +38251,7 @@ class StereoPeakMeterWidget(QWidget):
     PEAK_HOLD_LABEL_HEIGHT = 10
     PEAK_LIVE_LABEL_HEIGHT = 10
     PEAK_LABEL_HEIGHT = PEAK_HOLD_LABEL_HEIGHT + PEAK_LIVE_LABEL_HEIGHT
+    RELEASE_MS = 900
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38199,6 +38263,9 @@ class StereoPeakMeterWidget(QWidget):
         self._signal_active = True
         self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
         self._hold_db = self.DB_FLOOR
+        self._release_active = False
+        self._release_elapsed_ms = 0
+        self._release_start_db = (self.DB_FLOOR, self.DB_FLOOR)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setToolTip("Stereo peak meter")
         self._update_fixed_size()
@@ -38225,12 +38292,16 @@ class StereoPeakMeterWidget(QWidget):
         self._frames = cleaned
         self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
         self._hold_db = self.DB_FLOOR
+        self._release_active = False
+        self._release_elapsed_ms = 0
         self.update()
 
     def reset_signal_activity(self) -> None:
         self._signal_active = False
         self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
         self._hold_db = self.DB_FLOOR
+        self._release_active = False
+        self._release_elapsed_ms = 0
         self.update()
 
     def reset_peak_hold(self) -> None:
@@ -38241,18 +38312,54 @@ class StereoPeakMeterWidget(QWidget):
         self._hold_db = max(self._hold_db, self._current_db[0], self._current_db[1])
 
     def mark_signal_activity(self) -> None:
-        if self._signal_active:
-            return
+        was_active = self._signal_active and not self._release_active
         self._signal_active = True
+        self._release_active = False
+        self._release_elapsed_ms = 0
         self._current_db = self._frame_at_playhead()
         self._update_peak_hold()
+        if not was_active:
+            self.update()
+
+    def begin_release(self) -> None:
+        if self._release_active:
+            return
+        self._signal_active = False
+        if self._current_db == (self.DB_FLOOR, self.DB_FLOOR):
+            self._release_active = False
+            return
+        self._release_active = True
+        self._release_elapsed_ms = 0
+        self._release_start_db = self._current_db
         self.update()
+
+    def is_releasing(self) -> bool:
+        return bool(self._release_active)
+
+    def advance_release(self, elapsed_ms: int) -> bool:
+        if not self._release_active:
+            return False
+        self._release_elapsed_ms += max(1, int(elapsed_ms))
+        progress = max(0.0, min(1.0, self._release_elapsed_ms / max(1.0, float(self.RELEASE_MS))))
+        eased = 1.0 - ((1.0 - progress) * (1.0 - progress))
+        next_values = []
+        for start_db in self._release_start_db:
+            next_values.append(start_db + ((self.DB_FLOOR - start_db) * eased))
+        self._current_db = (self._clamp_db(next_values[0]), self._clamp_db(next_values[1]))
+        if progress >= 1.0:
+            self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+            self._release_active = False
+        self.update()
+        return self._release_active
 
     def set_duration_ms(self, ms: int) -> None:
         self._duration = max(1, int(ms))
 
     def set_playhead_ms(self, ms: int) -> None:
         self._playhead = max(0, min(int(ms), self._duration))
+        if self._release_active:
+            self.update()
+            return
         if not self._signal_active:
             self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
             self.update()
@@ -38263,6 +38370,9 @@ class StereoPeakMeterWidget(QWidget):
 
     def set_gain(self, gain: float) -> None:
         self._gain = max(0.0, float(gain))
+        if self._release_active:
+            self.update()
+            return
         if not self._signal_active:
             self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
             self.update()
@@ -38957,16 +39067,25 @@ class WaveformWidget(QWidget):
 
 
 class SpectrumGraphWidget(WaveformWidget):
-    SPECTRUM_LINE_WIDTH = 0.65
-    SPECTRUM_COLOR_ALPHA_BOOST = 1.36
-    SPECTRUM_FADE_IN_MS = 80
-    SPECTRUM_FADE_STEP_MS = 16
+    SPECTRUM_SCALE_LINEAR = "linear"
+    SPECTRUM_SCALE_LOG = "log"
+    SPECTRUM_LINE_WIDTH = 0.56
+    SPECTRUM_COLOR_ALPHA_BOOST = 1.58
+    SPECTRUM_FADE_IN_MS = 18
+    SPECTRUM_FADE_STEP_MS = 10
+    SPECTRUM_RELEASE_MS = 900
+    SPECTRUM_MIN_HZ = 20.0
+    SPECTRUM_MAX_HZ = 20000.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._peaks = []
         self._fade_elapsed_ms = 0
         self._fade_opacity = 0.0
+        self._release_active = False
+        self._release_elapsed_ms = 0
+        self._release_start_opacity = 0.0
+        self._frequency_scale = self.SPECTRUM_SCALE_LINEAR
         self._fade_timer = QTimer(self)
         self._fade_timer.setInterval(self.SPECTRUM_FADE_STEP_MS)
         self._fade_timer.timeout.connect(self._advance_fade_in)
@@ -38982,19 +39101,90 @@ class SpectrumGraphWidget(WaveformWidget):
         super().set_spectrum_frames(frames)
         self.reset_fade_in()
 
+    def frequency_scale(self) -> str:
+        return self._frequency_scale
+
+    def set_frequency_scale(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {self.SPECTRUM_SCALE_LINEAR, self.SPECTRUM_SCALE_LOG}:
+            normalized = self.SPECTRUM_SCALE_LINEAR
+        if normalized == self._frequency_scale:
+            return
+        self._frequency_scale = normalized
+        self.update()
+
+    def _create_frequency_scale_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        linear_action = menu.addAction("Linear view")
+        linear_action.setCheckable(True)
+        linear_action.setChecked(self._frequency_scale == self.SPECTRUM_SCALE_LINEAR)
+        linear_action.triggered.connect(lambda _checked=False: self.set_frequency_scale("linear"))
+        log_action = menu.addAction("Log view")
+        log_action.setCheckable(True)
+        log_action.setChecked(self._frequency_scale == self.SPECTRUM_SCALE_LOG)
+        log_action.triggered.connect(lambda _checked=False: self.set_frequency_scale("log"))
+        return menu
+
+    def contextMenuEvent(self, event) -> None:
+        menu = self._create_frequency_scale_context_menu()
+        menu.exec(event.globalPos())
+        event.accept()
+
     def reset_fade_in(self) -> None:
         self._fade_timer.stop()
         self._fade_elapsed_ms = 0
         self._fade_opacity = 0.0
+        self._release_active = False
+        self._release_elapsed_ms = 0
         self.update()
 
     def start_fade_in(self) -> None:
         if not self.has_live_visualization() or self._fade_opacity >= 1.0:
             return
+        self._release_active = False
+        self._release_elapsed_ms = 0
+        if self._fade_opacity < 0.72:
+            self._fade_opacity = 0.72
+            self.update()
         if not self._fade_timer.isActive():
             self._fade_timer.start()
 
+    def start_release(self) -> None:
+        self._fade_timer.stop()
+        if self._release_active:
+            return
+        if self._fade_opacity <= 0.0:
+            self._fade_opacity = 0.0
+            self._release_active = False
+            return
+        self._release_active = True
+        self._release_elapsed_ms = 0
+        self._release_start_opacity = self._fade_opacity
+        self.update()
+
+    def is_releasing(self) -> bool:
+        return bool(self._release_active)
+
+    def advance_release(self, elapsed_ms: int) -> bool:
+        if not self._release_active:
+            return False
+        self._release_elapsed_ms += max(1, int(elapsed_ms))
+        progress = max(
+            0.0,
+            min(1.0, self._release_elapsed_ms / max(1.0, float(self.SPECTRUM_RELEASE_MS))),
+        )
+        eased = 1.0 - ((1.0 - progress) * (1.0 - progress))
+        self._fade_opacity = max(0.0, self._release_start_opacity * (1.0 - eased))
+        if progress >= 1.0 or self._fade_opacity <= 0.001:
+            self._fade_opacity = 0.0
+            self._release_active = False
+        self.update()
+        return self._release_active
+
     def _advance_fade_in(self) -> None:
+        if self._release_active:
+            self._fade_timer.stop()
+            return
         self._fade_elapsed_ms += self.SPECTRUM_FADE_STEP_MS
         progress = max(
             0.0,
@@ -39025,10 +39215,35 @@ class SpectrumGraphWidget(WaveformWidget):
     def _current_spectrum_frame(self):
         return self._current_harmonic_frame()
 
+    def _log_scaled_spectrum_values(self, values: list[float]) -> list[float]:
+        count = len(values)
+        if count <= 2:
+            return list(values)
+        min_hz = max(1.0, float(self.SPECTRUM_MIN_HZ))
+        max_hz = max(min_hz + 1.0, float(self.SPECTRUM_MAX_HZ))
+        max_index = count - 1
+        scaled = []
+        for index in range(count):
+            ratio = (index + 0.5) / max(1.0, float(count))
+            frequency = min_hz * ((max_hz / min_hz) ** ratio)
+            source_pos = ((frequency - min_hz) / (max_hz - min_hz)) * max_index
+            source_pos = max(0.0, min(float(max_index), source_pos))
+            lower = int(math.floor(source_pos))
+            upper = min(max_index, lower + 1)
+            blend = source_pos - lower
+            scaled.append((values[lower] * (1.0 - blend)) + (values[upper] * blend))
+        return scaled
+
+    def _spectrum_display_values(self, frame) -> list[float]:
+        values = [max(0.0, min(1.0, float(value))) for value in frame or []]
+        if self._frequency_scale == self.SPECTRUM_SCALE_LOG:
+            return self._log_scaled_spectrum_values(values)
+        return values
+
     def _spectrum_line_segments(self, frame, visual_rect: QRectF):
         if not frame:
             return []
-        values = [max(0.0, min(1.0, float(value))) for value in frame]
+        values = self._spectrum_display_values(frame)
         if not values:
             return []
         left = float(visual_rect.left())
@@ -39043,13 +39258,27 @@ class SpectrumGraphWidget(WaveformWidget):
             segments.append((x_pos, top, bottom, value))
         return segments
 
+    def _visual_color_for_intensity(self, value: float, *, light_mode: bool) -> QColor:
+        hotness = max(0.0, min(1.0, float(value))) ** 0.56
+        hue = 0.62 * (1.0 - hotness)
+        saturation = 0.99
+        brightness = (0.74 + (hotness * 0.22)) if light_mode else (0.86 + (hotness * 0.14))
+        alpha = (0.52 + (hotness * 0.44)) if light_mode else (0.58 + (hotness * 0.4))
+        color = QColor()
+        color.setHsvF(hue, saturation, min(1.0, brightness), min(1.0, alpha))
+        return color
+
     def _draw_spectrum_graph(self, painter, rect, *, light_mode: bool) -> None:
         frame = self._current_spectrum_frame()
         opacity = max(0.0, min(1.0, self._fade_opacity))
         if not frame or opacity <= 0.0:
             return
         visual_rect = self._spectrum_graph_rect(rect)
-        for x_pos, top, bottom, intensity in self._spectrum_line_segments(frame, visual_rect):
+        display_frame = [max(0.0, min(1.0, float(value) * opacity)) for value in frame]
+        for x_pos, top, bottom, intensity in self._spectrum_line_segments(
+            display_frame,
+            visual_rect,
+        ):
             color = self._visual_color_for_intensity(intensity, light_mode=light_mode)
             alpha = max(0.2, min(1.0, color.alphaF() * self.SPECTRUM_COLOR_ALPHA_BOOST))
             color.setAlphaF(alpha * opacity)
