@@ -838,6 +838,24 @@ def _pyinstaller_cmd(
             ]
         )
 
+    media_icons_dir = entry_script.parent / "icons"
+    if media_icons_dir.exists():
+        cmd.extend(
+            [
+                "--add-data",
+                _pyinstaller_add_data(media_icons_dir, "icons"),
+            ]
+        )
+
+    startup_sounds_dir = entry_script.parent / "sounds"
+    if startup_sounds_dir.exists():
+        cmd.extend(
+            [
+                "--add-data",
+                _pyinstaller_add_data(startup_sounds_dir, "sounds"),
+            ]
+        )
+
     if icon:
         cmd.extend(["--icon", icon])
 

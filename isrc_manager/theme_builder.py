@@ -2157,6 +2157,17 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     theme = effective_theme_settings(raw_values)
     custom_qss = str(theme.get("custom_qss") or "").strip()
     font_family_css = str(theme["font_family"]).replace('"', '\\"')
+    panel_bg_value = str(theme["panel_bg"])
+    panel_is_dark = QColor(panel_bg_value).lightnessF() < 0.5
+    audio_preview_metadata_top_bg = shift_color(
+        panel_bg_value,
+        108 if panel_is_dark else 102,
+    )
+    audio_preview_metadata_border = shift_color(
+        str(theme["border_color"]),
+        122 if panel_is_dark else 88,
+    )
+    audio_preview_metadata_border_width = max(1, int(theme["border_width"]))
 
     stylesheet = f"""
     QWidget {{
@@ -2310,6 +2321,14 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         margin-top: 12px;
         padding-top: 10px;
         background-color: {theme["panel_bg"]};
+    }}
+    QGroupBox#audioPreviewMetadataGroup {{
+        border: {audio_preview_metadata_border_width}px solid {audio_preview_metadata_border};
+        background: qlineargradient(
+            x1: 0, y1: 0, x2: 0, y2: 1,
+            stop: 0 {audio_preview_metadata_top_bg},
+            stop: 1 {theme["panel_bg"]}
+        );
     }}
     QGroupBox::title {{
         subcontrol-origin: margin;

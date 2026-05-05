@@ -185,6 +185,9 @@ class ApplicationSettingsTransferService:
                 "enabled": bool(current_values.get("auto_snapshot_enabled")),
                 "interval_minutes": int(current_values.get("auto_snapshot_interval_minutes") or 0),
             },
+            "startup_sound": {
+                "enabled": bool(current_values.get("startup_sound_enabled", True)),
+            },
             "history_retention": {
                 "retention_mode": str(current_values.get("history_retention_mode") or "").strip(),
                 "auto_cleanup_enabled": bool(current_values.get("history_auto_cleanup_enabled")),
@@ -372,6 +375,7 @@ class ApplicationSettingsTransferService:
 
         registration = dict(payload.get("registration") or {})
         auto_snapshot = dict(payload.get("auto_snapshot") or {})
+        startup_sound = dict(payload.get("startup_sound") or {})
         history = dict(payload.get("history_retention") or {})
 
         after_values["window_title"] = str(identity.get("window_title_override") or "").strip()
@@ -387,6 +391,12 @@ class ApplicationSettingsTransferService:
         after_values["auto_snapshot_enabled"] = bool(auto_snapshot.get("enabled"))
         after_values["auto_snapshot_interval_minutes"] = int(
             auto_snapshot.get("interval_minutes") or 0
+        )
+        after_values["startup_sound_enabled"] = bool(
+            startup_sound.get(
+                "enabled",
+                after_values.get("startup_sound_enabled", True),
+            )
         )
         after_values["history_retention_mode"] = str(history.get("retention_mode") or "").strip()
         after_values["history_auto_cleanup_enabled"] = bool(history.get("auto_cleanup_enabled"))

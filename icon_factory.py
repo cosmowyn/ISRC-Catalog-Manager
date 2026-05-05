@@ -35,8 +35,8 @@ MIN_MACOS_ICON_SIZE = 1024  # recommended base size for macOS .icns
 
 OS_OPTIONS = {
     "1": {"name": "Windows", "prefix": "win_", "ext": ".ico"},
-    "2": {"name": "macOS",   "prefix": "mac_", "ext": ".icns"},
-    "3": {"name": "Linux",   "prefix": "linux_", "ext": ".png"},
+    "2": {"name": "macOS", "prefix": "mac_", "ext": ".icns"},
+    "3": {"name": "Linux", "prefix": "linux_", "ext": ".png"},
 }
 
 
@@ -85,9 +85,7 @@ def select_image_file(root: tk.Tk) -> Path:
 
 
 def crop_to_center_square(
-    img: Image.Image,
-    add_margin: bool = False,
-    margin_px: int = 20
+    img: Image.Image, add_margin: bool = False, margin_px: int = 20
 ) -> Image.Image:
     """
     Crop image to centered 1:1 square.
@@ -385,6 +383,7 @@ def main() -> None:
         "Icon(s) generated:\n\n" + "\n".join(created_files),
         parent=root,
     )
+
 
 if __name__ == "__main__":
     main()

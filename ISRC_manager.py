@@ -11,6 +11,7 @@
 import hashlib
 import json
 import logging
+import math
 import mimetypes
 import os
 import platform
@@ -33,7 +34,9 @@ from PySide6.QtCore import (
     QEventLoop,
     QItemSelectionModel,
     QPoint,
+    QPointF,
     QRect,
+    QRectF,
     QRegularExpression,
     QSettings,
     QSize,
@@ -53,15 +56,25 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
+    QFontMetrics,
     QIcon,
     QImage,
     QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
     QPixmap,
     QShortcut,
     QStandardItem,
     QStandardItemModel,
 )
-from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat, QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import (
+    QAudioDecoder,
+    QAudioFormat,
+    QAudioOutput,
+    QMediaPlayer,
+    QSoundEffect,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -99,7 +112,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStatusBar,
-    QStyle,
     QTableView,
     QTableWidget,
     QTableWidgetItem,
@@ -288,6 +300,7 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
 )
+from isrc_manager.media.waveform_cache import AudioWaveformCacheService, AudioWaveformCacheWorker
 from isrc_manager.packaged_smoke import (
     PACKAGED_SMOKE_TEST_ARGUMENT,
     run_packaged_smoke_test,
@@ -310,6 +323,7 @@ from isrc_manager.parties.dialogs import (
     PartyManagerPanel,
 )
 from isrc_manager.paths import (
+    RES_DIR,
     configure_qt_application_identity,
     resolve_app_storage_layout,
     settings_path,
@@ -783,6 +797,7 @@ class ApplicationSettingsDialog(QDialog):
         stored_themes: dict[str, dict[str, object]] | None,
         current_profile_path: str,
         blob_icon_settings: dict[str, object] | None = None,
+        startup_sound_enabled: bool = True,
         history_retention_mode: str = DEFAULT_HISTORY_RETENTION_MODE,
         history_auto_cleanup_enabled: bool = DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
         history_storage_budget_mb: int = DEFAULT_HISTORY_STORAGE_BUDGET_MB,
@@ -832,6 +847,7 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_change_tracking_enabled = True
         self._history_retention_sync_enabled = True
         self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
+        self._startup_sound_enabled = bool(startup_sound_enabled)
         self._settings_builder_specs = (
             *self.THEME_PAGE_SPECS[:-1],
             (
@@ -1028,6 +1044,17 @@ class ApplicationSettingsDialog(QDialog):
             "Application Icon",
             icon_widget,
             "Optional image file used as the app icon.",
+        )
+
+        self.startup_sound_enabled_check = QCheckBox("Play startup sound after loading")
+        self.startup_sound_enabled_check.setChecked(self._startup_sound_enabled)
+        self.startup_sound_enabled_check.setMinimumWidth(320)
+        self._add_row(
+            app_grid,
+            2,
+            "Startup Sound",
+            self.startup_sound_enabled_check,
+            "Play the bundled startup sound once after the loading splash finishes and the catalog table is visible.",
         )
 
         registration_box = QGroupBox("Registration & Codes")
@@ -1639,6 +1666,10 @@ class ApplicationSettingsDialog(QDialog):
             "auto_snapshot_interval_minutes": (
                 self._general_tab_index,
                 self.auto_snapshot_interval_spin,
+            ),
+            "startup_sound_enabled": (
+                self._general_tab_index,
+                self.startup_sound_enabled_check,
             ),
             "history_retention_mode": (self._general_tab_index, self.history_retention_mode_combo),
             "history_auto_cleanup_enabled": (
@@ -4268,6 +4299,7 @@ class ApplicationSettingsDialog(QDialog):
             "artist_code": self.artist_code_edit.text().strip(),
             "auto_snapshot_enabled": self.auto_snapshot_enabled_check.isChecked(),
             "auto_snapshot_interval_minutes": int(self.auto_snapshot_interval_spin.value()),
+            "startup_sound_enabled": self.startup_sound_enabled_check.isChecked(),
             "history_retention_mode": str(
                 self.history_retention_mode_combo.currentData() or DEFAULT_HISTORY_RETENTION_MODE
             ),
@@ -6709,6 +6741,10 @@ class App(QMainWindow):
     startupReady = Signal()
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
     TOP_CHROME_DOCK_GAP = 5
+    STARTUP_SOUND_ENABLED_SETTINGS_KEY = "startup/play_startup_sound"
+    STARTUP_SOUND_FILENAME = "startup.wav"
+    DEFAULT_STARTUP_SOUND_ENABLED = True
+    STARTUP_SOUND_DELAY_MS = 250
 
     def __init__(self, *, startup_feedback: StartupFeedbackProtocol | None = None):
         super().__init__()
@@ -6716,6 +6752,9 @@ class App(QMainWindow):
         self.setObjectName("mainWindow")
         configure_qt_application_identity(self)
         self._startup_feedback = startup_feedback
+        self._startup_sound_has_startup_feedback = startup_feedback is not None
+        self._startup_sound_played = False
+        self._startup_sound_effect: QSoundEffect | None = None
         self._startup_progress_tracker = (
             StartupProgressTracker.for_startup(startup_feedback)
             if startup_feedback is not None
@@ -6724,8 +6763,10 @@ class App(QMainWindow):
         self._startup_feedback_completed = False
         self._startup_ready_emitted = False
         self._startup_catalog_refresh_complete = False
+        self._startup_waveform_cache_complete = False
         self._post_ready_startup_tasks_scheduled = False
         self.startupReady.connect(lambda: self.complete_startup_feedback())
+        self.startupReady.connect(lambda: self._schedule_startup_sound_after_startup())
         self.startupReady.connect(lambda: self._schedule_post_ready_startup_tasks())
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
@@ -6875,6 +6916,8 @@ class App(QMainWindow):
         self._col_hint_signal_bound = False
         self._row_hint_signal_bound = False
         self.track_service = None
+        self._audio_waveform_cache_service_instance = None
+        self._audio_waveform_cache_worker = None
         self.settings_reads = None
         self.settings_mutations = None
         self.blob_icon_settings_service = None
@@ -7269,6 +7312,124 @@ class App(QMainWindow):
         self._startup_catalog_refresh_complete = True
         self._maybe_finish_startup_loading()
 
+    def _audio_waveform_cache_service(self) -> AudioWaveformCacheService | None:
+        if self.conn is None:
+            return None
+        service = getattr(self, "_audio_waveform_cache_service_instance", None)
+        if service is None or getattr(service, "conn", None) is not self.conn:
+            service = AudioWaveformCacheService(self.conn)
+            self._audio_waveform_cache_service_instance = service
+        return service
+
+    def _audio_waveform_cache_worker_for_current_profile(self) -> AudioWaveformCacheWorker | None:
+        if self.conn is None:
+            return None
+        db_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if not db_path:
+            return None
+        worker = getattr(self, "_audio_waveform_cache_worker", None)
+        if worker is not None and not worker.is_for_database(db_path):
+            try:
+                worker.stop(wait=False)
+            except Exception:
+                pass
+            worker = None
+        if worker is None:
+            worker = AudioWaveformCacheWorker(
+                db_path=db_path,
+                data_root=self.data_root,
+                connection_factory=getattr(self, "sqlite_connection_factory", None),
+                logger=self.logger,
+            )
+            self._audio_waveform_cache_worker = worker
+        return worker
+
+    def _stop_audio_waveform_cache_worker(self, *, wait: bool = False) -> None:
+        worker = getattr(self, "_audio_waveform_cache_worker", None)
+        if worker is None:
+            return
+        try:
+            worker.stop(wait=wait)
+        except Exception:
+            pass
+        self._audio_waveform_cache_worker = None
+
+    def _queue_audio_waveform_cache_for_track(
+        self,
+        track_id: int,
+        *,
+        delay_ms: int = 500,
+        force: bool = False,
+    ) -> bool:
+        if getattr(self, "_is_closing", False):
+            return False
+        try:
+            clean_track_id = int(track_id)
+        except (TypeError, ValueError):
+            return False
+        if clean_track_id <= 0:
+            return False
+
+        def _enqueue() -> None:
+            if getattr(self, "_is_closing", False):
+                return
+            worker = self._audio_waveform_cache_worker_for_current_profile()
+            if worker is None:
+                return
+            worker.enqueue_track(clean_track_id, force=force)
+
+        if int(delay_ms) > 0:
+            QTimer.singleShot(int(delay_ms), _enqueue)
+        else:
+            _enqueue()
+        return True
+
+    def _queue_startup_audio_waveform_cache_pass(self, *, progress_callback=None) -> None:
+        if self.track_service is None:
+            if callable(progress_callback):
+                progress_callback(1, 1, "No track service available for waveform cache checks.")
+            return
+        worker = self._audio_waveform_cache_worker_for_current_profile()
+        if worker is None:
+            if callable(progress_callback):
+                progress_callback(1, 1, "No profile database available for waveform cache checks.")
+            return
+        queued = worker.enqueue_all()
+        if queued:
+            self.logger.info("Queued background waveform cache validation")
+        if callable(progress_callback):
+            progress_callback(
+                1,
+                1,
+                "Queued waveform cache validation in the background.",
+            )
+
+    def _audio_waveform_cache_for_track(self, track_id: int):
+        if self.track_service is None:
+            return None
+        service = self._audio_waveform_cache_service()
+        if service is None:
+            return None
+        try:
+            cached = service.get_cached_waveform(
+                int(track_id),
+                track_service=self.track_service,
+                validate_source=True,
+            )
+            if cached is None:
+                self._queue_audio_waveform_cache_for_track(int(track_id), delay_ms=0)
+            return cached
+        except Exception as exc:
+            self.logger.debug(
+                "Waveform cache unavailable for track %s: %s",
+                track_id,
+                exc,
+            )
+            return None
+
+    def _run_startup_audio_waveform_cache_pass(self, *, progress_callback=None) -> None:
+        self._queue_startup_audio_waveform_cache_pass(progress_callback=progress_callback)
+
     def _maybe_finish_startup_loading(self) -> None:
         if self._startup_ready_emitted:
             return
@@ -7277,6 +7438,11 @@ class App(QMainWindow):
         if not getattr(self, "_startup_catalog_refresh_complete", False):
             self._report_startup_phase(StartupPhase.LOADING_CATALOG)
             return
+        if not getattr(self, "_startup_waveform_cache_complete", False):
+            self._startup_waveform_cache_complete = True
+            self._run_startup_audio_waveform_cache_pass(
+                progress_callback=self._startup_progress_callback(StartupPhase.LOADING_CATALOG)
+            )
         self._startup_ready_emitted = True
         self.startupReady.emit()
 
@@ -7344,6 +7510,78 @@ class App(QMainWindow):
         finally:
             self._startup_feedback = None
             self._startup_progress_tracker = None
+
+    @staticmethod
+    def _coerce_settings_bool(value, *, default: bool = False) -> bool:
+        if value is None:
+            return bool(default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
+
+    def _startup_sound_enabled(self) -> bool:
+        try:
+            return bool(
+                self.settings.value(
+                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
+                    self.DEFAULT_STARTUP_SOUND_ENABLED,
+                    bool,
+                )
+            )
+        except TypeError:
+            return self._coerce_settings_bool(
+                self.settings.value(
+                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
+                    self.DEFAULT_STARTUP_SOUND_ENABLED,
+                ),
+                default=self.DEFAULT_STARTUP_SOUND_ENABLED,
+            )
+
+    def _startup_sound_path(self) -> Path:
+        return RES_DIR() / "sounds" / self.STARTUP_SOUND_FILENAME
+
+    def _schedule_startup_sound_after_startup(self) -> None:
+        if getattr(self, "_startup_sound_played", False):
+            return
+        if not getattr(self, "_startup_sound_has_startup_feedback", False):
+            return
+        if not self._startup_sound_enabled():
+            return
+        self._startup_sound_played = True
+        QTimer.singleShot(self.STARTUP_SOUND_DELAY_MS, self._play_startup_sound)
+
+    def _play_startup_sound(self) -> None:
+        if not self._startup_sound_enabled():
+            return
+        sound_path = self._startup_sound_path()
+        if not sound_path.exists():
+            self._log_event(
+                "startup.sound_missing",
+                "Startup sound file was not found",
+                level=logging.DEBUG,
+                path=str(sound_path),
+            )
+            return
+        try:
+            effect = self._startup_sound_effect
+            if effect is None:
+                effect = QSoundEffect(self)
+                effect.setLoopCount(1)
+                effect.setVolume(0.45)
+                self._startup_sound_effect = effect
+            source = QUrl.fromLocalFile(str(sound_path))
+            if effect.source() != source:
+                effect.setSource(source)
+            effect.play()
+        except Exception as exc:
+            self._log_event(
+                "startup.sound_failed",
+                "Startup sound could not be played",
+                level=logging.WARNING,
+                error=str(exc),
+            )
 
     def _cleanup_ready_update_backup_handoff(self, *, phase: str) -> None:
         try:
@@ -8124,6 +8362,7 @@ class App(QMainWindow):
             e.ignore()
             return
         self._is_closing = True
+        self._stop_audio_waveform_cache_worker(wait=False)
         self._save_main_window_geometry(sync=False)
         self._store_workspace_panel_visibility_preferences(sync=False)
         self._save_main_dock_state(sync=False)
@@ -8283,6 +8522,114 @@ class App(QMainWindow):
             self._connect_bool_signal(action.toggled, action, toggled_slot)
         self.addAction(action)
         return action
+
+    def _media_player_icon_path(self) -> Path:
+        return RES_DIR() / "icons" / "music-player-fill.svg"
+
+    MEDIA_PLAYER_ACTION_ICON_SCALE = 0.45
+
+    def _text_scaled_icon_extent(self, font=None) -> int:
+        metrics = QFontMetrics(font or self.font())
+        return max(8, min(10, int(round(metrics.height() * 0.45))))
+
+    @staticmethod
+    def _tinted_icon_pixmap(source: QPixmap, color: QColor, *, glyph_scale: float = 1.0) -> QPixmap:
+        result = QPixmap(source.size())
+        result.setDevicePixelRatio(source.devicePixelRatioF())
+        result.fill(Qt.transparent)
+        painter = QPainter(result)
+        try:
+            logical_size = source.deviceIndependentSize()
+            scale = max(0.1, min(1.0, float(glyph_scale)))
+            draw_size = QSize(
+                max(1, int(round(logical_size.width() * scale))),
+                max(1, int(round(logical_size.height() * scale))),
+            )
+            draw_rect = QRect(QPoint(0, 0), draw_size)
+            draw_rect.moveCenter(QRect(QPoint(0, 0), logical_size.toSize()).center())
+            painter.drawPixmap(draw_rect, source)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(result.rect(), color)
+        finally:
+            painter.end()
+        return result
+
+    def _media_player_action_icon(self) -> QIcon:
+        icon_path = self._media_player_icon_path()
+        if not icon_path.exists():
+            return QIcon()
+        source_icon = QIcon(str(icon_path))
+        if source_icon.isNull():
+            return QIcon()
+
+        icon_color = QColor(self.palette().color(QPalette.ButtonText))
+        if not icon_color.isValid():
+            icon_color = QColor(self.palette().color(QPalette.WindowText))
+        if not icon_color.isValid():
+            icon_color = QColor("#111827")
+
+        tinted_icon = QIcon()
+        for extent in (10, 12, 14, 16):
+            pixmap = source_icon.pixmap(QSize(extent, extent))
+            if pixmap.isNull():
+                continue
+            tinted_icon.addPixmap(
+                self._tinted_icon_pixmap(
+                    pixmap,
+                    icon_color,
+                    glyph_scale=self.MEDIA_PLAYER_ACTION_ICON_SCALE,
+                )
+            )
+        return tinted_icon if not tinted_icon.isNull() else source_icon
+
+    def _configure_media_player_action_icon(self) -> None:
+        action = getattr(self, "media_player_action", None)
+        if action is None:
+            return
+        action.setIcon(self._media_player_action_icon())
+        action.setIconVisibleInMenu(True)
+
+    def _action_ribbon_text_button_height(self, widget: QToolButton) -> int:
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        if toolbar is not None:
+            for action in toolbar.actions():
+                candidate = toolbar.widgetForAction(action)
+                if (
+                    isinstance(candidate, QToolButton)
+                    and candidate is not widget
+                    and candidate.property("role") == "actionRibbonButton"
+                    and candidate.toolButtonStyle() == Qt.ToolButtonTextOnly
+                ):
+                    return max(1, int(candidate.sizeHint().height()))
+        original_style = widget.toolButtonStyle()
+        widget.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        try:
+            return max(1, int(widget.sizeHint().height()))
+        finally:
+            widget.setToolButtonStyle(original_style)
+
+    def _configure_action_ribbon_button_widget(self, action_id: str, widget, spec: dict) -> None:
+        if widget is None:
+            return
+        widget.setProperty("role", "actionRibbonButton")
+        widget.setToolTip(self._action_ribbon_button_tooltip(spec))
+        if action_id == "media_player" and isinstance(widget, QToolButton):
+            button_height = self._action_ribbon_text_button_height(widget)
+            widget.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            extent = self._text_scaled_icon_extent(widget.font())
+            widget.setIconSize(QSize(extent, extent))
+            widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            widget.setFixedHeight(button_height)
+
+    def _refresh_media_player_action_surfaces(self) -> None:
+        self._configure_media_player_action_icon()
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        action = getattr(self, "media_player_action", None)
+        if toolbar is None or action is None:
+            return
+        widget = toolbar.widgetForAction(action)
+        spec = getattr(self, "_action_ribbon_specs_by_id", {}).get("media_player", {})
+        self._configure_action_ribbon_button_widget("media_player", widget, spec)
 
     def _signal_noarg_wrapper(self, slot):
         def _wrapper(_checked=False, _slot=slot):
@@ -8670,7 +9017,7 @@ class App(QMainWindow):
     ) -> dict[str, int]:
         managed_counts = self._diagnostics_managed_file_scan_counts(conn=conn)
         managed_file_units = sum(int(value or 0) for value in managed_counts.values()) or 1
-        core_units = 9
+        core_units = 10
         history_units = 5
         try:
             application_storage_units = int(
@@ -8741,6 +9088,14 @@ class App(QMainWindow):
             return (
                 f"This will delete {int(count)} orphaned custom value row(s) that no longer point to a valid "
                 "track or custom field definition."
+            )
+        if repair_key == "waveform_cache_cleanup":
+            count = 0
+            if check is not None:
+                count = int(check.get("issue_count") or check.get("orphan_count") or 0)
+            return (
+                f"This will delete {int(count)} stale or orphaned cached waveform row(s). "
+                "The next startup cache pass or audio playback can regenerate valid previews from the current audio."
             )
         if repair_key == "legacy_promoted_field_repair":
             candidates = self._legacy_promoted_field_repair_candidates()
@@ -8846,6 +9201,26 @@ class App(QMainWindow):
                 remaining=after_count,
             )
             return f"Removed {removed} orphaned custom value row(s)."
+
+        if repair_key == "waveform_cache_cleanup":
+            if self.conn is None or self.track_service is None:
+                raise RuntimeError("Open a profile first.")
+            cache_service = AudioWaveformCacheService(self.conn)
+            removed = cache_service.cleanup_invalid_caches(self.track_service)
+            self._audit(
+                "REPAIR",
+                "TrackAudioWaveformCache",
+                ref_id="stale-or-orphaned",
+                details=f"removed={removed}",
+            )
+            self._audit_commit()
+            self._log_event(
+                "diagnostics.repair.waveform_cache_cleanup",
+                "Diagnostics repair applied",
+                repair_key=repair_key,
+                removed=removed,
+            )
+            return f"Removed {removed} stale or orphaned cached waveform row(s)."
 
         if repair_key == "legacy_promoted_field_repair":
             if self.conn is None:
@@ -9562,6 +9937,46 @@ class App(QMainWindow):
             )
         progress.complete("Checked custom-value integrity.")
 
+        progress.set_message("Checking cached waveform previews...")
+        try:
+            if connection is None or active_track_service is None:
+                raise RuntimeError("No active track service is available.")
+            cache_service = AudioWaveformCacheService(connection)
+            cache_inspection = cache_service.inspect_invalid_caches(active_track_service)
+            if cache_inspection.issue_count == 0:
+                add_check(
+                    "Audio waveform cache",
+                    "ok",
+                    f"{cache_inspection.valid_rows} cached waveform row(s) valid.",
+                    (
+                        "Cached waveform preview rows point to existing tracks and match their current primary audio. "
+                        f"Total cache rows: {cache_inspection.total_rows}."
+                    ),
+                )
+            else:
+                details = "\n".join(cache_inspection.details[:25])
+                add_check(
+                    "Audio waveform cache",
+                    "warning",
+                    f"{cache_inspection.issue_count} stale or orphaned cached waveform row(s) detected.",
+                    details
+                    or "Some cached waveform previews no longer match a live primary audio source.",
+                    repair_key="waveform_cache_cleanup",
+                    repair_label="Clean Waveform Cache",
+                    orphan_count=cache_inspection.issue_count,
+                    issue_count=cache_inspection.issue_count,
+                )
+        except Exception as exc:
+            add_check(
+                "Audio waveform cache",
+                "error",
+                "Cached waveform validation failed to run.",
+                f"An exception occurred while checking cached waveform previews:\n{exc}",
+                repair_key="waveform_cache_cleanup",
+                repair_label="Clean Waveform Cache",
+            )
+        progress.complete("Checked cached waveform previews.")
+
         progress.set_message("Checking legacy default-column custom fields...")
         try:
             legacy_candidates = self._legacy_promoted_field_repair_candidates(conn=connection)
@@ -10178,6 +10593,23 @@ class App(QMainWindow):
                 },
             }
 
+        if repair_key == "waveform_cache_cleanup":
+            _set_status("Deleting stale cached waveforms...")
+            cache_service = AudioWaveformCacheService(bundle.conn)
+            removed = cache_service.cleanup_invalid_caches(bundle.track_service)
+            return {
+                "result_text": f"Removed {removed} stale or orphaned cached waveform row(s).",
+                "audit_entity": "TrackAudioWaveformCache",
+                "audit_ref_id": "stale-or-orphaned",
+                "audit_details": f"removed={removed}",
+                "log_event": "diagnostics.repair.waveform_cache_cleanup",
+                "log_message": "Diagnostics repair applied",
+                "log_fields": {
+                    "repair_key": repair_key,
+                    "removed": removed,
+                },
+            }
+
         if repair_key == "legacy_promoted_field_repair":
             _set_status("Merging legacy custom fields into default columns...")
             result = LegacyPromotedFieldRepairService(bundle.conn).repair_candidates()
@@ -10386,6 +10818,8 @@ class App(QMainWindow):
             if self.conn is not None
             else None
         )
+        if self.track_service is not None:
+            self.track_service.waveform_cache_scheduler = self._queue_audio_waveform_cache_for_track
         self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
@@ -11214,6 +11648,14 @@ class App(QMainWindow):
             self._queue_top_chrome_boundary_refresh()
         if event.type() == QEvent.WindowStateChange:
             self._schedule_main_window_geometry_save()
+        if event.type() in (
+            QEvent.FontChange,
+            QEvent.ApplicationFontChange,
+            QEvent.PaletteChange,
+            QEvent.ApplicationPaletteChange,
+            QEvent.StyleChange,
+        ):
+            self._refresh_media_player_action_surfaces()
 
     @staticmethod
     def _root_object_name(widget: QWidget) -> str:
@@ -11664,6 +12106,7 @@ class App(QMainWindow):
             "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
             "theme_library": self._load_theme_library(),
             "blob_icon_settings": dict(self.blob_icon_settings or self._load_blob_icon_settings()),
+            "startup_sound_enabled": self._startup_sound_enabled(),
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -11852,6 +12295,36 @@ class App(QMainWindow):
                 changed_count += 1
                 if hasattr(self, "table"):
                     self.table.viewport().update()
+
+            before_startup_sound_enabled = bool(
+                before_values.get("startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED)
+            )
+            after_startup_sound_enabled = bool(
+                after_values.get("startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED)
+            )
+            if after_startup_sound_enabled != before_startup_sound_enabled:
+                self.settings.setValue(
+                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
+                    after_startup_sound_enabled,
+                )
+                self.settings.sync()
+                self._log_event(
+                    "settings.startup_sound",
+                    "Startup sound setting updated",
+                    enabled=after_startup_sound_enabled,
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="startup_sound_enabled",
+                        label=(
+                            "Startup Sound Enabled"
+                            if after_startup_sound_enabled
+                            else "Startup Sound Disabled"
+                        ),
+                        before_value=before_startup_sound_enabled,
+                        after_value=after_startup_sound_enabled,
+                    )
+                changed_count += 1
 
             if after_values["artist_code"] != before_values["artist_code"]:
                 self.settings_mutations.set_artist_code(after_values["artist_code"])
@@ -12279,6 +12752,7 @@ class App(QMainWindow):
             theme_settings=before_values["theme_settings"],
             stored_themes=before_values["theme_library"],
             blob_icon_settings=before_values["blob_icon_settings"],
+            startup_sound_enabled=before_values["startup_sound_enabled"],
             current_profile_path=getattr(self, "current_db_path", ""),
             history_retention_mode=before_values["history_retention_mode"],
             history_auto_cleanup_enabled=before_values["history_auto_cleanup_enabled"],
@@ -12657,6 +13131,7 @@ class App(QMainWindow):
         self.open_diagnostics_dialog(initial_cleanup_tab="albums")
 
     def _close_database_connection(self):
+        self._stop_audio_waveform_cache_worker(wait=False)
         if hasattr(self, "auto_snapshot_timer"):
             self.auto_snapshot_timer.stop()
         quality_dashboard = getattr(self, "quality_dashboard_dialog", None)
@@ -12667,6 +13142,8 @@ class App(QMainWindow):
         self.database_session.close(self.conn)
         self.conn = None
         self.cursor = None
+        self.track_service = None
+        self._audio_waveform_cache_service_instance = None
         self.schema_service = None
         self.history_manager = None
         self.profile_kv = None
@@ -15263,6 +15740,14 @@ class App(QMainWindow):
                 "default": True,
             },
             {
+                "id": "media_player",
+                "label": "Media Player",
+                "category": "Catalog",
+                "description": "Open the media player for the selected or first visible track with primary audio.",
+                "action": self.media_player_action,
+                "default": True,
+            },
+            {
                 "id": "save_entry",
                 "label": "Save Track",
                 "category": "Edit",
@@ -15873,9 +16358,7 @@ class App(QMainWindow):
                 continue
             toolbar.addAction(spec["action"])
             widget = toolbar.widgetForAction(spec["action"])
-            if widget is not None:
-                widget.setProperty("role", "actionRibbonButton")
-                widget.setToolTip(self._action_ribbon_button_tooltip(spec))
+            self._configure_action_ribbon_button_widget(action_id, widget, spec)
 
         spacer = QWidget(toolbar)
         spacer.setObjectName("actionRibbonSpacer")
@@ -29703,6 +30186,26 @@ class App(QMainWindow):
                 actions.append({"text": text, "handler": lambda _checked=False, fn=handler: fn()})
         return actions
 
+    def _audio_preview_track_queue_items(self, track_order: list[int]) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        for position, track_id in enumerate(self._normalize_track_ids(track_order), start=1):
+            title = ""
+            try:
+                title = str(self._get_track_title(int(track_id)) or "").strip()
+            except Exception:
+                title = ""
+            if not title:
+                title = f"Track {track_id}"
+            items.append(
+                {
+                    "track_id": int(track_id),
+                    "title": title,
+                    "label": title,
+                    "position": position,
+                }
+            )
+        return items
+
     def _audio_preview_state_for_track(
         self,
         track_id: int,
@@ -29744,6 +30247,7 @@ class App(QMainWindow):
         return {
             "track_id": int(track_id),
             "track_order": track_order,
+            "track_queue": self._audio_preview_track_queue_items(track_order),
             "title": title,
             "artist": artist,
             "album": album,
@@ -29773,6 +30277,7 @@ class App(QMainWindow):
         return {
             "track_id": None,
             "track_order": [],
+            "track_queue": [],
             "title": clean_title,
             "artist": "",
             "album": "",
@@ -30703,6 +31208,58 @@ class App(QMainWindow):
             media_key,
             target_mode,
             cursor=self.cursor,
+        )
+
+    def _media_player_default_track_id(self) -> int | None:
+        source_spec = self._audio_preview_source_spec_for_standard_media("audio_file")
+        playable_ids = self._audio_preview_navigation_track_ids(source_spec)
+        playable_set = set(playable_ids)
+        controller = self._catalog_table_controller()
+        selected_ids = self._normalize_track_ids(controller.selected_track_ids())
+
+        for track_id in playable_ids:
+            if track_id in selected_ids:
+                return track_id
+
+        current_track_id = controller.current_track_id()
+        if current_track_id is not None and int(current_track_id) in playable_set:
+            return int(current_track_id)
+        if playable_ids:
+            return playable_ids[0]
+
+        fallback_candidates = list(selected_ids)
+        if current_track_id is not None:
+            fallback_candidates.append(int(current_track_id))
+        fallback_candidates.extend(controller.visible_track_ids())
+        for track_id in self._normalize_track_ids(fallback_candidates):
+            try:
+                if self.track_has_media(track_id, "audio_file"):
+                    return track_id
+            except Exception:
+                continue
+        return None
+
+    def open_media_player(self):
+        title = "Media Player"
+        existing_dialog = getattr(self, "audio_preview_dialog", None)
+        if existing_dialog is not None and existing_dialog.isVisible():
+            self._bring_media_window_to_front(existing_dialog)
+            return
+        if self.track_service is None:
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return
+        track_id = self._media_player_default_track_id()
+        if track_id is None:
+            QMessageBox.information(
+                self,
+                title,
+                "Select a track with attached primary audio first.",
+            )
+            return
+        self._open_audio_preview_for_track(
+            track_id,
+            self._audio_preview_source_spec_for_standard_media("audio_file"),
+            autoplay=False,
         )
 
     def _choose_track_media_storage_modes(
@@ -36183,16 +36740,118 @@ class _ImagePreviewDialog(QDialog):
         super().resizeEvent(event)
 
 
+class _HiDpiArtworkLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._paint_pixmap = QPixmap()
+        self._target_extent = 200
+
+    def set_artwork_pixmap(self, pixmap: QPixmap) -> None:
+        self._paint_pixmap = QPixmap(pixmap)
+        self.update()
+
+    def set_target_extent(self, extent: int) -> None:
+        next_extent = max(1, int(extent))
+        if self._target_extent == next_extent:
+            return
+        self._target_extent = next_extent
+        self.updateGeometry()
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(self._target_extent, self._target_extent)
+
+    def minimumSizeHint(self) -> QSize:
+        minimum = self.minimumSize()
+        return QSize(max(1, minimum.width()), max(1, minimum.height()))
+
+    def clear(self) -> None:
+        self._paint_pixmap = QPixmap()
+        super().clear()
+        self.update()
+
+    def pixmap(self) -> QPixmap:
+        return QPixmap(self._paint_pixmap)
+
+    def paintEvent(self, event) -> None:
+        if self._paint_pixmap.isNull():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            logical_size = self._paint_pixmap.deviceIndependentSize()
+            contents = QRectF(self.contentsRect())
+            frame_rect = contents.adjusted(2.0, 2.0, -2.0, -2.0)
+            draw_rect = QRectF(
+                0.0,
+                0.0,
+                max(1.0, float(logical_size.width())),
+                max(1.0, float(logical_size.height())),
+            )
+            draw_rect.moveCenter(contents.center())
+
+            background = (
+                self.window().palette().window().color()
+                if self.window()
+                else self.palette().window().color()
+            )
+            luminance = (
+                (0.2126 * background.redF())
+                + (0.7152 * background.greenF())
+                + (0.0722 * background.blueF())
+            )
+            light_mode = luminance >= 0.5
+            shadow = QColor(0, 0, 0, 72 if light_mode else 108)
+            border = QColor(self.palette().highlight().color())
+            border.setAlphaF(0.42 if light_mode else 0.36)
+            sheen = QColor(255, 255, 255, 22 if light_mode else 28)
+
+            painter.fillRect(frame_rect.translated(2.0, 2.0), shadow)
+            painter.save()
+            painter.setClipRect(frame_rect)
+            painter.setOpacity(0.96)
+            painter.drawPixmap(draw_rect, self._paint_pixmap, QRectF(self._paint_pixmap.rect()))
+            painter.restore()
+            painter.fillRect(frame_rect.adjusted(1.0, 1.0, -1.0, -1.0), sheen)
+            painter.setPen(QPen(border, 1.0))
+            painter.drawRect(frame_rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        finally:
+            painter.end()
+
+
 class _AudioPreviewDialog(QDialog):
     SCRUB_STEP_MS = 1000
     JUMP_STEP_MS = 10000
     STOP_BUTTON_FONT_SCALE = 2.5
+    MEDIA_ICON_SIZE = QSize(18, 18)
     ARTWORK_SIZE = 200
-    WAVEFORM_HEIGHT = 100
-    MEDIA_ROW_HEIGHT = ARTWORK_SIZE + 24
+    WAVEFORM_HEIGHT = 172
+    MEDIA_ROW_HEIGHT = ARTWORK_SIZE
     STATUS_SLIDER_MAX_WIDTH = 420
     DEFAULT_WINDOW_WIDTH = 960
-    DEFAULT_WINDOW_HEIGHT = 561
+    DEFAULT_WINDOW_HEIGHT = 581
+    CONTROL_GROUP_MARGIN = 8
+    PEAK_LABEL_OFFSET = 20
+    CONTROL_ROW_TOP_OFFSET = 0
+    CONTROL_BAND_HEIGHT = 88
+    LOOP_MODE_OFF = "off"
+    LOOP_MODE_PLAYLIST = "playlist"
+    LOOP_MODE_TRACK = "track"
+    _MEDIA_ICON_FILES = {
+        "media-player": "music-player-fill.svg",
+        "previous": "skip-start-fill.svg",
+        "rewind": "rewind-fill.svg",
+        "play": "play-fill.svg",
+        "pause": "pause-fill.svg",
+        "stop": "stop-fill.svg",
+        "forward": "fast-forward-fill.svg",
+        "next": "skip-end-fill.svg",
+        "repeat": "repeat.svg",
+        "repeat-one": "repeat-1.svg",
+        "volume-up": "volume-up-fill.svg",
+        "volume-mute": "volume-mute-fill.svg",
+    }
 
     def __init__(self, app, parent=None):
         super().__init__(parent, Qt.Window)
@@ -36201,6 +36860,7 @@ class _AudioPreviewDialog(QDialog):
         self._source_spec = None
         self._current_track_id = None
         self._track_order = []
+        self._track_queue = []
         self._current_audio_bytes = b""
         self._current_audio_mime = "audio/wav"
         self._current_title = ""
@@ -36208,6 +36868,9 @@ class _AudioPreviewDialog(QDialog):
         self._current_album = ""
         self._artwork_pixmap = QPixmap()
         self._handling_end_of_media = False
+        self._loop_mode = self.LOOP_MODE_OFF
+        self._media_icon_cache: dict[tuple[str, bool, str], QIcon] = {}
+        self._media_stage_syncing = False
 
         self.setObjectName("audioPreviewDialog")
         self.setWindowFlags(
@@ -36225,6 +36888,7 @@ class _AudioPreviewDialog(QDialog):
         self.setMinimumSize(self.DEFAULT_WINDOW_WIDTH, self.DEFAULT_WINDOW_HEIGHT)
         self.resize(self.DEFAULT_WINDOW_WIDTH, self.DEFAULT_WINDOW_HEIGHT)
         _apply_standard_dialog_chrome(self, "audioPreviewDialog")
+        self._apply_window_icon()
 
         if platform.system().lower() == "darwin":
             os.environ.setdefault(
@@ -36280,25 +36944,32 @@ class _AudioPreviewDialog(QDialog):
         metadata_layout.addLayout(header_row)
         root.addWidget(metadata_group)
 
+        self.media_group = QGroupBox("", self)
+        self.media_group.setObjectName("audioPreviewMediaGroup")
+        self.media_group.setProperty("role", "panel")
+        self.media_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        media_layout = QVBoxLayout(self.media_group)
+        media_layout.setContentsMargins(18, 12, 18, 14)
+        media_layout.setSpacing(0)
+
         content_row = QHBoxLayout()
-        content_row.setSpacing(16)
-        self.waveform_panel = QFrame(self)
+        content_row.setSpacing(20)
+        self.waveform_panel = QFrame(self.media_group)
         self.waveform_panel.setObjectName("audioPreviewWaveformPanel")
-        self.waveform_panel.setProperty("role", "panel")
-        self.waveform_panel.setAttribute(Qt.WA_StyledBackground, True)
-        self.waveform_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.waveform_panel.setFixedHeight(self.MEDIA_ROW_HEIGHT)
+        self.waveform_panel.setProperty("role", "mediaStage")
+        self.waveform_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.waveform_panel.setMinimumHeight(self.MEDIA_ROW_HEIGHT)
         waveform_layout = QVBoxLayout(self.waveform_panel)
-        waveform_layout.setContentsMargins(12, 12, 12, 12)
+        waveform_layout.setContentsMargins(0, 0, 0, 0)
         waveform_layout.setSpacing(6)
         waveform_layout.addStretch(1)
         self.wave = WaveformWidget(self.waveform_panel)
         self.wave.setObjectName("audioPreviewWaveform")
         self.wave.setProperty("role", "mediaWaveform")
-        self.wave.setFixedHeight(self.WAVEFORM_HEIGHT)
         self.wave.setMinimumHeight(self.WAVEFORM_HEIGHT)
         self.wave.setMaximumHeight(self.WAVEFORM_HEIGHT)
-        self.wave.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.wave.set_preferred_height(self.WAVEFORM_HEIGHT)
+        self.wave.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.wave_status_label = QLabel("Waveform unavailable", self.waveform_panel)
         self.wave_status_label.setObjectName("audioPreviewWaveformStatusLabel")
         self.wave_status_label.setProperty("role", "secondary")
@@ -36307,26 +36978,31 @@ class _AudioPreviewDialog(QDialog):
         waveform_layout.addWidget(self.wave, 0, Qt.AlignVCenter)
         waveform_layout.addWidget(self.wave_status_label, 0, Qt.AlignCenter)
         waveform_layout.addStretch(1)
-        content_row.addWidget(self.waveform_panel, 1, Qt.AlignVCenter)
+        content_row.addWidget(self.waveform_panel, 1)
 
-        self.artwork_container = QFrame(self)
+        self.artwork_container = QFrame(self.media_group)
         self.artwork_container.setObjectName("audioPreviewArtworkContainer")
-        self.artwork_container.setProperty("role", "panel")
-        self.artwork_container.setAttribute(Qt.WA_StyledBackground, True)
-        self.artwork_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.artwork_container.setFixedHeight(self.MEDIA_ROW_HEIGHT)
+        self.artwork_container.setProperty("role", "mediaArtworkStage")
+        self.artwork_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.artwork_container.setMinimumHeight(self.MEDIA_ROW_HEIGHT)
+        self.artwork_container.setMinimumWidth(self.ARTWORK_SIZE)
+        self.artwork_container.setMaximumWidth(self.ARTWORK_SIZE)
         artwork_layout = QVBoxLayout(self.artwork_container)
-        artwork_layout.setContentsMargins(12, 12, 12, 12)
+        artwork_layout.setContentsMargins(0, 0, 0, 0)
         artwork_layout.setSpacing(0)
-        self.artwork_label = QLabel(self.artwork_container)
+        self.artwork_label = _HiDpiArtworkLabel(self.artwork_container)
         self.artwork_label.setObjectName("audioPreviewArtworkLabel")
         self.artwork_label.setProperty("role", "mediaArtwork")
         self.artwork_label.setAlignment(Qt.AlignCenter)
-        self.artwork_label.setFixedSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
+        self.artwork_label.setMinimumSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
+        self.artwork_label.setMaximumSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
+        self.artwork_label.set_target_extent(self.ARTWORK_SIZE)
+        self.artwork_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         artwork_layout.addWidget(self.artwork_label, 0, Qt.AlignCenter)
         self.artwork_container.hide()
-        content_row.addWidget(self.artwork_container, 0, Qt.AlignVCenter)
-        root.addLayout(content_row)
+        content_row.addWidget(self.artwork_container, 0)
+        media_layout.addLayout(content_row)
+        root.addWidget(self.media_group, 1)
 
         self.playback_status_panel = QFrame(self)
         self.playback_status_panel.setObjectName("audioPreviewPlaybackStatusPanel")
@@ -36346,45 +37022,70 @@ class _AudioPreviewDialog(QDialog):
         self._slider.setMinimumWidth(220)
         self._slider.setMaximumWidth(self.STATUS_SLIDER_MAX_WIDTH)
         playback_status_layout.addWidget(self._slider, 0, Qt.AlignLeft | Qt.AlignVCenter)
-        playback_status_layout.addStretch(1)
+        self.scope = SpectrumGraphWidget(self.playback_status_panel)
+        self.scope.setObjectName("audioPreviewSpectrumGraph")
+        self.scope.setProperty("role", "mediaSpectrumGraph")
+        scope_height = max(self._label_time.sizeHint().height(), self._slider.sizeHint().height())
+        self.scope.setFixedHeight(max(1, int(scope_height)))
+        self.scope.setMinimumWidth(160)
+        self.scope.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        scope_slot = QHBoxLayout()
+        scope_slot.setContentsMargins(0, 0, 0, 0)
+        scope_slot.setSpacing(0)
+        scope_slot.addStretch(1)
+        scope_slot.addWidget(self.scope, 4, Qt.AlignVCenter)
+        scope_slot.addStretch(1)
+        playback_status_layout.addLayout(scope_slot, 1)
         root.addWidget(self.playback_status_panel)
 
         controls_row = QHBoxLayout()
         controls_row.setSpacing(10)
 
         playback_group, playback_layout = _create_standard_section(self, "Playback")
+        self.playback_group = playback_group
         playback_group.setObjectName("audioPreviewPlaybackGroup")
         playback_group.setProperty("role", "panel")
-        playback_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        playback_layout.setSpacing(12)
+        playback_group.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Maximum)
+        playback_layout.setContentsMargins(
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+        )
+        playback_layout.setSpacing(0)
 
         transport_buttons = QHBoxLayout()
         transport_buttons.setSpacing(6)
         self.previous_button = self._create_transport_button(
+            "previous",
             "|◀",
             "Previous Track",
             "audioPreviewPreviousButton",
             self._go_to_previous_track,
         )
         self.rewind_button = self._create_transport_button(
+            "rewind",
             "◀◀",
             "Jump Back 10 Seconds",
             "audioPreviewRewindButton",
             lambda: self._jump_by_ms(-self.JUMP_STEP_MS),
         )
         self.play_button = self._create_transport_button(
+            "play",
             "▶",
             "Play",
             "audioPreviewPlayButton",
             self._player.play,
         )
         self.pause_button = self._create_transport_button(
+            "pause",
             "▌▌",
             "Pause",
             "audioPreviewPauseButton",
             self._player.pause,
         )
         self.stop_button = self._create_transport_button(
+            "stop",
             "■",
             "Stop",
             "audioPreviewStopButton",
@@ -36392,17 +37093,20 @@ class _AudioPreviewDialog(QDialog):
         )
         self._apply_stop_button_font()
         self.forward_button = self._create_transport_button(
+            "forward",
             "▶▶",
             "Jump Forward 10 Seconds",
             "audioPreviewForwardButton",
             lambda: self._jump_by_ms(self.JUMP_STEP_MS),
         )
         self.next_button = self._create_transport_button(
+            "next",
             "▶|",
             "Next Track",
             "audioPreviewNextButton",
             self._go_to_next_track,
         )
+        self.loop_button = self._create_loop_button()
         for button in (
             self.previous_button,
             self.rewind_button,
@@ -36411,10 +37115,10 @@ class _AudioPreviewDialog(QDialog):
             self.stop_button,
             self.forward_button,
             self.next_button,
+            self.loop_button,
         ):
             transport_buttons.addWidget(button)
         transport_buttons.addStretch(1)
-        playback_layout.addLayout(transport_buttons)
 
         playback_footer = QHBoxLayout()
         playback_footer.setSpacing(10)
@@ -36424,19 +37128,40 @@ class _AudioPreviewDialog(QDialog):
         self.auto_advance_check.setChecked(True)
         playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft)
         playback_footer.addStretch(1)
-        playback_layout.addLayout(playback_footer)
-        controls_row.addWidget(playback_group, 1)
+        self.playback_control_band = QWidget(playback_group)
+        self.playback_control_band.setObjectName("audioPreviewPlaybackControlBand")
+        self.playback_control_band.setFixedHeight(self.CONTROL_BAND_HEIGHT)
+        self.playback_control_band.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        playback_band_layout = QVBoxLayout(self.playback_control_band)
+        playback_band_layout.setContentsMargins(0, 0, 0, 0)
+        playback_band_layout.setSpacing(0)
+        playback_band_layout.addLayout(transport_buttons)
+        playback_band_layout.addStretch(1)
+        playback_band_layout.addLayout(playback_footer)
+        playback_layout.addSpacing(self.CONTROL_ROW_TOP_OFFSET)
+        playback_layout.addWidget(self.playback_control_band)
+        controls_row.addWidget(playback_group, 0)
 
         volume_group, volume_layout = _create_standard_section(self, "Volume")
         volume_group.setObjectName("audioPreviewVolumeGroup")
         volume_group.setProperty("role", "panel")
-        volume_group.setMinimumWidth(120)
+        volume_group.setMinimumWidth(150)
         volume_group.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        volume_layout.setContentsMargins(
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+        )
         volume_layout.setSpacing(6)
         volume_body = QGridLayout()
         volume_body.setContentsMargins(0, 0, 0, 0)
-        volume_body.setHorizontalSpacing(10)
-        volume_body.setVerticalSpacing(6)
+        volume_body.setHorizontalSpacing(8)
+        volume_body.setVerticalSpacing(0)
+        self.peak_meter = StereoPeakMeterWidget(volume_group)
+        self.peak_meter.setObjectName("audioPreviewStereoPeakMeter")
+        self.peak_meter.setProperty("role", "mediaPeakMeter")
+        self.peak_meter.setBarHeight(self.CONTROL_BAND_HEIGHT)
         self.volume_slider = FocusWheelSlider(Qt.Vertical)
         self.volume_slider.setObjectName("audioPreviewVolumeSlider")
         self.volume_slider.setProperty("role", "mediaVolumeSlider")
@@ -36444,11 +37169,12 @@ class _AudioPreviewDialog(QDialog):
         self.volume_slider.setSingleStep(5)
         self.volume_slider.setPageStep(10)
         self.volume_slider.setToolTip("Volume")
-        self.volume_slider.setMinimumHeight(74)
+        self.volume_slider.setMinimumHeight(self.CONTROL_BAND_HEIGHT)
+        self.volume_slider.setMaximumHeight(self.CONTROL_BAND_HEIGHT)
         self.volume_label = QLabel("100%", volume_group)
         self.volume_label.setObjectName("audioPreviewVolumeLabel")
         self.volume_label.setProperty("role", "statusText")
-        self.volume_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.volume_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self.volume_label.setMinimumWidth(44)
         self.mute_button = QToolButton(volume_group)
         self.mute_button.setObjectName("audioPreviewMuteButton")
@@ -36457,35 +37183,75 @@ class _AudioPreviewDialog(QDialog):
         self.mute_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.mute_button.setAutoRaise(False)
         self.mute_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.mute_button.setFixedSize(15, 15)
-        self.mute_button.setIconSize(QSize(12, 12))
+        self.mute_button.setFixedSize(24, 24)
+        self.mute_button.setIconSize(self.MEDIA_ICON_SIZE)
         self.mute_button.setStyleSheet(
             """
             QToolButton#audioPreviewMuteButton {
-                min-width: 12px;
-                max-width: 12px;
-                min-height: 12px;
-                max-height: 12px;
+                min-width: 24px;
+                max-width: 24px;
+                min-height: 24px;
+                max-height: 24px;
                 border-radius: 6px;
                 padding: 0px;
             }
             """
         )
         volume_body.setColumnStretch(0, 1)
-        volume_body.setColumnStretch(3, 1)
-        volume_body.setRowStretch(0, 1)
-        volume_body.addWidget(self.volume_slider, 0, 1, 2, 1, Qt.AlignCenter)
-        volume_body.addWidget(self.volume_label, 0, 2, Qt.AlignRight | Qt.AlignVCenter)
-        volume_body.addWidget(self.mute_button, 1, 2, Qt.AlignRight | Qt.AlignBottom)
+        volume_body.setColumnStretch(4, 1)
+        volume_body.setRowMinimumHeight(0, self.CONTROL_BAND_HEIGHT)
+        volume_body.setRowStretch(0, 0)
+        volume_body.addWidget(self.peak_meter, 0, 1, Qt.AlignHCenter | Qt.AlignTop)
+        volume_body.addWidget(self.volume_slider, 0, 2, Qt.AlignHCenter | Qt.AlignTop)
+        volume_body.addWidget(self.volume_label, 0, 3, Qt.AlignRight | Qt.AlignTop)
+        volume_body.addWidget(self.mute_button, 0, 3, Qt.AlignRight | Qt.AlignBottom)
         volume_layout.addLayout(volume_body)
         volume_layout.addStretch(1)
         controls_row.addWidget(volume_group, 0)
 
+        self.play_next_group, play_next_layout = _create_standard_section(self, "Play Next")
+        play_next_group = self.play_next_group
+        play_next_group.setObjectName("audioPreviewPlayNextGroup")
+        play_next_group.setProperty("role", "panel")
+        play_next_group.setMinimumWidth(200)
+        play_next_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        play_next_layout.setContentsMargins(
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+        )
+        play_next_layout.setSpacing(0)
+        self.play_next_list = QListWidget(play_next_group)
+        self.play_next_list.setObjectName("audioPreviewPlayNextList")
+        self.play_next_list.setProperty("role", "hint")
+        self.play_next_list.setAlternatingRowColors(False)
+        self.play_next_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.play_next_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.play_next_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.play_next_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.play_next_list.setUniformItemSizes(True)
+        self.play_next_list.setTextElideMode(Qt.ElideRight)
+        self.play_next_list.setMinimumHeight(self.CONTROL_BAND_HEIGHT)
+        self.play_next_list.setMaximumHeight(self.CONTROL_BAND_HEIGHT)
+        self.play_next_list.itemClicked.connect(self._play_next_item)
+        self.play_next_list.itemActivated.connect(self._play_next_item)
+        play_next_layout.addSpacing(self.CONTROL_ROW_TOP_OFFSET)
+        play_next_layout.addWidget(self.play_next_list)
+        controls_row.addWidget(play_next_group, 1)
+
         export_group, export_layout = _create_standard_section(self, "Export")
         export_group.setObjectName("audioPreviewExportGroup")
         export_group.setProperty("role", "panel")
-        export_group.setMinimumWidth(220)
+        export_group.setMinimumWidth(110)
+        export_group.setMaximumWidth(130)
         export_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        export_layout.setContentsMargins(
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+            self.CONTROL_GROUP_MARGIN,
+        )
         self.export_button = QToolButton(export_group)
         self.export_button.setObjectName("audioPreviewExportButton")
         self.export_button.setProperty("role", "mediaExportButton")
@@ -36495,32 +37261,42 @@ class _AudioPreviewDialog(QDialog):
         self.export_menu = QMenu(self.export_button)
         self.export_button.setMenu(self.export_menu)
         self.export_button.setEnabled(False)
+        export_layout.setSpacing(0)
+        export_layout.addSpacing(self.CONTROL_ROW_TOP_OFFSET)
         export_layout.addWidget(self.export_button)
         export_layout.addStretch(1)
         controls_row.addWidget(export_group, 0)
-        controls_row.setStretch(0, 1)
+        controls_row.setStretch(0, 0)
         controls_row.setStretch(1, 0)
-        controls_row.setStretch(2, 0)
+        controls_row.setStretch(2, 1)
+        controls_row.setStretch(3, 0)
         control_group_height = max(
             playback_group.sizeHint().height(),
             volume_group.sizeHint().height(),
+            play_next_group.sizeHint().height(),
             export_group.sizeHint().height(),
         )
-        for group in (playback_group, volume_group, export_group):
+        for group in (playback_group, volume_group, play_next_group, export_group):
             group.setMinimumHeight(control_group_height)
-        root.addLayout(controls_row)
-        root.addStretch(1)
+        self._apply_play_next_font()
+        root.addLayout(controls_row, 0)
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(50)
         self._resize_timer.timeout.connect(self._reload_peaks_for_current_width)
 
+        self._visualization_timer = QTimer(self)
+        self._visualization_timer.setInterval(33)
+        self._visualization_timer.timeout.connect(self._refresh_live_visualization)
+
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.positionChanged.connect(self._on_position_changed)
         self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self._player.playbackStateChanged.connect(self._sync_visualization_timer)
         self._slider.sliderMoved.connect(self._seek_to_ms)
         self.volume_slider.valueChanged.connect(self._set_volume_percent)
+        self._audio_out.volumeChanged.connect(self._sync_volume_controls)
         self.mute_button.toggled.connect(self._set_muted)
         self._audio_out.mutedChanged.connect(self._sync_mute_button)
         self.wave.scrubRequested.connect(self._scrub_by_ms)
@@ -36528,52 +37304,446 @@ class _AudioPreviewDialog(QDialog):
         self._sync_volume_controls()
         self._sync_mute_button()
         self._install_shortcuts()
+        QTimer.singleShot(0, self._sync_media_stage_size)
 
-    def _create_transport_button(self, symbol, tooltip, object_name, slot):
+    def _apply_window_icon(self) -> None:
+        icon = QIcon()
+        action = getattr(self.app, "media_player_action", None)
+        if action is not None:
+            icon = action.icon()
+        if icon.isNull():
+            icon_path = self._media_icon_path("media-player")
+            if icon_path.exists():
+                icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            self.setWindowIcon(icon)
+
+    def _sync_media_stage_size(self) -> None:
+        if getattr(self, "_media_stage_syncing", False):
+            return
+        if not hasattr(self, "media_group") or self.media_group is None:
+            return
+        layout = self.media_group.layout()
+        if layout is None:
+            return
+
+        self._media_stage_syncing = True
+        try:
+            contents = self.media_group.contentsRect()
+            margins = layout.contentsMargins()
+            row_height = max(
+                self.MEDIA_ROW_HEIGHT,
+                int(contents.height()) - int(margins.top()) - int(margins.bottom()),
+            )
+            available_width = max(
+                1,
+                int(contents.width()) - int(margins.left()) - int(margins.right()),
+            )
+            art_spacing = 20 if self.artwork_container.isVisible() else 0
+            max_art_by_width = available_width - art_spacing - 360
+            if max_art_by_width <= 0:
+                max_art_by_width = self.ARTWORK_SIZE
+            artwork_size = max(
+                self.ARTWORK_SIZE,
+                min(row_height, int(max_art_by_width)),
+            )
+            waveform_height = max(
+                self.WAVEFORM_HEIGHT,
+                min(row_height, int(round(row_height * 0.86))),
+            )
+
+            if self.waveform_panel.maximumHeight() != row_height:
+                self.waveform_panel.setMaximumHeight(row_height)
+            if self.wave.maximumHeight() != waveform_height:
+                self.wave.setMaximumHeight(waveform_height)
+            self.wave.set_preferred_height(waveform_height)
+
+            if self.artwork_container.maximumHeight() != row_height:
+                self.artwork_container.setMaximumHeight(row_height)
+            if self.artwork_container.maximumWidth() != artwork_size:
+                self.artwork_container.setMaximumWidth(artwork_size)
+            artwork_target = QSize(artwork_size, artwork_size)
+            if self.artwork_label.maximumSize() != artwork_target:
+                self.artwork_label.setMaximumSize(artwork_target)
+            self.artwork_label.set_target_extent(artwork_size)
+            if self.artwork_label.size() != artwork_target:
+                self._refresh_artwork_pixmap()
+            self.waveform_panel.updateGeometry()
+            self.wave.updateGeometry()
+            self.artwork_container.updateGeometry()
+            self.artwork_label.updateGeometry()
+        finally:
+            self._media_stage_syncing = False
+
+    def _media_icon_path(self, icon_key: str) -> Path:
+        filename = self._MEDIA_ICON_FILES.get(str(icon_key or ""))
+        if not filename:
+            return Path()
+        return RES_DIR() / "icons" / filename
+
+    @staticmethod
+    def _media_icon_relative_luminance(color: QColor) -> float:
+        def channel(value: int) -> float:
+            normalized = max(0.0, min(1.0, float(value) / 255.0))
+            if normalized <= 0.03928:
+                return normalized / 12.92
+            return ((normalized + 0.055) / 1.055) ** 2.4
+
+        return (
+            0.2126 * channel(color.red())
+            + 0.7152 * channel(color.green())
+            + 0.0722 * channel(color.blue())
+        )
+
+    @classmethod
+    def _media_icon_contrast_ratio(cls, foreground: QColor, background: QColor) -> float:
+        fg_luminance = cls._media_icon_relative_luminance(foreground)
+        bg_luminance = cls._media_icon_relative_luminance(background)
+        lighter = max(fg_luminance, bg_luminance)
+        darker = min(fg_luminance, bg_luminance)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    def _media_icon_background_color(self, button: QToolButton | None) -> QColor:
+        palette = button.palette() if button is not None else self.palette()
+        if button is not None and button.isChecked():
+            background = palette.color(QPalette.Highlight)
+        else:
+            background = palette.color(QPalette.Button)
+        if not background.isValid():
+            background = self.palette().color(QPalette.Window)
+        return background
+
+    def _media_icon_contrasting_color(
+        self,
+        button: QToolButton | None,
+        preferred: QColor | None = None,
+    ) -> QColor:
+        background = self._media_icon_background_color(button)
+        preferred_color = QColor(preferred) if isinstance(preferred, QColor) else QColor()
+        if not preferred_color.isValid():
+            preferred_color = self.palette().color(QPalette.ButtonText)
+        if (
+            preferred_color.isValid()
+            and self._media_icon_contrast_ratio(preferred_color, background) >= 3.0
+        ):
+            return preferred_color
+
+        dark = QColor("#111827")
+        light = QColor("#FFFFFF")
+        if self._media_icon_contrast_ratio(dark, background) >= self._media_icon_contrast_ratio(
+            light, background
+        ):
+            return dark
+        return light
+
+    @staticmethod
+    def _colorized_media_icon_pixmap(source: QPixmap, color: QColor) -> QPixmap:
+        result = QPixmap(source.size())
+        result.setDevicePixelRatio(source.devicePixelRatioF())
+        result.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(result)
+        try:
+            painter.drawPixmap(0, 0, source)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(result.rect(), color)
+        finally:
+            painter.end()
+        return result
+
+    def _tinted_media_icon_pixmap(self, source: QPixmap, color: QColor) -> QPixmap:
+        tinted = QPixmap(source.size())
+        tinted.setDevicePixelRatio(source.devicePixelRatioF())
+        tinted.fill(QColor(0, 0, 0, 0))
+
+        outline_color = QColor(
+            "#FFFFFF" if self._media_icon_relative_luminance(color) < 0.5 else "#111827"
+        )
+        outline_color.setAlphaF(max(0.0, min(1.0, color.alphaF() * 0.55)))
+        outline = self._colorized_media_icon_pixmap(source, outline_color)
+        foreground = self._colorized_media_icon_pixmap(source, color)
+
+        painter = QPainter(tinted)
+        try:
+            for dx, dy in (
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                (-1, -1),
+                (1, -1),
+                (-1, 1),
+                (1, 1),
+            ):
+                painter.drawPixmap(dx, dy, outline)
+            painter.drawPixmap(0, 0, foreground)
+        finally:
+            painter.end()
+        return tinted
+
+    def _media_icon(
+        self,
+        icon_key: str,
+        *,
+        color: QColor | None = None,
+        inactive: bool = False,
+    ) -> QIcon:
+        icon_color = QColor(color) if isinstance(color, QColor) else QColor()
+        if not icon_color.isValid():
+            icon_color = self.palette().color(QPalette.ButtonText)
+        if inactive:
+            icon_color.setAlphaF(max(0.0, min(1.0, icon_color.alphaF() * 0.38)))
+        cache_key = (str(icon_key or ""), bool(inactive), icon_color.name(QColor.HexArgb))
+        cached = self._media_icon_cache.get(cache_key)
+        if isinstance(cached, QIcon):
+            return cached
+
+        icon_path = self._media_icon_path(str(icon_key or ""))
+        icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+        if not icon.isNull():
+            pixmap = icon.pixmap(self.MEDIA_ICON_SIZE)
+            if not pixmap.isNull():
+                icon = QIcon(self._tinted_media_icon_pixmap(pixmap, icon_color))
+
+        self._media_icon_cache[cache_key] = icon
+        return icon
+
+    def _set_icon_button_content(
+        self,
+        button: QToolButton,
+        icon_key: str,
+        fallback_text: str,
+        *,
+        inactive: bool = False,
+    ) -> None:
+        if button.isChecked():
+            preferred_color = button.palette().color(QPalette.HighlightedText)
+        else:
+            preferred_color = button.palette().color(QPalette.ButtonText)
+        icon = self._media_icon(
+            icon_key,
+            color=self._media_icon_contrasting_color(button, preferred_color),
+            inactive=inactive,
+        )
+        button.setProperty("mediaIconKey", icon_key)
+        button.setProperty("mediaFallbackText", fallback_text)
+        button.setProperty("mediaIconInactive", bool(inactive))
+        button.setIconSize(self.MEDIA_ICON_SIZE)
+        if icon.isNull():
+            button.setIcon(QIcon())
+            button.setText(fallback_text)
+            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            return
+        button.setText("")
+        button.setIcon(icon)
+        button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+
+    def _create_transport_button(self, icon_key, fallback_text, tooltip, object_name, slot):
         button = QToolButton(self)
         button.setObjectName(object_name)
         button.setProperty("role", "mediaTransportButton")
-        button.setText(symbol)
-        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self._set_icon_button_content(button, icon_key, fallback_text)
         button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
         button.setAutoRaise(False)
         button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        button.setMinimumSize(52, 34)
+        button.setFixedSize(42, 34)
         button.clicked.connect(slot)
+        return button
+
+    def _refresh_media_button_icons(self) -> None:
+        for button in (
+            getattr(self, "previous_button", None),
+            getattr(self, "rewind_button", None),
+            getattr(self, "play_button", None),
+            getattr(self, "pause_button", None),
+            getattr(self, "stop_button", None),
+            getattr(self, "forward_button", None),
+            getattr(self, "next_button", None),
+        ):
+            if not isinstance(button, QToolButton):
+                continue
+            icon_key = str(button.property("mediaIconKey") or "")
+            fallback_text = str(button.property("mediaFallbackText") or "")
+            if icon_key:
+                self._set_icon_button_content(button, icon_key, fallback_text)
+        if hasattr(self, "loop_button"):
+            self._sync_loop_button()
+        if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
+            self._sync_mute_button()
+
+    def _create_loop_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewLoopButton")
+        button.setProperty("role", "mediaTransportButton")
+        button.setCheckable(True)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.clicked.connect(self._cycle_loop_mode)
+        self._sync_loop_button(button)
         return button
 
     def _apply_stop_button_font(self) -> None:
         if not hasattr(self, "stop_button"):
             return
-        if hasattr(self, "play_button"):
-            self.play_button.ensurePolished()
-        self.stop_button.ensurePolished()
         base_font = self.play_button.font() if hasattr(self, "play_button") else self.font()
-        base_info = self.play_button.fontInfo() if hasattr(self, "play_button") else self.fontInfo()
-        stop_font = QFont(base_font)
-        scale = float(self.STOP_BUTTON_FONT_SCALE)
-        style_size = 0.0
-        style_unit = "pt"
-        if base_info.pixelSize() > 0:
-            style_size = float(max(1, int(round(float(base_info.pixelSize()) * scale))))
-            style_unit = "px"
-            stop_font.setPixelSize(int(style_size))
-        else:
-            point_size = float(base_info.pointSizeF())
+        self.stop_button.setFont(base_font)
+        self.stop_button.setStyleSheet("")
+
+    def _cycle_loop_mode(self) -> None:
+        next_modes = {
+            self.LOOP_MODE_OFF: self.LOOP_MODE_PLAYLIST,
+            self.LOOP_MODE_PLAYLIST: self.LOOP_MODE_TRACK,
+            self.LOOP_MODE_TRACK: self.LOOP_MODE_OFF,
+        }
+        self._set_loop_mode(next_modes.get(self._loop_mode, self.LOOP_MODE_OFF))
+
+    def _set_loop_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {
+            self.LOOP_MODE_OFF,
+            self.LOOP_MODE_PLAYLIST,
+            self.LOOP_MODE_TRACK,
+        }:
+            normalized = self.LOOP_MODE_OFF
+        self._loop_mode = normalized
+        self._sync_loop_button()
+        self._update_navigation_buttons()
+
+    def _sync_loop_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "loop_button", None)
+        if button is None:
+            return
+        mode = self._loop_mode
+        active = mode != self.LOOP_MODE_OFF
+        icon_key = "repeat-one" if mode == self.LOOP_MODE_TRACK else "repeat"
+        fallback_text = "R1" if mode == self.LOOP_MODE_TRACK else "R"
+        tooltip = {
+            self.LOOP_MODE_OFF: "Loop Off",
+            self.LOOP_MODE_PLAYLIST: "Loop Playlist",
+            self.LOOP_MODE_TRACK: "Loop Current Track",
+        }.get(mode, "Loop Off")
+        button.blockSignals(True)
+        try:
+            button.setChecked(active)
+        finally:
+            button.blockSignals(False)
+        button.setProperty("loopMode", mode)
+        self._set_icon_button_content(
+            button,
+            icon_key,
+            fallback_text,
+            inactive=mode == self.LOOP_MODE_OFF,
+        )
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def _hint_text_font(self) -> QFont:
+        font = QFont(self.font())
+        effective_theme = {}
+        provider = getattr(self.app, "_effective_theme_settings", None)
+        if callable(provider):
+            try:
+                effective_theme = dict(provider() or {})
+            except Exception:
+                effective_theme = {}
+        try:
+            hint_size = int(effective_theme.get("secondary_text_font_size") or 0)
+        except (TypeError, ValueError):
+            hint_size = 0
+        if hint_size <= 0:
+            point_size = font.pointSizeF()
             if point_size <= 0:
                 point_size = float(QApplication.font().pointSizeF())
-            if point_size <= 0:
-                point_size = 12.0
-            style_size = max(1.0, point_size * scale)
-            stop_font.setPointSizeF(style_size)
-        self.stop_button.setFont(stop_font)
-        self.stop_button.setStyleSheet(
-            f"""
-            QToolButton#audioPreviewStopButton {{
-                font-size: {style_size:.3f}{style_unit};
-            }}
-            """
-        )
+            hint_size = max(8, int(round(point_size - 1)))
+        font.setPointSize(max(1, int(hint_size)))
+        return font
+
+    def _apply_play_next_font(self) -> None:
+        if not hasattr(self, "play_next_list"):
+            return
+        font = self._hint_text_font()
+        self.play_next_list.setFont(font)
+        for index in range(self.play_next_list.count()):
+            self.play_next_list.item(index).setFont(font)
+
+    def _set_play_next_items(self, items: list[dict[str, object]]) -> None:
+        if not hasattr(self, "play_next_list"):
+            return
+        self._track_queue = list(items or [])
+        self.play_next_list.blockSignals(True)
+        try:
+            self.play_next_list.clear()
+            font = self._hint_text_font()
+            if not self._track_queue:
+                item = QListWidgetItem("No playable tracks")
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                item.setFont(font)
+                self.play_next_list.addItem(item)
+                return
+            for position, spec in enumerate(self._track_queue, start=1):
+                try:
+                    track_id = int(spec.get("track_id"))
+                except (TypeError, ValueError):
+                    continue
+                title = str(spec.get("title") or spec.get("label") or f"Track {track_id}").strip()
+                if not title:
+                    title = f"Track {track_id}"
+                label = str(spec.get("label") or title).strip() or title
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, track_id)
+                item.setToolTip(f"{position}. {title}")
+                item.setFont(font)
+                self.play_next_list.addItem(item)
+        finally:
+            self.play_next_list.blockSignals(False)
+        self._sync_play_next_selection()
+
+    def _sync_play_next_selection(self) -> None:
+        if not hasattr(self, "play_next_list"):
+            return
+        current_id = self._current_track_id
+        try:
+            current_id = int(current_id)
+        except (TypeError, ValueError):
+            current_id = None
+        self.play_next_list.blockSignals(True)
+        try:
+            self.play_next_list.clearSelection()
+            if current_id is None:
+                self.play_next_list.setCurrentRow(-1)
+                return
+            for index in range(self.play_next_list.count()):
+                item = self.play_next_list.item(index)
+                try:
+                    track_id = int(item.data(Qt.UserRole))
+                except (TypeError, ValueError):
+                    continue
+                if track_id == current_id:
+                    self.play_next_list.setCurrentItem(item)
+                    item.setSelected(True)
+                    self.play_next_list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                    return
+            self.play_next_list.setCurrentRow(-1)
+        finally:
+            self.play_next_list.blockSignals(False)
+
+    def _play_next_item(self, item: QListWidgetItem | None) -> None:
+        if item is None or self._source_spec is None:
+            self._sync_play_next_selection()
+            return
+        try:
+            track_id = int(item.data(Qt.UserRole))
+        except (TypeError, ValueError):
+            self._sync_play_next_selection()
+            return
+        if track_id == self._current_track_id:
+            self._sync_play_next_selection()
+            return
+        self.open_track_preview(track_id, self._source_spec, autoplay=True)
 
     def _install_shortcuts(self) -> None:
         bindings = (
@@ -36617,6 +37787,7 @@ class _AudioPreviewDialog(QDialog):
         self._source_spec = source_spec
         self._current_track_id = state.get("track_id")
         self._track_order = list(state.get("track_order") or [])
+        self._set_play_next_items(list(state.get("track_queue") or []))
         self._current_audio_bytes = bytes(state.get("audio_bytes") or b"")
         self._current_audio_mime = str(state.get("audio_mime") or "audio/wav")
         self._current_title = str(state.get("title") or "Audio Player").strip() or "Audio Player"
@@ -36640,6 +37811,7 @@ class _AudioPreviewDialog(QDialog):
     def _load_audio_source(self, data: bytes, mime: str) -> None:
         self._reset_player_source()
         self._cleanup_temp_file()
+        self.peak_meter.reset_signal_activity()
         ext = {
             "audio/mpeg": ".mp3",
             "audio/wav": ".wav",
@@ -36662,8 +37834,35 @@ class _AudioPreviewDialog(QDialog):
         self._apply_position(0, self._player.duration())
 
     def _load_waveform(self, path: str) -> None:
-        peaks = load_wav_peaks(path, max(self.wave.width(), 480))
-        self.wave.set_peaks(peaks)
+        self._load_waveform_peaks(path)
+        spectrum_frames = load_audio_spectrum_frames(path)
+        peak_frames = load_audio_peak_meter_frames(path)
+        self.scope.set_spectrum_frames(spectrum_frames)
+        self.peak_meter.set_peak_frames(peak_frames)
+        self._start_scope_visualization_if_playing()
+
+    def _load_waveform_peaks(self, path: str) -> None:
+        cached = None
+        source_spec = self._source_spec if isinstance(self._source_spec, dict) else {}
+        if (
+            self._current_track_id is not None
+            and str(source_spec.get("kind") or "").strip().lower() == "standard"
+            and str(source_spec.get("media_key") or "audio_file").strip() == "audio_file"
+        ):
+            cache_loader = getattr(self.app, "_audio_waveform_cache_for_track", None)
+            if callable(cache_loader):
+                cached = cache_loader(int(self._current_track_id))
+        if cached is not None:
+            peaks = list(getattr(cached, "peaks", []) or [])
+            self.wave.set_cached_waveform(
+                peaks,
+                light_preview_png=getattr(cached, "light_preview_png", None),
+                dark_preview_png=getattr(cached, "dark_preview_png", None),
+                cache_key=getattr(cached, "source_fingerprint", None),
+            )
+        else:
+            peaks = load_wav_peaks(path, max(self.wave.width(), 480))
+            self.wave.set_peaks(peaks)
         has_peaks = bool(peaks)
         self.wave.setVisible(has_peaks)
         self.wave_status_label.setVisible(not has_peaks)
@@ -36671,7 +37870,9 @@ class _AudioPreviewDialog(QDialog):
     def _reload_peaks_for_current_width(self) -> None:
         if not self._tmp_path:
             return
-        self._load_waveform(self._tmp_path)
+        self._load_waveform_peaks(self._tmp_path)
+        self._start_scope_visualization_if_playing()
+        self.scope.update()
         self._refresh_artwork_pixmap()
 
     def _set_export_actions(self, actions: list[dict[str, object]]) -> None:
@@ -36691,26 +37892,38 @@ class _AudioPreviewDialog(QDialog):
         self.volume_slider.setValue(percent)
         self.volume_slider.blockSignals(False)
         self.volume_label.setText(f"{percent}%")
+        self._sync_peak_meter_gain()
 
     def _sync_mute_button(self, *_args) -> None:
         muted = bool(self._audio_out.isMuted())
         self.mute_button.blockSignals(True)
         self.mute_button.setChecked(muted)
         self.mute_button.blockSignals(False)
-        icon = self.style().standardIcon(
-            QStyle.SP_MediaVolume if muted else QStyle.SP_MediaVolumeMuted
+        self._set_icon_button_content(
+            self.mute_button,
+            "volume-mute" if muted else "volume-up",
+            "Mute" if muted else "Vol",
         )
-        self.mute_button.setIcon(icon)
         self.mute_button.setToolTip("Unmute" if muted else "Mute")
+        self.mute_button.setAccessibleName("Unmute" if muted else "Mute")
+        self._sync_peak_meter_gain()
 
     def _set_volume_percent(self, value: int) -> None:
         percent = max(0, min(100, int(value)))
         self._audio_out.setVolume(percent / 100.0)
         self.volume_label.setText(f"{percent}%")
+        self._sync_peak_meter_gain()
 
     def _set_muted(self, muted: bool) -> None:
         self._audio_out.setMuted(bool(muted))
         self._sync_mute_button()
+
+    def _sync_peak_meter_gain(self) -> None:
+        if not hasattr(self, "peak_meter"):
+            return
+        muted = bool(self._audio_out.isMuted())
+        gain = 0.0 if muted else max(0.0, min(1.0, float(self._audio_out.volume())))
+        self.peak_meter.set_gain(gain)
 
     def _apply_artwork(self, artwork_payload) -> None:
         self._artwork_pixmap = QPixmap()
@@ -36721,6 +37934,7 @@ class _AudioPreviewDialog(QDialog):
                 self._artwork_pixmap = QPixmap.fromImage(image)
         has_artwork = not self._artwork_pixmap.isNull()
         self.artwork_container.setVisible(has_artwork)
+        self._sync_media_stage_size()
         self._refresh_artwork_pixmap()
 
     def _refresh_artwork_pixmap(self) -> None:
@@ -36728,13 +37942,33 @@ class _AudioPreviewDialog(QDialog):
             self.artwork_label.clear()
             return
         target = self.artwork_label.size()
-        self.artwork_label.setPixmap(
-            self._artwork_pixmap.scaled(
-                target,
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation,
-            )
+        device_pixel_ratio = self._artwork_target_device_pixel_ratio()
+        pixel_target = QSize(
+            max(1, int(round(target.width() * device_pixel_ratio))),
+            max(1, int(round(target.height() * device_pixel_ratio))),
         )
+        scaled = self._artwork_pixmap.scaled(
+            pixel_target,
+            Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation,
+        )
+        scaled.setDevicePixelRatio(device_pixel_ratio)
+        self.artwork_label.set_artwork_pixmap(scaled)
+
+    def _artwork_target_device_pixel_ratio(self) -> float:
+        ratio = 1.0
+        try:
+            ratio = max(ratio, float(self.artwork_label.devicePixelRatioF()))
+        except Exception:
+            pass
+        try:
+            handle = self.windowHandle()
+            screen = handle.screen() if handle is not None else self.screen()
+            if screen is not None:
+                ratio = max(ratio, float(screen.devicePixelRatio()))
+        except Exception:
+            pass
+        return max(1.0, ratio)
 
     def _toggle_play_pause(self) -> None:
         playing_state = getattr(QMediaPlayer, "PlaybackState", QMediaPlayer).PlayingState
@@ -36746,6 +37980,7 @@ class _AudioPreviewDialog(QDialog):
     def _stop_playback(self) -> None:
         self._player.stop()
         self._seek_to_ms(0)
+        self.peak_meter.reset_signal_activity()
 
     def _jump_by_ms(self, delta_ms: int) -> None:
         self._seek_to_ms(self._player.position() + int(delta_ms))
@@ -36762,6 +37997,8 @@ class _AudioPreviewDialog(QDialog):
     def _on_duration_changed(self, duration: int) -> None:
         self._slider.setRange(0, max(0, int(duration)))
         self.wave.set_duration_ms(duration)
+        self.scope.set_duration_ms(duration)
+        self.peak_meter.set_duration_ms(duration)
         self._apply_position(self._player.position(), duration)
 
     def _on_position_changed(self, position: int) -> None:
@@ -36772,9 +38009,38 @@ class _AudioPreviewDialog(QDialog):
             self._slider.blockSignals(True)
             self._slider.setValue(max(0, int(position)))
             self._slider.blockSignals(False)
+        self._sync_peak_meter_gain()
         self.wave.set_duration_ms(duration)
         self.wave.set_playhead_ms(position)
+        self.scope.set_duration_ms(duration)
+        self.scope.set_playhead_ms(position)
+        self.peak_meter.set_duration_ms(duration)
+        self.peak_meter.set_playhead_ms(position)
         self._label_time.setText(f"{self._format_time(position)} / {self._format_time(duration)}")
+
+    def _refresh_live_visualization(self) -> None:
+        if not self._is_media_playing():
+            return
+        self._start_scope_visualization_if_playing()
+        self._apply_position(self._player.position(), self._player.duration())
+
+    def _is_media_playing(self) -> bool:
+        playing_state = getattr(QMediaPlayer, "PlaybackState", QMediaPlayer).PlayingState
+        return self._player.playbackState() == playing_state
+
+    def _start_scope_visualization_if_playing(self) -> None:
+        if self._is_media_playing():
+            self.peak_meter.mark_signal_activity()
+            self.scope.start_fade_in()
+
+    def _sync_visualization_timer(self, *_args) -> None:
+        if self._is_media_playing():
+            self._start_scope_visualization_if_playing()
+            if not self._visualization_timer.isActive():
+                self._visualization_timer.start()
+            return
+        if self._visualization_timer.isActive():
+            self._visualization_timer.stop()
 
     @staticmethod
     def _format_time(ms: int) -> str:
@@ -36792,26 +38058,43 @@ class _AudioPreviewDialog(QDialog):
 
     def _update_navigation_buttons(self) -> None:
         index = self._track_index()
-        self.previous_button.setEnabled(index > 0)
-        self.next_button.setEnabled(0 <= index < len(self._track_order) - 1)
+        can_wrap_playlist = (
+            self._loop_mode == self.LOOP_MODE_PLAYLIST and index >= 0 and len(self._track_order) > 1
+        )
+        self.previous_button.setEnabled(can_wrap_playlist or index > 0)
+        self.next_button.setEnabled(can_wrap_playlist or 0 <= index < len(self._track_order) - 1)
+        self._sync_play_next_selection()
 
-    def _navigate_relative(self, offset: int, *, autoplay: bool) -> None:
+    def _navigate_relative(self, offset: int, *, autoplay: bool, wrap: bool = False) -> bool:
         if self._source_spec is None:
-            return
+            return False
         index = self._track_index()
         if index < 0:
-            return
+            return False
         target_index = index + int(offset)
-        if target_index < 0 or target_index >= len(self._track_order):
-            return
+        if wrap and self._track_order:
+            target_index %= len(self._track_order)
+        elif target_index < 0 or target_index >= len(self._track_order):
+            return False
+        if target_index == index:
+            return False
         target_track_id = int(self._track_order[target_index])
         self.open_track_preview(target_track_id, self._source_spec, autoplay=autoplay)
+        return True
 
     def _go_to_previous_track(self) -> None:
-        self._navigate_relative(-1, autoplay=True)
+        self._navigate_relative(
+            -1,
+            autoplay=True,
+            wrap=self._loop_mode == self.LOOP_MODE_PLAYLIST,
+        )
 
     def _go_to_next_track(self) -> None:
-        self._navigate_relative(1, autoplay=True)
+        self._navigate_relative(
+            1,
+            autoplay=True,
+            wrap=self._loop_mode == self.LOOP_MODE_PLAYLIST,
+        )
 
     def _on_media_status_changed(self, status) -> None:
         end_status = getattr(QMediaPlayer, "MediaStatus", QMediaPlayer).EndOfMedia
@@ -36820,10 +38103,20 @@ class _AudioPreviewDialog(QDialog):
         self._handling_end_of_media = True
         try:
             self._apply_position(self._player.duration(), self._player.duration())
-            if self.auto_advance_check.isChecked():
+            if self._loop_mode == self.LOOP_MODE_TRACK:
+                self._restart_current_media()
+            elif self._loop_mode == self.LOOP_MODE_PLAYLIST:
+                if not self._navigate_relative(1, autoplay=True, wrap=True):
+                    self._restart_current_media()
+            elif self.auto_advance_check.isChecked():
                 self._navigate_relative(1, autoplay=True)
         finally:
             self._handling_end_of_media = False
+
+    def _restart_current_media(self) -> None:
+        self.peak_meter.reset_signal_activity()
+        self._seek_to_ms(0)
+        self._player.play()
 
     def _reset_player_source(self) -> None:
         try:
@@ -36849,6 +38142,7 @@ class _AudioPreviewDialog(QDialog):
         self._tmp_path = None
 
     def closeEvent(self, event):
+        self._visualization_timer.stop()
         self._reset_player_source()
         self._cleanup_temp_file()
         super().closeEvent(event)
@@ -36857,40 +38151,372 @@ class _AudioPreviewDialog(QDialog):
         super().changeEvent(event)
         if event.type() in (QEvent.FontChange, QEvent.ApplicationFontChange):
             self._apply_stop_button_font()
+            self._apply_play_next_font()
+        if event.type() in (
+            QEvent.PaletteChange,
+            QEvent.ApplicationPaletteChange,
+            QEvent.StyleChange,
+        ):
+            self._media_icon_cache.clear()
+            self._refresh_media_button_icons()
+        elif event.type() == QEvent.WindowStateChange:
+            QTimer.singleShot(0, self._resume_scope_visualization_after_window_state_change)
+
+    def _resume_scope_visualization_after_window_state_change(self) -> None:
+        self._start_scope_visualization_if_playing()
+        if hasattr(self, "scope"):
+            self.scope.update()
 
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_stop_button_font()
+        self._refresh_media_button_icons()
         QTimer.singleShot(0, lambda: self._apply_stop_button_font())
 
     def resizeEvent(self, event):
-        self._resize_timer.start()
         super().resizeEvent(event)
+        self._sync_media_stage_size()
+        self._resize_timer.start()
+
+
+class StereoPeakMeterWidget(QWidget):
+    BAR_WIDTH = 5
+    BAR_GAP = 5
+    DB_FLOOR = -60.0
+    DB_ZERO = 0.0
+    DB_TOP = 3.0
+    PEAK_HOLD_LABEL_HEIGHT = 10
+    PEAK_LIVE_LABEL_HEIGHT = 10
+    PEAK_LABEL_HEIGHT = PEAK_HOLD_LABEL_HEIGHT + PEAK_LIVE_LABEL_HEIGHT
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._frames: list[tuple[float, float]] = []
+        self._duration = 1
+        self._playhead = 0
+        self._gain = 1.0
+        self._bar_height = 74
+        self._signal_active = True
+        self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+        self._hold_db = self.DB_FLOOR
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setToolTip("Stereo peak meter")
+        self._update_fixed_size()
+
+    def _update_fixed_size(self) -> None:
+        width = max(58, (self.BAR_WIDTH * 2) + self.BAR_GAP)
+        height = max(1, int(self._bar_height))
+        self.setFixedSize(width, height)
+
+    def setBarHeight(self, height: int) -> None:
+        self._bar_height = max(1, int(height))
+        self._update_fixed_size()
+        self.update()
+
+    def set_peak_frames(self, frames) -> None:
+        cleaned = []
+        for frame in frames or []:
+            try:
+                left = float(frame[0])
+                right = float(frame[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            cleaned.append((self._clamp_db(left), self._clamp_db(right)))
+        self._frames = cleaned
+        self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+        self._hold_db = self.DB_FLOOR
+        self.update()
+
+    def reset_signal_activity(self) -> None:
+        self._signal_active = False
+        self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+        self._hold_db = self.DB_FLOOR
+        self.update()
+
+    def reset_peak_hold(self) -> None:
+        self._hold_db = self.DB_FLOOR
+        self.update()
+
+    def _update_peak_hold(self) -> None:
+        self._hold_db = max(self._hold_db, self._current_db[0], self._current_db[1])
+
+    def mark_signal_activity(self) -> None:
+        if self._signal_active:
+            return
+        self._signal_active = True
+        self._current_db = self._frame_at_playhead()
+        self._update_peak_hold()
+        self.update()
+
+    def set_duration_ms(self, ms: int) -> None:
+        self._duration = max(1, int(ms))
+
+    def set_playhead_ms(self, ms: int) -> None:
+        self._playhead = max(0, min(int(ms), self._duration))
+        if not self._signal_active:
+            self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+            self.update()
+            return
+        self._current_db = self._frame_at_playhead()
+        self._update_peak_hold()
+        self.update()
+
+    def set_gain(self, gain: float) -> None:
+        self._gain = max(0.0, float(gain))
+        if not self._signal_active:
+            self._current_db = (self.DB_FLOOR, self.DB_FLOOR)
+            self.update()
+            return
+        self._current_db = self._frame_at_playhead()
+        if self._gain > 0.0:
+            self._update_peak_hold()
+        self.update()
+
+    def _gain_db(self) -> float:
+        if self._gain <= 0.0:
+            return self.DB_FLOOR
+        return 20.0 * math.log10(self._gain)
+
+    def _frame_position(self) -> float:
+        if len(self._frames) <= 1:
+            return 0.0
+        ratio = max(0.0, min(1.0, self._playhead / max(1, self._duration)))
+        return ratio * (len(self._frames) - 1)
+
+    def _frame_at_playhead(self) -> tuple[float, float]:
+        if not self._frames:
+            return (self.DB_FLOOR, self.DB_FLOOR)
+        if self._gain <= 0.0:
+            return (self.DB_FLOOR, self.DB_FLOOR)
+        gain_db = self._gain_db()
+        if len(self._frames) == 1:
+            left, right = self._frames[0]
+        else:
+            frame_pos = self._frame_position()
+            lower_index = int(frame_pos)
+            upper_index = min(len(self._frames) - 1, lower_index + 1)
+            blend = frame_pos - lower_index
+            lower = self._frames[lower_index]
+            upper = self._frames[upper_index]
+            left = (lower[0] * (1.0 - blend)) + (upper[0] * blend)
+            right = (lower[1] * (1.0 - blend)) + (upper[1] * blend)
+        return (self._clamp_db(left + gain_db), self._clamp_db(right + gain_db))
+
+    def _clamp_db(self, value: float) -> float:
+        return max(self.DB_FLOOR, min(self.DB_TOP, float(value)))
+
+    def _db_to_ratio(self, value: float) -> float:
+        value = self._clamp_db(value)
+        return max(0.0, min(1.0, (value - self.DB_FLOOR) / (self.DB_TOP - self.DB_FLOOR)))
+
+    def _format_db(self, value: float) -> str:
+        if value <= self.DB_FLOOR + 0.05:
+            return "-inf"
+        return f"{value:+.1f} dB"
+
+    def _format_compact_db(self, value: float) -> str:
+        if value <= self.DB_FLOOR + 0.05:
+            return "-inf"
+        return f"{value:+.1f}"
+
+    def _live_peak_db(self) -> float:
+        return max(self._current_db[0], self._current_db[1])
+
+    def _bar_rects(self) -> tuple[QRectF, QRectF]:
+        top = float(self.PEAK_LABEL_HEIGHT)
+        bar_height = max(1.0, float(self.height()) - top)
+        total_width = (self.BAR_WIDTH * 2) + self.BAR_GAP
+        start_x = max(0.0, (float(self.width()) - float(total_width)) / 2.0)
+        left = QRectF(start_x, top, float(self.BAR_WIDTH), bar_height)
+        right = QRectF(
+            start_x + float(self.BAR_WIDTH + self.BAR_GAP),
+            top,
+            float(self.BAR_WIDTH),
+            bar_height,
+        )
+        return left, right
+
+    def _meter_gradient(self, rect: QRectF):
+        from PySide6.QtGui import QLinearGradient
+
+        gradient = QLinearGradient(rect.left(), rect.bottom(), rect.left(), rect.top())
+        zero_stop = self._db_to_ratio(self.DB_ZERO)
+        gradient.setColorAt(0.0, QColor(28, 178, 82))
+        gradient.setColorAt(max(0.0, zero_stop - 0.24), QColor(223, 214, 48))
+        gradient.setColorAt(zero_stop, QColor(255, 130, 122))
+        gradient.setColorAt(1.0, QColor(232, 0, 0))
+        return gradient
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QBrush, QFont, QPainter, QPen
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        pal = self.palette()
+        label_font = QFont(self.font())
+        point_size = label_font.pointSizeF()
+        if point_size > 0:
+            label_font.setPointSizeF(max(5.0, point_size - 3.0))
+        painter.setFont(label_font)
+
+        hold_label_color = pal.text().color()
+        hold_label_color.setAlphaF(0.46)
+        painter.setPen(hold_label_color)
+        painter.drawText(
+            QRectF(0.0, 0.0, float(self.width()), float(self.PEAK_HOLD_LABEL_HEIGHT)),
+            Qt.AlignCenter,
+            self._format_compact_db(self._hold_db),
+        )
+
+        live_label_color = pal.text().color()
+        live_label_color.setAlphaF(0.86)
+        painter.setPen(live_label_color)
+        painter.drawText(
+            QRectF(
+                0.0,
+                float(self.PEAK_HOLD_LABEL_HEIGHT),
+                float(self.width()),
+                float(self.PEAK_LIVE_LABEL_HEIGHT),
+            ),
+            Qt.AlignCenter,
+            self._format_db(self._live_peak_db()),
+        )
+
+        outline = QColor(pal.mid().color())
+        outline.setAlphaF(0.72)
+        background = QColor(pal.base().color())
+        background.setAlphaF(0.42)
+        for rect, db_value in zip(self._bar_rects(), self._current_db):
+            painter.fillRect(rect, background)
+            fill_ratio = self._db_to_ratio(db_value)
+            if fill_ratio > 0.0:
+                fill_height = rect.height() * fill_ratio
+                fill_rect = QRectF(
+                    rect.left(),
+                    rect.bottom() - fill_height,
+                    rect.width(),
+                    fill_height,
+                )
+                painter.fillRect(fill_rect, QBrush(self._meter_gradient(rect)))
+            painter.setPen(QPen(outline, 1))
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
 
 class WaveformWidget(QWidget):
     scrubRequested = Signal(int)
     seekRequested = Signal(int)
+    WAVEFORM_DB_FLOOR = -96.0
+    WAVEFORM_DB_STOPS = (
+        0.0,
+        -3.0,
+        -6.0,
+        -12.0,
+        -18.0,
+        -30.0,
+        -48.0,
+        -72.0,
+        -96.0,
+    )
+    OSCILLOSCOPE_PHASE_SPAN_DEGREES = 180.0
+    OSCILLOSCOPE_VERTICAL_ZOOM = 0.92
+    OSCILLOSCOPE_MAX_AMPLITUDE = 0.54
+    OSCILLOSCOPE_RESPONSE_LIFT = 1.28
+    OSCILLOSCOPE_MAX_HARMONICS = 14
+    STATIC_WAVEFORM_OPACITY = 0.92
+    WAVEFORM_COLOR_SOFTEN_AMOUNT = 0.13
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._peaks = []
+        self._peaks_version = 0
+        self._waveform_cache = QPixmap()
+        self._waveform_cache_key = None
+        self._stored_waveform_pixmaps: dict[str, QPixmap] = {}
+        self._stored_waveform_cache_key = None
+        self._harmonic_frames = []
         self._duration = 1
         self._playhead = 0
+        self._preferred_height = 120
         self.setMinimumHeight(120)
         self.setCursor(Qt.SizeHorCursor)
 
+    def set_preferred_height(self, height: int) -> None:
+        next_height = max(1, int(height))
+        if self._preferred_height == next_height:
+            return
+        self._preferred_height = next_height
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:
+        return QSize(480, self._preferred_height)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(120, max(1, self.minimumHeight()))
+
     def set_peaks(self, peaks):
         self._peaks = peaks or []
+        self._peaks_version += 1
+        self._stored_waveform_pixmaps = {}
+        self._stored_waveform_cache_key = None
+        self._invalidate_waveform_cache()
         self.update()
+
+    def set_cached_waveform(
+        self,
+        peaks,
+        *,
+        light_preview_png: bytes | None = None,
+        dark_preview_png: bytes | None = None,
+        cache_key: object | None = None,
+    ) -> None:
+        self._peaks = peaks or []
+        self._peaks_version += 1
+        self._stored_waveform_pixmaps = {}
+        for theme_key, payload in (
+            ("light", light_preview_png),
+            ("dark", dark_preview_png),
+        ):
+            if not payload:
+                continue
+            pixmap = QPixmap()
+            if pixmap.loadFromData(bytes(payload), "PNG") and not pixmap.isNull():
+                self._stored_waveform_pixmaps[theme_key] = pixmap
+        self._stored_waveform_cache_key = cache_key
+        self._invalidate_waveform_cache()
+        self.update()
+
+    def set_harmonic_frames(self, frames):
+        cleaned = []
+        for frame in frames or []:
+            try:
+                values = [max(0.0, min(1.0, float(value))) for value in frame]
+            except (TypeError, ValueError):
+                continue
+            if values:
+                cleaned.append(values)
+        self._harmonic_frames = cleaned
+        self.update()
+
+    def set_spectrum_frames(self, frames):
+        self.set_harmonic_frames(frames)
+
+    def has_live_visualization(self) -> bool:
+        return bool(self._harmonic_frames)
 
     def set_duration_ms(self, ms):
         self._duration = max(1, int(ms))
         self.update()
 
     def set_playhead_ms(self, ms):
-        self._playhead = max(0, min(int(ms), self._duration))
-        self.update()
+        next_playhead = max(0, min(int(ms), self._duration))
+        if next_playhead == self._playhead:
+            return
+        previous_playhead = self._playhead
+        self._playhead = next_playhead
+        if self._peaks:
+            self._update_playhead_regions(previous_playhead, next_playhead)
+        else:
+            self.update()
 
     def _position_from_x(self, x_pos: float) -> int:
         rect = self.rect()
@@ -36898,6 +38524,22 @@ class WaveformWidget(QWidget):
             return 0
         ratio = max(0.0, min(1.0, (float(x_pos) - rect.left()) / max(1, rect.width() - 1)))
         return int(self._duration * ratio)
+
+    def _playhead_x_for_ms(self, ms: int) -> int:
+        rect = self.rect()
+        if rect.width() <= 1 or self._duration <= 0:
+            return rect.left()
+        ratio = max(0.0, min(1.0, int(ms) / self._duration))
+        return int(rect.left() + ((rect.width() - 1) * ratio))
+
+    def _update_playhead_regions(self, *positions_ms: int) -> None:
+        rect = self.rect()
+        if rect.isNull():
+            self.update()
+            return
+        for position_ms in positions_ms:
+            x_pos = self._playhead_x_for_ms(position_ms)
+            self.update(QRect(x_pos - 3, rect.top(), 7, rect.height()))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -36935,52 +38577,520 @@ class WaveformWidget(QWidget):
             return
         event.ignore()
 
+    def _harmonic_frame_position(self) -> float:
+        if len(self._harmonic_frames) <= 1:
+            return 0.0
+        ratio = max(0.0, min(1.0, self._playhead / max(1, self._duration)))
+        return ratio * (len(self._harmonic_frames) - 1)
+
+    def _harmonic_frame_at_position(self, frame_pos: float):
+        if not self._harmonic_frames:
+            return []
+        if len(self._harmonic_frames) == 1:
+            return self._harmonic_frames[0]
+        frame_pos = max(0.0, min(float(frame_pos), len(self._harmonic_frames) - 1))
+        lower_index = int(frame_pos)
+        upper_index = min(len(self._harmonic_frames) - 1, lower_index + 1)
+        blend = frame_pos - lower_index
+        lower = self._harmonic_frames[lower_index]
+        upper = self._harmonic_frames[upper_index]
+        count = min(len(lower), len(upper))
+        if count <= 0:
+            return []
+        if blend <= 0:
+            return lower[:count]
+        return [(lower[index] * (1.0 - blend)) + (upper[index] * blend) for index in range(count)]
+
+    def _current_harmonic_frame(self):
+        return self._harmonic_frame_at_position(self._harmonic_frame_position())
+
+    def _harmonic_rect(self, rect) -> QRectF:
+        return QRectF(
+            float(rect.left()),
+            float(rect.top()),
+            float(rect.width()),
+            max(1.0, float(rect.height()) * 0.62),
+        )
+
+    def _waveform_rect(self, rect) -> QRectF:
+        return QRectF(
+            float(rect.left()),
+            float(rect.top()),
+            float(rect.width()),
+            max(1.0, float(rect.height())),
+        )
+
+    def _invalidate_waveform_cache(self) -> None:
+        self._waveform_cache = QPixmap()
+        self._waveform_cache_key = None
+
+    def resizeEvent(self, event):
+        self._invalidate_waveform_cache()
+        super().resizeEvent(event)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (
+            QEvent.PaletteChange,
+            QEvent.ApplicationPaletteChange,
+            QEvent.StyleChange,
+        ):
+            self._invalidate_waveform_cache()
+
+    @staticmethod
+    def _relative_luminance(color: QColor) -> float:
+        return 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
+
+    def _window_background_color(self) -> QColor:
+        widget = self.window()
+        if widget is not None:
+            return widget.palette().window().color()
+        return self.palette().window().color()
+
+    def _waveform_cache_key_for(self, rect: QRectF):
+        background = self._window_background_color()
+        return (
+            self._peaks_version,
+            int(self.width()),
+            int(self.height()),
+            round(float(self.devicePixelRatioF()), 3),
+            round(float(rect.left()), 2),
+            round(float(rect.top()), 2),
+            round(float(rect.width()), 2),
+            round(float(rect.height()), 2),
+            background.name(QColor.HexArgb),
+        )
+
+    def _empty_waveform_pixmap(self) -> QPixmap:
+        if self.size().isEmpty():
+            return QPixmap()
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        pixmap_size = QSize(
+            max(1, int(math.ceil(self.width() * dpr))),
+            max(1, int(math.ceil(self.height() * dpr))),
+        )
+        pixmap = QPixmap(pixmap_size)
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(Qt.transparent)
+        return pixmap
+
+    def _fallback_waveform_rgb_for_peak(self, peak: float) -> tuple[int, int, int]:
+        peak = max(0.0, min(1.0, float(peak)))
+        if peak >= 0.72:
+            return self._soften_waveform_rgb((255, 45, 16))
+        if peak >= 0.46:
+            return self._soften_waveform_rgb((255, 117, 18))
+        if peak >= 0.24:
+            return self._soften_waveform_rgb((245, 206, 38))
+        return self._soften_waveform_rgb((35, 214, 95))
+
+    def _soften_waveform_rgb(self, rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+        amount = max(0.0, min(1.0, self.WAVEFORM_COLOR_SOFTEN_AMOUNT))
+        red, green, blue = (max(0, min(255, int(channel))) for channel in rgb)
+        luma = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+        return (
+            int(round((red * (1.0 - amount)) + (luma * amount))),
+            int(round((green * (1.0 - amount)) + (luma * amount))),
+            int(round((blue * (1.0 - amount)) + (luma * amount))),
+        )
+
+    def _shade_static_waveform_color(
+        self,
+        rgb: tuple[int, int, int],
+        *,
+        peak: float,
+        edge_ratio: float,
+    ) -> QColor:
+        background = self._window_background_color()
+        light_background = self._relative_luminance(background) >= 0.5
+        peak = max(0.0, min(1.0, float(peak)))
+        edge_ratio = max(0.0, min(1.0, float(edge_ratio)))
+        if light_background:
+            base_scale = 0.42 + (0.22 * peak)
+            edge_lift = 0.26 * (edge_ratio**0.7)
+        else:
+            base_scale = 0.58 + (0.18 * peak)
+            edge_lift = 0.30 * (edge_ratio**0.7)
+        scale = min(1.18, base_scale + edge_lift)
+        highlight = 0.10 * (edge_ratio**1.8) if not light_background else 0.04 * edge_ratio
+        red = int(max(0, min(255, (rgb[0] * scale) + (255 * highlight))))
+        green = int(max(0, min(255, (rgb[1] * scale) + (255 * highlight))))
+        blue = int(max(0, min(255, (rgb[2] * scale) + (255 * highlight))))
+        return QColor(red, green, blue, 255)
+
+    def _render_static_waveform_cache(self, rect: QRectF) -> QPixmap:
+        if not self._peaks or self.size().isEmpty():
+            return QPixmap()
+        pixmap = self._empty_waveform_pixmap()
+        dpr = max(1.0, float(pixmap.devicePixelRatioF()))
+        image = QImage(pixmap.size(), QImage.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(dpr)
+        image.fill(Qt.transparent)
+        physical_rect = QRectF(
+            float(rect.left()) * dpr,
+            float(rect.top()) * dpr,
+            float(rect.width()) * dpr,
+            float(rect.height()) * dpr,
+        )
+        mid = float(physical_rect.center().y())
+        center_y = max(0, min(image.height() - 1, int(round(mid))))
+        amplitude = max(1.0, float(physical_rect.height()) * 0.47)
+        width = max(1, int(round(physical_rect.width())))
+        peak_count = max(1, len(self._peaks))
+        for x_offset in range(width):
+            peak_index = min(peak_count - 1, int((x_offset / max(1, width - 1)) * (peak_count - 1)))
+            low, high = self._peaks[peak_index]
+            top_peak = max(0.0, min(1.0, float(high)))
+            bottom_peak = max(0.0, min(1.0, -float(low)))
+            dominant_peak = max(top_peak, bottom_peak)
+            if dominant_peak <= 0.0:
+                continue
+            base_rgb = self._fallback_waveform_rgb_for_peak(dominant_peak)
+            x_pos = int(round(physical_rect.left())) + x_offset
+            if x_pos < 0 or x_pos >= image.width():
+                continue
+            if top_peak > 0.0:
+                start_y = max(0, int(round(mid - (top_peak * amplitude))))
+                end_y = center_y
+                for y_pos in range(start_y, end_y + 1):
+                    edge_ratio = abs(float(y_pos) - mid) / max(1.0, top_peak * amplitude)
+                    image.setPixelColor(
+                        x_pos,
+                        y_pos,
+                        self._shade_static_waveform_color(
+                            base_rgb,
+                            peak=top_peak,
+                            edge_ratio=edge_ratio,
+                        ),
+                    )
+            if bottom_peak > 0.0:
+                start_y = center_y
+                end_y = max(0, min(image.height() - 1, int(round(mid + (bottom_peak * amplitude)))))
+                for y_pos in range(start_y, end_y + 1):
+                    edge_ratio = abs(float(y_pos) - mid) / max(1.0, bottom_peak * amplitude)
+                    image.setPixelColor(
+                        x_pos,
+                        y_pos,
+                        self._shade_static_waveform_color(
+                            base_rgb,
+                            peak=bottom_peak,
+                            edge_ratio=edge_ratio,
+                        ),
+                    )
+        pixmap = QPixmap.fromImage(image)
+        return pixmap
+
+    def _static_waveform_pixmap(self, rect: QRectF) -> QPixmap:
+        cache_key = self._waveform_cache_key_for(rect)
+        if self._waveform_cache_key != cache_key or self._waveform_cache.isNull():
+            self._waveform_cache = self._render_static_waveform_cache(rect)
+            self._waveform_cache_key = cache_key
+        return self._waveform_cache
+
+    def _stored_waveform_theme_key(self) -> str:
+        background = self._window_background_color()
+        return "light" if self._relative_luminance(background) >= 0.5 else "dark"
+
+    def _stored_waveform_pixmap(self) -> QPixmap | None:
+        if not self._stored_waveform_pixmaps:
+            return None
+        theme_key = self._stored_waveform_theme_key()
+        pixmap = self._stored_waveform_pixmaps.get(theme_key)
+        if pixmap is not None and not pixmap.isNull():
+            return pixmap
+        for candidate in self._stored_waveform_pixmaps.values():
+            if not candidate.isNull():
+                return candidate
+        return None
+
+    def _visual_color_for_intensity(self, value: float, *, light_mode: bool) -> QColor:
+        hotness = max(0.0, min(1.0, float(value))) ** 0.62
+        hue = 0.62 * (1.0 - hotness)
+        saturation = 0.92
+        lightness = (0.48 + (hotness * 0.2)) if light_mode else (0.58 + (hotness * 0.18))
+        alpha = (0.36 + (hotness * 0.52)) if light_mode else (0.42 + (hotness * 0.5))
+        color = QColor()
+        color.setHslF(hue, saturation, min(0.82, lightness), min(0.96, alpha))
+        return color
+
+    def _harmonic_frame_energy(self, frame) -> float:
+        if not frame:
+            return 0.0
+        values = [
+            max(0.0, min(1.0, float(value))) for value in frame[: self.OSCILLOSCOPE_MAX_HARMONICS]
+        ]
+        if not values:
+            return 0.0
+        peak = max(values)
+        mean = sum(values) / max(1, len(values))
+        fundamental = values[0]
+        energy = (peak * 0.72) + (fundamental * 0.18) + (mean * 0.1)
+        lifted = max(0.0, min(1.0, energy * self.OSCILLOSCOPE_RESPONSE_LIFT))
+        return lifted**0.74
+
+    def _harmonic_trace_points(
+        self,
+        frame,
+        visual_rect: QRectF,
+        *,
+        phase_offset: float = 0.0,
+        amplitude_scale: float = 1.0,
+    ):
+        if frame is None:
+            return [], []
+        width = max(2, int(visual_rect.width()))
+        center_y = visual_rect.center().y()
+        frame_values = [
+            max(0.0, min(1.0, float(value))) for value in frame[: self.OSCILLOSCOPE_MAX_HARMONICS]
+        ]
+        energy = self._harmonic_frame_energy(frame_values)
+        amplitude = min(
+            visual_rect.height() * self.OSCILLOSCOPE_MAX_AMPLITUDE,
+            visual_rect.height()
+            * self.OSCILLOSCOPE_VERTICAL_ZOOM
+            * energy
+            * float(amplitude_scale),
+        )
+        phase_span = math.radians(self.OSCILLOSCOPE_PHASE_SPAN_DEGREES)
+        points = []
+        intensities = []
+        for x_offset in range(width):
+            x_ratio = x_offset / max(1, width - 1)
+            phase = (phase_span * x_ratio) + phase_offset
+            value = 0.0
+            weight_sum = 0.0
+            for harmonic_index, harmonic_level in enumerate(frame_values, start=1):
+                if harmonic_level <= 0.001:
+                    continue
+                weight = harmonic_level / (harmonic_index**0.42)
+                value += weight * math.sin(phase * harmonic_index)
+                weight_sum += weight
+            normalized = value / weight_sum if weight_sum else 0.0
+            normalized = max(-1.0, min(1.0, normalized))
+            points.append((visual_rect.left() + x_offset, center_y - (normalized * amplitude)))
+            intensities.append(max(0.0, min(1.0, energy * (0.62 + (abs(normalized) * 0.38)))))
+        return points, intensities
+
+    def _draw_harmonic_trace(
+        self,
+        painter,
+        points,
+        intensities,
+        *,
+        light_mode: bool,
+        alpha_scale: float,
+        width_scale: float,
+    ) -> None:
+        if len(points) < 2:
+            return
+        for index in range(len(points) - 1):
+            intensity = (intensities[index] + intensities[index + 1]) / 2.0
+            color = self._visual_color_for_intensity(intensity, light_mode=light_mode)
+            color.setAlphaF(max(0.02, min(0.9, color.alphaF() * float(alpha_scale))))
+            glow = QColor(color)
+            glow.setAlphaF(min(0.32, color.alphaF() * 0.52))
+            painter.setPen(QPen(glow, 4.2 * width_scale, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(
+                int(points[index][0]),
+                int(points[index][1]),
+                int(points[index + 1][0]),
+                int(points[index + 1][1]),
+            )
+            painter.setPen(QPen(color, 1.45 * width_scale, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(
+                int(points[index][0]),
+                int(points[index][1]),
+                int(points[index + 1][0]),
+                int(points[index + 1][1]),
+            )
+
+    def _draw_live_harmonics(self, painter, rect, *, light_mode: bool) -> None:
+        if not self._harmonic_frames:
+            return
+        visual_rect = self._harmonic_rect(rect)
+        painter.save()
+        frame = self._current_harmonic_frame()
+        if frame is not None:
+            points, intensities = self._harmonic_trace_points(frame, visual_rect)
+            self._draw_harmonic_trace(
+                painter,
+                points,
+                intensities,
+                light_mode=light_mode,
+                alpha_scale=1.0,
+                width_scale=1.08,
+            )
+        painter.restore()
+
     def paintEvent(self, e):
-        from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+        from PySide6.QtGui import QColor, QPainter, QPen
 
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.Antialiasing, False)
         r = self.rect()
-        mid = r.center().y()
+        waveform_rect = self._waveform_rect(r)
 
         # Decide colors based on window background brightness
-        pal = self.palette()
-        bg = pal.window().color()
-        # Relative luminance (simple RGB weighted sum)
-        lum = 0.2126 * bg.redF() + 0.7152 * bg.greenF() + 0.0722 * bg.blueF()
+        bg = self._window_background_color()
+        lum = self._relative_luminance(bg)
         light_mode = lum >= 0.5
 
-        waveform_color = QColor(0, 0, 0) if light_mode else QColor(255, 255, 255)
         playhead_color = QColor(255, 255, 255) if light_mode else QColor(0, 0, 0)
 
         # waveform (vertical min–max bars)
         if self._peaks:
-            w = len(self._peaks)
-            xscale = (r.width() - 1) / max(1, w - 1)
-            path = QPainterPath()
-            for i, (lo, hi) in enumerate(self._peaks):
-                x = r.left() + i * xscale
-                y1 = mid - hi * (r.height() * 0.45)
-                y2 = mid - lo * (r.height() * 0.45)
-                path.moveTo(x, y1)
-                path.lineTo(x, y2)
-            p.setPen(QPen(waveform_color))
-            p.drawPath(path)
+            stored_pixmap = self._stored_waveform_pixmap()
+            p.save()
+            p.setOpacity(self.STATIC_WAVEFORM_OPACITY)
+            if stored_pixmap is not None:
+                p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+                p.drawPixmap(waveform_rect, stored_pixmap, QRectF(stored_pixmap.rect()))
+            else:
+                p.drawPixmap(QPoint(0, 0), self._static_waveform_pixmap(waveform_rect))
+            p.restore()
 
         # playhead
         if self._duration > 0:
             x = r.left() + (r.width() - 1) * (self._playhead / self._duration)
             p.setPen(QPen(playhead_color))
-            p.drawLine(int(x), r.top(), int(x), r.bottom())
+            p.drawLine(int(x), int(waveform_rect.top()), int(x), int(waveform_rect.bottom()))
+
+
+class SpectrumGraphWidget(WaveformWidget):
+    SPECTRUM_LINE_WIDTH = 0.65
+    SPECTRUM_COLOR_ALPHA_BOOST = 1.36
+    SPECTRUM_FADE_IN_MS = 80
+    SPECTRUM_FADE_STEP_MS = 16
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._peaks = []
+        self._fade_elapsed_ms = 0
+        self._fade_opacity = 0.0
+        self._fade_timer = QTimer(self)
+        self._fade_timer.setInterval(self.SPECTRUM_FADE_STEP_MS)
+        self._fade_timer.timeout.connect(self._advance_fade_in)
+        self.setMinimumHeight(1)
+        self.setCursor(Qt.ArrowCursor)
+
+    def set_peaks(self, peaks):
+        self._peaks = []
+        self._invalidate_waveform_cache()
+        self.update()
+
+    def set_spectrum_frames(self, frames):
+        super().set_spectrum_frames(frames)
+        self.reset_fade_in()
+
+    def reset_fade_in(self) -> None:
+        self._fade_timer.stop()
+        self._fade_elapsed_ms = 0
+        self._fade_opacity = 0.0
+        self.update()
+
+    def start_fade_in(self) -> None:
+        if not self.has_live_visualization() or self._fade_opacity >= 1.0:
+            return
+        if not self._fade_timer.isActive():
+            self._fade_timer.start()
+
+    def _advance_fade_in(self) -> None:
+        self._fade_elapsed_ms += self.SPECTRUM_FADE_STEP_MS
+        progress = max(
+            0.0,
+            min(1.0, self._fade_elapsed_ms / max(1.0, float(self.SPECTRUM_FADE_IN_MS))),
+        )
+        self._fade_opacity = 1.0 - ((1.0 - progress) * (1.0 - progress))
+        if progress >= 1.0:
+            self._fade_opacity = 1.0
+            self._fade_timer.stop()
+        self.update()
+
+    def _harmonic_rect(self, rect) -> QRectF:
+        return QRectF(
+            float(rect.left()),
+            float(rect.top()),
+            float(rect.width()),
+            max(1.0, float(rect.height())),
+        )
+
+    def _spectrum_graph_rect(self, rect) -> QRectF:
+        return QRectF(
+            float(rect.left()),
+            float(rect.top()) + 1.0,
+            float(rect.width()),
+            max(1.0, float(rect.height()) - 2.0),
+        )
+
+    def _current_spectrum_frame(self):
+        return self._current_harmonic_frame()
+
+    def _spectrum_line_segments(self, frame, visual_rect: QRectF):
+        if not frame:
+            return []
+        values = [max(0.0, min(1.0, float(value))) for value in frame]
+        if not values:
+            return []
+        left = float(visual_rect.left())
+        bottom = float(visual_rect.bottom())
+        height = max(1.0, float(visual_rect.height()))
+        x_step = float(visual_rect.width()) / max(1, len(values) - 1)
+        segments = []
+        for index, value in enumerate(values):
+            shaped = value**0.58
+            x_pos = left + (index * x_step)
+            top = bottom - (shaped * height)
+            segments.append((x_pos, top, bottom, value))
+        return segments
+
+    def _draw_spectrum_graph(self, painter, rect, *, light_mode: bool) -> None:
+        frame = self._current_spectrum_frame()
+        opacity = max(0.0, min(1.0, self._fade_opacity))
+        if not frame or opacity <= 0.0:
+            return
+        visual_rect = self._spectrum_graph_rect(rect)
+        for x_pos, top, bottom, intensity in self._spectrum_line_segments(frame, visual_rect):
+            color = self._visual_color_for_intensity(intensity, light_mode=light_mode)
+            alpha = max(0.2, min(1.0, color.alphaF() * self.SPECTRUM_COLOR_ALPHA_BOOST))
+            color.setAlphaF(alpha * opacity)
+            painter.setPen(
+                QPen(color, self.SPECTRUM_LINE_WIDTH, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            )
+            painter.drawLine(QPointF(x_pos, bottom), QPointF(x_pos, top))
+
+    def mousePressEvent(self, event):
+        event.ignore()
+
+    def mouseMoveEvent(self, event):
+        event.ignore()
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+    def paintEvent(self, e):
+        from PySide6.QtGui import QPainter
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        pal = self.palette()
+        bg = pal.window().color()
+        lum = 0.2126 * bg.redF() + 0.7152 * bg.greenF() + 0.0722 * bg.blueF()
+        light_mode = lum >= 0.5
+
+        self._draw_spectrum_graph(p, self.rect(), light_mode=light_mode)
+
+
+OscilloscopeWidget = SpectrumGraphWidget
 
 
 def load_wav_peaks(path: str, width_px: int):
     """
-    Build min/max peaks for drawing a waveform.
+    Build stereo peaks for drawing a waveform.
     - Fast path: RIFF/WAVE (16, 24, 32-bit PCM) via `wave`.
-    - Generic path: decode any compressed format to mono s16le via ffmpeg (if present),
+    - Generic path: decode any compressed format to stereo s16le via ffmpeg (if present),
       else fallback to QtMultimedia's decoder, then `audioread` as a last resort.
-    Returns: list[(lo, hi)] in [-1.0, 1.0].
+    Returns: list[(-right_peak, left_peak)] in [-1.0, 1.0].
     """
     import os
     import shutil
@@ -36997,8 +39107,8 @@ def load_wav_peaks(path: str, width_px: int):
             return 1.0
         return value
 
-    def _append_pending_peak(peaks, lo: float, hi: float) -> None:
-        peaks.append((_clamp_peak(lo), _clamp_peak(hi)))
+    def _append_pending_peak(peaks, left_peak: float, right_peak: float) -> None:
+        peaks.append((-abs(_clamp_peak(right_peak)), abs(_clamp_peak(left_peak))))
 
     def _load_peaks_via_qt_decoder():
         decoder = QAudioDecoder()
@@ -37010,8 +39120,9 @@ def load_wav_peaks(path: str, width_px: int):
             "sample_rate": 44100,
             "target_step": None,
             "need": None,
-            "lo": 1.0,
-            "hi": -1.0,
+            "left_peak": 0.0,
+            "right_peak": 0.0,
+            "bucket_had_sample": False,
             "had_buffer": False,
             "timed_out": False,
             "decode_error": None,
@@ -37032,9 +39143,10 @@ def load_wav_peaks(path: str, width_px: int):
             return None
 
         def _finish_pending_peak() -> None:
-            if state["lo"] <= state["hi"]:
-                _append_pending_peak(state["peaks"], state["lo"], state["hi"])
-                state["lo"], state["hi"] = 1.0, -1.0
+            if state["bucket_had_sample"]:
+                _append_pending_peak(state["peaks"], state["left_peak"], state["right_peak"])
+                state["left_peak"], state["right_peak"] = 0.0, 0.0
+                state["bucket_had_sample"] = False
 
         def _on_buffer_ready() -> None:
             buf = decoder.read()
@@ -37043,12 +39155,13 @@ def load_wav_peaks(path: str, width_px: int):
 
             fmt = buf.format()
             frame_bytes = fmt.bytesPerFrame()
+            bytes_per_sample = fmt.bytesPerSample()
             if frame_bytes <= 0:
-                bytes_per_sample = fmt.bytesPerSample()
                 channels = max(1, fmt.channelCount())
                 frame_bytes = bytes_per_sample * channels
             if frame_bytes <= 0:
                 return
+            channels = max(1, fmt.channelCount())
 
             sample_format = fmt.sampleFormat()
             if sample_format not in (
@@ -37081,13 +39194,17 @@ def load_wav_peaks(path: str, width_px: int):
             state["had_buffer"] = True
             for frame_index in range(frame_count):
                 offset = frame_index * frame_bytes
-                value = _sample_value(raw, offset, sample_format)
-                if value is None:
+                left_value = _sample_value(raw, offset, sample_format)
+                if left_value is None:
                     continue
-                if value < state["lo"]:
-                    state["lo"] = value
-                if value > state["hi"]:
-                    state["hi"] = value
+                right_value = left_value
+                if channels > 1 and bytes_per_sample > 0:
+                    decoded_right = _sample_value(raw, offset + bytes_per_sample, sample_format)
+                    if decoded_right is not None:
+                        right_value = decoded_right
+                state["left_peak"] = max(state["left_peak"], abs(left_value))
+                state["right_peak"] = max(state["right_peak"], abs(right_value))
+                state["bucket_had_sample"] = True
                 state["need"] -= 1
                 if state["need"] == 0:
                     _finish_pending_peak()
@@ -37173,7 +39290,7 @@ def load_wav_peaks(path: str, width_px: int):
             import wave
 
             with wave.open(path, "rb") as w:
-                ch = w.getnchannels()
+                ch = max(1, w.getnchannels())
                 sampwidth = w.getsampwidth()  # bytes: 2, 3, 4
                 nframes = w.getnframes()
                 if nframes <= 0:
@@ -37195,45 +39312,57 @@ def load_wav_peaks(path: str, width_px: int):
                         if count == 0:
                             continue
                         vals = struct.unpack("<" + "h" * count, raw)
-                        if ch > 1:
-                            vals = vals[0::ch]  # ch0 only
+                        usable = (len(vals) // ch) * ch
+                        if usable <= 0:
+                            continue
+                        left_vals = vals[:usable:ch]
+                        right_vals = vals[1:usable:ch] if ch > 1 else left_vals
+                        left_peak = max(abs(value) for value in left_vals) / fs
+                        right_peak = max(abs(value) for value in right_vals) / fs
                     elif sampwidth == 3:
                         b = raw
                         count = len(b) // (3 * ch)
                         if count <= 0:
                             continue
-                        vals = []
                         step_bytes = 3 * ch
+                        left_peak_value = 0
+                        right_peak_value = 0
+
+                        def _read_s24(offset: int) -> int:
+                            b0, b1, b2 = b[offset], b[offset + 1], b[offset + 2]
+                            value = b0 | (b1 << 8) | (b2 << 16)
+                            if value & 0x800000:
+                                value -= 0x1000000
+                            return value
+
                         for off in range(0, count * step_bytes, step_bytes):
-                            b0, b1, b2 = b[off], b[off + 1], b[off + 2]
-                            v = b0 | (b1 << 8) | (b2 << 16)
-                            if v & 0x800000:
-                                v -= 0x1000000
-                            vals.append(v)
+                            left_value = _read_s24(off)
+                            right_value = _read_s24(off + 3) if ch > 1 else left_value
+                            left_peak_value = max(left_peak_value, abs(left_value))
+                            right_peak_value = max(right_peak_value, abs(right_value))
+                        left_peak = left_peak_value / fs
+                        right_peak = right_peak_value / fs
                     elif sampwidth == 4:
                         count = len(raw) // 4
                         if count == 0:
                             continue
                         vals = struct.unpack("<" + "i" * count, raw)
-                        if ch > 1:
-                            vals = vals[0::ch]
+                        usable = (len(vals) // ch) * ch
+                        if usable <= 0:
+                            continue
+                        left_vals = vals[:usable:ch]
+                        right_vals = vals[1:usable:ch] if ch > 1 else left_vals
+                        left_peak = max(abs(value) for value in left_vals) / fs
+                        right_peak = max(abs(value) for value in right_vals) / fs
                     else:
                         continue
 
-                    if not vals:
-                        continue
-                    lo = float(min(vals)) / fs
-                    hi = float(max(vals)) / fs
-                    if lo < -1.0:
-                        lo = -1.0
-                    if hi > 1.0:
-                        hi = 1.0
-                    peaks.append((lo, hi))
+                    peaks.append((-min(1.0, float(right_peak)), min(1.0, float(left_peak))))
                 return peaks
     except Exception:
         pass
 
-    # --- Generic path A: ffmpeg streaming to mono s16le ----------------------
+    # --- Generic path A: ffmpeg streaming to stereo s16le --------------------
     ffmpeg = _which("ffmpeg")
     if ffmpeg:
         sr = 44100
@@ -37285,7 +39414,7 @@ def load_wav_peaks(path: str, width_px: int):
                     "-acodec",
                     "pcm_s16le",
                     "-ac",
-                    "1",
+                    "2",
                     "-ar",
                     str(sr),
                     "-",
@@ -37297,7 +39426,8 @@ def load_wav_peaks(path: str, width_px: int):
             peaks = []
             fs = 32768.0
             need = target_step
-            lo, hi = +1.0, -1.0
+            left_peak, right_peak = 0.0, 0.0
+            bucket_had_sample = False
             buf = bytearray()
 
             while True:
@@ -37306,37 +39436,39 @@ def load_wav_peaks(path: str, width_px: int):
                     break
                 buf.extend(chunk)
 
-                # process full samples (2 bytes/sample)
-                n_samples = len(buf) // 2
-                if n_samples <= 0:
+                frame_bytes = 4
+                n_frames = len(buf) // frame_bytes
+                if n_frames <= 0:
                     continue
 
-                off_samples = 0
+                off_frames = 0
                 import struct as _st
 
-                while n_samples > 0:
-                    take = min(need, n_samples)
-                    data_len = take * 2
+                while n_frames > 0:
+                    take = min(need, n_frames)
+                    data_len = take * frame_bytes
                     data = bytes(
-                        buf[off_samples * 2 : off_samples * 2 + data_len]
+                        buf[off_frames * frame_bytes : off_frames * frame_bytes + data_len]
                     )  # copy; safe to resize buf
-                    for i in range(0, len(data), 2):
-                        v = _st.unpack_from("<h", data, i)[0] / fs
-                        if v < lo:
-                            lo = v
-                        if v > hi:
-                            hi = v
+                    for i in range(0, len(data), frame_bytes):
+                        left_value = _st.unpack_from("<h", data, i)[0] / fs
+                        right_value = _st.unpack_from("<h", data, i + 2)[0] / fs
+                        left_peak = max(left_peak, abs(left_value))
+                        right_peak = max(right_peak, abs(right_value))
+                        bucket_had_sample = True
                     need -= take
-                    off_samples += take
-                    n_samples -= take
+                    off_frames += take
+                    n_frames -= take
 
                     if need == 0:
-                        peaks.append((max(-1.0, lo), min(1.0, hi)))
-                        lo, hi = +1.0, -1.0
+                        if bucket_had_sample:
+                            peaks.append((-min(1.0, right_peak), min(1.0, left_peak)))
+                        left_peak, right_peak = 0.0, 0.0
+                        bucket_had_sample = False
                         need = target_step
 
                 # drop consumed bytes
-                del buf[: off_samples * 2]
+                del buf[: off_frames * frame_bytes]
 
             p.stdout.close()
             try:
@@ -37344,8 +39476,8 @@ def load_wav_peaks(path: str, width_px: int):
             except Exception:
                 p.kill()
 
-            if lo <= hi:
-                peaks.append((max(-1.0, lo), min(1.0, hi)))
+            if bucket_had_sample:
+                peaks.append((-min(1.0, right_peak), min(1.0, left_peak)))
 
             return peaks or [(-0.0, 0.0)]
         except Exception:
@@ -37381,7 +39513,8 @@ def load_wav_peaks(path: str, width_px: int):
 
             fs = 32768.0
             need = target_step
-            lo, hi = +1.0, -1.0
+            left_peak, right_peak = 0.0, 0.0
+            bucket_had_sample = False
             buf = bytearray()
 
             for block in f:  # raw 16-bit little-endian PCM
@@ -37397,25 +39530,28 @@ def load_wav_peaks(path: str, width_px: int):
                     data = bytes(
                         buf[off_frames * frame_bytes : off_frames * frame_bytes + data_len]
                     )  # copy
-                    # pick channel 0 only → cheap mono
                     for i in range(0, len(data), frame_bytes):
-                        v = _st.unpack_from("<h", data, i)[0] / fs
-                        if v < lo:
-                            lo = v
-                        if v > hi:
-                            hi = v
+                        left_value = _st.unpack_from("<h", data, i)[0] / fs
+                        right_value = (
+                            _st.unpack_from("<h", data, i + 2)[0] / fs if ch > 1 else left_value
+                        )
+                        left_peak = max(left_peak, abs(left_value))
+                        right_peak = max(right_peak, abs(right_value))
+                        bucket_had_sample = True
                     need -= take
                     off_frames += take
                     frames -= take
                     if need == 0:
-                        peaks.append((max(-1.0, lo), min(1.0, hi)))
-                        lo, hi = +1.0, -1.0
+                        if bucket_had_sample:
+                            peaks.append((-min(1.0, right_peak), min(1.0, left_peak)))
+                        left_peak, right_peak = 0.0, 0.0
+                        bucket_had_sample = False
                         need = target_step
 
                 del buf[: off_frames * frame_bytes]
 
-            if lo <= hi:
-                peaks.append((max(-1.0, lo), min(1.0, hi)))
+            if bucket_had_sample:
+                peaks.append((-min(1.0, right_peak), min(1.0, left_peak)))
 
             return peaks or [(-0.0, 0.0)]
     except Exception:
@@ -37423,6 +39559,605 @@ def load_wav_peaks(path: str, width_px: int):
 
     # Last resort
     return []
+
+
+def load_audio_harmonic_frames(path: str, *, target_sr: int = 22050):
+    """
+    Build normalized harmonic partial frames for the live playback visualizer.
+    Returns: list[list[float]] with each value in [0.0, 1.0].
+    """
+    import os
+    import shutil
+    import subprocess
+
+    try:
+        import numpy as np
+    except Exception:
+        return []
+
+    def _which(name: str):
+        p = shutil.which(name)
+        if p:
+            return p
+        sysname = platform.system().lower()
+        search_dirs = []
+        if sysname == "darwin":
+            search_dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+        elif sysname == "linux":
+            search_dirs = ["/usr/bin", "/usr/local/bin"]
+        elif sysname == "windows":
+            search_dirs = [
+                r"C:\Program Files\ffmpeg\bin",
+                r"C:\ffmpeg\bin",
+                r"C:\ProgramData\chocolatey\bin",
+                os.path.expandvars(r"%USERPROFILE%\scoop\shims"),
+            ]
+        candidates = [name]
+        if sysname == "windows" and not name.lower().endswith(".exe"):
+            candidates.append(name + ".exe")
+        for directory in search_dirs:
+            for candidate in candidates:
+                full_path = os.path.join(directory, candidate)
+                if os.path.exists(full_path):
+                    return full_path
+        return None
+
+    def _downsample(samples, sample_rate: int):
+        clean_sample_rate = max(1, int(sample_rate or target_sr))
+        if clean_sample_rate <= target_sr:
+            return samples.astype(np.float32, copy=False), clean_sample_rate
+        stride = max(1, int(round(clean_sample_rate / target_sr)))
+        return samples[::stride].astype(np.float32, copy=False), max(1, clean_sample_rate // stride)
+
+    def _decode_wav():
+        import wave
+
+        try:
+            with open(path, "rb") as handle:
+                head = handle.read(12)
+            if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                return None
+            with wave.open(path, "rb") as wav_file:
+                channels = max(1, wav_file.getnchannels())
+                sample_width = wav_file.getsampwidth()
+                sample_rate = wav_file.getframerate() or target_sr
+                frame_count = wav_file.getnframes()
+                if frame_count <= 0:
+                    return None
+                raw = wav_file.readframes(frame_count)
+            if not raw:
+                return None
+            if sample_width == 1:
+                values = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+            elif sample_width == 2:
+                values = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            elif sample_width == 3:
+                data = np.frombuffer(raw, dtype=np.uint8)
+                usable = (len(data) // 3) * 3
+                if usable <= 0:
+                    return None
+                triples = data[:usable].reshape(-1, 3).astype(np.int32)
+                values = triples[:, 0] | (triples[:, 1] << 8) | (triples[:, 2] << 16)
+                values = np.where(values & 0x800000, values - 0x1000000, values).astype(np.float32)
+                values = values / 8388608.0
+            elif sample_width == 4:
+                values = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+            else:
+                return None
+            if channels > 1:
+                usable = (len(values) // channels) * channels
+                if usable <= 0:
+                    return None
+                values = values[:usable].reshape(-1, channels).mean(axis=1)
+            return _downsample(np.clip(values, -1.0, 1.0), sample_rate)
+        except Exception:
+            return None
+
+    def _decode_ffmpeg():
+        ffmpeg = _which("ffmpeg")
+        if not ffmpeg:
+            return None
+        try:
+            output = subprocess.check_output(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-vn",
+                    "-i",
+                    os.fspath(path),
+                    "-f",
+                    "s16le",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(target_sr),
+                    "-",
+                ],
+                stderr=subprocess.STDOUT,
+                timeout=30,
+            )
+            if not output:
+                return None
+            values = np.frombuffer(output, dtype="<i2").astype(np.float32) / 32768.0
+            return np.clip(values, -1.0, 1.0), int(target_sr)
+        except Exception:
+            return None
+
+    def _decode_soundfile():
+        try:
+            import soundfile as sf
+
+            values, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+            if values.size <= 0:
+                return None
+            mono = values.mean(axis=1)
+            return _downsample(np.clip(mono, -1.0, 1.0), int(sample_rate or target_sr))
+        except Exception:
+            return None
+
+    decoded = _decode_wav() or _decode_ffmpeg() or _decode_soundfile()
+    if decoded is None:
+        return []
+    samples, sample_rate = decoded
+    if samples is None or len(samples) <= 0:
+        return []
+
+    sample_rate = max(1, int(sample_rate or target_sr))
+    duration_ms = max(1, int((len(samples) / sample_rate) * 1000))
+    frame_ms = max(60, int(duration_ms / 5000))
+    hop = max(1, int(sample_rate * (frame_ms / 1000.0)))
+    fft_size = 2048
+    if len(samples) < fft_size:
+        fft_size = 1024 if len(samples) >= 1024 else 512
+    fft_size = max(128, int(fft_size))
+    window = np.hanning(fft_size).astype(np.float32)
+    freqs = np.fft.rfftfreq(fft_size, 1.0 / sample_rate)
+    nyquist = sample_rate / 2.0
+
+    raw_frames = []
+    for start in range(0, len(samples), hop):
+        segment = samples[start : start + fft_size]
+        if len(segment) < fft_size:
+            padded = np.zeros(fft_size, dtype=np.float32)
+            padded[: len(segment)] = segment
+            segment = padded
+        spectrum = np.abs(np.fft.rfft(segment * window))
+        usable_indexes = np.where((freqs >= 45.0) & (freqs <= min(1200.0, nyquist * 0.82)))[0]
+        if len(usable_indexes) == 0:
+            continue
+        fundamental_index = usable_indexes[int(np.argmax(spectrum[usable_indexes]))]
+        fundamental = float(freqs[fundamental_index])
+        if fundamental <= 0:
+            continue
+        frame = []
+        for harmonic_index in range(1, 15):
+            center = fundamental * harmonic_index
+            if center >= nyquist:
+                frame.append(0.0)
+                continue
+            half_width = max(18.0, fundamental * 0.055 * harmonic_index)
+            indexes = np.where((freqs >= center - half_width) & (freqs <= center + half_width))[0]
+            if len(indexes) == 0:
+                indexes = np.array([int(np.argmin(np.abs(freqs - center)))])
+            band = spectrum[indexes]
+            frame.append(float(np.sqrt(np.mean(band * band))) if len(band) else 0.0)
+        raw_frames.append(frame)
+
+    if not raw_frames:
+        return []
+
+    levels = np.log1p(np.asarray(raw_frames, dtype=np.float32) * 12.0)
+    normalizer = float(np.percentile(levels, 96)) if levels.size else 0.0
+    if normalizer > 0:
+        levels = np.clip(levels / normalizer, 0.0, 1.0)
+    else:
+        levels = np.zeros_like(levels)
+    levels = np.power(levels, 0.72)
+
+    smoothed = []
+    previous = None
+    for frame in levels:
+        if previous is None:
+            current = frame
+        else:
+            current = (previous * 0.55) + (frame * 0.45)
+        smoothed.append([float(max(0.0, min(1.0, value))) for value in current])
+        previous = current
+    return smoothed
+
+
+def load_audio_peak_meter_frames(path: str, *, target_sr: int = 22050):
+    """
+    Build stereo peak frames in dBFS for the compact L/R peak meter.
+    Returns: list[(left_db, right_db)] clamped to [-60.0, +3.0].
+    """
+    import os
+    import shutil
+    import subprocess
+
+    try:
+        import numpy as np
+    except Exception:
+        return []
+
+    db_floor = float(StereoPeakMeterWidget.DB_FLOOR)
+    db_top = float(StereoPeakMeterWidget.DB_TOP)
+
+    def _which(name: str):
+        p = shutil.which(name)
+        if p:
+            return p
+        sysname = platform.system().lower()
+        search_dirs = []
+        if sysname == "darwin":
+            search_dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+        elif sysname == "linux":
+            search_dirs = ["/usr/bin", "/usr/local/bin"]
+        elif sysname == "windows":
+            search_dirs = [
+                r"C:\Program Files\ffmpeg\bin",
+                r"C:\ffmpeg\bin",
+                r"C:\ProgramData\chocolatey\bin",
+                os.path.expandvars(r"%USERPROFILE%\scoop\shims"),
+            ]
+        candidates = [name]
+        if sysname == "windows" and not name.lower().endswith(".exe"):
+            candidates.append(name + ".exe")
+        for directory in search_dirs:
+            for candidate in candidates:
+                full_path = os.path.join(directory, candidate)
+                if os.path.exists(full_path):
+                    return full_path
+        return None
+
+    def _stereo(values, channels: int):
+        channels = max(1, int(channels or 1))
+        usable = (len(values) // channels) * channels
+        if usable <= 0:
+            return None
+        shaped = values[:usable].reshape(-1, channels)
+        if channels == 1:
+            return np.column_stack((shaped[:, 0], shaped[:, 0])).astype(np.float32, copy=False)
+        return shaped[:, :2].astype(np.float32, copy=False)
+
+    def _downsample(samples, sample_rate: int):
+        clean_sample_rate = max(1, int(sample_rate or target_sr))
+        if clean_sample_rate <= target_sr:
+            return samples.astype(np.float32, copy=False), clean_sample_rate
+        stride = max(1, int(round(clean_sample_rate / target_sr)))
+        return samples[::stride].astype(np.float32, copy=False), max(1, clean_sample_rate // stride)
+
+    def _decode_wav():
+        import wave
+
+        try:
+            with open(path, "rb") as handle:
+                head = handle.read(12)
+            if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                return None
+            with wave.open(path, "rb") as wav_file:
+                channels = max(1, wav_file.getnchannels())
+                sample_width = wav_file.getsampwidth()
+                sample_rate = wav_file.getframerate() or target_sr
+                frame_count = wav_file.getnframes()
+                if frame_count <= 0:
+                    return None
+                raw = wav_file.readframes(frame_count)
+            if not raw:
+                return None
+            if sample_width == 1:
+                values = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+            elif sample_width == 2:
+                values = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            elif sample_width == 3:
+                data = np.frombuffer(raw, dtype=np.uint8)
+                usable = (len(data) // 3) * 3
+                if usable <= 0:
+                    return None
+                triples = data[:usable].reshape(-1, 3).astype(np.int32)
+                values = triples[:, 0] | (triples[:, 1] << 8) | (triples[:, 2] << 16)
+                values = np.where(values & 0x800000, values - 0x1000000, values).astype(np.float32)
+                values = values / 8388608.0
+            elif sample_width == 4:
+                values = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+            else:
+                return None
+            stereo = _stereo(values, channels)
+            if stereo is None:
+                return None
+            return _downsample(stereo, sample_rate)
+        except Exception:
+            return None
+
+    def _decode_ffmpeg():
+        ffmpeg = _which("ffmpeg")
+        if not ffmpeg:
+            return None
+        try:
+            output = subprocess.check_output(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-vn",
+                    "-i",
+                    os.fspath(path),
+                    "-f",
+                    "s16le",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ac",
+                    "2",
+                    "-ar",
+                    str(target_sr),
+                    "-",
+                ],
+                stderr=subprocess.STDOUT,
+                timeout=30,
+            )
+            if not output:
+                return None
+            values = np.frombuffer(output, dtype="<i2").astype(np.float32) / 32768.0
+            stereo = _stereo(values, 2)
+            if stereo is None:
+                return None
+            return stereo, int(target_sr)
+        except Exception:
+            return None
+
+    def _decode_soundfile():
+        try:
+            import soundfile as sf
+
+            values, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+            if values.size <= 0:
+                return None
+            if values.shape[1] == 1:
+                stereo = np.column_stack((values[:, 0], values[:, 0]))
+            else:
+                stereo = values[:, :2]
+            return _downsample(stereo.astype(np.float32, copy=False), int(sample_rate or target_sr))
+        except Exception:
+            return None
+
+    decoded = _decode_wav() or _decode_ffmpeg() or _decode_soundfile()
+    if decoded is None:
+        return []
+    samples, sample_rate = decoded
+    if samples is None or len(samples) <= 0:
+        return []
+
+    sample_rate = max(1, int(sample_rate or target_sr))
+    frame_ms = 33
+    hop = max(1, int(sample_rate * (frame_ms / 1000.0)))
+    frames = []
+    for start in range(0, len(samples), hop):
+        segment = samples[start : start + hop]
+        if len(segment) <= 0:
+            continue
+        peaks = np.max(np.abs(segment), axis=0)
+        frame = []
+        for peak in peaks[:2]:
+            peak = float(peak)
+            if peak <= 0.000001:
+                db_value = db_floor
+            else:
+                db_value = 20.0 * math.log10(peak)
+            frame.append(max(db_floor, min(db_top, db_value)))
+        if len(frame) == 1:
+            frame.append(frame[0])
+        frames.append((float(frame[0]), float(frame[1])))
+    return frames
+
+
+def load_audio_spectrum_frames(path: str, *, target_sr: int = 22050, bin_count: int = 192):
+    """
+    Build normalized linear-frequency FFT frames for the compact playback spectrum graph.
+    Returns: list[list[float]] with each value in [0.0, 1.0].
+    """
+    import os
+    import shutil
+    import subprocess
+
+    try:
+        import numpy as np
+    except Exception:
+        return []
+
+    bin_count = max(48, int(bin_count))
+
+    def _which(name: str):
+        p = shutil.which(name)
+        if p:
+            return p
+        sysname = platform.system().lower()
+        search_dirs = []
+        if sysname == "darwin":
+            search_dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+        elif sysname == "linux":
+            search_dirs = ["/usr/bin", "/usr/local/bin"]
+        elif sysname == "windows":
+            search_dirs = [
+                r"C:\Program Files\ffmpeg\bin",
+                r"C:\ffmpeg\bin",
+                r"C:\ProgramData\chocolatey\bin",
+                os.path.expandvars(r"%USERPROFILE%\scoop\shims"),
+            ]
+        candidates = [name]
+        if sysname == "windows" and not name.lower().endswith(".exe"):
+            candidates.append(name + ".exe")
+        for directory in search_dirs:
+            for candidate in candidates:
+                full_path = os.path.join(directory, candidate)
+                if os.path.exists(full_path):
+                    return full_path
+        return None
+
+    def _downsample(samples, sample_rate: int):
+        clean_sample_rate = max(1, int(sample_rate or target_sr))
+        if clean_sample_rate <= target_sr:
+            return samples.astype(np.float32, copy=False), clean_sample_rate
+        stride = max(1, int(round(clean_sample_rate / target_sr)))
+        return samples[::stride].astype(np.float32, copy=False), max(1, clean_sample_rate // stride)
+
+    def _decode_wav():
+        import wave
+
+        try:
+            with open(path, "rb") as handle:
+                head = handle.read(12)
+            if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                return None
+            with wave.open(path, "rb") as wav_file:
+                channels = max(1, wav_file.getnchannels())
+                sample_width = wav_file.getsampwidth()
+                sample_rate = wav_file.getframerate() or target_sr
+                frame_count = wav_file.getnframes()
+                if frame_count <= 0:
+                    return None
+                raw = wav_file.readframes(frame_count)
+            if not raw:
+                return None
+            if sample_width == 1:
+                values = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+            elif sample_width == 2:
+                values = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            elif sample_width == 3:
+                data = np.frombuffer(raw, dtype=np.uint8)
+                usable = (len(data) // 3) * 3
+                if usable <= 0:
+                    return None
+                triples = data[:usable].reshape(-1, 3).astype(np.int32)
+                values = triples[:, 0] | (triples[:, 1] << 8) | (triples[:, 2] << 16)
+                values = np.where(values & 0x800000, values - 0x1000000, values).astype(np.float32)
+                values = values / 8388608.0
+            elif sample_width == 4:
+                values = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+            else:
+                return None
+            if channels > 1:
+                usable = (len(values) // channels) * channels
+                if usable <= 0:
+                    return None
+                values = values[:usable].reshape(-1, channels).mean(axis=1)
+            return _downsample(np.clip(values, -1.0, 1.0), sample_rate)
+        except Exception:
+            return None
+
+    def _decode_ffmpeg():
+        ffmpeg = _which("ffmpeg")
+        if not ffmpeg:
+            return None
+        try:
+            output = subprocess.check_output(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-vn",
+                    "-i",
+                    os.fspath(path),
+                    "-f",
+                    "s16le",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(target_sr),
+                    "-",
+                ],
+                stderr=subprocess.STDOUT,
+                timeout=30,
+            )
+            if not output:
+                return None
+            values = np.frombuffer(output, dtype="<i2").astype(np.float32) / 32768.0
+            return np.clip(values, -1.0, 1.0), int(target_sr)
+        except Exception:
+            return None
+
+    def _decode_soundfile():
+        try:
+            import soundfile as sf
+
+            values, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+            if values.size <= 0:
+                return None
+            mono = values.mean(axis=1)
+            return _downsample(np.clip(mono, -1.0, 1.0), int(sample_rate or target_sr))
+        except Exception:
+            return None
+
+    decoded = _decode_wav() or _decode_ffmpeg() or _decode_soundfile()
+    if decoded is None:
+        return []
+    samples, sample_rate = decoded
+    if samples is None or len(samples) <= 0:
+        return []
+
+    sample_rate = max(1, int(sample_rate or target_sr))
+    duration_ms = max(1, int((len(samples) / sample_rate) * 1000))
+    frame_ms = max(45, int(duration_ms / 6000))
+    hop = max(1, int(sample_rate * (frame_ms / 1000.0)))
+    fft_size = 4096
+    if len(samples) < fft_size:
+        fft_size = 2048 if len(samples) >= 2048 else 1024
+    fft_size = max(256, int(fft_size))
+    window = np.hanning(fft_size).astype(np.float32)
+    freqs = np.fft.rfftfreq(fft_size, 1.0 / sample_rate)
+    nyquist = sample_rate / 2.0
+    max_freq = max(80.0, min(nyquist * 0.94, 18000.0))
+    edges = np.linspace(20.0, max_freq, bin_count + 1)
+    bin_indexes = []
+    for index in range(bin_count):
+        indexes = np.where((freqs >= edges[index]) & (freqs < edges[index + 1]))[0]
+        if len(indexes) == 0:
+            center = (edges[index] + edges[index + 1]) / 2.0
+            indexes = np.array([int(np.argmin(np.abs(freqs - center)))])
+        bin_indexes.append(indexes)
+
+    raw_frames = []
+    for start in range(0, len(samples), hop):
+        segment = samples[start : start + fft_size]
+        if len(segment) < fft_size:
+            padded = np.zeros(fft_size, dtype=np.float32)
+            padded[: len(segment)] = segment
+            segment = padded
+        spectrum = np.abs(np.fft.rfft(segment * window))
+        frame = []
+        for indexes in bin_indexes:
+            band = spectrum[indexes]
+            frame.append(float(np.sqrt(np.mean(band * band))) if len(band) else 0.0)
+        raw_frames.append(frame)
+
+    if not raw_frames:
+        return []
+
+    levels = np.log1p(np.asarray(raw_frames, dtype=np.float32) * 14.0)
+    normalizer = float(np.percentile(levels, 97)) if levels.size else 0.0
+    if normalizer > 0:
+        levels = np.clip(levels / normalizer, 0.0, 1.0)
+    else:
+        levels = np.zeros_like(levels)
+    levels = np.power(levels, 0.66)
+
+    smoothed = []
+    previous = None
+    for frame in levels:
+        if previous is None:
+            current = frame
+        else:
+            current = (previous * 0.46) + (frame * 0.54)
+        smoothed.append([float(max(0.0, min(1.0, value))) for value in current])
+        previous = current
+    return smoothed
 
 
 # =============================================================================

@@ -362,6 +362,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("Action Ribbon", labels)
             self.assertIn("Blob Icons", labels)
             self.assertIn("Advanced QSS", labels)
+            self.assertTrue(dialog.startup_sound_enabled_check.isChecked())
             for key in (
                 "workspace_bg",
                 "group_title_fg",
@@ -389,8 +390,10 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._blob_icon_editors["audio_database"].emoji_edit.setText("💾")
             dialog._blob_icon_editors["audio_lossy_database"].emoji_edit.setText("📼")
             dialog._blob_icon_editors["image_database"].emoji_edit.setText("🗂️")
+            dialog.startup_sound_enabled_check.setChecked(False)
             values = dialog.values()
 
+            self.assertFalse(values["startup_sound_enabled"])
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
             self.assertEqual(values["theme_settings"]["menu_selected_bg"], "#BB5500")
             self.assertEqual(values["theme_settings"]["toolbar_bg"], "#1F2937")

@@ -16,6 +16,7 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
 )
+from isrc_manager.media.waveform_cache import ensure_audio_waveform_cache_schema
 from isrc_manager.parties.service import PartyService
 from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 
@@ -316,6 +317,9 @@ class DatabaseSchemaService:
                 """
             )
 
+    def _ensure_audio_waveform_cache_table(self) -> None:
+        ensure_audio_waveform_cache_schema(self.conn)
+
     def init_db(self) -> None:
         # Core entities
         self.cursor.execute(
@@ -338,6 +342,7 @@ class DatabaseSchemaService:
         self._create_current_tracks_table()
         self._ensure_current_track_columns()
         self._ensure_current_track_indexes_and_triggers()
+        self._ensure_audio_waveform_cache_table()
 
         # Licenses & Licensees
         self.cursor.execute(
@@ -762,6 +767,8 @@ class DatabaseSchemaService:
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
+        self._ensure_audio_waveform_cache_table()
+        self.conn.commit()
 
     def _mig_1_to_2(self) -> None:
         cols = [

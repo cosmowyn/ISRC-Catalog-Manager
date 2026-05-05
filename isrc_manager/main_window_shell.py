@@ -674,6 +674,19 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     audio_export_menu = audio_menu.addMenu("Delivery & Conversion")
     authenticity_menu = audio_menu.addMenu("Authenticity & Provenance")
     quality_menu = catalog_menu.addMenu("Quality & Repair")
+    app.media_player_action = app._create_action(
+        "Media Player",
+        slot=app.open_media_player,
+    )
+    app.media_player_action.setStatusTip(
+        "Open the media player for the selected or first visible track with primary audio."
+    )
+    app.media_player_action.setToolTip(app.media_player_action.statusTip())
+    configure_media_player_icon = getattr(app, "_configure_media_player_action_icon", None)
+    if callable(configure_media_player_icon):
+        configure_media_player_icon()
+    audio_menu.insertAction(audio_ingest_menu.menuAction(), app.media_player_action)
+    audio_menu.insertSeparator(audio_ingest_menu.menuAction())
     app.track_import_repair_queue_action = app._create_action(
         "Track Import Repair Queue…",
         slot=app.open_track_import_repair_queue,

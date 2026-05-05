@@ -1,8 +1,10 @@
 import contextlib
 import io
 import json
+import math
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 import wave
@@ -328,6 +330,7 @@ class AppShellTestCase(unittest.TestCase):
         for patcher in self._patchers:
             patcher.start()
         self._set_first_launch_prompt_pending(False)
+        self._set_startup_sound_enabled(False)
         self._open_window(skip_background_prepare=True)
 
     def tearDown(self):
@@ -708,6 +711,12 @@ class AppShellTestCase(unittest.TestCase):
     def _set_first_launch_prompt_pending(self, pending: bool) -> None:
         settings = self._settings()
         settings.setValue("startup/offer_open_settings_on_first_launch_pending", bool(pending))
+        settings.sync()
+        settings.deleteLater() if hasattr(settings, "deleteLater") else None
+
+    def _set_startup_sound_enabled(self, enabled: bool) -> None:
+        settings = self._settings()
+        settings.setValue(app_module.App.STARTUP_SOUND_ENABLED_SETTINGS_KEY, bool(enabled))
         settings.sync()
         settings.deleteLater() if hasattr(settings, "deleteLater") else None
 
@@ -1203,6 +1212,35 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(splash.phase_updates[-1][0], StartupPhase.READY)
         self.assertEqual(splash.current_progress, 100)
         self.assertEqual(splash.finish_calls, [self.window])
+
+    def case_startup_sound_runs_once_after_startup_ready_when_enabled(self):
+        self._close_window()
+        self._set_startup_sound_enabled(True)
+        splash = _FakeStartupSplashController()
+        splash.show()
+        played_windows: list[object] = []
+
+        with mock.patch.object(
+            app_module.App,
+            "_play_startup_sound",
+            autospec=True,
+            side_effect=lambda window: played_windows.append(window),
+        ):
+            self.window = app_module.App(startup_feedback=splash)
+            self.window.show()
+            self._drain_events()
+            wait_for(
+                lambda: bool(played_windows),
+                timeout_ms=1500,
+                interval_ms=20,
+                app=self.app,
+                description="startup sound playback",
+            )
+            self.window._schedule_startup_sound_after_startup()
+            self._drain_events(cycles=4)
+
+        self.assertEqual(splash.finish_calls, [self.window])
+        self.assertEqual(played_windows, [self.window])
 
     def case_startup_prepares_database_before_live_open(self):
         self._close_window()
@@ -1832,6 +1870,7 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "add_track",
                 "add_album",
+                "media_player",
                 "release_browser",
                 "work_manager",
                 "quality_dashboard",
@@ -2784,6 +2823,10 @@ class AppShellTestCase(unittest.TestCase):
                 autospec=True,
                 side_effect=_deferred_refresh,
             ),
+            mock.patch.object(
+                self.window,
+                "_schedule_startup_sound_after_startup",
+            ) as startup_sound_schedule,
         ):
             self.window._activate_profile_in_background(
                 str(target_path),
@@ -2812,6 +2855,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(activated, [str(target_path)])
         self.assertEqual(feedback.current_progress, 100)
         self.assertEqual(feedback.finish_calls, [self.window])
+        startup_sound_schedule.assert_not_called()
 
     def case_profile_switch_reuses_prepared_database_activation_path(self):
         target_path = self.root / "prepared-profile.db"
@@ -3709,10 +3753,17 @@ class AppShellTestCase(unittest.TestCase):
 
         self.window.artist_field.setCurrentText("Moonwake")
         self.window.track_title_field.setText("Docked Parent Work Remix")
-        with mock.patch.object(
-            app_module.QMessageBox,
-            "information",
-            return_value=app_module.QMessageBox.Ok,
+        with (
+            mock.patch.object(
+                app_module.QMessageBox,
+                "information",
+                return_value=app_module.QMessageBox.Ok,
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "warning",
+                return_value=app_module.QMessageBox.Ok,
+            ),
         ):
             self.window.save()
             self._wait_for_background_tasks(
@@ -4435,7 +4486,12 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(list(metadata_snapshot.get("texts") or []), ["GS1 Metadata…"])
         self.assertEqual(
             list(audio_snapshot.get("texts") or []),
-            ["Import & Attach", "Delivery & Conversion", "Authenticity & Provenance"],
+            [
+                "Media Player",
+                "Import & Attach",
+                "Delivery & Conversion",
+                "Authenticity & Provenance",
+            ],
         )
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
@@ -7919,6 +7975,93 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("forensic_inspect_audio", action_ids)
         self.assertIn("authenticity_keys", action_ids)
 
+    def case_media_player_action_opens_selected_audio_track_and_is_exposed_in_menu_and_ribbon(
+        self,
+    ):
+        first_id = self._create_track(index=320, title="Media Player First")
+        selected_id = self._create_track(index=321, title="Media Player Selected")
+        silent_id = self._create_track(index=322, title="Media Player Silent")
+        self.window.track_service.set_media_path(
+            first_id,
+            "audio_file",
+            self._create_wav_file("media-player-first.wav"),
+        )
+        self.window.track_service.set_media_path(
+            selected_id,
+            "audio_file",
+            self._create_wav_file("media-player-selected.wav"),
+        )
+        self.window.refresh_table()
+        self._select_track_ids([silent_id, selected_id])
+
+        catalog_snapshot = self._menu_snapshot(self._menu_by_text("Catalog"))
+        audio_texts = list(
+            self._menu_snapshot_at_path(catalog_snapshot, "Audio").get("texts") or []
+        )
+        self.assertIn("Media Player", audio_texts)
+        self.assertEqual(self.window.media_player_action.text(), "Media Player")
+        self.assertFalse(self.window.media_player_action.icon().isNull())
+        self.assertTrue(self.window.media_player_action.isIconVisibleInMenu())
+        self.assertIn("media_player", self.window._action_ribbon_specs_by_id)
+        self.assertIn("media_player", self.window._action_ribbon_default_ids)
+        self.assertIs(
+            self.window._action_ribbon_specs_by_id["media_player"]["action"],
+            self.window.media_player_action,
+        )
+        ribbon_button = self.window.action_ribbon_toolbar.widgetForAction(
+            self.window.media_player_action
+        )
+        self.assertIsNotNone(ribbon_button)
+        self.assertEqual(ribbon_button.toolButtonStyle(), Qt.ToolButtonTextBesideIcon)
+        reference_button = self.window.action_ribbon_toolbar.widgetForAction(
+            self.window.add_track_action
+        )
+        self.assertIsNotNone(reference_button)
+        self.assertEqual(ribbon_button.minimumHeight(), reference_button.sizeHint().height())
+        self.assertEqual(ribbon_button.maximumHeight(), reference_button.sizeHint().height())
+        self.assertFalse(ribbon_button.icon().isNull())
+        expected_icon_extent = self.window._text_scaled_icon_extent(ribbon_button.font())
+        self.assertGreaterEqual(ribbon_button.iconSize().width(), 8)
+        self.assertLessEqual(ribbon_button.iconSize().width(), 10)
+        self.assertLessEqual(abs(ribbon_button.iconSize().width() - expected_icon_extent), 2)
+        self.assertEqual(ribbon_button.iconSize().height(), ribbon_button.iconSize().width())
+        icon_pixmap = ribbon_button.icon().pixmap(ribbon_button.iconSize())
+        icon_image = icon_pixmap.toImage()
+        visible_x = []
+        visible_y = []
+        for y_pos in range(icon_image.height()):
+            for x_pos in range(icon_image.width()):
+                if icon_image.pixelColor(x_pos, y_pos).alpha() > 48:
+                    visible_x.append(x_pos)
+                    visible_y.append(y_pos)
+        self.assertTrue(visible_x)
+        visible_width = max(visible_x) - min(visible_x) + 1
+        visible_height = max(visible_y) - min(visible_y) + 1
+        self.assertLessEqual(visible_width, int(round(icon_image.width() * 0.68)))
+        self.assertLessEqual(visible_height, int(round(icon_image.height() * 0.68)))
+
+        with mock.patch.object(self.window, "_open_audio_preview_for_track") as open_preview:
+            self.window.media_player_action.trigger()
+
+        source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
+        open_preview.assert_called_once_with(
+            selected_id,
+            source_spec,
+            autoplay=False,
+        )
+
+        self.window._open_audio_preview_for_track(selected_id, source_spec, autoplay=False)
+        dialog = self.window.audio_preview_dialog
+        self.assertIsNotNone(dialog)
+        dialog.showMinimized()
+        pump_events()
+        with mock.patch.object(self.window, "_open_audio_preview_for_track") as reopen_preview:
+            self.window.media_player_action.trigger()
+        reopen_preview.assert_not_called()
+        self.assertIs(self.window.audio_preview_dialog, dialog)
+        self.assertFalse(dialog.isMinimized())
+        self.assertFalse(dialog.isHidden())
+
     def case_authenticity_table_context_menu_exposes_export_actions(self):
         lossy_track_id = self._create_track(
             index=303,
@@ -9469,24 +9612,58 @@ class AppShellTestCase(unittest.TestCase):
         dialog = self._open_audio_preview_dialog(primary_track)
 
         self.assertEqual(dialog.windowTitle(), "Audio Player — Aurora Signal")
+        self.assertFalse(dialog.windowIcon().isNull())
         self.assertEqual(dialog.title_label.text(), "Aurora Signal")
         self.assertEqual(dialog.artist_label.text(), "Moonwake")
         self.assertEqual(dialog.album_label.text(), "Album · Preview Layout A")
         self.assertTrue(dialog.artwork_container.isVisible())
 
-        for object_name, symbol in (
-            ("audioPreviewPreviousButton", "|◀"),
-            ("audioPreviewRewindButton", "◀◀"),
-            ("audioPreviewPlayButton", "▶"),
-            ("audioPreviewPauseButton", "▌▌"),
-            ("audioPreviewStopButton", "■"),
-            ("audioPreviewForwardButton", "▶▶"),
-            ("audioPreviewNextButton", "▶|"),
+        for object_name in (
+            "audioPreviewPreviousButton",
+            "audioPreviewRewindButton",
+            "audioPreviewPlayButton",
+            "audioPreviewPauseButton",
+            "audioPreviewStopButton",
+            "audioPreviewForwardButton",
+            "audioPreviewNextButton",
+            "audioPreviewLoopButton",
         ):
             button = dialog.findChild(app_module.QToolButton, object_name)
             self.assertIsNotNone(button)
-            self.assertEqual(button.text(), symbol)
+            self.assertEqual(button.text(), "")
+            self.assertFalse(button.icon().isNull())
+            self.assertEqual(button.toolButtonStyle(), Qt.ToolButtonIconOnly)
             self.assertEqual(button.property("role"), "mediaTransportButton")
+
+        def icon_luminances(icon):
+            pixmap = icon.pixmap(dialog.MEDIA_ICON_SIZE)
+            image = pixmap.toImage()
+            values = []
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    color = image.pixelColor(x, y)
+                    if color.alpha() > 48:
+                        values.append(dialog._media_icon_relative_luminance(color))
+            return values
+
+        low_contrast_palette = dialog.play_button.palette()
+        low_contrast_palette.setColor(app_module.QPalette.Button, app_module.QColor("#FFFFFF"))
+        low_contrast_palette.setColor(app_module.QPalette.ButtonText, app_module.QColor("#FFFFFF"))
+        dialog.play_button.setPalette(low_contrast_palette)
+        dialog._media_icon_cache.clear()
+        dialog._set_icon_button_content(dialog.play_button, "play", "Play")
+        white_button_luminances = icon_luminances(dialog.play_button.icon())
+        self.assertTrue(white_button_luminances)
+        self.assertLess(min(white_button_luminances), 0.25)
+
+        low_contrast_palette.setColor(app_module.QPalette.Button, app_module.QColor("#111111"))
+        low_contrast_palette.setColor(app_module.QPalette.ButtonText, app_module.QColor("#111111"))
+        dialog.play_button.setPalette(low_contrast_palette)
+        dialog._media_icon_cache.clear()
+        dialog._set_icon_button_content(dialog.play_button, "play", "Play")
+        dark_button_luminances = icon_luminances(dialog.play_button.icon())
+        self.assertTrue(dark_button_luminances)
+        self.assertGreater(max(dark_button_luminances), 0.75)
 
         label_texts = self._label_texts(dialog)
         for obsolete_text in (
@@ -9506,6 +9683,11 @@ class AppShellTestCase(unittest.TestCase):
         )
         pump_events()
         self.assertTrue(dialog.artwork_container.isHidden())
+        self.assertEqual(
+            dialog.peak_meter._current_db,
+            (dialog.peak_meter.DB_FLOOR, dialog.peak_meter.DB_FLOOR),
+        )
+        self.assertEqual(dialog.peak_meter._hold_db, dialog.peak_meter.DB_FLOOR)
 
     def case_audio_preview_layout_groups_and_theme_surfaces_are_exposed(self):
         track_id = self._create_track(
@@ -9521,48 +9703,116 @@ class AppShellTestCase(unittest.TestCase):
 
         dialog = self._open_audio_preview_dialog(track_id)
         metadata_group = dialog.findChild(app_module.QGroupBox, "audioPreviewMetadataGroup")
+        media_group = dialog.findChild(app_module.QGroupBox, "audioPreviewMediaGroup")
         waveform_panel = dialog.findChild(app_module.QFrame, "audioPreviewWaveformPanel")
         playback_group = dialog.findChild(app_module.QGroupBox, "audioPreviewPlaybackGroup")
         volume_group = dialog.findChild(app_module.QGroupBox, "audioPreviewVolumeGroup")
+        play_next_group = dialog.findChild(app_module.QGroupBox, "audioPreviewPlayNextGroup")
         export_group = dialog.findChild(app_module.QGroupBox, "audioPreviewExportGroup")
 
         self.assertIsNotNone(metadata_group)
+        self.assertIsNotNone(media_group)
         self.assertIsNotNone(waveform_panel)
         self.assertIsNotNone(playback_group)
         self.assertIsNotNone(volume_group)
+        self.assertIsNotNone(play_next_group)
         self.assertIsNotNone(export_group)
         self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
+        self.assertIs(dialog.layout().itemAt(1).widget(), media_group)
+        self.assertTrue(media_group.isAncestorOf(waveform_panel))
+        self.assertTrue(media_group.isAncestorOf(dialog.artwork_container))
         self.assertEqual(dialog.width(), dialog.DEFAULT_WINDOW_WIDTH)
         self.assertLessEqual(abs(dialog.height() - dialog.DEFAULT_WINDOW_HEIGHT), 8)
-        self.assertEqual(dialog.wave.minimumHeight(), 100)
-        self.assertEqual(dialog.wave.maximumHeight(), 100)
-        self.assertEqual(dialog.artwork_label.height(), 200)
-        self.assertEqual(dialog.artwork_label.width(), 200)
+        self.assertEqual(dialog.wave.minimumHeight(), 172)
+        self.assertGreaterEqual(dialog.wave.maximumHeight(), dialog.WAVEFORM_HEIGHT)
+        self.assertGreaterEqual(dialog.artwork_label.height(), dialog.ARTWORK_SIZE)
+        self.assertEqual(dialog.artwork_label.width(), dialog.artwork_label.height())
+        self.assertFalse(dialog.wave.has_live_visualization())
+        self.assertTrue(dialog.scope.has_live_visualization())
+        self.assertIs(dialog.scope.parent(), dialog.playback_status_panel)
+        self.assertIs(dialog.play_next_list.parentWidget(), play_next_group)
+        self.assertGreaterEqual(dialog.play_next_list.count(), 1)
+        self.assertIsNotNone(dialog.play_next_list.currentItem())
+        self.assertEqual(int(dialog.play_next_list.currentItem().data(Qt.UserRole)), track_id)
+        expected_hint_size = int(
+            self.window._effective_theme_settings()["secondary_text_font_size"]
+        )
+        self.assertEqual(int(round(dialog.play_next_list.font().pointSizeF())), expected_hint_size)
+        with mock.patch.object(dialog, "_artwork_target_device_pixel_ratio", return_value=2.0):
+            dialog._refresh_artwork_pixmap()
+        artwork_pixmap = dialog.artwork_label.pixmap()
+        self.assertFalse(artwork_pixmap.isNull())
+        self.assertEqual(artwork_pixmap.devicePixelRatioF(), 2.0)
+        self.assertGreaterEqual(artwork_pixmap.width(), dialog.artwork_label.width() * 2)
+        self.assertGreaterEqual(artwork_pixmap.height(), dialog.artwork_label.height() * 2)
         self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
         self.assertTrue(volume_group.isAncestorOf(dialog.volume_slider))
         self.assertTrue(volume_group.isAncestorOf(dialog.volume_label))
+        self.assertTrue(volume_group.isAncestorOf(dialog.peak_meter))
+        for control_group in (playback_group, volume_group, play_next_group, export_group):
+            layout_margins = control_group.layout().contentsMargins()
+            self.assertLessEqual(layout_margins.left(), 10)
+            self.assertLessEqual(layout_margins.top(), 10)
+            self.assertLessEqual(layout_margins.right(), 10)
+            self.assertLessEqual(layout_margins.bottom(), 10)
         self.assertEqual(dialog.volume_slider.orientation(), Qt.Vertical)
         self.assertEqual(dialog.volume_slider.minimum(), 0)
         self.assertEqual(dialog.volume_slider.maximum(), 100)
+        self.assertEqual(dialog.playback_control_band.height(), dialog.CONTROL_BAND_HEIGHT)
+        self.assertEqual(dialog.peak_meter.height(), dialog.CONTROL_BAND_HEIGHT)
+        self.assertEqual(dialog.play_next_list.height(), dialog.CONTROL_BAND_HEIGHT)
+        left_meter_rect, right_meter_rect = dialog.peak_meter._bar_rects()
+        self.assertEqual(int(left_meter_rect.top()), dialog.peak_meter.PEAK_LABEL_HEIGHT)
+        self.assertEqual(int(left_meter_rect.width()), 5)
+        self.assertEqual(int(right_meter_rect.width()), 5)
+        self.assertEqual(int(right_meter_rect.left() - left_meter_rect.right()), 5)
+        self.assertEqual(
+            int(left_meter_rect.height()),
+            dialog.volume_slider.minimumHeight() - dialog.peak_meter.PEAK_LABEL_HEIGHT,
+        )
+        volume_group_origin = volume_group.mapTo(dialog, app_module.QPoint(0, 0))
+        meter_origin = dialog.peak_meter.mapTo(dialog, app_module.QPoint(0, 0))
+        slider_origin = dialog.volume_slider.mapTo(dialog, app_module.QPoint(0, 0))
+        mute_origin = dialog.mute_button.mapTo(dialog, app_module.QPoint(0, 0))
+        transport_origin = dialog.previous_button.mapTo(dialog, app_module.QPoint(0, 0))
+        auto_advance_origin = dialog.auto_advance_check.mapTo(dialog, app_module.QPoint(0, 0))
+        play_next_list_origin = dialog.play_next_list.mapTo(dialog, app_module.QPoint(0, 0))
+        volume_label_origin = dialog.volume_label.mapTo(dialog, app_module.QPoint(0, 0))
+        control_band_top = meter_origin.y()
+        meter_bar_bottom = meter_origin.y() + int(round(left_meter_rect.bottom()))
+        slider_top = slider_origin.y()
+        slider_bottom = slider_origin.y() + dialog.volume_slider.height()
+        mute_bottom = mute_origin.y() + dialog.mute_button.height()
+        auto_advance_bottom = auto_advance_origin.y() + dialog.auto_advance_check.height()
+        play_next_list_bottom = play_next_list_origin.y() + dialog.play_next_list.height()
+        volume_group_bottom = volume_group_origin.y() + volume_group.height()
+        self.assertGreaterEqual(meter_bar_bottom, volume_group_origin.y())
+        self.assertLessEqual(abs(control_band_top - slider_top), 1)
+        self.assertLessEqual(abs(control_band_top - transport_origin.y()), 2)
+        self.assertLessEqual(abs(control_band_top - play_next_list_origin.y()), 2)
+        self.assertLessEqual(abs(control_band_top - volume_label_origin.y()), 2)
+        self.assertLessEqual(abs(meter_bar_bottom - slider_bottom), 1)
+        self.assertLessEqual(abs(meter_bar_bottom - mute_bottom), 1)
+        self.assertLessEqual(abs(meter_bar_bottom - auto_advance_bottom), 2)
+        self.assertLessEqual(abs(meter_bar_bottom - play_next_list_bottom), 2)
+        self.assertLessEqual(volume_group_bottom - meter_bar_bottom, 10)
         self.assertEqual(dialog.volume_label.text(), "100%")
         dialog.volume_slider.setValue(37)
         pump_events()
         self.assertEqual(dialog.volume_label.text(), "37%")
         self.assertAlmostEqual(dialog._audio_out.volume(), 0.37, places=2)
+        self.assertFalse(dialog.mute_button.icon().isNull())
+        self.assertEqual(dialog.mute_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        dialog._set_muted(True)
+        pump_events()
+        self.assertTrue(dialog.mute_button.isChecked())
+        self.assertEqual(dialog.mute_button.toolTip(), "Unmute")
+        self.assertFalse(dialog.mute_button.icon().isNull())
         self.assertEqual(dialog.album_label.text(), "Album · Layout Followup")
         self.assertEqual(dialog.play_button.styleSheet(), "")
         self.assertEqual(dialog.play_button.font().family(), dialog.font().family())
-
-        def _font_size(font):
-            if font.pixelSize() > 0:
-                return float(font.pixelSize())
-            return float(font.pointSizeF())
-
-        self.assertGreater(
-            _font_size(dialog.stop_button.font()),
-            _font_size(dialog.play_button.font()),
-        )
-        self.assertIn("font-size:", dialog.stop_button.styleSheet())
+        self.assertEqual(dialog.stop_button.styleSheet(), "")
+        self.assertEqual(dialog.stop_button.font().family(), dialog.play_button.font().family())
         adjusted_font = app_module.QFont(dialog.font())
         if adjusted_font.pixelSize() > 0:
             adjusted_font.setPixelSize(adjusted_font.pixelSize() + 3)
@@ -9573,33 +9823,53 @@ class AppShellTestCase(unittest.TestCase):
             adjusted_font.setPointSizeF(point_size + 3.0)
         dialog.setFont(adjusted_font)
         pump_events()
-        self.assertGreater(
-            _font_size(dialog.stop_button.font()),
-            _font_size(dialog.play_button.font()),
-        )
-        self.assertIn("font-size:", dialog.stop_button.styleSheet())
+        self.assertEqual(dialog.stop_button.styleSheet(), "")
+        self.assertEqual(dialog.stop_button.font().family(), dialog.play_button.font().family())
 
         self.assertIs(dialog.layout().itemAt(2).widget(), dialog.playback_status_panel)
         status_geom = dialog.playback_status_panel.geometry()
-        waveform_geom = waveform_panel.geometry()
-        self.assertGreaterEqual(status_geom.top(), waveform_geom.bottom())
+        media_geom = media_group.geometry()
+        self.assertGreaterEqual(status_geom.top(), media_geom.bottom())
         self.assertEqual(dialog._label_time.parentWidget(), dialog.playback_status_panel)
         self.assertEqual(dialog._slider.parentWidget(), dialog.playback_status_panel)
 
         playback_layout = playback_group.layout()
         self.assertIsNotNone(playback_layout)
-        transport_row = playback_layout.itemAt(0).layout()
+        self.assertIs(playback_layout.itemAt(1).widget(), dialog.playback_control_band)
+        playback_band_layout = dialog.playback_control_band.layout()
+        self.assertIsNotNone(playback_band_layout)
+        transport_row = playback_band_layout.itemAt(0).layout()
         self.assertIsNotNone(transport_row)
         self.assertIs(transport_row.itemAt(0).widget(), dialog.previous_button)
-        footer_row = playback_layout.itemAt(1).layout()
+        footer_row = playback_band_layout.itemAt(2).layout()
         self.assertIsNotNone(footer_row)
         self.assertIs(footer_row.itemAt(0).widget(), dialog.auto_advance_check)
 
+        startup_metadata_height = metadata_group.height()
+        startup_media_height = media_group.height()
+        startup_status_height = dialog.playback_status_panel.height()
+        startup_playback_height = playback_group.height()
+        startup_playback_width = playback_group.width()
+        startup_play_next_width = play_next_group.width()
+        startup_wave_height = dialog.wave.height()
+        startup_artwork_size = dialog.artwork_label.height()
         dialog.resize(1600, 1000)
         pump_events()
+        self.assertEqual(metadata_group.height(), startup_metadata_height)
+        self.assertEqual(dialog.playback_status_panel.height(), startup_status_height)
+        self.assertLessEqual(abs(playback_group.width() - startup_playback_width), 2)
+        self.assertEqual(playback_group.height(), startup_playback_height)
+        self.assertEqual(volume_group.height(), startup_playback_height)
+        self.assertEqual(play_next_group.height(), startup_playback_height)
+        self.assertEqual(export_group.height(), startup_playback_height)
+        self.assertGreater(media_group.height(), startup_media_height)
+        self.assertGreater(dialog.wave.height(), startup_wave_height)
+        self.assertGreater(dialog.artwork_label.height(), startup_artwork_size)
+        self.assertEqual(dialog.artwork_label.width(), dialog.artwork_label.height())
+        self.assertGreater(play_next_group.width(), startup_play_next_width)
         self.assertLessEqual(
             playback_group.height(),
-            playback_group.sizeHint().height() + 24,
+            playback_group.sizeHint().height() + 32,
         )
         self.assertEqual(
             playback_group.height(),
@@ -9609,39 +9879,63 @@ class AppShellTestCase(unittest.TestCase):
             playback_group.height(),
             export_group.height(),
         )
+        self.assertEqual(
+            playback_group.height(),
+            play_next_group.height(),
+        )
         self.assertLessEqual(
             abs(playback_group.geometry().top() - volume_group.geometry().top()), 2
         )
         self.assertLessEqual(
+            abs(playback_group.geometry().top() - play_next_group.geometry().top()), 2
+        )
+        self.assertLessEqual(
             abs(playback_group.geometry().top() - export_group.geometry().top()), 2
         )
-        self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
-        self.assertFalse(waveform_panel.geometry().intersects(volume_group.geometry()))
-        self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(volume_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
+        self.assertLess(
+            volume_group.geometry().right(),
+            play_next_group.geometry().left(),
+        )
+        self.assertLess(
+            play_next_group.geometry().right(),
+            export_group.geometry().left(),
+        )
+        self.assertGreater(play_next_group.width(), export_group.width())
+        self.assertLessEqual(export_group.width(), 170)
+        self.assertFalse(media_group.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(volume_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(play_next_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(export_group.geometry()))
+        large_minimum_hint = dialog.minimumSizeHint()
+        self.assertLessEqual(large_minimum_hint.width(), dialog.DEFAULT_WINDOW_WIDTH + 80)
+        self.assertLessEqual(large_minimum_hint.height(), dialog.DEFAULT_WINDOW_HEIGHT + 80)
         wave_center = dialog.wave.mapTo(dialog, dialog.wave.rect().center())
         artwork_center = dialog.artwork_label.mapTo(dialog, dialog.artwork_label.rect().center())
         self.assertLessEqual(abs(wave_center.y() - artwork_center.y()), 2)
 
-        dialog.resize(dialog.minimumWidth(), dialog.minimumHeight())
+        dialog.resize(dialog.DEFAULT_WINDOW_WIDTH, dialog.DEFAULT_WINDOW_HEIGHT)
         pump_events()
-        self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
-        self.assertFalse(waveform_panel.geometry().intersects(volume_group.geometry()))
-        self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(volume_group.geometry()))
-        self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
+        self.assertLessEqual(abs(dialog.width() - dialog.DEFAULT_WINDOW_WIDTH), 8)
+        self.assertLessEqual(abs(dialog.height() - dialog.DEFAULT_WINDOW_HEIGHT), 16)
+        self.assertLessEqual(dialog.wave.height(), startup_wave_height + 8)
+        self.assertLessEqual(dialog.artwork_label.height(), startup_artwork_size + 8)
+        self.assertFalse(media_group.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(volume_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(play_next_group.geometry()))
+        self.assertFalse(media_group.geometry().intersects(export_group.geometry()))
 
         selectors = {entry.selector for entry in collect_qss_reference_entries([dialog])}
         for selector in (
             "#audioPreviewDialog",
             "#audioPreviewMetadataGroup",
+            "#audioPreviewMediaGroup",
             "#audioPreviewWaveformPanel",
             "#audioPreviewPlaybackStatusPanel",
             "#audioPreviewPlaybackGroup",
             "#audioPreviewVolumeGroup",
+            "#audioPreviewStereoPeakMeter",
+            "#audioPreviewPlayNextGroup",
+            "#audioPreviewPlayNextList",
             "#audioPreviewVolumeSlider",
             "#audioPreviewVolumeLabel",
             "#audioPreviewExportGroup",
@@ -9649,10 +9943,13 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewAlbumLabel",
             "#audioPreviewTimeLabel",
             "#audioPreviewAutoAdvanceCheck",
+            "#audioPreviewLoopButton",
             '[role="mediaTransportButton"]',
             'QToolButton[role="mediaTransportButton"]',
             '[role="mediaVolumeSlider"]',
             'FocusWheelSlider[role="mediaVolumeSlider"]',
+            '[role="mediaPeakMeter"]',
+            'StereoPeakMeterWidget[role="mediaPeakMeter"]',
             '[role="mediaToggle"]',
             'QCheckBox[role="mediaToggle"]',
             '[role="mediaExportButton"]',
@@ -9683,28 +9980,63 @@ class AppShellTestCase(unittest.TestCase):
         dialog = self._open_audio_preview_dialog(expected_order[1])
 
         self.assertEqual(dialog._track_order, expected_order)
+        self.assertEqual(dialog.play_next_list.count(), len(expected_order))
+        self.assertEqual(
+            [
+                int(dialog.play_next_list.item(index).data(Qt.UserRole))
+                for index in range(dialog.play_next_list.count())
+            ],
+            expected_order,
+        )
+        self.assertEqual(
+            int(dialog.play_next_list.currentItem().data(Qt.UserRole)), expected_order[1]
+        )
         self.assertTrue(dialog.auto_advance_check.isChecked())
+        self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_OFF)
+        self.assertEqual(dialog.loop_button.property("loopMode"), dialog.LOOP_MODE_OFF)
+        self.assertFalse(dialog.loop_button.isChecked())
+        self.assertEqual(dialog.loop_button.toolTip(), "Loop Off")
 
         dialog._go_to_previous_track()
         self.assertEqual(dialog._current_track_id, expected_order[0])
+        self.assertEqual(
+            int(dialog.play_next_list.currentItem().data(Qt.UserRole)), expected_order[0]
+        )
         self.assertFalse(dialog.previous_button.isEnabled())
         self.assertTrue(dialog.next_button.isEnabled())
 
         dialog._go_to_next_track()
         self.assertEqual(dialog._current_track_id, expected_order[1])
+        self.assertEqual(
+            int(dialog.play_next_list.currentItem().data(Qt.UserRole)), expected_order[1]
+        )
 
         dialog.open_track_preview(expected_order[-1], source_spec, autoplay=False)
         pump_events()
+        self.assertEqual(
+            int(dialog.play_next_list.currentItem().data(Qt.UserRole)), expected_order[-1]
+        )
         self.assertFalse(dialog.next_button.isEnabled())
+        dialog._cycle_loop_mode()
+        self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_PLAYLIST)
+        self.assertEqual(dialog.loop_button.property("loopMode"), dialog.LOOP_MODE_PLAYLIST)
+        self.assertTrue(dialog.loop_button.isChecked())
+        self.assertEqual(dialog.loop_button.toolTip(), "Loop Playlist")
+        self.assertFalse(dialog.loop_button.icon().isNull())
+        self.assertTrue(dialog.previous_button.isEnabled())
+        self.assertTrue(dialog.next_button.isEnabled())
 
         end_status = getattr(
             app_module.QMediaPlayer,
             "MediaStatus",
             app_module.QMediaPlayer,
         ).EndOfMedia
+        dialog._on_media_status_changed(end_status)
+        self.assertEqual(dialog._current_track_id, expected_order[0])
 
         dialog.open_track_preview(expected_order[1], source_spec, autoplay=False)
         pump_events()
+        dialog._set_loop_mode(dialog.LOOP_MODE_OFF)
         dialog._on_media_status_changed(end_status)
         self.assertEqual(dialog._current_track_id, expected_order[2])
 
@@ -9713,6 +10045,21 @@ class AppShellTestCase(unittest.TestCase):
         pump_events()
         dialog._on_media_status_changed(end_status)
         self.assertEqual(dialog._current_track_id, expected_order[1])
+
+        dialog._cycle_loop_mode()
+        dialog._cycle_loop_mode()
+        self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_TRACK)
+        self.assertEqual(dialog.loop_button.property("loopMode"), dialog.LOOP_MODE_TRACK)
+        self.assertTrue(dialog.loop_button.isChecked())
+        self.assertEqual(dialog.loop_button.toolTip(), "Loop Current Track")
+        with mock.patch.object(dialog, "_restart_current_media") as restart_current:
+            dialog._on_media_status_changed(end_status)
+        restart_current.assert_called_once_with()
+        self.assertEqual(dialog._current_track_id, expected_order[1])
+
+        dialog._cycle_loop_mode()
+        self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_OFF)
+        self.assertFalse(dialog.loop_button.isChecked())
 
     def case_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired(self):
         track_id = self._create_track(
@@ -9727,16 +10074,234 @@ class AppShellTestCase(unittest.TestCase):
         dialog = self._open_audio_preview_dialog(track_id)
 
         captured_deltas: list[int] = []
-        wave = app_module.WaveformWidget()
-        wave.scrubRequested.connect(captured_deltas.append)
+        tone_samples = [
+            int(16000 * math.sin((2.0 * math.pi * 440.0 * index) / 44100.0))
+            for index in range(4410)
+        ]
+        tone_buffer = io.BytesIO()
+        with wave.open(tone_buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(44100)
+            handle.writeframes(struct.pack("<" + ("h" * len(tone_samples)), *tone_samples))
+        tone_path = self._create_media_file("visualization-tone.wav", tone_buffer.getvalue())
+        spectrum_frames = app_module.load_audio_spectrum_frames(str(tone_path))
+        self.assertTrue(spectrum_frames)
+        self.assertGreater(len(spectrum_frames[0]), 96)
+        self.assertTrue(any(any(value > 0 for value in frame) for frame in spectrum_frames))
+        stereo_samples = []
+        for index in range(4410):
+            left = int(24000 * math.sin((2.0 * math.pi * 440.0 * index) / 44100.0))
+            right = int(6000 * math.sin((2.0 * math.pi * 660.0 * index) / 44100.0))
+            stereo_samples.extend((left, right))
+        stereo_buffer = io.BytesIO()
+        with wave.open(stereo_buffer, "wb") as handle:
+            handle.setnchannels(2)
+            handle.setsampwidth(2)
+            handle.setframerate(44100)
+            handle.writeframes(struct.pack("<" + ("h" * len(stereo_samples)), *stereo_samples))
+        stereo_path = self._create_media_file("peak-meter-stereo.wav", stereo_buffer.getvalue())
+        peak_frames = app_module.load_audio_peak_meter_frames(str(stereo_path))
+        self.assertTrue(peak_frames)
+        self.assertGreater(
+            max(frame[0] for frame in peak_frames), max(frame[1] for frame in peak_frames)
+        )
+        stereo_waveform_peaks = app_module.load_wav_peaks(str(stereo_path), 16)
+        self.assertTrue(stereo_waveform_peaks)
+        self.assertTrue(all(lo <= 0.0 <= hi for lo, hi in stereo_waveform_peaks))
+        self.assertGreater(
+            max(hi for _lo, hi in stereo_waveform_peaks),
+            max(-lo for lo, _hi in stereo_waveform_peaks),
+        )
+
+        waveform_widget = app_module.WaveformWidget()
+        waveform_widget.scrubRequested.connect(captured_deltas.append)
+        waveform_widget.resize(320, 128)
+        waveform_widget.set_duration_ms(1000)
+        waveform_rect = waveform_widget._waveform_rect(waveform_widget.rect())
+        self.assertEqual(waveform_rect.top(), waveform_widget.rect().top())
+        self.assertAlmostEqual(waveform_rect.height(), waveform_widget.rect().height(), delta=0.001)
+        self.assertFalse(waveform_widget.has_live_visualization())
+        waveform_palette = waveform_widget.palette()
+        waveform_palette.setColor(app_module.QPalette.Window, app_module.QColor("#F8FAFC"))
+        waveform_widget.setPalette(waveform_palette)
+        loud_color = waveform_widget._fallback_waveform_rgb_for_peak(0.95)
+        mid_color = waveform_widget._fallback_waveform_rgb_for_peak(0.5)
+        quiet_color = waveform_widget._fallback_waveform_rgb_for_peak(0.1)
+        self.assertGreater(loud_color[0], loud_color[1])
+        self.assertGreater(mid_color[0], mid_color[2])
+        self.assertGreater(quiet_color[1], quiet_color[0])
+        light_shaded = waveform_widget._shade_static_waveform_color(
+            loud_color,
+            peak=1.0,
+            edge_ratio=1.0,
+        )
+        self.assertGreater(light_shaded.red(), light_shaded.green())
+        self.assertLess(waveform_widget._relative_luminance(light_shaded), 0.45)
+        waveform_palette.setColor(app_module.QPalette.Window, app_module.QColor("#111827"))
+        waveform_widget.setPalette(waveform_palette)
+        dark_shaded = waveform_widget._shade_static_waveform_color(
+            loud_color,
+            peak=1.0,
+            edge_ratio=1.0,
+        )
+        self.assertGreater(
+            waveform_widget._relative_luminance(dark_shaded),
+            waveform_widget._relative_luminance(light_shaded),
+        )
+
+        self.assertIs(dialog.scope.parent(), dialog.playback_status_panel)
+        self.assertLessEqual(
+            dialog.scope.height(),
+            max(dialog._label_time.sizeHint().height(), dialog._slider.sizeHint().height()),
+        )
+
+        scope_widget = app_module.SpectrumGraphWidget()
+        scope_widget.resize(320, max(18, dialog.scope.height()))
+        scope_widget.set_duration_ms(1000)
+        rising_frame = [index / 127.0 for index in range(128)]
+        falling_frame = list(reversed(rising_frame))
+        scope_widget.set_spectrum_frames(
+            [
+                rising_frame,
+                falling_frame,
+            ]
+        )
+        scope_widget.set_playhead_ms(500)
+        self.assertTrue(scope_widget.has_live_visualization())
+        scope_rect = scope_widget._spectrum_graph_rect(scope_widget.rect())
+        self.assertAlmostEqual(scope_rect.top(), scope_widget.rect().top() + 1.0, delta=0.001)
+        self.assertAlmostEqual(scope_rect.height(), scope_widget.rect().height() - 2.0, delta=0.001)
+        quiet_color = scope_widget._visual_color_for_intensity(0.05, light_mode=True)
+        hot_color = scope_widget._visual_color_for_intensity(1.0, light_mode=True)
+        self.assertGreater(quiet_color.blue(), quiet_color.red())
+        self.assertGreater(hot_color.red(), hot_color.blue())
+        self.assertGreater(quiet_color.alphaF(), 0.35)
+        self.assertGreater(hot_color.alphaF(), 0.85)
+        self.assertGreater(hot_color.hslSaturationF(), 0.85)
+        self.assertLess(scope_widget.SPECTRUM_LINE_WIDTH, 1.0)
+        self.assertEqual(scope_widget._fade_opacity, 0.0)
+        scope_widget.start_fade_in()
+        self.assertTrue(scope_widget._fade_timer.isActive())
+        for _step in range(5):
+            scope_widget._advance_fade_in()
+        self.assertEqual(scope_widget._fade_opacity, 1.0)
+        self.assertFalse(scope_widget._fade_timer.isActive())
+        silence_segments = scope_widget._spectrum_line_segments([0.0] * 128, scope_rect)
+        self.assertTrue(silence_segments)
+        self.assertTrue(
+            all(abs(top - bottom) < 0.001 for _x, top, bottom, _value in silence_segments)
+        )
+        graph_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
+        self.assertEqual(len(graph_segments), len(rising_frame))
+        self.assertLess(graph_segments[0][0], graph_segments[-1][0])
+        self.assertLess(graph_segments[-1][1], graph_segments[0][1])
+        first_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
+        scope_widget.set_playhead_ms(900)
+        second_segments = scope_widget._spectrum_line_segments(rising_frame, scope_rect)
+        self.assertEqual(first_segments, second_segments)
+        waveform_widget.set_peaks([(-1.0, 1.0)] * 80)
+        rendered = app_module.QPixmap(waveform_widget.size())
+        rendered.fill(Qt.transparent)
+        waveform_widget.render(rendered)
+        self.assertFalse(waveform_widget._waveform_cache.isNull())
+        waveform_cache_key = waveform_widget._waveform_cache_key
+        self.assertIsNotNone(waveform_cache_key)
+        waveform_widget.set_playhead_ms(500)
+        rerendered = app_module.QPixmap(waveform_widget.size())
+        rerendered.fill(Qt.transparent)
+        waveform_widget.render(rerendered)
+        self.assertEqual(waveform_widget._waveform_cache_key, waveform_cache_key)
+        rendered_waveform = rendered.toImage()
+        top_y = int(waveform_rect.top() + (waveform_rect.height() * 0.10))
+        bottom_y = int(waveform_rect.top() + (waveform_rect.height() * 0.90))
+        top_colors = [
+            rendered_waveform.pixelColor(x, top_y)
+            for x in range(rendered_waveform.width())
+            if rendered_waveform.pixelColor(x, top_y).alpha() > 200
+        ]
+        bottom_colors = [
+            rendered_waveform.pixelColor(x, bottom_y)
+            for x in range(rendered_waveform.width())
+            if rendered_waveform.pixelColor(x, bottom_y).alpha() > 200
+        ]
+        self.assertTrue(top_colors)
+        self.assertTrue(bottom_colors)
+        self.assertGreater(max(color.red() for color in top_colors), 180)
+        self.assertGreater(max(color.red() for color in bottom_colors), 180)
+        self.assertTrue(any(color.red() != color.green() for color in top_colors))
+        rendered_scope = app_module.QPixmap(scope_widget.size())
+        rendered_scope.fill(Qt.transparent)
+        scope_widget.render(rendered_scope)
+
+        peak_meter = app_module.StereoPeakMeterWidget()
+        peak_meter.setBarHeight(74)
+        peak_meter.set_duration_ms(1000)
+        peak_meter.set_peak_frames([(-60.0, -60.0), (-3.0, -12.0), (0.0, 3.0)])
+        self.assertEqual(
+            peak_meter.PEAK_LABEL_HEIGHT,
+            peak_meter.PEAK_HOLD_LABEL_HEIGHT + peak_meter.PEAK_LIVE_LABEL_HEIGHT,
+        )
+        peak_meter.reset_signal_activity()
+        peak_meter.set_playhead_ms(1000)
+        self.assertEqual(peak_meter._current_db, (peak_meter.DB_FLOOR, peak_meter.DB_FLOOR))
+        self.assertEqual(peak_meter._hold_db, peak_meter.DB_FLOOR)
+        self.assertEqual(peak_meter._live_peak_db(), peak_meter.DB_FLOOR)
+        peak_meter.mark_signal_activity()
+        peak_meter.set_playhead_ms(1000)
+        self.assertEqual(peak_meter.BAR_WIDTH, 5)
+        self.assertEqual(peak_meter.BAR_GAP, 5)
+        self.assertEqual(
+            int(peak_meter._bar_rects()[0].height()),
+            74 - peak_meter.PEAK_LABEL_HEIGHT,
+        )
+        self.assertAlmostEqual(peak_meter._db_to_ratio(3.0), 1.0)
+        self.assertGreater(peak_meter._db_to_ratio(0.0), 0.9)
+        self.assertEqual(peak_meter._current_db, (0.0, 3.0))
+        self.assertEqual(peak_meter._hold_db, 3.0)
+        self.assertEqual(peak_meter._live_peak_db(), 3.0)
+        self.assertEqual(peak_meter._format_compact_db(peak_meter._hold_db), "+3.0")
+        peak_meter.set_gain(0.5)
+        self.assertLess(peak_meter._current_db[0], 0.0)
+        self.assertEqual(peak_meter._hold_db, 3.0)
+        peak_meter.set_playhead_ms(500)
+        self.assertEqual(peak_meter._hold_db, 3.0)
+        peak_meter.set_gain(0.0)
+        self.assertEqual(peak_meter._current_db, (peak_meter.DB_FLOOR, peak_meter.DB_FLOOR))
+        self.assertEqual(peak_meter._hold_db, 3.0)
+        peak_meter.reset_peak_hold()
+        self.assertEqual(peak_meter._hold_db, peak_meter.DB_FLOOR)
+        rendered_meter = app_module.QPixmap(peak_meter.size())
+        rendered_meter.fill(Qt.transparent)
+        peak_meter.render(rendered_meter)
+
+        dialog.scope.set_spectrum_frames([rising_frame])
+        self.assertEqual(dialog.scope._fade_opacity, 0.0)
+        with mock.patch.object(dialog, "_is_media_playing", return_value=True):
+            dialog._start_scope_visualization_if_playing()
+        self.assertTrue(dialog.scope._fade_timer.isActive())
+        dialog.scope._fade_timer.stop()
+        dialog.scope._fade_opacity = 1.0
+        with mock.patch.object(
+            app_module,
+            "load_audio_spectrum_frames",
+            side_effect=AssertionError("resize reload should not rebuild spectrum frames"),
+        ):
+            dialog._reload_peaks_for_current_width()
+        self.assertEqual(dialog.scope._fade_opacity, 1.0)
+        with mock.patch.object(dialog, "_is_media_playing", return_value=True):
+            dialog.scope._fade_opacity = 0.0
+            dialog._resume_scope_visualization_after_window_state_change()
+        self.assertTrue(dialog.scope._fade_timer.isActive())
+        dialog.scope._fade_timer.stop()
 
         forward_event = _FakeWheelEvent(angle_y=-120)
-        wave.wheelEvent(forward_event)
+        waveform_widget.wheelEvent(forward_event)
         self.assertTrue(forward_event.accepted)
         self.assertEqual(captured_deltas[-1], 1000)
 
         backward_event = _FakeWheelEvent(angle_y=120)
-        wave.wheelEvent(backward_event)
+        waveform_widget.wheelEvent(backward_event)
         self.assertTrue(backward_event.accepted)
         self.assertEqual(captured_deltas[-1], -1000)
 

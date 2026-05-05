@@ -552,6 +552,34 @@ class CommandConstructionTests(unittest.TestCase):
         self.assertIn("--osx-bundle-identifier", cmd)
         self.assertIn(build.PACKAGE_BUNDLE_IDENTIFIER, cmd)
 
+    def test_pyinstaller_command_bundles_media_icons_and_startup_sounds_when_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            entry_script = root / "ISRC_manager.py"
+            entry_script.write_text("# entry\n", encoding="utf-8")
+            icons_dir = root / "icons"
+            icons_dir.mkdir()
+            (icons_dir / "play-fill.svg").write_text("<svg />\n", encoding="utf-8")
+            sounds_dir = root / "sounds"
+            sounds_dir.mkdir()
+            (sounds_dir / "startup.wav").write_bytes(b"RIFF")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=False),
+            ):
+                cmd = build._pyinstaller_cmd(
+                    pyinstaller_launcher=("pyinstaller",),
+                    entry_script=entry_script,
+                    app_name=build.PACKAGE_APP_NAME,
+                    icon=None,
+                    runtime_splash_asset=None,
+                )
+
+        self.assertIn("--add-data", cmd)
+        self.assertIn(f"{icons_dir}:icons", cmd)
+        self.assertIn(f"{sounds_dir}:sounds", cmd)
+
 
 class MainFlowTests(unittest.TestCase):
     def test_main_cleans_build_directories_before_icon_resolution(self):

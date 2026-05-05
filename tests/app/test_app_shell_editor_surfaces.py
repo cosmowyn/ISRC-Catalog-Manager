@@ -81,6 +81,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_authenticity_actions_are_present_in_catalog_and_settings_menus = (
         AppShellTestCase.case_authenticity_actions_are_present_in_catalog_and_settings_menus
     )
+    test_media_player_action_opens_selected_audio_track_and_is_exposed_in_menu_and_ribbon = (
+        AppShellTestCase.case_media_player_action_opens_selected_audio_track_and_is_exposed_in_menu_and_ribbon
+    )
     test_authenticity_table_context_menu_exposes_export_actions = (
         AppShellTestCase.case_authenticity_table_context_menu_exposes_export_actions
     )

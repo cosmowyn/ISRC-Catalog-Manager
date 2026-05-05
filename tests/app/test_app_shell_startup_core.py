@@ -11,6 +11,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_splash_waits_for_catalog_refresh_completion = (
         AppShellTestCase.case_startup_splash_waits_for_catalog_refresh_completion
     )
+    test_startup_sound_runs_once_after_startup_ready_when_enabled = (
+        AppShellTestCase.case_startup_sound_runs_once_after_startup_ready_when_enabled
+    )
     test_startup_prepares_database_before_live_open = (
         AppShellTestCase.case_startup_prepares_database_before_live_open
     )

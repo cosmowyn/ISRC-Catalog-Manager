@@ -60,6 +60,7 @@ def build_current_values(
         "artist_code": "42",
         "auto_snapshot_enabled": True,
         "auto_snapshot_interval_minutes": 45,
+        "startup_sound_enabled": True,
         "history_retention_mode": "balanced",
         "history_auto_cleanup_enabled": True,
         "history_storage_budget_mb": history_storage_budget_mb,
@@ -166,6 +167,7 @@ class SettingsTransferServiceTests(unittest.TestCase):
         self.assertEqual(payload["bundle_format"], "isrc-catalog-manager-settings")
         self.assertEqual(payload["bundle_version"], 1)
         self.assertEqual(payload["general"]["artist_code"], "42")
+        self.assertTrue(payload["general"]["startup_sound"]["enabled"])
         self.assertTrue(payload["gs1"]["template"]["present"])
         self.assertTrue(payload["gs1"]["contracts"]["present"])
         self.assertIn("Migrated Theme", payload["theme"]["custom_theme_library"])
@@ -237,6 +239,7 @@ class SettingsTransferServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result.values["window_title"], "Migrated Catalog")
+        self.assertTrue(result.values["startup_sound_enabled"])
         self.assertTrue(Path(str(result.values["icon_path"])).exists())
         self.assertIn("Migrated Theme", result.values["theme_library"])
         self.assertEqual(result.values["gs1_template_import_bytes"], template_bytes)

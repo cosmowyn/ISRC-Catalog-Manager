@@ -1,16 +1,20 @@
+import io
 import sqlite3
 import tempfile
+import time
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.media.waveform_cache import AudioWaveformCacheService, AudioWaveformCacheWorker
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
 
 
-def make_track_conn():
-    conn = sqlite3.connect(":memory:")
+def make_track_conn(path: str | Path | None = None):
+    conn = sqlite3.connect(str(path) if path is not None else ":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(
         """
@@ -127,6 +131,20 @@ class TrackServiceTests(unittest.TestCase):
         path = self.data_root / name
         path.write_bytes(payload)
         return path
+
+    def _create_wav_media_file(self, name: str, *, amplitude: int = 12000) -> Path:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(2)
+            handle.setsampwidth(2)
+            handle.setframerate(44100)
+            frames = bytearray()
+            for index in range(256):
+                value = amplitude if index % 2 == 0 else -amplitude
+                frames.extend(int(value).to_bytes(2, "little", signed=True))
+                frames.extend(int(value // 2).to_bytes(2, "little", signed=True))
+            handle.writeframes(bytes(frames))
+        return self._create_media_file(name, buffer.getvalue())
 
     def test_create_track_persists_relations_and_metadata(self):
         track_id = self.service.create_track(
@@ -1146,6 +1164,238 @@ class TrackServiceTests(unittest.TestCase):
         prior_bytes, _mime = self.service.asset_service.fetch_asset_bytes(prior_asset.id)
         self.assertEqual(current_bytes, b"RIFFversiontwo")
         self.assertEqual(prior_bytes, b"RIFFversionone")
+
+    def test_audio_waveform_cache_is_stored_updated_and_cleaned_with_audio(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00064",
+                track_title="Cached Waveform Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Cache Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        first_audio = self._create_wav_media_file("cached-one.wav", amplitude=8000)
+        second_audio = self._create_wav_media_file("cached-two.wav", amplitude=16000)
+
+        self.service.set_media_path(
+            track_id,
+            "audio_file",
+            first_audio,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+
+        first_row = self.conn.execute(
+            """
+            SELECT source_fingerprint, peaks_json, light_preview_png, dark_preview_png
+            FROM TrackAudioWaveformCache
+            WHERE track_id=?
+            """,
+            (track_id,),
+        ).fetchone()
+        self.assertIsNotNone(first_row)
+        self.assertTrue(first_row[0])
+        self.assertIn("[", first_row[1])
+        self.assertTrue(bytes(first_row[2]).startswith(b"\x89PNG"))
+        self.assertTrue(bytes(first_row[3]).startswith(b"\x89PNG"))
+
+        self.service.set_media_path(
+            track_id,
+            "audio_file",
+            second_audio,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        second_fingerprint = self.conn.execute(
+            "SELECT source_fingerprint FROM TrackAudioWaveformCache WHERE track_id=?",
+            (track_id,),
+        ).fetchone()[0]
+        self.assertNotEqual(first_row[0], second_fingerprint)
+
+        inspection = AudioWaveformCacheService(self.conn).inspect_invalid_caches(self.service)
+        self.assertEqual(inspection.issue_count, 0)
+
+        self.service.clear_media(track_id, "audio_file")
+        self.assertIsNone(
+            self.conn.execute(
+                "SELECT 1 FROM TrackAudioWaveformCache WHERE track_id=?",
+                (track_id,),
+            ).fetchone()
+        )
+
+    def test_audio_waveform_cache_can_be_deferred_to_scheduler(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00067",
+                track_title="Deferred Waveform Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title=None,
+                release_date=None,
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        audio_path = self._create_wav_media_file("cached-deferred.wav")
+        scheduled_track_ids = []
+        self.service.waveform_cache_scheduler = scheduled_track_ids.append
+
+        with mock.patch.object(
+            self.service.waveform_cache_service,
+            "ensure_track_cache",
+        ) as ensure_track_cache:
+            self.service.set_media_path(track_id, "audio_file", audio_path)
+
+        ensure_track_cache.assert_not_called()
+        self.assertEqual(scheduled_track_ids, [track_id])
+        self.assertIsNone(
+            self.conn.execute(
+                "SELECT 1 FROM TrackAudioWaveformCache WHERE track_id=?",
+                (track_id,),
+            ).fetchone()
+        )
+
+    def test_audio_waveform_cache_worker_generates_deferred_cache(self):
+        db_path = self.data_root / "worker-cache.db"
+        conn = make_track_conn(db_path)
+        worker = AudioWaveformCacheWorker(db_path=db_path, data_root=self.data_root)
+        try:
+            service = TrackService(conn, self.data_root)
+            track_id = service.create_track(
+                TrackCreatePayload(
+                    isrc="NL-ABC-26-00068",
+                    track_title="Worker Waveform Song",
+                    artist_name="Main Artist",
+                    additional_artists=[],
+                    album_title=None,
+                    release_date=None,
+                    track_length_sec=180,
+                    iswc=None,
+                    upc=None,
+                    genre=None,
+                )
+            )
+            audio_path = self._create_wav_media_file("cached-worker.wav")
+            service.waveform_cache_scheduler = lambda _track_id: None
+            service.set_media_path(track_id, "audio_file", audio_path)
+            conn.commit()
+            self.assertIsNone(
+                conn.execute(
+                    "SELECT 1 FROM TrackAudioWaveformCache WHERE track_id=?",
+                    (track_id,),
+                ).fetchone()
+            )
+
+            self.assertTrue(worker.enqueue_track(track_id))
+            deadline = time.monotonic() + 5.0
+            row = None
+            while time.monotonic() < deadline:
+                row = conn.execute(
+                    """
+                    SELECT light_preview_png, dark_preview_png
+                    FROM TrackAudioWaveformCache
+                    WHERE track_id=?
+                    """,
+                    (track_id,),
+                ).fetchone()
+                if row is not None:
+                    break
+                time.sleep(0.05)
+
+            self.assertIsNotNone(row)
+            self.assertTrue(bytes(row[0]).startswith(b"\x89PNG"))
+            self.assertTrue(bytes(row[1]).startswith(b"\x89PNG"))
+        finally:
+            worker.stop(wait=True)
+            conn.close()
+
+    def test_delete_track_removes_cached_waveform_rows(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00065",
+                track_title="Cached Disposable Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title=None,
+                release_date=None,
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        audio_path = self._create_wav_media_file("cached-delete.wav")
+        self.service.set_media_path(track_id, "audio_file", audio_path)
+        self.assertIsNotNone(
+            self.conn.execute(
+                "SELECT 1 FROM TrackAudioWaveformCache WHERE track_id=?",
+                (track_id,),
+            ).fetchone()
+        )
+
+        self.service.delete_track(track_id)
+
+        self.assertIsNone(
+            self.conn.execute(
+                "SELECT 1 FROM TrackAudioWaveformCache WHERE track_id=?",
+                (track_id,),
+            ).fetchone()
+        )
+
+    def test_waveform_cache_diagnostics_clean_stale_and_orphaned_rows(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00066",
+                track_title="Cached Diagnostics Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title=None,
+                release_date=None,
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        audio_path = self._create_wav_media_file("cached-diagnostics.wav")
+        self.service.set_media_path(track_id, "audio_file", audio_path)
+        self.conn.execute(
+            "UPDATE TrackAudioWaveformCache SET source_fingerprint='stale' WHERE track_id=?",
+            (track_id,),
+        )
+        self.conn.commit()
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        self.conn.execute(
+            """
+            INSERT INTO TrackAudioWaveformCache(
+                track_id, source_fingerprint, source_size_bytes, analyzer_version,
+                width_px, height_px, peaks_json, light_preview_png, dark_preview_png
+            )
+            VALUES (?, 'orphan', 0, 0, 1, 1, '[]', X'00', X'00')
+            """,
+            (99999,),
+        )
+        self.conn.commit()
+        self.conn.execute("PRAGMA foreign_keys = ON")
+
+        cache_service = AudioWaveformCacheService(self.conn)
+        inspection = cache_service.inspect_invalid_caches(self.service)
+        self.assertEqual(inspection.stale_rows, 1)
+        self.assertEqual(inspection.orphaned_rows, 1)
+
+        removed = cache_service.cleanup_invalid_caches(self.service)
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM TrackAudioWaveformCache").fetchone()[0],
+            0,
+        )
 
     def test_set_media_path_updates_track_length_from_audio_duration(self):
         track_id = self.service.create_track(

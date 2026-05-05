@@ -11,7 +11,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 try:
     from mutagen import File as MutagenFile
@@ -41,6 +41,10 @@ from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
     _read_blob_from_path,
+)
+from isrc_manager.media.waveform_cache import (
+    AudioWaveformCacheService,
+    delete_audio_waveform_cache,
 )
 from isrc_manager.parties import artist_primary_label
 from isrc_manager.parties.authority import emit_party_authority_changed
@@ -283,9 +287,12 @@ class TrackService:
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
         self.asset_service = AssetService(self.conn, data_root)
         self.party_service = PartyService(self.conn)
+        self.waveform_cache_service = AudioWaveformCacheService(self.conn)
+        self.waveform_cache_scheduler: Callable[[int], object] | None = None
         self.require_governed_creation = bool(require_governed_creation)
         self._code_registry_service_instance: CodeRegistryService | None = None
         self._ensure_storage_columns()
+        self.waveform_cache_service.ensure_schema()
 
     def _ensure_storage_columns(self) -> None:
         table_names = {
@@ -1028,6 +1035,41 @@ class TrackService:
             return
         progress_callback(int(value), int(maximum), str(message or ""))
 
+    def _ensure_audio_waveform_cache(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+        progress_callback=None,
+    ) -> None:
+        scheduler = self.waveform_cache_scheduler
+        if callable(scheduler):
+            try:
+                delete_audio_waveform_cache(self.conn, int(track_id), cursor=cursor)
+                scheduler(int(track_id))
+            except Exception:
+                pass
+            return
+        try:
+            self.waveform_cache_service.ensure_track_cache(
+                self,
+                int(track_id),
+                cursor=cursor,
+                progress_callback=progress_callback,
+            )
+        except Exception:
+            # The audio attachment itself is authoritative; waveform cache can be
+            # rebuilt by diagnostics or the next startup cache pass.
+            pass
+
+    def _delete_audio_waveform_cache(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int:
+        return delete_audio_waveform_cache(self.conn, int(track_id), cursor=cursor)
+
     def _build_media_storage_payload_from_bytes(
         self,
         media_key: str,
@@ -1721,7 +1763,7 @@ class TrackService:
                 )
 
         if media_key == "audio_file":
-            total_steps = 6 if bool(sync_track_length) else 5
+            total_steps = 7 if bool(sync_track_length) else 6
         else:
             total_steps = 4
         self._emit_progress(
@@ -1788,6 +1830,22 @@ class TrackService:
                     source_path,
                     cursor=cur,
                 )
+            cache_step = 5 if bool(sync_track_length) else 4
+            cache_message = (
+                "Queueing cached waveform preview generation..."
+                if callable(self.waveform_cache_scheduler)
+                else "Analysing and storing the cached waveform preview..."
+            )
+            self._emit_progress(
+                progress_callback,
+                cache_step,
+                total_steps,
+                cache_message,
+            )
+            self._ensure_audio_waveform_cache(
+                track_id,
+                cursor=cur,
+            )
         cleanup_step = total_steps - 1
         self._emit_progress(
             progress_callback,
@@ -1847,6 +1905,8 @@ class TrackService:
             size_bytes=0,
             cursor=cur,
         )
+        if media_key == "audio_file":
+            self._delete_audio_waveform_cache(track_id, cursor=cur)
         self._delete_unreferenced_media_files([str(stale_meta.get("path") or "")], cursor=cur)
 
     def convert_media_storage_mode(
@@ -1923,6 +1983,7 @@ class TrackService:
                     storage_mode=clean_mode,
                     cursor=cur,
                 )
+            self._ensure_audio_waveform_cache(int(track_id), cursor=cur)
         if stale_path and stale_path != str(rel_path or ""):
             self._delete_unreferenced_media_files([stale_path], cursor=cur)
         return self.get_media_meta(track_id, media_key, cursor=cur)
@@ -3009,4 +3070,5 @@ class TrackService:
 
     def delete_track(self, track_id: int) -> None:
         with self.conn:
+            self._delete_audio_waveform_cache(track_id)
             self.conn.execute("DELETE FROM Tracks WHERE id=?", (track_id,))
