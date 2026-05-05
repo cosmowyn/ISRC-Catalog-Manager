@@ -15,6 +15,7 @@ import math
 import mimetypes
 import os
 import platform
+import random
 import re
 import shutil
 import sqlite3
@@ -36858,6 +36859,7 @@ class _AudioPreviewDialog(QDialog):
         "stop": "stop-fill.svg",
         "forward": "fast-forward-fill.svg",
         "next": "skip-end-fill.svg",
+        "shuffle": "shuffle.svg",
         "repeat": "repeat.svg",
         "repeat-one": "repeat-1.svg",
         "volume-up": "volume-up-fill.svg",
@@ -36882,6 +36884,11 @@ class _AudioPreviewDialog(QDialog):
         self._current_artwork_mime = "image/png"
         self._artwork_pixmap = QPixmap()
         self._handling_end_of_media = False
+        self._shuffle_enabled = False
+        self._base_track_order = []
+        self._base_track_queue = []
+        self._shuffled_track_order = []
+        self._visualization_gain = 1.0
         self._loop_mode = self.LOOP_MODE_OFF
         self._media_icon_cache: dict[tuple[str, bool, str], QIcon] = {}
         self._media_stage_syncing = False
@@ -37143,11 +37150,14 @@ class _AudioPreviewDialog(QDialog):
 
         playback_footer = QHBoxLayout()
         playback_footer.setSpacing(10)
+        self.shuffle_button = self._create_shuffle_button()
+        playback_footer.addWidget(self.shuffle_button, 0, Qt.AlignLeft | Qt.AlignBottom)
+        playback_footer.addStretch(1)
         self.auto_advance_check = QCheckBox("Auto-advance", playback_group)
         self.auto_advance_check.setObjectName("audioPreviewAutoAdvanceCheck")
         self.auto_advance_check.setProperty("role", "mediaToggle")
         self.auto_advance_check.setChecked(True)
-        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft | Qt.AlignBottom)
+        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignHCenter | Qt.AlignBottom)
         playback_footer.addStretch(1)
         self.export_button = QToolButton(playback_group)
         self.export_button.setObjectName("audioPreviewExportButton")
@@ -37572,6 +37582,8 @@ class _AudioPreviewDialog(QDialog):
             fallback_text = str(button.property("mediaFallbackText") or "")
             if icon_key:
                 self._set_icon_button_content(button, icon_key, fallback_text)
+        if hasattr(self, "shuffle_button"):
+            self._sync_shuffle_button()
         if hasattr(self, "loop_button"):
             self._sync_loop_button()
         if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
@@ -37590,6 +37602,18 @@ class _AudioPreviewDialog(QDialog):
         button.setFixedSize(42, 34)
         button.clicked.connect(self._cycle_loop_mode)
         self._sync_loop_button(button)
+        return button
+
+    def _create_shuffle_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewShuffleButton")
+        button.setProperty("role", "mediaTransportButton")
+        button.setCheckable(True)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.clicked.connect(lambda checked=False: self._set_shuffle_enabled(bool(checked)))
+        self._sync_shuffle_button(button)
         return button
 
     def _apply_stop_button_font(self) -> None:
@@ -37644,6 +37668,30 @@ class _AudioPreviewDialog(QDialog):
             fallback_text,
             inactive=mode == self.LOOP_MODE_OFF,
         )
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def _sync_shuffle_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "shuffle_button", None)
+        if button is None:
+            return
+        active = bool(self._shuffle_enabled)
+        button.blockSignals(True)
+        try:
+            button.setChecked(active)
+        finally:
+            button.blockSignals(False)
+        button.setProperty("shuffleEnabled", active)
+        self._set_icon_button_content(
+            button,
+            "shuffle",
+            "Shuf",
+            inactive=not active,
+        )
+        tooltip = "Shuffle On" if active else "Shuffle Off"
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         button.style().unpolish(button)
@@ -37710,6 +37758,35 @@ class _AudioPreviewDialog(QDialog):
         finally:
             self.play_next_list.blockSignals(False)
         self._sync_play_next_selection()
+
+    def _ordered_track_queue_items(self, track_order: list[int]) -> list[dict[str, object]]:
+        by_id: dict[int, dict[str, object]] = {}
+        for spec in self._base_track_queue:
+            try:
+                track_id = int(spec.get("track_id"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            by_id[track_id] = dict(spec)
+        ordered: list[dict[str, object]] = []
+        for position, track_id in enumerate(track_order, start=1):
+            try:
+                normalized_id = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            spec = dict(by_id.get(normalized_id) or {})
+            title = str(spec.get("title") or spec.get("label") or "").strip()
+            if not title:
+                title = f"Track {normalized_id}"
+            spec.update(
+                {
+                    "track_id": normalized_id,
+                    "title": title,
+                    "label": str(spec.get("label") or title).strip() or title,
+                    "position": position,
+                }
+            )
+            ordered.append(spec)
+        return ordered
 
     def _sync_play_next_selection(self) -> None:
         if not hasattr(self, "play_next_list"):
@@ -37786,6 +37863,79 @@ class _AudioPreviewDialog(QDialog):
         )
         self._apply_preview_state(state, source_spec=None, autoplay=autoplay)
 
+    def _current_track_id_as_int(self) -> int | None:
+        try:
+            return int(self._current_track_id)
+        except (TypeError, ValueError):
+            return None
+
+    def _create_shuffled_track_order(
+        self,
+        track_order: list[int],
+        current_track_id: int | None,
+    ) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for track_id in track_order:
+            try:
+                normalized_id = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_id in seen:
+                continue
+            normalized.append(normalized_id)
+            seen.add(normalized_id)
+        if len(normalized) <= 1:
+            return normalized
+        remainder = [track_id for track_id in normalized if track_id != current_track_id]
+        random.shuffle(remainder)
+        if current_track_id in seen:
+            return [int(current_track_id), *remainder]
+        return remainder
+
+    def _shuffle_order_for_base_track_order(self, track_order: list[int]) -> list[int]:
+        normalized: list[int] = []
+        for track_id in track_order:
+            try:
+                normalized.append(int(track_id))
+            except (TypeError, ValueError):
+                continue
+        normalized_set = set(normalized)
+        existing: list[int] = []
+        for track_id in self._shuffled_track_order:
+            try:
+                normalized_id = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_id in normalized_set:
+                existing.append(normalized_id)
+        if len(existing) == len(normalized) and set(existing) == set(normalized):
+            return existing
+        self._shuffled_track_order = self._create_shuffled_track_order(
+            normalized,
+            self._current_track_id_as_int(),
+        )
+        return list(self._shuffled_track_order)
+
+    def _apply_effective_track_order(self) -> None:
+        if self._shuffle_enabled:
+            self._track_order = self._shuffle_order_for_base_track_order(self._base_track_order)
+        else:
+            self._track_order = list(self._base_track_order)
+            self._shuffled_track_order = []
+        self._set_play_next_items(self._ordered_track_queue_items(self._track_order))
+
+    def _set_shuffle_enabled(self, enabled: bool) -> None:
+        self._shuffle_enabled = bool(enabled)
+        if self._shuffle_enabled:
+            self._shuffled_track_order = self._create_shuffled_track_order(
+                self._base_track_order or self._track_order,
+                self._current_track_id_as_int(),
+            )
+        self._apply_effective_track_order()
+        self._sync_shuffle_button()
+        self._update_navigation_buttons()
+
     def _apply_preview_state(
         self,
         state: dict[str, object],
@@ -37795,8 +37945,9 @@ class _AudioPreviewDialog(QDialog):
     ) -> None:
         self._source_spec = source_spec
         self._current_track_id = state.get("track_id")
-        self._track_order = list(state.get("track_order") or [])
-        self._set_play_next_items(list(state.get("track_queue") or []))
+        self._base_track_order = list(state.get("track_order") or [])
+        self._base_track_queue = list(state.get("track_queue") or [])
+        self._apply_effective_track_order()
         self._current_audio_bytes = bytes(state.get("audio_bytes") or b"")
         self._current_audio_mime = str(state.get("audio_mime") or "audio/wav")
         self._current_title = str(state.get("title") or "Audio Player").strip() or "Audio Player"
@@ -37954,12 +38105,36 @@ class _AudioPreviewDialog(QDialog):
         self._audio_out.setMuted(bool(muted))
         self._sync_mute_button()
 
+    def _effective_output_gain(self) -> float:
+        muted = bool(self._audio_out.isMuted())
+        if muted:
+            return 0.0
+        return max(0.0, min(1.0, float(self._audio_out.volume())))
+
     def _sync_peak_meter_gain(self) -> None:
         if not hasattr(self, "peak_meter"):
             return
-        muted = bool(self._audio_out.isMuted())
-        gain = 0.0 if muted else max(0.0, min(1.0, float(self._audio_out.volume())))
+        gain = self._effective_output_gain()
+        previous_gain = max(0.0, float(getattr(self, "_visualization_gain", gain)))
+        playing = self._is_media_playing()
+        if playing and previous_gain > 0.0 and gain <= 0.0:
+            self._begin_visualization_release()
+        self._visualization_gain = gain
         self.peak_meter.set_gain(gain)
+        if hasattr(self, "scope"):
+            self.scope.set_gain(gain)
+        if not playing:
+            return
+        if gain > 0.0:
+            self._start_scope_visualization_if_playing()
+            if not self._visualization_timer.isActive():
+                self._visualization_timer.start()
+            return
+        if self.peak_meter.is_releasing() or self.scope.is_releasing():
+            if not self._visualization_timer.isActive():
+                self._visualization_timer.start()
+        elif self._visualization_timer.isActive():
+            self._visualization_timer.stop()
 
     def _apply_artwork(self, artwork_payload) -> None:
         self._artwork_pixmap = QPixmap()
@@ -38062,8 +38237,12 @@ class _AudioPreviewDialog(QDialog):
 
     def _refresh_live_visualization(self) -> None:
         if self._is_media_playing():
-            self._start_scope_visualization_if_playing()
             self._apply_position(self._player.position(), self._player.duration())
+            if self._effective_output_gain() > 0.0:
+                self._start_scope_visualization_if_playing()
+                return
+            if not self._advance_visualization_release():
+                self._visualization_timer.stop()
             return
         if not self._advance_visualization_release():
             self._visualization_timer.stop()
@@ -38073,7 +38252,7 @@ class _AudioPreviewDialog(QDialog):
         return self._player.playbackState() == playing_state
 
     def _start_scope_visualization_if_playing(self) -> None:
-        if self._is_media_playing():
+        if self._is_media_playing() and self._effective_output_gain() > 0.0:
             self.peak_meter.mark_signal_activity()
             self.scope.start_fade_in()
 
@@ -38093,9 +38272,17 @@ class _AudioPreviewDialog(QDialog):
 
     def _sync_visualization_timer(self, *_args) -> None:
         if self._is_media_playing():
-            self._start_scope_visualization_if_playing()
-            if not self._visualization_timer.isActive():
-                self._visualization_timer.start()
+            if self._effective_output_gain() > 0.0:
+                self._start_scope_visualization_if_playing()
+                if not self._visualization_timer.isActive():
+                    self._visualization_timer.start()
+                return
+            self._begin_visualization_release()
+            if self.peak_meter.is_releasing() or self.scope.is_releasing():
+                if not self._visualization_timer.isActive():
+                    self._visualization_timer.start()
+            elif self._visualization_timer.isActive():
+                self._visualization_timer.stop()
             return
         self._begin_visualization_release()
         if self.peak_meter.is_releasing() or self.scope.is_releasing():
@@ -39082,6 +39269,7 @@ class SpectrumGraphWidget(WaveformWidget):
         self._peaks = []
         self._fade_elapsed_ms = 0
         self._fade_opacity = 0.0
+        self._gain = 1.0
         self._release_active = False
         self._release_elapsed_ms = 0
         self._release_start_opacity = 0.0
@@ -39138,8 +39326,15 @@ class SpectrumGraphWidget(WaveformWidget):
         self._release_elapsed_ms = 0
         self.update()
 
+    def set_gain(self, gain: float) -> None:
+        self._gain = max(0.0, min(1.0, float(gain)))
+        if self._gain > 0.0 and self._release_active:
+            self._release_active = False
+            self._release_elapsed_ms = 0
+        self.update()
+
     def start_fade_in(self) -> None:
-        if not self.has_live_visualization() or self._fade_opacity >= 1.0:
+        if not self.has_live_visualization() or self._gain <= 0.0 or self._fade_opacity >= 1.0:
             return
         self._release_active = False
         self._release_elapsed_ms = 0
@@ -39153,13 +39348,15 @@ class SpectrumGraphWidget(WaveformWidget):
         self._fade_timer.stop()
         if self._release_active:
             return
-        if self._fade_opacity <= 0.0:
+        release_start_opacity = max(0.0, self._fade_opacity * max(0.0, self._gain))
+        if release_start_opacity <= 0.0:
             self._fade_opacity = 0.0
             self._release_active = False
             return
         self._release_active = True
         self._release_elapsed_ms = 0
-        self._release_start_opacity = self._fade_opacity
+        self._fade_opacity = release_start_opacity
+        self._release_start_opacity = release_start_opacity
         self.update()
 
     def is_releasing(self) -> bool:
@@ -39271,6 +39468,8 @@ class SpectrumGraphWidget(WaveformWidget):
     def _draw_spectrum_graph(self, painter, rect, *, light_mode: bool) -> None:
         frame = self._current_spectrum_frame()
         opacity = max(0.0, min(1.0, self._fade_opacity))
+        if not self._release_active:
+            opacity *= max(0.0, min(1.0, self._gain))
         if not frame or opacity <= 0.0:
             return
         visual_rect = self._spectrum_graph_rect(rect)

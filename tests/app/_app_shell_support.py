@@ -9627,6 +9627,7 @@ class AppShellTestCase(unittest.TestCase):
             "audioPreviewForwardButton",
             "audioPreviewNextButton",
             "audioPreviewLoopButton",
+            "audioPreviewShuffleButton",
         ):
             button = dialog.findChild(app_module.QToolButton, object_name)
             self.assertIsNotNone(button)
@@ -9761,7 +9762,14 @@ class AppShellTestCase(unittest.TestCase):
             menu.actions()[0].trigger()
             open_artwork_mock.assert_called_once()
         self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
+        self.assertTrue(playback_group.isAncestorOf(dialog.shuffle_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.export_button))
+        self.assertEqual(dialog.shuffle_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.shuffle_button.text(), "")
+        self.assertFalse(dialog.shuffle_button.icon().isNull())
+        self.assertEqual(dialog.shuffle_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertFalse(dialog.shuffle_button.isChecked())
+        self.assertEqual(dialog.shuffle_button.toolTip(), "Shuffle Off")
         self.assertEqual(dialog.export_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.export_button.text(), "")
         self.assertFalse(dialog.export_button.icon().isNull())
@@ -9796,6 +9804,7 @@ class AppShellTestCase(unittest.TestCase):
         slider_origin = dialog.volume_slider.mapTo(dialog, app_module.QPoint(0, 0))
         mute_origin = dialog.mute_button.mapTo(dialog, app_module.QPoint(0, 0))
         transport_origin = dialog.previous_button.mapTo(dialog, app_module.QPoint(0, 0))
+        shuffle_origin = dialog.shuffle_button.mapTo(dialog, app_module.QPoint(0, 0))
         auto_advance_origin = dialog.auto_advance_check.mapTo(dialog, app_module.QPoint(0, 0))
         play_next_list_origin = dialog.play_next_list.mapTo(dialog, app_module.QPoint(0, 0))
         volume_label_origin = dialog.volume_label.mapTo(dialog, app_module.QPoint(0, 0))
@@ -9814,6 +9823,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertLessEqual(abs(control_band_top - volume_label_origin.y()), 2)
         self.assertLessEqual(abs(meter_bar_bottom - slider_bottom), 1)
         self.assertLessEqual(abs(meter_bar_bottom - mute_bottom), 1)
+        self.assertLessEqual(
+            abs(meter_bar_bottom - (shuffle_origin.y() + dialog.shuffle_button.height())), 1
+        )
         self.assertLessEqual(abs(meter_bar_bottom - auto_advance_bottom), 2)
         self.assertLessEqual(abs(meter_bar_bottom - play_next_list_bottom), 2)
         self.assertLessEqual(volume_group_bottom - meter_bar_bottom, 10)
@@ -9864,8 +9876,36 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(transport_row.itemAt(0).widget(), dialog.previous_button)
         footer_row = playback_band_layout.itemAt(2).layout()
         self.assertIsNotNone(footer_row)
-        self.assertIs(footer_row.itemAt(0).widget(), dialog.auto_advance_check)
-        self.assertIs(footer_row.itemAt(2).widget(), dialog.export_button)
+        self.assertIs(footer_row.itemAt(0).widget(), dialog.shuffle_button)
+        self.assertIs(footer_row.itemAt(2).widget(), dialog.auto_advance_check)
+        self.assertIs(footer_row.itemAt(4).widget(), dialog.export_button)
+        footer_center = footer_row.geometry().center().x()
+        auto_center = (
+            dialog.auto_advance_check.geometry().left()
+            + dialog.auto_advance_check.geometry().width() / 2
+        )
+        self.assertLessEqual(abs(auto_center - footer_center), 3)
+        original_order = list(dialog._track_order)
+        self.assertGreaterEqual(len(original_order), 1)
+        with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
+            dialog.shuffle_button.click()
+        pump_events()
+        self.assertTrue(dialog.shuffle_button.isChecked())
+        self.assertEqual(dialog.shuffle_button.toolTip(), "Shuffle On")
+        self.assertEqual(dialog._track_order[0], track_id)
+        self.assertEqual(set(dialog._track_order), set(original_order))
+        self.assertEqual(
+            [
+                int(dialog.play_next_list.item(index).data(Qt.UserRole))
+                for index in range(dialog.play_next_list.count())
+            ],
+            dialog._track_order,
+        )
+        dialog.shuffle_button.click()
+        pump_events()
+        self.assertFalse(dialog.shuffle_button.isChecked())
+        self.assertEqual(dialog.shuffle_button.toolTip(), "Shuffle Off")
+        self.assertEqual(dialog._track_order, original_order)
 
         startup_metadata_height = metadata_group.height()
         startup_media_height = media_group.height()
@@ -10346,6 +10386,50 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(dialog._visualization_timer.isActive())
         dialog._visualization_timer.stop()
         dialog.scope._release_active = False
+        dialog.scope._fade_opacity = 1.0
+        dialog.scope.set_gain(1.0)
+        dialog.peak_meter.set_peak_frames([(-3.0, -6.0)])
+        dialog.peak_meter.set_duration_ms(1000)
+        dialog.peak_meter.mark_signal_activity()
+        dialog.peak_meter.set_playhead_ms(0)
+        dialog._visualization_gain = 1.0
+        with mock.patch.object(dialog, "_is_media_playing", return_value=True):
+            dialog._set_muted(True)
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog.peak_meter.is_releasing())
+        self.assertEqual(dialog.scope._gain, 0.0)
+        self.assertTrue(dialog._visualization_timer.isActive())
+        mute_release_opacity = dialog.scope._fade_opacity
+        self.assertGreater(mute_release_opacity, 0.0)
+        dialog.scope.advance_release(300)
+        self.assertLess(dialog.scope._fade_opacity, mute_release_opacity)
+        dialog._visualization_timer.stop()
+        dialog.scope._release_active = False
+        dialog.peak_meter._release_active = False
+        dialog._set_muted(False)
+        dialog.scope._fade_opacity = 1.0
+        dialog.scope.set_gain(1.0)
+        dialog.peak_meter.mark_signal_activity()
+        dialog.peak_meter.set_playhead_ms(0)
+        dialog._visualization_gain = 1.0
+        with mock.patch.object(dialog, "_is_media_playing", return_value=True):
+            dialog._set_volume_percent(0)
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog.peak_meter.is_releasing())
+        self.assertEqual(dialog.scope._gain, 0.0)
+        self.assertTrue(dialog._visualization_timer.isActive())
+        dialog.scope.advance_release(300)
+        dialog.peak_meter.advance_release(300)
+        with mock.patch.object(dialog, "_is_media_playing", return_value=True):
+            dialog._set_volume_percent(50)
+        self.assertFalse(dialog.scope.is_releasing())
+        self.assertFalse(dialog.peak_meter.is_releasing())
+        self.assertAlmostEqual(dialog.scope._gain, 0.5)
+        self.assertTrue(dialog.scope._fade_timer.isActive())
+        dialog.scope._fade_timer.stop()
+        dialog._visualization_timer.stop()
+        dialog.scope._fade_opacity = 1.0
+        dialog.scope.set_gain(1.0)
         with mock.patch.object(
             app_module,
             "load_audio_spectrum_frames",
