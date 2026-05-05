@@ -30,6 +30,7 @@ The waveform view now uses cached, frequency/amplitude-colored waveform previews
 - The media player quick action icon is deliberately tiny: the actual icon box follows text height, while the SVG glyph is drawn smaller inside that box.
 - Startup sound playback is tied to the `startupReady` signal after splash completion, retained through `QSoundEffect`, and packaged from the top-level `sounds/` folder for PyInstaller builds.
 - The waveform cache Qt decoder fallback now requires an active `QCoreApplication` before creating `QAudioDecoder`. This prevents headless service tests and non-UI callers from blocking in Qt Multimedia when ffmpeg is unavailable.
+- MP3 waveform probing now does a lightweight frame-sync preflight before Qt decoder fallback. This keeps invalid placeholder MP3 fixtures and corrupt MP3-like files from blocking UI saves when ffmpeg is unavailable but a Qt application instance exists.
 
 ## Validation
 
@@ -54,6 +55,13 @@ Full local validation run before push:
 - CI follow-up after first push: GitHub Actions exposed a Linux catalog-services timeout in `tests.test_authenticity_verification_service` when service-layer audio cache generation reached the Qt decoder without a Qt application instance. Fixed with the `QCoreApplication` guard and verified with:
   - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_track_service.py::TrackServiceTests::test_qt_waveform_decoder_is_skipped_without_application_instance tests/test_authenticity_verification_service.py::AudioAuthenticityVerificationServiceTests::test_export_provenance_audio_reports_real_progress_stages_before_terminal_completion -q`
   - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m tests.run_group catalog-services --module-timeout-seconds 120 --group-timeout-seconds 600 --verbosity 1` passed in 72.46s.
+  - `.venv/bin/python -m compileall -q isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m ruff check isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m black --check isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m mypy`
+- CI follow-up after the headless decoder guard: GitHub Actions run `25373423117` made catalog-services green but exposed a `ui-app-workflows` timeout in `tests.app.test_app_shell_startup_core.AppShellStartupCoreTests.test_track_editor_save_succeeds_without_album_propagation`. The failing path used a tiny invalid MP3 fixture; with a QApplication present it reached Qt Multimedia and consumed the edit-save wait budget. Fixed with the MP3 frame-sync preflight and verified with:
+  - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_track_service.py::TrackServiceTests::test_invalid_mp3_waveform_cache_skips_qt_decoder_probe tests/app/test_app_shell_startup_core.py::AppShellStartupCoreTests::test_track_editor_save_succeeds_without_album_propagation -q`
+  - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m tests.run_group ui-app-workflows --module-timeout-seconds 300 --group-timeout-seconds 2400 --verbosity 1` passed in 220.27s.
   - `.venv/bin/python -m compileall -q isrc_manager/media/waveform_cache.py tests/test_track_service.py`
   - `.venv/bin/python -m ruff check isrc_manager/media/waveform_cache.py tests/test_track_service.py`
   - `.venv/bin/python -m black --check isrc_manager/media/waveform_cache.py tests/test_track_service.py`

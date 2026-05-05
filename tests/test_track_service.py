@@ -1241,6 +1241,19 @@ class TrackServiceTests(unittest.TestCase):
                 )
             )
 
+    def test_invalid_mp3_waveform_cache_skips_qt_decoder_probe(self):
+        audio_path = self._create_media_file("invalid-cache.mp3", b"ID3not-real-audio")
+        with (
+            mock.patch.object(waveform_cache, "_load_wave_peaks", return_value=None),
+            mock.patch.object(waveform_cache, "_load_ffmpeg_peaks", return_value=None),
+            mock.patch.object(waveform_cache, "_load_qt_decoder_peaks") as qt_decoder,
+        ):
+            self.assertEqual(
+                waveform_cache.load_audio_waveform_peaks(str(audio_path), 16),
+                [],
+            )
+        qt_decoder.assert_not_called()
+
     def test_audio_waveform_cache_can_be_deferred_to_scheduler(self):
         track_id = self.service.create_track(
             TrackCreatePayload(

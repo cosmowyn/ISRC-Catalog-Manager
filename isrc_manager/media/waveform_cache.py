@@ -31,6 +31,7 @@ WAVEFORM_DB_FLOOR = -96.0
 WAVEFORM_DB_STOPS = (0.0, -3.0, -6.0, -12.0, -18.0, -30.0, -48.0, -72.0, -96.0)
 WAVEFORM_COLOR_SOFTEN_AMOUNT = 0.13
 _FINGERPRINT_EDGE_BYTES = 64 * 1024
+_MP3_FRAME_SYNC_SCAN_BYTES = 256 * 1024
 
 
 @dataclass(slots=True)
@@ -408,6 +409,17 @@ def _qt_application_instance_available() -> bool:
     return QCoreApplication.instance() is not None
 
 
+def _mp3_source_has_frame_sync(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(_MP3_FRAME_SYNC_SCAN_BYTES)
+    except OSError:
+        return False
+    if not data:
+        return False
+    return any(first == 0xFF and (second & 0xE0) == 0xE0 for first, second in zip(data, data[1:]))
+
+
 def _load_qt_decoder_peaks(path: str, buckets: int) -> list[tuple[float, float]] | None:
     if not _qt_application_instance_available():
         return None
@@ -533,6 +545,8 @@ def load_audio_waveform_peaks(
     peaks = _load_ffmpeg_peaks(path, buckets)
     if peaks is not None:
         return peaks
+    if suffix == ".mp3" and not _mp3_source_has_frame_sync(path):
+        return []
     peaks = _load_qt_decoder_peaks(path, buckets)
     if peaks is not None:
         return peaks
