@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.media import waveform_cache
 from isrc_manager.media.waveform_cache import AudioWaveformCacheService, AudioWaveformCacheWorker
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
 
@@ -1226,6 +1227,19 @@ class TrackServiceTests(unittest.TestCase):
                 (track_id,),
             ).fetchone()
         )
+
+    def test_qt_waveform_decoder_is_skipped_without_application_instance(self):
+        with mock.patch.object(
+            waveform_cache,
+            "_qt_application_instance_available",
+            return_value=False,
+        ):
+            self.assertIsNone(
+                waveform_cache._load_qt_decoder_peaks(
+                    str(self.data_root / "no-app.mp3"),
+                    16,
+                )
+            )
 
     def test_audio_waveform_cache_can_be_deferred_to_scheduler(self):
         track_id = self.service.create_track(

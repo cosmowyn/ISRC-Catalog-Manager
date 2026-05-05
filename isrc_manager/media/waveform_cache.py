@@ -400,7 +400,17 @@ def _load_ffmpeg_peaks(path: str, buckets: int) -> list[tuple[float, float]] | N
     return peaks or []
 
 
+def _qt_application_instance_available() -> bool:
+    try:
+        from PySide6.QtCore import QCoreApplication
+    except Exception:
+        return False
+    return QCoreApplication.instance() is not None
+
+
 def _load_qt_decoder_peaks(path: str, buckets: int) -> list[tuple[float, float]] | None:
+    if not _qt_application_instance_available():
+        return None
     try:
         from PySide6.QtCore import QEventLoop, QTimer, QUrl
         from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat

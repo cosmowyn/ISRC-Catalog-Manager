@@ -29,6 +29,7 @@ The waveform view now uses cached, frequency/amplitude-colored waveform previews
 - The media stage avoids fixed fullscreen-derived sizes; it uses min/max constraints and preferred size hints so the dialog can shrink back to its default footprint.
 - The media player quick action icon is deliberately tiny: the actual icon box follows text height, while the SVG glyph is drawn smaller inside that box.
 - Startup sound playback is tied to the `startupReady` signal after splash completion, retained through `QSoundEffect`, and packaged from the top-level `sounds/` folder for PyInstaller builds.
+- The waveform cache Qt decoder fallback now requires an active `QCoreApplication` before creating `QAudioDecoder`. This prevents headless service tests and non-UI callers from blocking in Qt Multimedia when ffmpeg is unavailable.
 
 ## Validation
 
@@ -50,6 +51,13 @@ Full local validation run before push:
 - `.venv/bin/python -m pytest tests/app/test_app_shell_startup_core.py::AppShellStartupCoreTests::test_startup_sound_runs_once_after_startup_ready_when_enabled tests/app/test_app_shell_profiles_and_selection.py::AppShellProfileAndSelectionTests::test_profile_switch_loading_feedback_waits_for_catalog_refresh_completion tests/test_theme_builder.py::ThemeBuilderTests::test_application_settings_dialog_exposes_theme_builder_tabs_and_payload tests/test_settings_transfer_service.py::SettingsTransferServiceTests::test_export_bundle_writes_settings_json_and_attachments tests/test_settings_transfer_service.py::SettingsTransferServiceTests::test_prepare_import_restores_portable_values_and_attachments tests/test_build_requirements.py::CommandConstructionTests::test_pyinstaller_command_bundles_media_icons_and_startup_sounds_when_present`
 - `.venv/bin/python -m pytest tests/app/test_app_shell_workspace_docks.py`
 - `.venv/bin/python -m pytest tests/app/test_app_shell_editor_surfaces.py`
+- CI follow-up after first push: GitHub Actions exposed a Linux catalog-services timeout in `tests.test_authenticity_verification_service` when service-layer audio cache generation reached the Qt decoder without a Qt application instance. Fixed with the `QCoreApplication` guard and verified with:
+  - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_track_service.py::TrackServiceTests::test_qt_waveform_decoder_is_skipped_without_application_instance tests/test_authenticity_verification_service.py::AudioAuthenticityVerificationServiceTests::test_export_provenance_audio_reports_real_progress_stages_before_terminal_completion -q`
+  - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m tests.run_group catalog-services --module-timeout-seconds 120 --group-timeout-seconds 600 --verbosity 1` passed in 72.46s.
+  - `.venv/bin/python -m compileall -q isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m ruff check isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m black --check isrc_manager/media/waveform_cache.py tests/test_track_service.py`
+  - `.venv/bin/python -m mypy`
 
 Raw unsharded `.venv/bin/python -m pytest` was not used as the final local signal because native macOS Qt modal handling can hang outside the CI runner shape. The CI-style `tests.run_group` runner was used instead with `QT_QPA_PLATFORM=offscreen` and module/group timeouts, matching the online workflow more closely.
 
