@@ -86,9 +86,12 @@ Catalog media attachment uses reviewed workflows rather than silent writes.
 
 Preview stays close to the catalog workflow.
 
-- audio preview supports transport controls, waveform scrubbing, export, and track-aware navigation
+- audio preview opens as the full Audio Player, with waveform and timeline scrubbing, Now Playing metadata, artwork handoff to image preview, live spectrum and peak meters, volume/mute, export, and track-aware navigation
+- Play Next follows the visible catalog order, while shuffle, auto advance, loop, and album-scoped playlist controls shape playback without leaving the catalog
 - image preview supports pan and zoom inspection plus export
 - both previews remain real top-level windows so they can be revisited naturally while you keep working in the catalog
+
+All bundled application sound effects were designed and created by Aeon Cosmowyn.
 
 ## Recommended In-App Help Topics
 

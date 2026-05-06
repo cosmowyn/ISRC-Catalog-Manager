@@ -152,7 +152,20 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("owner Party company name", settings.content_html)
         self.assertIn("custom value acts as an explicit override", settings.content_html)
         self.assertIn("Export Settings", settings.content_html)
+        self.assertIn("Sounds", settings.content_html)
+        self.assertIn("Aeon Cosmowyn", settings.content_html)
         self.assertIn("GTIN contracts CSV", settings.content_html)
+
+    def test_media_preview_help_documents_audio_player_capabilities(self):
+        chapter = HELP_CHAPTERS_BY_ID["media-preview"]
+
+        self.assertEqual(chapter.title, "Audio Player and Image Preview")
+        self.assertIn("Now Playing", chapter.content_html)
+        self.assertIn("Play Next", chapter.content_html)
+        self.assertIn("Album playlist", chapter.content_html)
+        self.assertIn("Auto Advance", chapter.content_html)
+        self.assertIn("smooth meter and spectrum fade-out", chapter.content_html)
+        self.assertIn("forensic watermarked audio", chapter.content_html)
 
     def test_application_updates_help_documents_installer_workflow(self):
         chapter = HELP_CHAPTERS_BY_ID["application-updates"]

@@ -14,6 +14,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_sound_runs_once_after_startup_ready_when_enabled = (
         AppShellTestCase.case_startup_sound_runs_once_after_startup_ready_when_enabled
     )
+    test_app_sound_message_box_probe_uses_stable_qmessagebox_type = (
+        AppShellTestCase.case_app_sound_message_box_probe_uses_stable_qmessagebox_type
+    )
     test_startup_prepares_database_before_live_open = (
         AppShellTestCase.case_startup_prepares_database_before_live_open
     )

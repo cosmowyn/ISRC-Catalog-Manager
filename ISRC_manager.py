@@ -21,11 +21,13 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import fields as dataclass_fields
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from time import monotonic
 
 from PySide6.QtCore import (
     QByteArray,
@@ -78,6 +80,7 @@ from PySide6.QtMultimedia import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSlider,
     QApplication,
     QCalendarWidget,
     QCheckBox,
@@ -110,7 +113,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QScrollBar,
     QSizePolicy,
+    QSlider,
     QSplitter,
     QStatusBar,
     QTableView,
@@ -136,6 +141,19 @@ from isrc_manager.app_dialogs import (
     HelpContentsDialog,
     MasterTransferExportDialog,
     ReleaseNotesDialog,
+)
+from isrc_manager.app_sounds import (
+    APP_SOUND_CLICK,
+    APP_SOUND_DEFAULTS,
+    APP_SOUND_FILENAMES,
+    APP_SOUND_IDS,
+    APP_SOUND_NOTICE,
+    APP_SOUND_SETTINGS_KEYS,
+    APP_SOUND_SPECS,
+    APP_SOUND_STARTUP,
+    APP_SOUND_WARNING,
+    coerce_sound_bool,
+    normalize_app_sound_settings,
 )
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
@@ -574,6 +592,8 @@ from isrc_manager.workspace_debug import (
     workspace_debug_log,
 )
 
+_QT_MESSAGE_BOX_CLASS = QMessageBox
+
 _RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
     "message",
     "asctime",
@@ -799,6 +819,7 @@ class ApplicationSettingsDialog(QDialog):
         current_profile_path: str,
         blob_icon_settings: dict[str, object] | None = None,
         startup_sound_enabled: bool = True,
+        app_sound_settings: dict[str, object] | None = None,
         history_retention_mode: str = DEFAULT_HISTORY_RETENTION_MODE,
         history_auto_cleanup_enabled: bool = DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
         history_storage_budget_mb: int = DEFAULT_HISTORY_STORAGE_BUDGET_MB,
@@ -848,7 +869,12 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_change_tracking_enabled = True
         self._history_retention_sync_enabled = True
         self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
-        self._startup_sound_enabled = bool(startup_sound_enabled)
+        self._app_sound_settings = normalize_app_sound_settings(
+            app_sound_settings,
+            startup_sound_enabled=startup_sound_enabled,
+        )
+        self._startup_sound_enabled = self._app_sound_settings[APP_SOUND_STARTUP]
+        self._app_sound_checks: dict[str, QCheckBox] = {}
         self._settings_builder_specs = (
             *self.THEME_PAGE_SPECS[:-1],
             (
@@ -1045,17 +1071,6 @@ class ApplicationSettingsDialog(QDialog):
             "Application Icon",
             icon_widget,
             "Optional image file used as the app icon.",
-        )
-
-        self.startup_sound_enabled_check = QCheckBox("Play startup sound after loading")
-        self.startup_sound_enabled_check.setChecked(self._startup_sound_enabled)
-        self.startup_sound_enabled_check.setMinimumWidth(320)
-        self._add_row(
-            app_grid,
-            2,
-            "Startup Sound",
-            self.startup_sound_enabled_check,
-            "Play the bundled startup sound once after the loading splash finishes and the catalog table is visible.",
         )
 
         registration_box = QGroupBox("Registration & Codes")
@@ -1314,6 +1329,33 @@ class ApplicationSettingsDialog(QDialog):
 
         general_layout.addStretch(1)
         self._general_tab_index = self.tabs.addTab(self._wrap_tab_page(general_page), "General")
+
+        sounds_page = QWidget(self)
+        sounds_page.setProperty("role", "workspaceCanvas")
+        sounds_layout = QVBoxLayout(sounds_page)
+        sounds_layout.setContentsMargins(10, 10, 10, 10)
+        sounds_layout.setSpacing(14)
+
+        app_sounds_box = QGroupBox("App-Wide Sounds")
+        app_sounds_grid = QGridLayout(app_sounds_box)
+        self._configure_grid(app_sounds_grid)
+        for row, (sound_id, label, control_text, hint_text) in enumerate(APP_SOUND_SPECS):
+            check = QCheckBox(control_text)
+            check.setChecked(bool(self._app_sound_settings.get(sound_id, True)))
+            check.setMinimumWidth(320)
+            self._app_sound_checks[sound_id] = check
+            setattr(self, f"{sound_id}_sound_enabled_check", check)
+            self._add_row(app_sounds_grid, row, label, check, hint_text)
+        self.startup_sound_enabled_check = self._app_sound_checks[APP_SOUND_STARTUP]
+        sounds_layout.addWidget(app_sounds_box)
+        sound_credit = QLabel(
+            "All bundled application sound effects were designed and created by Aeon Cosmowyn."
+        )
+        sound_credit.setProperty("role", "hint")
+        sound_credit.setWordWrap(True)
+        sounds_layout.addWidget(sound_credit)
+        sounds_layout.addStretch(1)
+        self._sounds_tab_index = self.tabs.addTab(self._wrap_tab_page(sounds_page), "Sounds")
 
         gs1_page = QWidget(self)
         gs1_page.setProperty("role", "workspaceCanvas")
@@ -1669,8 +1711,20 @@ class ApplicationSettingsDialog(QDialog):
                 self.auto_snapshot_interval_spin,
             ),
             "startup_sound_enabled": (
-                self._general_tab_index,
+                self._sounds_tab_index,
                 self.startup_sound_enabled_check,
+            ),
+            "click_sound_enabled": (
+                self._sounds_tab_index,
+                self._app_sound_checks[APP_SOUND_CLICK],
+            ),
+            "notice_sound_enabled": (
+                self._sounds_tab_index,
+                self._app_sound_checks[APP_SOUND_NOTICE],
+            ),
+            "warning_sound_enabled": (
+                self._sounds_tab_index,
+                self._app_sound_checks[APP_SOUND_WARNING],
             ),
             "history_retention_mode": (self._general_tab_index, self.history_retention_mode_combo),
             "history_auto_cleanup_enabled": (
@@ -4293,6 +4347,9 @@ class ApplicationSettingsDialog(QDialog):
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
         blob_icon_values = self._blob_icon_value_payload()
+        app_sound_values = {
+            sound_id: bool(check.isChecked()) for sound_id, check in self._app_sound_checks.items()
+        }
         return {
             "window_title": self.window_title_edit.text().strip(),
             "icon_path": self.icon_path_edit.text().strip(),
@@ -4300,7 +4357,11 @@ class ApplicationSettingsDialog(QDialog):
             "artist_code": self.artist_code_edit.text().strip(),
             "auto_snapshot_enabled": self.auto_snapshot_enabled_check.isChecked(),
             "auto_snapshot_interval_minutes": int(self.auto_snapshot_interval_spin.value()),
-            "startup_sound_enabled": self.startup_sound_enabled_check.isChecked(),
+            "startup_sound_enabled": app_sound_values[APP_SOUND_STARTUP],
+            "click_sound_enabled": app_sound_values[APP_SOUND_CLICK],
+            "notice_sound_enabled": app_sound_values[APP_SOUND_NOTICE],
+            "warning_sound_enabled": app_sound_values[APP_SOUND_WARNING],
+            "app_sound_settings": app_sound_values,
             "history_retention_mode": str(
                 self.history_retention_mode_combo.currentData() or DEFAULT_HISTORY_RETENTION_MODE
             ),
@@ -6742,10 +6803,36 @@ class App(QMainWindow):
     startupReady = Signal()
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
     TOP_CHROME_DOCK_GAP = 5
-    STARTUP_SOUND_ENABLED_SETTINGS_KEY = "startup/play_startup_sound"
-    STARTUP_SOUND_FILENAME = "startup.wav"
-    DEFAULT_STARTUP_SOUND_ENABLED = True
+    STARTUP_SOUND_ENABLED_SETTINGS_KEY = APP_SOUND_SETTINGS_KEYS[APP_SOUND_STARTUP]
+    STARTUP_SOUND_FILENAME = APP_SOUND_FILENAMES[APP_SOUND_STARTUP]
+    DEFAULT_STARTUP_SOUND_ENABLED = APP_SOUND_DEFAULTS[APP_SOUND_STARTUP]
     STARTUP_SOUND_DELAY_MS = 250
+    APP_SOUND_VOLUMES = {
+        APP_SOUND_STARTUP: 0.45,
+        APP_SOUND_CLICK: 0.24,
+        APP_SOUND_NOTICE: 0.42,
+        APP_SOUND_WARNING: 0.50,
+    }
+    APP_SOUND_THROTTLE_MS = {
+        APP_SOUND_CLICK: 55,
+        "scroll": 90,
+        "slider": 75,
+        APP_SOUND_NOTICE: 1500,
+        APP_SOUND_WARNING: 1500,
+    }
+    NOTICE_MESSAGE_KEYWORDS = (
+        "saved",
+        "export",
+        "exported",
+        "imported",
+        "updated",
+        "created",
+        "deleted",
+        "done",
+        "finished",
+        "completed",
+        "success",
+    )
 
     def __init__(self, *, startup_feedback: StartupFeedbackProtocol | None = None):
         super().__init__()
@@ -6756,6 +6843,15 @@ class App(QMainWindow):
         self._startup_sound_has_startup_feedback = startup_feedback is not None
         self._startup_sound_played = False
         self._startup_sound_effect: QSoundEffect | None = None
+        self._app_sound_effects: dict[str, QSoundEffect] = {}
+        self._app_sound_last_played: dict[str, float] = {}
+        self._app_sound_missing_reported: set[str] = set()
+        self._app_sound_scroll_state: dict[int, tuple[int, float]] = {}
+        self._app_sound_interactions_ready = False
+        self._app_sound_hook_timer = QTimer(self)
+        self._app_sound_hook_timer.setSingleShot(False)
+        self._app_sound_hook_timer.setInterval(1000)
+        self._app_sound_hook_timer.timeout.connect(lambda: self._install_app_sound_widget_hooks())
         self._startup_progress_tracker = (
             StartupProgressTracker.for_startup(startup_feedback)
             if startup_feedback is not None
@@ -6768,6 +6864,7 @@ class App(QMainWindow):
         self._post_ready_startup_tasks_scheduled = False
         self.startupReady.connect(lambda: self.complete_startup_feedback())
         self.startupReady.connect(lambda: self._schedule_startup_sound_after_startup())
+        self.startupReady.connect(lambda: self._enable_app_interaction_sounds())
         self.startupReady.connect(lambda: self._schedule_post_ready_startup_tasks())
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
@@ -7514,34 +7611,99 @@ class App(QMainWindow):
 
     @staticmethod
     def _coerce_settings_bool(value, *, default: bool = False) -> bool:
-        if value is None:
-            return bool(default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
+        return coerce_sound_bool(value, default=default)
 
-    def _startup_sound_enabled(self) -> bool:
+    def _app_sound_enabled(self, sound_id: str) -> bool:
+        clean_id = str(sound_id or "").strip().lower()
+        if clean_id not in APP_SOUND_SETTINGS_KEYS:
+            return False
+        default = bool(APP_SOUND_DEFAULTS.get(clean_id, True))
+        key = APP_SOUND_SETTINGS_KEYS[clean_id]
         try:
             return bool(
                 self.settings.value(
-                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
-                    self.DEFAULT_STARTUP_SOUND_ENABLED,
+                    key,
+                    default,
                     bool,
                 )
             )
         except TypeError:
             return self._coerce_settings_bool(
-                self.settings.value(
-                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
-                    self.DEFAULT_STARTUP_SOUND_ENABLED,
-                ),
-                default=self.DEFAULT_STARTUP_SOUND_ENABLED,
+                self.settings.value(key, default),
+                default=default,
             )
 
+    def _startup_sound_enabled(self) -> bool:
+        return self._app_sound_enabled(APP_SOUND_STARTUP)
+
+    def _current_app_sound_settings(self) -> dict[str, bool]:
+        return {sound_id: self._app_sound_enabled(sound_id) for sound_id in APP_SOUND_IDS}
+
+    def _app_sound_path(self, sound_id: str) -> Path:
+        return RES_DIR() / "sounds" / APP_SOUND_FILENAMES[str(sound_id)]
+
     def _startup_sound_path(self) -> Path:
-        return RES_DIR() / "sounds" / self.STARTUP_SOUND_FILENAME
+        return self._app_sound_path(APP_SOUND_STARTUP)
+
+    def _app_sound_effect(self, sound_id: str) -> QSoundEffect:
+        clean_id = str(sound_id or "").strip().lower()
+        effect = self._app_sound_effects.get(clean_id)
+        if effect is None:
+            effect = QSoundEffect(self)
+            effect.setLoopCount(1)
+            effect.setVolume(float(self.APP_SOUND_VOLUMES.get(clean_id, 0.4)))
+            self._app_sound_effects[clean_id] = effect
+            if clean_id == APP_SOUND_STARTUP:
+                self._startup_sound_effect = effect
+        return effect
+
+    def _play_app_sound(
+        self,
+        sound_id: str,
+        *,
+        throttle_key: str | None = None,
+        throttle_ms: int = 0,
+    ) -> None:
+        clean_id = str(sound_id or "").strip().lower()
+        if clean_id not in APP_SOUND_FILENAMES:
+            return
+        if not self._app_sound_enabled(clean_id):
+            return
+        effective_throttle_key = throttle_key or clean_id
+        throttle_seconds = max(0.0, float(throttle_ms or 0) / 1000.0)
+        if throttle_seconds:
+            now = monotonic()
+            last_played = float(self._app_sound_last_played.get(effective_throttle_key, 0.0))
+            if now - last_played < throttle_seconds:
+                return
+            self._app_sound_last_played[effective_throttle_key] = now
+
+        sound_path = self._app_sound_path(clean_id)
+        if not sound_path.exists():
+            if clean_id not in self._app_sound_missing_reported:
+                self._app_sound_missing_reported.add(clean_id)
+                self._log_event(
+                    "app_sound.missing",
+                    "Application sound file was not found",
+                    level=logging.DEBUG,
+                    sound=clean_id,
+                    path=str(sound_path),
+                )
+            return
+        try:
+            effect = self._app_sound_effect(clean_id)
+            source = QUrl.fromLocalFile(str(sound_path))
+            if effect.source() != source:
+                effect.setSource(source)
+            effect.play()
+        except Exception as exc:
+            self._log_event(
+                "app_sound.failed",
+                "Application sound could not be played",
+                level=logging.WARNING,
+                sound=clean_id,
+                error=str(exc),
+            )
 
     def _schedule_startup_sound_after_startup(self) -> None:
         if getattr(self, "_startup_sound_played", False):
@@ -7554,35 +7716,161 @@ class App(QMainWindow):
         QTimer.singleShot(self.STARTUP_SOUND_DELAY_MS, self._play_startup_sound)
 
     def _play_startup_sound(self) -> None:
-        if not self._startup_sound_enabled():
+        self._play_app_sound(APP_SOUND_STARTUP)
+
+    def _play_click_sound(
+        self,
+        *,
+        throttle_key: str = APP_SOUND_CLICK,
+        throttle_ms: int | None = None,
+    ) -> None:
+        if not getattr(self, "_app_sound_interactions_ready", False):
             return
-        sound_path = self._startup_sound_path()
-        if not sound_path.exists():
-            self._log_event(
-                "startup.sound_missing",
-                "Startup sound file was not found",
-                level=logging.DEBUG,
-                path=str(sound_path),
+        self._play_app_sound(
+            APP_SOUND_CLICK,
+            throttle_key=throttle_key,
+            throttle_ms=(
+                int(throttle_ms)
+                if throttle_ms is not None
+                else int(self.APP_SOUND_THROTTLE_MS[APP_SOUND_CLICK])
+            ),
+        )
+
+    def _scroll_click_throttle_ms(self, scrollbar: QScrollBar, value: int) -> int:
+        now = monotonic()
+        state_key = id(scrollbar)
+        previous = self._app_sound_scroll_state.get(state_key)
+        self._app_sound_scroll_state[state_key] = (int(value), now)
+        if previous is None:
+            return int(self.APP_SOUND_THROTTLE_MS["scroll"])
+
+        previous_value, previous_time = previous
+        delta = abs(int(value) - int(previous_value))
+        if delta <= 0:
+            return int(self.APP_SOUND_THROTTLE_MS["scroll"])
+
+        elapsed = max(0.008, now - float(previous_time))
+        single_step = max(1, abs(int(scrollbar.singleStep() or 1)))
+        page_step = max(single_step, abs(int(scrollbar.pageStep() or single_step)))
+        speed_steps_per_second = (delta / single_step) / elapsed
+        page_distance = delta / page_step
+
+        if page_distance >= 1.0 or speed_steps_per_second >= 120.0:
+            return 24
+        if speed_steps_per_second >= 70.0:
+            return 34
+        if speed_steps_per_second >= 35.0:
+            return 50
+        if speed_steps_per_second >= 12.0:
+            return 75
+        return 120
+
+    def _play_scroll_click_sound(self, scrollbar: QScrollBar, value: int) -> None:
+        self._play_click_sound(
+            throttle_key=f"scroll:{id(scrollbar)}",
+            throttle_ms=self._scroll_click_throttle_ms(scrollbar, int(value)),
+        )
+
+    def _play_notice_sound(self) -> None:
+        self._play_app_sound(
+            APP_SOUND_NOTICE,
+            throttle_ms=int(self.APP_SOUND_THROTTLE_MS[APP_SOUND_NOTICE]),
+        )
+
+    def _play_warning_sound(self) -> None:
+        self._play_app_sound(
+            APP_SOUND_WARNING,
+            throttle_ms=int(self.APP_SOUND_THROTTLE_MS[APP_SOUND_WARNING]),
+        )
+
+    def _enable_app_interaction_sounds(self) -> None:
+        self._app_sound_interactions_ready = True
+        self._install_app_sound_widget_hooks()
+        timer = getattr(self, "_app_sound_hook_timer", None)
+        if timer is not None and not timer.isActive():
+            timer.start()
+
+    @staticmethod
+    def _widget_has_app_sound_hooks(widget: QWidget) -> bool:
+        try:
+            return bool(widget.property("_appSoundHooksInstalled"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _mark_widget_has_app_sound_hooks(widget: QWidget) -> None:
+        try:
+            widget.setProperty("_appSoundHooksInstalled", True)
+        except Exception:
+            pass
+
+    def _install_app_sound_widget_hooks(self, root: QWidget | None = None) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        widgets: list[QWidget]
+        if isinstance(root, QWidget):
+            widgets = [root, *root.findChildren(QWidget)]
+        else:
+            widgets = [widget for widget in app.allWidgets() if isinstance(widget, QWidget)]
+        for widget in widgets:
+            self._play_message_box_sound_once(widget)
+            self._install_app_sound_widget_hook(widget)
+
+    def _install_app_sound_widget_hook(self, widget: QWidget) -> None:
+        if self._widget_has_app_sound_hooks(widget):
+            return
+        self._mark_widget_has_app_sound_hooks(widget)
+        try:
+            if isinstance(widget, QSlider):
+                widget.sliderMoved.connect(
+                    lambda *_args, _self=self: _self._play_click_sound(
+                        throttle_key="slider",
+                        throttle_ms=int(_self.APP_SOUND_THROTTLE_MS["slider"]),
+                    )
+                )
+            elif isinstance(widget, QScrollBar):
+                widget.valueChanged.connect(
+                    lambda value, scrollbar=widget, _self=self: _self._play_scroll_click_sound(
+                        scrollbar,
+                        int(value),
+                    ),
+                )
+            elif isinstance(widget, QAbstractSlider):
+                widget.sliderMoved.connect(
+                    lambda *_args, _self=self: _self._play_click_sound(
+                        throttle_key="slider",
+                        throttle_ms=int(_self.APP_SOUND_THROTTLE_MS["slider"]),
+                    )
+                )
+        except Exception:
+            pass
+
+    def _message_box_notice_worthy(self, message_box: QMessageBox) -> bool:
+        text = " ".join(
+            str(part or "").casefold()
+            for part in (
+                message_box.windowTitle(),
+                message_box.text(),
+                message_box.informativeText(),
             )
+        )
+        return any(keyword in text for keyword in self.NOTICE_MESSAGE_KEYWORDS)
+
+    def _play_message_box_sound_once(self, widget: QWidget) -> None:
+        if not isinstance(widget, _QT_MESSAGE_BOX_CLASS):
             return
         try:
-            effect = self._startup_sound_effect
-            if effect is None:
-                effect = QSoundEffect(self)
-                effect.setLoopCount(1)
-                effect.setVolume(0.45)
-                self._startup_sound_effect = effect
-            source = QUrl.fromLocalFile(str(sound_path))
-            if effect.source() != source:
-                effect.setSource(source)
-            effect.play()
-        except Exception as exc:
-            self._log_event(
-                "startup.sound_failed",
-                "Startup sound could not be played",
-                level=logging.WARNING,
-                error=str(exc),
-            )
+            if bool(widget.property("_appSoundPlayed")):
+                return
+            widget.setProperty("_appSoundPlayed", True)
+            icon = widget.icon()
+        except Exception:
+            return
+        if icon in (_QT_MESSAGE_BOX_CLASS.Warning, _QT_MESSAGE_BOX_CLASS.Critical):
+            self._play_warning_sound()
+        elif icon == _QT_MESSAGE_BOX_CLASS.Information and self._message_box_notice_worthy(widget):
+            self._play_notice_sound()
 
     def _cleanup_ready_update_backup_handoff(self, *, phase: str) -> None:
         try:
@@ -8363,6 +8651,9 @@ class App(QMainWindow):
             e.ignore()
             return
         self._is_closing = True
+        timer = getattr(self, "_app_sound_hook_timer", None)
+        if timer is not None:
+            timer.stop()
         self._stop_audio_waveform_cache_worker(wait=False)
         self._save_main_window_geometry(sync=False)
         self._store_workspace_panel_visibility_preferences(sync=False)
@@ -11629,6 +11920,8 @@ class App(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._queue_top_chrome_boundary_refresh()
+        if getattr(self, "_app_sound_interactions_ready", False):
+            QTimer.singleShot(0, self._install_app_sound_widget_hooks)
         if self._workspace_layout_restore_pending and not self._workspace_layout_restore_scheduled:
             self._workspace_layout_restore_pending = False
             self._workspace_layout_restore_scheduled = True
@@ -12100,6 +12393,7 @@ class App(QMainWindow):
             if self.settings_reads is not None
             else None
         )
+        app_sound_settings = self._current_app_sound_settings()
         return {
             "window_title": self.identity.get("window_title_override") or "",
             "effective_window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
@@ -12107,7 +12401,11 @@ class App(QMainWindow):
             "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
             "theme_library": self._load_theme_library(),
             "blob_icon_settings": dict(self.blob_icon_settings or self._load_blob_icon_settings()),
-            "startup_sound_enabled": self._startup_sound_enabled(),
+            "startup_sound_enabled": app_sound_settings[APP_SOUND_STARTUP],
+            "click_sound_enabled": app_sound_settings[APP_SOUND_CLICK],
+            "notice_sound_enabled": app_sound_settings[APP_SOUND_NOTICE],
+            "warning_sound_enabled": app_sound_settings[APP_SOUND_WARNING],
+            "app_sound_settings": app_sound_settings,
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -12297,33 +12595,36 @@ class App(QMainWindow):
                 if hasattr(self, "table"):
                     self.table.viewport().update()
 
-            before_startup_sound_enabled = bool(
-                before_values.get("startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED)
+            before_app_sounds = normalize_app_sound_settings(
+                before_values.get("app_sound_settings"),
+                startup_sound_enabled=before_values.get(
+                    "startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED
+                ),
             )
-            after_startup_sound_enabled = bool(
-                after_values.get("startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED)
+            after_app_sounds = normalize_app_sound_settings(
+                after_values.get("app_sound_settings"),
+                startup_sound_enabled=after_values.get(
+                    "startup_sound_enabled", self.DEFAULT_STARTUP_SOUND_ENABLED
+                ),
             )
-            if after_startup_sound_enabled != before_startup_sound_enabled:
-                self.settings.setValue(
-                    self.STARTUP_SOUND_ENABLED_SETTINGS_KEY,
-                    after_startup_sound_enabled,
-                )
+            if after_app_sounds != before_app_sounds:
+                for sound_id, enabled in after_app_sounds.items():
+                    self.settings.setValue(APP_SOUND_SETTINGS_KEYS[sound_id], bool(enabled))
                 self.settings.sync()
                 self._log_event(
-                    "settings.startup_sound",
-                    "Startup sound setting updated",
-                    enabled=after_startup_sound_enabled,
+                    "settings.app_sounds",
+                    "Application sound settings updated",
+                    **{
+                        f"{sound_id}_enabled": enabled
+                        for sound_id, enabled in after_app_sounds.items()
+                    },
                 )
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
-                        key="startup_sound_enabled",
-                        label=(
-                            "Startup Sound Enabled"
-                            if after_startup_sound_enabled
-                            else "Startup Sound Disabled"
-                        ),
-                        before_value=before_startup_sound_enabled,
-                        after_value=after_startup_sound_enabled,
+                        key="app_sound_settings",
+                        label="Update Application Sounds",
+                        before_value=before_app_sounds,
+                        after_value=after_app_sounds,
                     )
                 changed_count += 1
 
@@ -12721,6 +13022,7 @@ class App(QMainWindow):
             self._update_add_data_generated_fields()
             self._refresh_history_actions()
             if show_confirmation:
+                self._play_notice_sound()
                 QMessageBox.information(self, "Settings Saved", "Application settings updated.")
         return changed_count
 
@@ -12754,6 +13056,7 @@ class App(QMainWindow):
             stored_themes=before_values["theme_library"],
             blob_icon_settings=before_values["blob_icon_settings"],
             startup_sound_enabled=before_values["startup_sound_enabled"],
+            app_sound_settings=before_values["app_sound_settings"],
             current_profile_path=getattr(self, "current_db_path", ""),
             history_retention_mode=before_values["history_retention_mode"],
             history_auto_cleanup_enabled=before_values["history_auto_cleanup_enabled"],
@@ -12772,10 +13075,12 @@ class App(QMainWindow):
             self._apply_settings_changes(before_values, dlg.values(), show_confirmation=True)
         except Exception as e:
             self.logger.exception(f"Settings update failed: {e}")
+            self._play_warning_sound()
             QMessageBox.critical(self, "Settings Error", f"Could not save settings:\n{e}")
 
     def export_application_settings_bundle(self):
         if self.conn is None or self.settings_transfer_service is None:
+            self._play_warning_sound()
             QMessageBox.warning(self, "Export Settings", "Open a profile first.")
             return
         before_values = self._current_settings_values()
@@ -12802,9 +13107,11 @@ class App(QMainWindow):
             )
         except Exception as exc:
             self.logger.exception("Application settings export failed: %s", exc)
+            self._play_warning_sound()
             QMessageBox.warning(self, "Export Settings", str(exc))
             return
         self.statusBar().showMessage(f"Settings export saved to {saved_path}", 5000)
+        self._play_notice_sound()
         QMessageBox.information(
             self,
             "Export Settings",
@@ -12813,6 +13120,7 @@ class App(QMainWindow):
 
     def import_application_settings_bundle(self):
         if self.conn is None or self.settings_transfer_service is None:
+            self._play_warning_sound()
             QMessageBox.warning(self, "Import Settings", "Open a profile first.")
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -12845,6 +13153,7 @@ class App(QMainWindow):
             )
         except Exception as exc:
             self.logger.exception("Application settings import failed: %s", exc)
+            self._play_warning_sound()
             QMessageBox.warning(self, "Import Settings", str(exc))
             return
 
@@ -12858,6 +13167,7 @@ class App(QMainWindow):
                 f"- {warning}" for warning in import_result.warnings
             )
         self.statusBar().showMessage("Application settings imported.", 5000)
+        self._play_notice_sound()
         QMessageBox.information(self, "Import Settings", message)
 
     def _apply_single_setting_value(self, field_name: str, value: str) -> int:
@@ -13248,6 +13558,7 @@ class App(QMainWindow):
         self.logger.error("%s: %s", title, failure.message)
         if failure.traceback_text:
             self.logger.error("%s traceback:\n%s", title, failure.traceback_text)
+        self._play_warning_sound()
         QMessageBox.critical(self, title, f"{user_message}\n{failure.message}")
 
     @staticmethod
@@ -13336,6 +13647,7 @@ class App(QMainWindow):
         on_status=None,
     ):
         if requires_profile and not str(getattr(self, "current_db_path", "") or "").strip():
+            self._play_warning_sound()
             QMessageBox.warning(self, title, "Open a profile first.")
             return None
         if kind in {"read", "write", "exclusive"}:
@@ -30112,6 +30424,91 @@ class App(QMainWindow):
                 continue
         return self._normalize_track_ids(ordered)
 
+    def _audio_preview_album_titles(self) -> list[str]:
+        if self.conn is None:
+            return []
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT DISTINCT trim(title)
+                FROM Albums
+                WHERE title IS NOT NULL AND trim(title) != ''
+                ORDER BY trim(title) COLLATE NOCASE
+                """
+            ).fetchall()
+        except Exception:
+            return []
+        titles: list[str] = []
+        seen: set[str] = set()
+        for (title,) in rows:
+            clean_title = str(title or "").strip()
+            key = clean_title.casefold()
+            if clean_title and key not in seen:
+                titles.append(clean_title)
+                seen.add(key)
+        return titles
+
+    def _audio_preview_track_has_source_payload(
+        self,
+        track_id: int,
+        source_spec: dict[str, object] | None,
+    ) -> bool:
+        if source_spec is None:
+            return True
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        try:
+            if kind == "custom":
+                field_id = int(source_spec.get("field_id") or 0)
+                return field_id > 0 and self.cf_has_blob(int(track_id), field_id)
+            media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+            return self.track_has_media(int(track_id), media_key)
+        except Exception:
+            return False
+
+    def _audio_preview_album_track_ids(
+        self,
+        album_title: str | None,
+        source_spec: dict[str, object] | None = None,
+    ) -> list[int]:
+        clean_title = str(album_title or "").strip()
+        if not clean_title or self.conn is None:
+            return []
+        order_sql = """
+            CASE WHEN t.track_number IS NULL OR t.track_number <= 0 THEN 1 ELSE 0 END,
+            t.track_number,
+            t.id
+        """
+        try:
+            rows = self.conn.execute(
+                f"""
+                SELECT t.id
+                FROM Tracks t
+                INNER JOIN Albums al ON al.id = t.album_id
+                WHERE trim(al.title)=?
+                ORDER BY {order_sql}
+                """,
+                (clean_title,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = self.conn.execute(
+                """
+                SELECT t.id
+                FROM Tracks t
+                INNER JOIN Albums al ON al.id = t.album_id
+                WHERE trim(al.title)=?
+                ORDER BY t.id
+                """,
+                (clean_title,),
+            ).fetchall()
+        except Exception:
+            return []
+        track_ids = self._normalize_track_ids(int(row[0]) for row in rows)
+        return [
+            track_id
+            for track_id in track_ids
+            if self._audio_preview_track_has_source_payload(track_id, source_spec)
+        ]
+
     def _audio_preview_export_actions_for_track(
         self,
         track_id: int,
@@ -30191,8 +30588,21 @@ class App(QMainWindow):
         items: list[dict[str, object]] = []
         for position, track_id in enumerate(self._normalize_track_ids(track_order), start=1):
             title = ""
+            album = ""
             try:
-                title = str(self._get_track_title(int(track_id)) or "").strip()
+                if self.track_service is not None:
+                    snapshot = self.track_service.fetch_track_snapshot(
+                        int(track_id),
+                        include_media_blobs=False,
+                    )
+                else:
+                    snapshot = None
+                title = str(
+                    (snapshot.track_title if snapshot is not None else None)
+                    or self._get_track_title(int(track_id))
+                    or ""
+                ).strip()
+                album = str((snapshot.album_title if snapshot is not None else None) or "").strip()
             except Exception:
                 title = ""
             if not title:
@@ -30202,6 +30612,7 @@ class App(QMainWindow):
                     "track_id": int(track_id),
                     "title": title,
                     "label": title,
+                    "album": album,
                     "position": position,
                 }
             )
@@ -36860,6 +37271,8 @@ class _AudioPreviewDialog(QDialog):
         "forward": "fast-forward-fill.svg",
         "next": "skip-end-fill.svg",
         "shuffle": "shuffle.svg",
+        "auto-advance": "music-note-list.svg",
+        "album-scope": "collection-play-fill.svg",
         "repeat": "repeat.svg",
         "repeat-one": "repeat-1.svg",
         "volume-up": "volume-up-fill.svg",
@@ -36888,6 +37301,8 @@ class _AudioPreviewDialog(QDialog):
         self._base_track_order = []
         self._base_track_queue = []
         self._shuffled_track_order = []
+        self._album_scope_title: str | None = None
+        self._album_scope_menu: QMenu | None = None
         self._visualization_gain = 1.0
         self._loop_mode = self.LOOP_MODE_OFF
         self._media_icon_cache: dict[tuple[str, bool, str], QIcon] = {}
@@ -37152,12 +37567,15 @@ class _AudioPreviewDialog(QDialog):
         playback_footer.setSpacing(10)
         self.shuffle_button = self._create_shuffle_button()
         playback_footer.addWidget(self.shuffle_button, 0, Qt.AlignLeft | Qt.AlignBottom)
-        playback_footer.addStretch(1)
-        self.auto_advance_check = QCheckBox("Auto-advance", playback_group)
-        self.auto_advance_check.setObjectName("audioPreviewAutoAdvanceCheck")
-        self.auto_advance_check.setProperty("role", "mediaToggle")
-        self.auto_advance_check.setChecked(True)
-        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignHCenter | Qt.AlignBottom)
+        self.album_scope_button = self._create_album_scope_button()
+        playback_footer.addWidget(self.album_scope_button, 0, Qt.AlignLeft | Qt.AlignBottom)
+        self.auto_advance_button = self._create_auto_advance_button()
+        self.auto_advance_check = self.auto_advance_button
+        playback_footer.addWidget(
+            self.auto_advance_button,
+            0,
+            Qt.AlignLeft | Qt.AlignBottom,
+        )
         playback_footer.addStretch(1)
         self.export_button = QToolButton(playback_group)
         self.export_button.setObjectName("audioPreviewExportButton")
@@ -37553,7 +37971,14 @@ class _AudioPreviewDialog(QDialog):
         button.setIcon(icon)
         button.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
-    def _create_transport_button(self, icon_key, fallback_text, tooltip, object_name, slot):
+    def _create_transport_button(
+        self,
+        icon_key: str,
+        fallback_text: str,
+        tooltip: str,
+        object_name: str,
+        slot: Callable[[], None],
+    ) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName(object_name)
         button.setProperty("role", "mediaTransportButton")
@@ -37584,6 +38009,10 @@ class _AudioPreviewDialog(QDialog):
                 self._set_icon_button_content(button, icon_key, fallback_text)
         if hasattr(self, "shuffle_button"):
             self._sync_shuffle_button()
+        if hasattr(self, "auto_advance_button"):
+            self._sync_auto_advance_button()
+        if hasattr(self, "album_scope_button"):
+            self._sync_album_scope_button()
         if hasattr(self, "loop_button"):
             self._sync_loop_button()
         if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
@@ -37614,6 +38043,35 @@ class _AudioPreviewDialog(QDialog):
         button.setFixedSize(42, 34)
         button.clicked.connect(lambda checked=False: self._set_shuffle_enabled(bool(checked)))
         self._sync_shuffle_button(button)
+        return button
+
+    def _create_auto_advance_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewAutoAdvanceButton")
+        button.setProperty("role", "mediaToggle")
+        button.setCheckable(True)
+        button.setChecked(True)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.clicked.connect(lambda _checked=False: self._sync_auto_advance_button(button))
+        self._sync_auto_advance_button(button)
+        return button
+
+    def _create_album_scope_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewAlbumScopeButton")
+        button.setProperty("role", "mediaToggle")
+        button.setCheckable(True)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(button)
+        menu.aboutToShow.connect(self._rebuild_album_scope_menu)
+        button.setMenu(menu)
+        self._album_scope_menu = menu
+        self._sync_album_scope_button(button)
         return button
 
     def _apply_stop_button_font(self) -> None:
@@ -37698,6 +38156,134 @@ class _AudioPreviewDialog(QDialog):
         button.style().polish(button)
         button.update()
 
+    def _auto_advance_enabled(self) -> bool:
+        button = getattr(self, "auto_advance_button", None)
+        return bool(button.isChecked()) if isinstance(button, QToolButton) else True
+
+    def _sync_auto_advance_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "auto_advance_button", None)
+        if button is None:
+            return
+        active = bool(button.isChecked())
+        button.setProperty("autoAdvanceEnabled", active)
+        self._set_icon_button_content(
+            button,
+            "auto-advance",
+            "Auto",
+            inactive=not active,
+        )
+        tooltip = "Auto Advance On" if active else "Auto Advance Off"
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def _available_album_scope_titles(self) -> list[str]:
+        titles: list[str] = []
+        provider = getattr(self.app, "_audio_preview_album_titles", None)
+        if callable(provider):
+            try:
+                titles.extend(str(title or "").strip() for title in provider())
+            except Exception:
+                titles = []
+        if not titles:
+            for spec in list(getattr(self, "_base_track_queue", []) or []):
+                try:
+                    titles.append(str(spec.get("album") or "").strip())
+                except AttributeError:
+                    continue
+        unique: dict[str, str] = {}
+        for title in titles:
+            clean = str(title or "").strip()
+            if clean:
+                unique.setdefault(clean.casefold(), clean)
+        return sorted(unique.values(), key=str.casefold)
+
+    def _album_track_order_for_title(self, album_title: str | None) -> list[int]:
+        clean_title = str(album_title or "").strip()
+        if not clean_title:
+            return []
+        provider = getattr(self.app, "_audio_preview_album_track_ids", None)
+        if callable(provider):
+            try:
+                return self.app._normalize_track_ids(provider(clean_title, self._source_spec))
+            except Exception:
+                pass
+        fallback: list[int] = []
+        for spec in list(getattr(self, "_base_track_queue", []) or []):
+            try:
+                if str(spec.get("album") or "").strip().casefold() != clean_title.casefold():
+                    continue
+                fallback.append(int(spec.get("track_id")))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return self.app._normalize_track_ids(fallback)
+
+    def _effective_base_track_order(self) -> list[int]:
+        if self._album_scope_title:
+            return self._album_track_order_for_title(self._album_scope_title)
+        return list(self._base_track_order)
+
+    def _set_album_scope_title(self, album_title: str | None) -> None:
+        clean_title = str(album_title or "").strip() or None
+        self._album_scope_title = clean_title
+        self._apply_effective_track_order()
+        self._sync_album_scope_button()
+        self._update_navigation_buttons()
+        if clean_title and self._source_spec is not None and self._track_order:
+            self.open_track_preview(int(self._track_order[0]), self._source_spec, autoplay=False)
+
+    def _rebuild_album_scope_menu(self) -> None:
+        menu = self._album_scope_menu
+        if menu is None:
+            return
+        menu.clear()
+        off_action = menu.addAction("Off")
+        off_action.setCheckable(True)
+        off_action.setChecked(self._album_scope_title is None)
+        off_action.triggered.connect(lambda _checked=False: self._set_album_scope_title(None))
+
+        titles = self._available_album_scope_titles()
+        if titles:
+            menu.addSeparator()
+        active_title = str(self._album_scope_title or "").casefold()
+        for title in titles:
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(title.casefold() == active_title)
+            action.triggered.connect(
+                lambda _checked=False, album_title=title: self._set_album_scope_title(album_title)
+            )
+
+    def _sync_album_scope_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "album_scope_button", None)
+        if button is None:
+            return
+        active = bool(self._album_scope_title)
+        button.blockSignals(True)
+        try:
+            button.setChecked(active)
+        finally:
+            button.blockSignals(False)
+        button.setProperty("albumScopeTitle", self._album_scope_title or "")
+        self._set_icon_button_content(
+            button,
+            "album-scope",
+            "Album",
+            inactive=not active,
+        )
+        tooltip = (
+            f"Album Playlist: {self._album_scope_title}"
+            if self._album_scope_title
+            else "Album Playlist Off"
+        )
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
     def _hint_text_font(self) -> QFont:
         font = QFont(self.font())
         effective_theme = {}
@@ -37774,6 +38360,15 @@ class _AudioPreviewDialog(QDialog):
             except (TypeError, ValueError):
                 continue
             spec = dict(by_id.get(normalized_id) or {})
+            if not spec:
+                queue_provider = getattr(self.app, "_audio_preview_track_queue_items", None)
+                if callable(queue_provider):
+                    try:
+                        fetched = list(queue_provider([normalized_id]) or [])
+                    except Exception:
+                        fetched = []
+                    if fetched:
+                        spec = dict(fetched[0])
             title = str(spec.get("title") or spec.get("label") or "").strip()
             if not title:
                 title = f"Track {normalized_id}"
@@ -37918,18 +38513,20 @@ class _AudioPreviewDialog(QDialog):
         return list(self._shuffled_track_order)
 
     def _apply_effective_track_order(self) -> None:
+        base_track_order = self._effective_base_track_order()
         if self._shuffle_enabled:
-            self._track_order = self._shuffle_order_for_base_track_order(self._base_track_order)
+            self._track_order = self._shuffle_order_for_base_track_order(base_track_order)
         else:
-            self._track_order = list(self._base_track_order)
+            self._track_order = list(base_track_order)
             self._shuffled_track_order = []
         self._set_play_next_items(self._ordered_track_queue_items(self._track_order))
+        self._sync_album_scope_button()
 
     def _set_shuffle_enabled(self, enabled: bool) -> None:
         self._shuffle_enabled = bool(enabled)
         if self._shuffle_enabled:
             self._shuffled_track_order = self._create_shuffled_track_order(
-                self._base_track_order or self._track_order,
+                self._effective_base_track_order() or self._track_order,
                 self._current_track_id_as_int(),
             )
         self._apply_effective_track_order()
@@ -37953,6 +38550,11 @@ class _AudioPreviewDialog(QDialog):
         self._current_title = str(state.get("title") or "Audio Player").strip() or "Audio Player"
         self._current_artist = str(state.get("artist") or "").strip()
         self._current_album = str(state.get("album") or "").strip()
+        if self._album_scope_title:
+            current_track_id = self._current_track_id_as_int()
+            scoped_track_ids = self._album_track_order_for_title(self._album_scope_title)
+            if current_track_id is not None and current_track_id not in scoped_track_ids:
+                self._album_scope_title = self._current_album or None
         self.title_label.setText(self._current_title)
         self.artist_label.setVisible(bool(self._current_artist))
         self.artist_label.setText(self._current_artist)
@@ -38195,9 +38797,10 @@ class _AudioPreviewDialog(QDialog):
             self._player.play()
 
     def _stop_playback(self) -> None:
+        self._ensure_visualization_release_running()
         self._player.stop()
-        self._begin_visualization_release()
         self._seek_to_ms(0)
+        self._ensure_visualization_release_running()
 
     def _jump_by_ms(self, delta_ms: int) -> None:
         self._seek_to_ms(self._player.position() + int(delta_ms))
@@ -38262,6 +38865,21 @@ class _AudioPreviewDialog(QDialog):
         if hasattr(self, "scope"):
             self.scope.start_release()
 
+    def _ensure_visualization_release_running(self) -> bool:
+        self._begin_visualization_release()
+        active = False
+        if hasattr(self, "peak_meter"):
+            active = bool(self.peak_meter.is_releasing()) or active
+        if hasattr(self, "scope"):
+            active = bool(self.scope.is_releasing()) or active
+        if active:
+            if not self._visualization_timer.isActive():
+                self._visualization_timer.start()
+            return True
+        if self._visualization_timer.isActive():
+            self._visualization_timer.stop()
+        return False
+
     def _advance_visualization_release(self) -> bool:
         active = False
         if hasattr(self, "peak_meter"):
@@ -38277,20 +38895,9 @@ class _AudioPreviewDialog(QDialog):
                 if not self._visualization_timer.isActive():
                     self._visualization_timer.start()
                 return
-            self._begin_visualization_release()
-            if self.peak_meter.is_releasing() or self.scope.is_releasing():
-                if not self._visualization_timer.isActive():
-                    self._visualization_timer.start()
-            elif self._visualization_timer.isActive():
-                self._visualization_timer.stop()
+            self._ensure_visualization_release_running()
             return
-        self._begin_visualization_release()
-        if self.peak_meter.is_releasing() or self.scope.is_releasing():
-            if not self._visualization_timer.isActive():
-                self._visualization_timer.start()
-            return
-        if self._visualization_timer.isActive():
-            self._visualization_timer.stop()
+        self._ensure_visualization_release_running()
 
     @staticmethod
     def _format_time(ms: int) -> str:
@@ -38358,7 +38965,7 @@ class _AudioPreviewDialog(QDialog):
             elif self._loop_mode == self.LOOP_MODE_PLAYLIST:
                 if not self._navigate_relative(1, autoplay=True, wrap=True):
                     self._restart_current_media()
-            elif self.auto_advance_check.isChecked():
+            elif self._auto_advance_enabled():
                 self._navigate_relative(1, autoplay=True)
         finally:
             self._handling_end_of_media = False

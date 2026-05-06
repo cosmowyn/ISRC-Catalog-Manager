@@ -799,6 +799,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "application settings",
             "window title",
             "icon",
+            "sounds",
+            "sound effects",
             "isrc prefix",
             "snapshot interval",
             "retention",
@@ -809,11 +811,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
           <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
+          <li><strong>Sounds</strong>: app-wide sound controls for startup, scroll/slider click feedback, completed-action notices, and warnings. Each sound can be switched on or off independently. Click feedback is limited to scrolling and slider movement, not ordinary button presses, and scroll clicks scale with scroll speed.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
-        <p>The <strong>Settings</strong> menu also includes <strong>Export Settings…</strong> and <strong>Import Settings…</strong> for portable migration. That ZIP bundle contains a JSON settings payload for the General, GS1, and Theme areas plus any bundled exportable assets such as the stored GS1 workbook, stored GTIN contracts CSV, and the current application icon when that file is available.</p>
+        <p>The <strong>Settings</strong> menu also includes <strong>Export Settings…</strong> and <strong>Import Settings…</strong> for portable migration. That ZIP bundle contains a JSON settings payload for the General, Sounds, GS1, and Theme areas plus any bundled exportable assets such as the stored GS1 workbook, stored GTIN contracts CSV, and the current application icon when that file is available.</p>
         <p>If you leave the window-title field blank, the app uses the current owner Party company name automatically when one is available and otherwise falls back to the application name. Entering a custom value acts as an explicit override and is preserved until you clear it again. Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
+        <p>All bundled application sound effects were designed and created by <strong>Aeon Cosmowyn</strong>.</p>
         """,
     ),
     HelpChapter(
@@ -956,15 +960,29 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "image preview",
             "waveform",
             "album art",
+            "play next",
+            "shuffle",
+            "auto advance",
+            "album playlist",
+            "loop",
+            "export",
         ),
         content_html="""
         <p>The app can open file-backed audio and image media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
         <ul>
           <li><strong>Image preview</strong>: inspect stored image data such as album art, zoom with trackpad pinch or <code>Ctrl</code>/<code>Cmd</code> + scroll, double-click to reset the view to fit, and export the current image from the preview controls.</li>
-          <li><strong>Audio player</strong>: play attached audio with waveform preview, playhead, transport controls, volume, and in-player export actions.</li>
+          <li><strong>Now Playing</strong>: the audio player presents title, artist, album context, a waveform-first stage, and album artwork when artwork is available. Clicking the artwork opens it in the image preview.</li>
+          <li><strong>Waveform and timeline</strong>: seek by clicking or dragging the waveform, use the timeline slider for precise scrubbing, and use the live spectrum graph for playback activity. The spectrum supports linear and log display modes from its context menu.</li>
+          <li><strong>Transport controls</strong>: previous, rewind, play, pause, stop, fast-forward, next, and loop are available as icon buttons. Loop cycles between off, playlist loop, and current-track loop.</li>
+          <li><strong>Play Next</strong>: the queue follows the currently visible catalog order and only includes tracks with playable media for the current preview source. Selecting an item loads that track into the player.</li>
+          <li><strong>Shuffle</strong>: shuffle rearranges the available Play Next queue without leaving the current playable-track scope.</li>
+          <li><strong>Album playlist</strong>: the collection-play button opens a menu with Off plus each album in the database. Selecting an album narrows Play Next to tracks from that album, loads the first playable track without starting playback, and keeps shuffle limited to that album queue.</li>
+          <li><strong>Auto Advance</strong>: the music-note-list button toggles whether playback moves to the next queued track automatically when the current track ends.</li>
+          <li><strong>Volume and meters</strong>: the player includes volume control, mute, live peak meters, and a spectrum visualization. Pausing or stopping playback uses the same smooth meter and spectrum fade-out behavior.</li>
+          <li><strong>Export</strong>: the export menu is built from the app's existing audio export workflows for the current track and source, including catalog audio copies, managed derivatives, authenticity/provenance exports, forensic watermarked audio, and custom-field BLOB export when applicable.</li>
           <li><strong>Standard media columns</strong>: double-click Audio File or Album Art to attach new files, or preview existing media from the table.</li>
         </ul>
-        <p>The audio player and image preview are intended to verify attached media quickly without leaving the catalog workflow.</p>
+        <p>The audio player and image preview are reusable top-level windows. Reopening a media preview brings the existing window forward and updates its contents instead of creating duplicate utility dialogs. The player is intended for serious auditioning, media verification, and export follow-up without leaving the catalog workflow.</p>
         """,
     ),
     HelpChapter(

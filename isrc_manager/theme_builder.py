@@ -2359,6 +2359,13 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         padding-top: {int(theme["catalog_toolbar_control_padding_v"])}px;
         padding-bottom: {int(theme["catalog_toolbar_control_padding_v"])}px;
     }}
+    QWidget#catalogTablePanel QToolButton#catalogTableSelectionFilterButton {{
+        max-height: {int(theme["catalog_toolbar_control_height"])}px;
+        max-width: {int(theme["catalog_toolbar_control_height"])}px;
+        min-height: {int(theme["catalog_toolbar_control_height"])}px;
+        min-width: {int(theme["catalog_toolbar_control_height"])}px;
+        padding: 0px;
+    }}
     QWidget#catalogTablePanel QPushButton#catalogTableZoomDecreaseButton,
     QWidget#catalogTablePanel QPushButton#catalogTableZoomIncreaseButton {{
         max-height: {int(theme["catalog_toolbar_zoom_step_button_size"])}px;

@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import platform
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut
+from PySide6.QtCore import QDate, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -27,6 +37,7 @@ from PySide6.QtWidgets import (
     QTableView,
     QTabWidget,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -38,6 +49,7 @@ from isrc_manager.catalog_table import (
     CATALOG_ZOOM_STEP_PERCENT,
 )
 from isrc_manager.code_registry import CatalogIdentifierField
+from isrc_manager.paths import RES_DIR
 from isrc_manager.theme_builder import THEME_METRIC_SPECS_BY_KEY, theme_setting_defaults
 from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
@@ -131,6 +143,55 @@ def _catalog_zoom_slider_stack_height(metrics: dict[str, int]) -> int:
     )
 
 
+def _tinted_toolbar_svg_icon(icon_path: Path, color: QColor, size: QSize) -> QIcon:
+    source_icon = QIcon(str(icon_path))
+    pixmap = source_icon.pixmap(size)
+    if pixmap.isNull():
+        return source_icon
+    tinted = QPixmap(pixmap.size())
+    tinted.setDevicePixelRatio(pixmap.devicePixelRatioF())
+    tinted.fill(Qt.transparent)
+    icon_color = QColor(color)
+    if not icon_color.isValid():
+        icon_color = QColor("#111827")
+    painter = QPainter(tinted)
+    try:
+        painter.drawPixmap(0, 0, pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), icon_color)
+    finally:
+        painter.end()
+    return QIcon(tinted)
+
+
+def _sync_search_filter_button_icon(app: Any) -> None:
+    button = getattr(app, "search_filter_button", None)
+    if button is None:
+        return
+    funnel_icon_path = RES_DIR() / "icons" / "funnel-fill.svg"
+    if not funnel_icon_path.exists():
+        button.setIcon(QIcon())
+        button.setText("Filter")
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        return
+    control_height = button.maximumHeight()
+    if control_height <= 0 or control_height >= 10000:
+        control_height = button.height()
+    if control_height <= 0:
+        control_height = 20
+    icon_extent = max(8, min(14, control_height - 6))
+    button.setIconSize(QSize(icon_extent, icon_extent))
+    button.setText("")
+    button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    button.setIcon(
+        _tinted_toolbar_svg_icon(
+            funnel_icon_path,
+            button.palette().color(QPalette.ButtonText),
+            button.iconSize(),
+        )
+    )
+
+
 def _apply_catalog_table_toolbar_theme_metrics(
     app: Any, theme_values: dict[str, object] | None = None
 ) -> None:
@@ -169,6 +230,7 @@ def _apply_catalog_table_toolbar_theme_metrics(
     for control_name in (
         "search_column_combo",
         "search_field",
+        "search_filter_button",
         "search_button",
         "count_label",
         "duration_label",
@@ -178,6 +240,13 @@ def _apply_catalog_table_toolbar_theme_metrics(
         if control is not None:
             control.setMinimumHeight(control_height)
             control.setMaximumHeight(control_height)
+
+    search_filter_button = getattr(app, "search_filter_button", None)
+    if search_filter_button is not None:
+        search_filter_button.setFixedSize(control_height, control_height)
+        icon_extent = max(8, min(14, control_height - 6))
+        search_filter_button.setIconSize(QSize(icon_extent, icon_extent))
+        _sync_search_filter_button_icon(app)
 
     zoom_value_label = getattr(app, "catalog_zoom_value_label", None)
     effective_zoom_label_height = zoom_label_height
@@ -1644,6 +1713,16 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.search_button = QPushButton("Reset")
     app.search_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
+    app.search_filter_button = QToolButton()
+    app.search_filter_button.setObjectName("catalogTableSelectionFilterButton")
+    app.search_filter_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    app.search_filter_button.setAutoRaise(False)
+    app.search_filter_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    app.search_filter_button.setIconSize(QSize(16, 16))
+    app.search_filter_button.setToolTip("Filter to the current table cell.")
+    app.search_filter_button.setAccessibleName("Filter to current table cell")
+    _sync_search_filter_button_icon(app)
+
     app.catalog_info_group = QGroupBox("Catalog Totals")
     app.catalog_info_group.setObjectName("catalogTableInfoGroup")
     app.catalog_info_layout = QHBoxLayout(app.catalog_info_group)
@@ -1676,8 +1755,14 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         app._apply_catalog_search_filter,
     )
     app._connect_noarg_signal(app.search_button.clicked, app.search_button, app.reset_search)
+    app._connect_noarg_signal(
+        app.search_filter_button.clicked,
+        app.search_filter_button,
+        app._set_catalog_filter_from_current_cell,
+    )
 
     app.search_layout.addWidget(app.search_field, 1, Qt.AlignVCenter)
+    app.search_layout.addWidget(app.search_filter_button, 0, Qt.AlignVCenter)
     app.search_layout.addWidget(app.search_button, 0, Qt.AlignVCenter)
     app.catalog_info_layout.addStretch(1)
     app.catalog_info_layout.addWidget(app.count_label, 0, Qt.AlignCenter)
@@ -1787,6 +1872,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     catalog_toolbar_controls = (
         app.search_column_combo,
         app.search_field,
+        app.search_filter_button,
         app.search_button,
         app.count_label,
         app.duration_label,

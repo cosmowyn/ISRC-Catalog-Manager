@@ -300,6 +300,8 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn('QToolButton[role="mediaExportButton"]', stylesheet)
         self.assertIn('QCheckBox[role="mediaToggle"]', stylesheet)
         self.assertIn("QWidget#catalogTablePanel QGroupBox#catalogTableSearchGroup", stylesheet)
+        self.assertIn("QToolButton#catalogTableSelectionFilterButton", stylesheet)
+        self.assertIn("padding: 0px", stylesheet)
         self.assertIn("QPushButton#catalogTableZoomDecreaseButton", stylesheet)
         self.assertIn("margin-top: 4px", stylesheet)
         self.assertIn("font-size: 10px", stylesheet)
@@ -362,7 +364,19 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("Action Ribbon", labels)
             self.assertIn("Blob Icons", labels)
             self.assertIn("Advanced QSS", labels)
+            self.assertIn(
+                "Sounds",
+                [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+            )
             self.assertTrue(dialog.startup_sound_enabled_check.isChecked())
+            self.assertTrue(dialog.click_sound_enabled_check.isChecked())
+            self.assertTrue(dialog.notice_sound_enabled_check.isChecked())
+            self.assertTrue(dialog.warning_sound_enabled_check.isChecked())
+            label_texts = [label.text() for label in dialog.findChildren(QLabel)]
+            self.assertIn(
+                "All bundled application sound effects were designed and created by Aeon Cosmowyn.",
+                label_texts,
+            )
             for key in (
                 "workspace_bg",
                 "group_title_fg",
@@ -391,9 +405,15 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._blob_icon_editors["audio_lossy_database"].emoji_edit.setText("📼")
             dialog._blob_icon_editors["image_database"].emoji_edit.setText("🗂️")
             dialog.startup_sound_enabled_check.setChecked(False)
+            dialog.click_sound_enabled_check.setChecked(False)
             values = dialog.values()
 
             self.assertFalse(values["startup_sound_enabled"])
+            self.assertFalse(values["click_sound_enabled"])
+            self.assertFalse(values["app_sound_settings"]["startup"])
+            self.assertFalse(values["app_sound_settings"]["click"])
+            self.assertTrue(values["app_sound_settings"]["notice"])
+            self.assertTrue(values["app_sound_settings"]["warning"])
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
             self.assertEqual(values["theme_settings"]["menu_selected_bg"], "#BB5500")
             self.assertEqual(values["theme_settings"]["toolbar_bg"], "#1F2937")

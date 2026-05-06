@@ -1242,6 +1242,15 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(splash.finish_calls, [self.window])
         self.assertEqual(played_windows, [self.window])
 
+    def case_app_sound_message_box_probe_uses_stable_qmessagebox_type(self):
+        probe_widget = app_module.QWidget()
+        try:
+            with mock.patch.object(app_module, "QMessageBox", mock.MagicMock()):
+                self.window._play_message_box_sound_once(probe_widget)
+                self.window._install_app_sound_widget_hooks(probe_widget)
+        finally:
+            probe_widget.deleteLater()
+
     def case_startup_prepares_database_before_live_open(self):
         self._close_window()
         splash = _FakeStartupSplashController()
@@ -8529,6 +8538,7 @@ class AppShellTestCase(unittest.TestCase):
         for control in (
             self.window.search_column_combo,
             self.window.search_field,
+            self.window.search_filter_button,
             self.window.search_button,
             self.window.count_label,
             self.window.duration_label,
@@ -8550,8 +8560,12 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(self.window.catalog_search_group.height(), 50)
         self.assertEqual(
-            self.window.search_layout.indexOf(self.window.search_button),
+            self.window.search_layout.indexOf(self.window.search_filter_button),
             self.window.search_layout.indexOf(self.window.search_field) + 1,
+        )
+        self.assertEqual(
+            self.window.search_layout.indexOf(self.window.search_button),
+            self.window.search_layout.indexOf(self.window.search_filter_button) + 1,
         )
         self.assertIn(
             self.window.search_field,
@@ -8561,6 +8575,13 @@ class AppShellTestCase(unittest.TestCase):
             self.window.search_column_combo,
             self.window.catalog_search_group.findChildren(app_module.QComboBox),
         )
+        self.assertIn(
+            self.window.search_filter_button,
+            self.window.catalog_search_group.findChildren(app_module.QToolButton),
+        )
+        self.assertFalse(self.window.search_filter_button.icon().isNull())
+        self.assertEqual(self.window.search_filter_button.iconSize().width(), 14)
+        self.assertEqual(self.window.search_filter_button.iconSize().height(), 14)
         self.assertIn(
             self.window.count_label,
             self.window.catalog_info_group.findChildren(app_module.QLabel),
@@ -8712,6 +8733,13 @@ class AppShellTestCase(unittest.TestCase):
         shortcut.activated.emit()
         self._drain_events()
 
+        self.assertEqual(self.window.search_field.text(), "Shortcut Filter Target")
+        self.assertEqual(self._visible_track_ids(), [track_id])
+
+        self.window.reset_search()
+        self._set_current_catalog_cell(row, title_column)
+        self.window.search_filter_button.click()
+        self._drain_events()
         self.assertEqual(self.window.search_field.text(), "Shortcut Filter Target")
         self.assertEqual(self._visible_track_ids(), [track_id])
 
@@ -9761,8 +9789,10 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(menu.actions()[0].text(), "View Album Art")
             menu.actions()[0].trigger()
             open_artwork_mock.assert_called_once()
-        self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
+        self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_button))
+        self.assertIs(dialog.auto_advance_check, dialog.auto_advance_button)
         self.assertTrue(playback_group.isAncestorOf(dialog.shuffle_button))
+        self.assertTrue(playback_group.isAncestorOf(dialog.album_scope_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.export_button))
         self.assertEqual(dialog.shuffle_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.shuffle_button.text(), "")
@@ -9770,6 +9800,18 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(dialog.shuffle_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
         self.assertFalse(dialog.shuffle_button.isChecked())
         self.assertEqual(dialog.shuffle_button.toolTip(), "Shuffle Off")
+        self.assertEqual(dialog.album_scope_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.album_scope_button.text(), "")
+        self.assertFalse(dialog.album_scope_button.icon().isNull())
+        self.assertEqual(dialog.album_scope_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertFalse(dialog.album_scope_button.isChecked())
+        self.assertEqual(dialog.album_scope_button.toolTip(), "Album Playlist Off")
+        self.assertEqual(dialog.auto_advance_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.auto_advance_button.text(), "")
+        self.assertFalse(dialog.auto_advance_button.icon().isNull())
+        self.assertEqual(dialog.auto_advance_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertTrue(dialog.auto_advance_button.isChecked())
+        self.assertEqual(dialog.auto_advance_button.toolTip(), "Auto Advance On")
         self.assertEqual(dialog.export_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.export_button.text(), "")
         self.assertFalse(dialog.export_button.icon().isNull())
@@ -9805,7 +9847,8 @@ class AppShellTestCase(unittest.TestCase):
         mute_origin = dialog.mute_button.mapTo(dialog, app_module.QPoint(0, 0))
         transport_origin = dialog.previous_button.mapTo(dialog, app_module.QPoint(0, 0))
         shuffle_origin = dialog.shuffle_button.mapTo(dialog, app_module.QPoint(0, 0))
-        auto_advance_origin = dialog.auto_advance_check.mapTo(dialog, app_module.QPoint(0, 0))
+        album_scope_origin = dialog.album_scope_button.mapTo(dialog, app_module.QPoint(0, 0))
+        auto_advance_origin = dialog.auto_advance_button.mapTo(dialog, app_module.QPoint(0, 0))
         play_next_list_origin = dialog.play_next_list.mapTo(dialog, app_module.QPoint(0, 0))
         volume_label_origin = dialog.volume_label.mapTo(dialog, app_module.QPoint(0, 0))
         control_band_top = meter_origin.y()
@@ -9813,7 +9856,7 @@ class AppShellTestCase(unittest.TestCase):
         slider_top = slider_origin.y()
         slider_bottom = slider_origin.y() + dialog.volume_slider.height()
         mute_bottom = mute_origin.y() + dialog.mute_button.height()
-        auto_advance_bottom = auto_advance_origin.y() + dialog.auto_advance_check.height()
+        auto_advance_bottom = auto_advance_origin.y() + dialog.auto_advance_button.height()
         play_next_list_bottom = play_next_list_origin.y() + dialog.play_next_list.height()
         volume_group_bottom = volume_group_origin.y() + volume_group.height()
         self.assertGreaterEqual(meter_bar_bottom, volume_group_origin.y())
@@ -9825,6 +9868,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertLessEqual(abs(meter_bar_bottom - mute_bottom), 1)
         self.assertLessEqual(
             abs(meter_bar_bottom - (shuffle_origin.y() + dialog.shuffle_button.height())), 1
+        )
+        self.assertLessEqual(
+            abs(meter_bar_bottom - (album_scope_origin.y() + dialog.album_scope_button.height())),
+            1,
         )
         self.assertLessEqual(abs(meter_bar_bottom - auto_advance_bottom), 2)
         self.assertLessEqual(abs(meter_bar_bottom - play_next_list_bottom), 2)
@@ -9877,14 +9924,9 @@ class AppShellTestCase(unittest.TestCase):
         footer_row = playback_band_layout.itemAt(2).layout()
         self.assertIsNotNone(footer_row)
         self.assertIs(footer_row.itemAt(0).widget(), dialog.shuffle_button)
-        self.assertIs(footer_row.itemAt(2).widget(), dialog.auto_advance_check)
+        self.assertIs(footer_row.itemAt(1).widget(), dialog.album_scope_button)
+        self.assertIs(footer_row.itemAt(2).widget(), dialog.auto_advance_button)
         self.assertIs(footer_row.itemAt(4).widget(), dialog.export_button)
-        footer_center = footer_row.geometry().center().x()
-        auto_center = (
-            dialog.auto_advance_check.geometry().left()
-            + dialog.auto_advance_check.geometry().width() / 2
-        )
-        self.assertLessEqual(abs(auto_center - footer_center), 3)
         original_order = list(dialog._track_order)
         self.assertGreaterEqual(len(original_order), 1)
         with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
@@ -9989,7 +10031,8 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewArtworkContainer",
             "#audioPreviewAlbumLabel",
             "#audioPreviewTimeLabel",
-            "#audioPreviewAutoAdvanceCheck",
+            "#audioPreviewAutoAdvanceButton",
+            "#audioPreviewAlbumScopeButton",
             "#audioPreviewLoopButton",
             '[role="mediaTransportButton"]',
             'QToolButton[role="mediaTransportButton"]',
@@ -9998,7 +10041,7 @@ class AppShellTestCase(unittest.TestCase):
             '[role="mediaPeakMeter"]',
             'StereoPeakMeterWidget[role="mediaPeakMeter"]',
             '[role="mediaToggle"]',
-            'QCheckBox[role="mediaToggle"]',
+            'QToolButton[role="mediaToggle"]',
             '[role="mediaExportButton"]',
             'QToolButton[role="mediaExportButton"]',
         ):
@@ -10008,10 +10051,16 @@ class AppShellTestCase(unittest.TestCase):
         first_track = self._create_track(index=9103, title="Zulu Drift", album_title="Order Tests")
         middle_track = self._create_track(index=9104, title="Echo Bloom", album_title="Order Tests")
         last_track = self._create_track(index=9105, title="Aurora Fade", album_title="Order Tests")
+        other_album_track = self._create_track(
+            index=9107,
+            title="Lunar Annex",
+            album_title="Other Order Tests",
+        )
         for track_id, filename in (
             (first_track, "zulu-drift.wav"),
             (middle_track, "echo-bloom.wav"),
             (last_track, "aurora-fade.wav"),
+            (other_album_track, "lunar-annex.wav"),
         ):
             self._attach_standard_media(
                 track_id,
@@ -10039,10 +10088,58 @@ class AppShellTestCase(unittest.TestCase):
             int(dialog.play_next_list.currentItem().data(Qt.UserRole)), expected_order[1]
         )
         self.assertTrue(dialog.auto_advance_check.isChecked())
+        self.assertTrue(dialog.auto_advance_button.isChecked())
         self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_OFF)
         self.assertEqual(dialog.loop_button.property("loopMode"), dialog.LOOP_MODE_OFF)
         self.assertFalse(dialog.loop_button.isChecked())
         self.assertEqual(dialog.loop_button.toolTip(), "Loop Off")
+
+        album_menu = dialog.album_scope_button.menu()
+        dialog._rebuild_album_scope_menu()
+        album_actions = {
+            action.text(): action for action in album_menu.actions() if not action.isSeparator()
+        }
+        self.assertIn("Off", album_actions)
+        self.assertIn("Order Tests", album_actions)
+        self.assertIn("Other Order Tests", album_actions)
+        album_actions["Order Tests"].trigger()
+        pump_events()
+        album_track_ids = [first_track, middle_track, last_track]
+        self.assertTrue(dialog.album_scope_button.isChecked())
+        self.assertEqual(dialog.album_scope_button.property("albumScopeTitle"), "Order Tests")
+        self.assertEqual(dialog.album_scope_button.toolTip(), "Album Playlist: Order Tests")
+        self.assertEqual(dialog._current_track_id, first_track)
+        self.assertNotEqual(
+            dialog._player.playbackState(),
+            getattr(
+                app_module.QMediaPlayer,
+                "PlaybackState",
+                app_module.QMediaPlayer,
+            ).PlayingState,
+        )
+        self.assertEqual(dialog._track_order, album_track_ids)
+        self.assertEqual(
+            [
+                int(dialog.play_next_list.item(index).data(Qt.UserRole))
+                for index in range(dialog.play_next_list.count())
+            ],
+            album_track_ids,
+        )
+        self.assertNotIn(other_album_track, dialog._track_order)
+
+        with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
+            dialog.shuffle_button.click()
+        pump_events()
+        self.assertTrue(dialog.shuffle_button.isChecked())
+        self.assertEqual(set(dialog._track_order), set(album_track_ids))
+        self.assertNotIn(other_album_track, dialog._track_order)
+        dialog.shuffle_button.click()
+        album_actions["Off"].trigger()
+        pump_events()
+        self.assertFalse(dialog.album_scope_button.isChecked())
+        self.assertEqual(dialog._track_order, expected_order)
+        dialog.open_track_preview(expected_order[1], source_spec, autoplay=False)
+        pump_events()
 
         dialog._go_to_previous_track()
         self.assertEqual(dialog._current_track_id, expected_order[0])
@@ -10088,7 +10185,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(dialog._current_track_id, expected_order[2])
 
         dialog.open_track_preview(expected_order[1], source_spec, autoplay=False)
-        dialog.auto_advance_check.setChecked(False)
+        dialog.auto_advance_button.setChecked(False)
+        dialog._sync_auto_advance_button()
         pump_events()
         dialog._on_media_status_changed(end_status)
         self.assertEqual(dialog._current_track_id, expected_order[1])
@@ -10383,6 +10481,18 @@ class AppShellTestCase(unittest.TestCase):
         with mock.patch.object(dialog, "_is_media_playing", return_value=False):
             dialog._sync_visualization_timer()
         self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog._visualization_timer.isActive())
+        dialog._visualization_timer.stop()
+        dialog.scope._release_active = False
+        dialog.scope._fade_opacity = 1.0
+        dialog.scope.set_gain(1.0)
+        dialog.peak_meter.set_peak_frames([(-3.0, -6.0)])
+        dialog.peak_meter.set_duration_ms(1000)
+        dialog.peak_meter.mark_signal_activity()
+        dialog.peak_meter.set_playhead_ms(0)
+        dialog._stop_playback()
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog.peak_meter.is_releasing())
         self.assertTrue(dialog._visualization_timer.isActive())
         dialog._visualization_timer.stop()
         dialog.scope._release_active = False

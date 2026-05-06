@@ -8,6 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
+from isrc_manager.app_sounds import (
+    APP_SOUND_CLICK,
+    APP_SOUND_NOTICE,
+    APP_SOUND_STARTUP,
+    APP_SOUND_WARNING,
+    normalize_app_sound_settings,
+)
 from isrc_manager.blob_icons import normalize_blob_icon_settings
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -166,6 +173,10 @@ class ApplicationSettingsTransferService:
                     )
                     icon_attachment_path = f"general/icon/{icon_filename}"
                     attachments[icon_attachment_path] = icon_bytes
+        app_sound_settings = normalize_app_sound_settings(
+            current_values.get("app_sound_settings"),
+            startup_sound_enabled=current_values.get("startup_sound_enabled", True),
+        )
         return {
             "identity": {
                 "window_title_override": str(current_values.get("window_title") or "").strip(),
@@ -186,8 +197,9 @@ class ApplicationSettingsTransferService:
                 "interval_minutes": int(current_values.get("auto_snapshot_interval_minutes") or 0),
             },
             "startup_sound": {
-                "enabled": bool(current_values.get("startup_sound_enabled", True)),
+                "enabled": app_sound_settings[APP_SOUND_STARTUP],
             },
+            "app_sounds": dict(app_sound_settings),
             "history_retention": {
                 "retention_mode": str(current_values.get("history_retention_mode") or "").strip(),
                 "auto_cleanup_enabled": bool(current_values.get("history_auto_cleanup_enabled")),
@@ -376,6 +388,13 @@ class ApplicationSettingsTransferService:
         registration = dict(payload.get("registration") or {})
         auto_snapshot = dict(payload.get("auto_snapshot") or {})
         startup_sound = dict(payload.get("startup_sound") or {})
+        app_sounds = normalize_app_sound_settings(
+            payload.get("app_sounds"),
+            startup_sound_enabled=startup_sound.get(
+                "enabled",
+                after_values.get("startup_sound_enabled", True),
+            ),
+        )
         history = dict(payload.get("history_retention") or {})
 
         after_values["window_title"] = str(identity.get("window_title_override") or "").strip()
@@ -392,12 +411,11 @@ class ApplicationSettingsTransferService:
         after_values["auto_snapshot_interval_minutes"] = int(
             auto_snapshot.get("interval_minutes") or 0
         )
-        after_values["startup_sound_enabled"] = bool(
-            startup_sound.get(
-                "enabled",
-                after_values.get("startup_sound_enabled", True),
-            )
-        )
+        after_values["startup_sound_enabled"] = app_sounds[APP_SOUND_STARTUP]
+        after_values["click_sound_enabled"] = app_sounds[APP_SOUND_CLICK]
+        after_values["notice_sound_enabled"] = app_sounds[APP_SOUND_NOTICE]
+        after_values["warning_sound_enabled"] = app_sounds[APP_SOUND_WARNING]
+        after_values["app_sound_settings"] = dict(app_sounds)
         after_values["history_retention_mode"] = str(history.get("retention_mode") or "").strip()
         after_values["history_auto_cleanup_enabled"] = bool(history.get("auto_cleanup_enabled"))
         after_values["history_storage_budget_mb"] = int(history.get("storage_budget_mb") or 0)

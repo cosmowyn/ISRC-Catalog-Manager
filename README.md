@@ -4,6 +4,8 @@ Music Catalog Manager is a local-first desktop catalog and repertoire operations
 
 It combines recording metadata, releases, works, parties, contracts, rights, documents, assets, GS1 product data, import and export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
 
+![Audio Player](docs/screenshots/media-player.png)
+
 ![Workspace overview](docs/screenshots/workspace-overview.png)
 
 ## Support Development
@@ -102,6 +104,22 @@ Tracks and releases can carry multiple asset versions, including approved master
 
 - `Asset Registry` for primary-version control and approved-source review
 - `Derivative Ledger` for managed export batches, derivative lineage, and retained output review
+
+### Media player
+
+The built-in audio player turns attached catalog audio into an auditioning and verification surface instead of a tiny preview utility.
+
+It includes:
+
+- a Now Playing header with title, artist, album context, waveform, spectrum, and album artwork
+- full transport controls for previous, rewind, play, pause, stop, fast-forward, next, and loop
+- waveform and timeline scrubbing
+- live peak meters, spectrum activity, volume, and mute
+- Play Next queueing from the current visible catalog order
+- shuffle, auto advance, and album-scoped playlist playback
+- an export menu wired to the app's existing audio export, derivative, authenticity, provenance, forensic, and custom BLOB workflows
+
+The player reuses the same top-level media window when reopened, so it can stay beside the catalog while you keep reviewing, filtering, and exporting tracks. App-wide sound effects for startup, scrolling/sliders, completed actions, and warnings are controlled from `Settings > Application Settings > Sounds`. All bundled application sound effects were designed and created by Aeon Cosmowyn.
 
 ### Audio authenticity and provenance
 
@@ -273,6 +291,10 @@ The screenshots below are regenerated from the bundled demo workspace and captur
 
 ![Workspace overview](docs/screenshots/workspace-overview.png)
 
+### Audio Player
+
+![Audio player](docs/screenshots/media-player.png)
+
 ### Custom Fields
 
 ![Custom columns](docs/screenshots/custom-columns.png)
@@ -307,6 +329,7 @@ Start with `Help > Help Contents` inside the app for the integrated manual, then
 ### User Guides
 
 - [Documentation Hub](docs/README.md)
+- [Media Player Guide](docs/media-player.md)
 - [Import and Merge Workflows](docs/import-and-merge-workflows.md)
 - [Catalog Workspace Workflows](docs/catalog-workspace-workflows.md)
 - [Contract Template Workflows](docs/contract-template-workflows.md)
