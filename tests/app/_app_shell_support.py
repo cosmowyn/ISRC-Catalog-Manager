@@ -71,6 +71,11 @@ def _skip_owner_bootstrap(self):
     return None
 
 
+def _skip_startup_update_check(self):
+    del self
+    return None
+
+
 class _DeferredMigrationMessageBox:
     Warning = object()
     Information = object()
@@ -324,6 +329,9 @@ class AppShellTestCase(unittest.TestCase):
             ),
             mock.patch.object(
                 app_module.App, "_schedule_owner_party_bootstrap", _skip_owner_bootstrap
+            ),
+            mock.patch.object(
+                app_module.App, "_schedule_startup_update_check", _skip_startup_update_check
             ),
             mock.patch.object(app_module.App, "_apply_theme", _fast_test_apply_theme),
         ]
@@ -810,7 +818,28 @@ class AppShellTestCase(unittest.TestCase):
     def _open_audio_preview_dialog(self, track_id: int):
         self.window._preview_standard_media_for_track(track_id, "audio_file")
         pump_events()
-        return self.window.audio_preview_dialog
+        dialog = self.window.audio_preview_dialog
+        self._wait_for_audio_preview_dialog(dialog, track_id)
+        return dialog
+
+    def _wait_for_audio_preview_dialog(self, dialog, track_id: int | None = None) -> None:
+        def _loaded() -> bool:
+            pump_events(app=self.app)
+            if dialog is None:
+                return False
+            if getattr(dialog, "_audio_load_jobs", None):
+                return False
+            if track_id is not None and getattr(dialog, "_current_track_id", None) != int(track_id):
+                return False
+            return bool(getattr(dialog, "_tmp_path", None))
+
+        wait_for(
+            _loaded,
+            timeout_ms=3000,
+            interval_ms=10,
+            app=self.app,
+            description="audio preview track load",
+        )
 
     def _open_image_preview_dialog(self, track_id: int):
         self.window._preview_standard_media_for_track(track_id, "album_art")
@@ -8000,6 +8029,7 @@ class AppShellTestCase(unittest.TestCase):
             "audio_file",
             self._create_wav_file("media-player-selected.wav"),
         )
+        self.window.conn.commit()
         self.window.refresh_table()
         self._select_track_ids([silent_id, selected_id])
 
@@ -9793,6 +9823,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(dialog.auto_advance_check, dialog.auto_advance_button)
         self.assertTrue(playback_group.isAncestorOf(dialog.shuffle_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.album_scope_button))
+        self.assertTrue(playback_group.isAncestorOf(dialog.equalizer_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.export_button))
         self.assertEqual(dialog.shuffle_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.shuffle_button.text(), "")
@@ -9812,6 +9843,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(dialog.auto_advance_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
         self.assertTrue(dialog.auto_advance_button.isChecked())
         self.assertEqual(dialog.auto_advance_button.toolTip(), "Auto Advance On")
+        self.assertEqual(dialog.equalizer_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.equalizer_button.text(), "")
+        self.assertFalse(dialog.equalizer_button.icon().isNull())
+        self.assertEqual(dialog.equalizer_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
         self.assertEqual(dialog.export_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.export_button.text(), "")
         self.assertFalse(dialog.export_button.icon().isNull())
@@ -9926,7 +9961,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(footer_row.itemAt(0).widget(), dialog.shuffle_button)
         self.assertIs(footer_row.itemAt(1).widget(), dialog.album_scope_button)
         self.assertIs(footer_row.itemAt(2).widget(), dialog.auto_advance_button)
-        self.assertIs(footer_row.itemAt(4).widget(), dialog.export_button)
+        self.assertIs(footer_row.itemAt(3).widget(), dialog.equalizer_button)
+        self.assertIs(footer_row.itemAt(5).widget(), dialog.export_button)
         original_order = list(dialog._track_order)
         self.assertGreaterEqual(len(original_order), 1)
         with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
@@ -10205,6 +10241,53 @@ class AppShellTestCase(unittest.TestCase):
         dialog._cycle_loop_mode()
         self.assertEqual(dialog._loop_mode, dialog.LOOP_MODE_OFF)
         self.assertFalse(dialog.loop_button.isChecked())
+
+    def case_audio_preview_next_previous_use_background_track_load(self):
+        first_track = self._create_track(index=9114, title="Background Previous")
+        middle_track = self._create_track(index=9115, title="Background Current")
+        last_track = self._create_track(index=9116, title="Background Next")
+        for track_id, filename in (
+            (first_track, "background-previous.wav"),
+            (middle_track, "background-current.wav"),
+            (last_track, "background-next.wav"),
+        ):
+            self._attach_standard_media(
+                track_id,
+                audio_path=self._create_wav_file(filename),
+            )
+
+        source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
+        expected_order = self.window._audio_preview_navigation_track_ids(source_spec)
+        dialog = self._open_audio_preview_dialog(middle_track)
+        self.assertEqual(dialog._track_order, expected_order)
+        self.assertFalse(dialog._audio_preload_cache)
+        self.assertFalse(dialog._audio_preload_jobs)
+
+        with mock.patch.object(
+            dialog,
+            "_submit_audio_track_load",
+            wraps=dialog._submit_audio_track_load,
+        ) as submit_track_load:
+            dialog._go_to_previous_track()
+        submit_track_load.assert_called_once()
+        self._wait_for_audio_preview_dialog(dialog, first_track)
+        self.assertEqual(dialog._current_track_id, first_track)
+        self.assertFalse(dialog._audio_load_jobs)
+        self.assertFalse(dialog._audio_preload_cache)
+        self.assertFalse(dialog._audio_preload_jobs)
+
+        with mock.patch.object(
+            dialog,
+            "_submit_audio_track_load",
+            wraps=dialog._submit_audio_track_load,
+        ) as submit_track_load:
+            dialog._go_to_next_track()
+        submit_track_load.assert_called_once()
+        self._wait_for_audio_preview_dialog(dialog, middle_track)
+        self.assertEqual(dialog._current_track_id, middle_track)
+        self.assertFalse(dialog._audio_load_jobs)
+        self.assertFalse(dialog._audio_preload_cache)
+        self.assertFalse(dialog._audio_preload_jobs)
 
     def case_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired(self):
         track_id = self._create_track(

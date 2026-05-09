@@ -156,6 +156,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_audio_preview_navigation_follows_visible_catalog_order_and_auto_advance = (
         AppShellTestCase.case_audio_preview_navigation_follows_visible_catalog_order_and_auto_advance
     )
+    test_audio_preview_next_previous_use_background_track_load = (
+        AppShellTestCase.case_audio_preview_next_previous_use_background_track_load
+    )
     test_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired = (
         AppShellTestCase.case_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired
     )

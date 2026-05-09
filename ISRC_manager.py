@@ -21,8 +21,12 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -282,6 +286,9 @@ from isrc_manager.external_launch import open_external_path
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
+    bytes_from_blob,
+    infer_storage_mode,
     normalize_storage_mode,
     resolve_directory_export_target,
     resolve_file_export_target,
@@ -319,6 +326,15 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
 )
+from isrc_manager.media.equalizer import (
+    EqualizerDialog,
+    equalizer_is_enabled,
+    equalizer_response_for_bins,
+    load_equalizer_settings,
+    normalize_equalizer_settings,
+    save_equalizer_settings,
+)
+from isrc_manager.media.equalizer_player import LiveEqualizerPlayer, _decode_audio_file
 from isrc_manager.media.waveform_cache import AudioWaveformCacheService, AudioWaveformCacheWorker
 from isrc_manager.packaged_smoke import (
     PACKAGED_SMOKE_TEST_ARGUMENT,
@@ -30515,9 +30531,14 @@ class App(QMainWindow):
         source_spec: dict[str, object] | None,
         *,
         parent_widget=None,
+        title_override: str | None = None,
     ) -> list[dict[str, object]]:
         parent = parent_widget or self
-        title = self._get_track_title(int(track_id)) or f"track_{track_id}"
+        title = (
+            str(title_override or "").strip()
+            or self._get_track_title(int(track_id))
+            or f"track_{track_id}"
+        )
         if source_spec is None:
             return []
         kind = str(source_spec.get("kind") or "").strip().lower()
@@ -30624,6 +30645,7 @@ class App(QMainWindow):
         source_spec: dict[str, object],
         *,
         parent_widget=None,
+        prepared_media: "_AudioPreviewPreparedMedia | None" = None,
     ) -> dict[str, object]:
         snapshot = None
         if self.track_service is not None:
@@ -30648,11 +30670,21 @@ class App(QMainWindow):
         kind = str(source_spec.get("kind") or "").strip().lower()
         if kind == "custom":
             field_id = int(source_spec.get("field_id") or 0)
-            data, mime = self.cf_fetch_blob(int(track_id), field_id)
+            if prepared_media is not None:
+                data, mime = b"", prepared_media.audio_mime
+            else:
+                data, mime = self.cf_fetch_blob(int(track_id), field_id)
         else:
             media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
-            data, mime = self.track_fetch_media(int(track_id), media_key)
-        raw_bytes = self._coerce_export_bytes(data[0] if isinstance(data, tuple) else data)
+            if prepared_media is not None:
+                data, mime = b"", prepared_media.audio_mime
+            else:
+                data, mime = self.track_fetch_media(int(track_id), media_key)
+        raw_bytes = (
+            b""
+            if prepared_media is not None
+            else self._coerce_export_bytes(data[0] if isinstance(data, tuple) else data)
+        )
         track_order = self._audio_preview_navigation_track_ids(source_spec)
         if int(track_id) not in track_order:
             track_order = [int(track_id), *track_order]
@@ -30664,7 +30696,10 @@ class App(QMainWindow):
             "artist": artist,
             "album": album,
             "audio_bytes": raw_bytes,
-            "audio_mime": str(mime or self._detect_mime(raw_bytes) or "audio/wav"),
+            "audio_mime": str(
+                mime or (self._detect_mime(raw_bytes) if raw_bytes else "") or "audio/wav"
+            ),
+            "prepared_media": prepared_media,
             "artwork_payload": artwork,
             "window_title": f"Audio Player — {title}",
             "export_actions": self._audio_preview_export_actions_for_track(
@@ -37242,6 +37277,562 @@ class _HiDpiArtworkLabel(QLabel):
             painter.end()
 
 
+class _AudioPreviewPreloadBridge(QWidget):
+    ready = Signal(object)
+    track_ready = Signal(object)
+    failed = Signal(object)
+
+
+class _AudioPreviewPreloadCancelled(Exception):
+    pass
+
+
+@dataclass(slots=True)
+class _AudioPreviewPreparedMedia:
+    track_id: int
+    source_key: str
+    audio_mime: str
+    source_path: str
+    owns_source_path: bool
+    decoded_samples: object | None
+    sample_rate: int
+    waveform_peaks: list
+    spectrum_frames: list
+    peak_frames: list
+    byte_count: int
+    generation: int
+    created_at: float
+    preview_state: dict[str, object] | None = None
+
+    def memory_cost(self) -> int:
+        decoded_cost = int(getattr(self.decoded_samples, "nbytes", 0) or 0)
+        return max(0, int(self.byte_count or 0)) + decoded_cost
+
+    def dispose(self) -> None:
+        if not self.owns_source_path:
+            return
+        try:
+            os.remove(self.source_path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        self.owns_source_path = False
+
+
+@dataclass(slots=True)
+class _AudioPreviewPreloadTask:
+    generation: int
+    track_id: int
+    source_spec: dict[str, object]
+    source_key: str
+    db_path: str
+    data_root: str | None
+    cancel_event: threading.Event
+    waveform_width: int
+    cache_budget_bytes: int
+    require_decoded: bool = False
+    base_track_order: list[int] | None = None
+    effective_track_order: list[int] | None = None
+    build_preview_state: bool = False
+
+
+@dataclass(slots=True)
+class _AudioPreviewPreloadResult:
+    generation: int
+    track_id: int
+    source_key: str
+    prepared: _AudioPreviewPreparedMedia | None = None
+    error: str = ""
+    cancelled: bool = False
+
+
+@dataclass(slots=True)
+class _AudioPreviewTrackLoadTask:
+    request_id: int
+    track_id: int
+    source_spec: dict[str, object]
+    source_key: str
+    autoplay: bool
+    db_path: str
+    data_root: str | None
+    base_track_order: list[int]
+    effective_track_order: list[int]
+    cancel_event: threading.Event
+    waveform_width: int
+    cache_budget_bytes: int
+    prepared_media: _AudioPreviewPreparedMedia | None = None
+
+
+@dataclass(slots=True)
+class _AudioPreviewTrackLoadResult:
+    request_id: int
+    track_id: int
+    source_key: str
+    state: dict[str, object] | None = None
+    prepared_owned_by_result: bool = False
+    error: str = ""
+    cancelled: bool = False
+
+
+def _audio_preview_detect_mime_from_bytes(data: bytes) -> str:
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if len(data) >= 4 and data[:4] == b"fLaC":
+        return "audio/flac"
+    if len(data) >= 4 and data[:4] == b"OggS":
+        return "audio/opus" if b"OpusHead" in data[:64] else "audio/ogg"
+    if len(data) >= 3 and data[:3] == b"ID3":
+        return "audio/mpeg"
+    if len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+        return "audio/mpeg"
+    return ""
+
+
+def _audio_preview_suffix_for_mime(mime: str, fallback: str = ".bin") -> str:
+    return {
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/ogg": ".ogg",
+        "audio/opus": ".opus",
+        "audio/flac": ".flac",
+        "audio/aiff": ".aiff",
+        "audio/x-aiff": ".aiff",
+    }.get(str(mime or "").strip().lower(), fallback)
+
+
+def _audio_preview_fetch_source_for_preload(
+    task: _AudioPreviewPreloadTask,
+) -> tuple[str, bool, str, int]:
+    if task.cancel_event.is_set():
+        raise _AudioPreviewPreloadCancelled()
+    if not task.db_path:
+        raise FileNotFoundError("No active profile database for audio preload.")
+
+    conn = SQLiteConnectionFactory().open(task.db_path)
+    try:
+        kind = str(task.source_spec.get("kind") or "").strip().lower()
+        if kind == "custom":
+            field_id = int(task.source_spec.get("field_id") or 0)
+            if field_id <= 0:
+                raise FileNotFoundError("No custom audio field selected.")
+            row = conn.execute(
+                """
+                SELECT
+                    cfv.blob_value,
+                    cfv.managed_file_path,
+                    cfv.storage_mode,
+                    cfv.filename,
+                    cfv.mime_type,
+                    cfv.size_bytes
+                FROM CustomFieldValues cfv
+                JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+                WHERE cfv.track_id=? AND cfv.field_def_id=? AND cfd.field_type='blob_audio'
+                """,
+                (int(task.track_id), field_id),
+            ).fetchone()
+            if not row:
+                raise FileNotFoundError("No custom audio file stored for this track.")
+            blob_value, managed_file_path, storage_mode, filename, mime_type, size_bytes = row
+            effective_mode = infer_storage_mode(
+                explicit_mode=storage_mode,
+                stored_path=managed_file_path,
+                blob_value=blob_value,
+            )
+            if effective_mode == STORAGE_MODE_MANAGED_FILE:
+                store = ManagedFileStorage(
+                    data_root=task.data_root,
+                    relative_root="custom_field_media",
+                )
+                resolved = store.resolve(str(managed_file_path or ""))
+                if resolved is None or not resolved.exists():
+                    raise FileNotFoundError(
+                        str(managed_file_path or filename or "custom audio file")
+                    )
+                mime = str(mime_type or mimetypes.guess_type(str(resolved))[0] or "")
+                return str(resolved), False, mime, int(size_bytes or resolved.stat().st_size)
+            if blob_value is None:
+                raise FileNotFoundError("No custom audio blob stored for this track.")
+            data = bytes_from_blob(blob_value)
+            mime = str(mime_type or _audio_preview_detect_mime_from_bytes(data) or "audio/wav")
+            suffix = Path(str(filename or "")).suffix or _audio_preview_suffix_for_mime(mime)
+            return _audio_preview_write_preload_temp_file(data, suffix), True, mime, len(data)
+
+        media_key = str(task.source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+        service = TrackService(conn, task.data_root)
+        handle = service.resolve_media_source(int(task.track_id), media_key)
+        if handle.source_path is not None and handle.source_path.exists():
+            mime = str(handle.mime_type or mimetypes.guess_type(str(handle.source_path))[0] or "")
+            return str(handle.source_path), False, mime, int(handle.size_bytes or 0)
+        data = bytes(handle.source_bytes or b"")
+        if not data:
+            raise FileNotFoundError(f"{media_key} for track {task.track_id}")
+        mime = str(handle.mime_type or _audio_preview_detect_mime_from_bytes(data) or "audio/wav")
+        suffix = handle.suffix or _audio_preview_suffix_for_mime(mime)
+        return _audio_preview_write_preload_temp_file(data, suffix), True, mime, len(data)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _audio_preview_write_preload_temp_file(data: bytes, suffix: str) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or ".bin") as handle:
+        handle.write(bytes(data or b""))
+        return handle.name
+
+
+def _audio_preview_artwork_payload_for_snapshot(
+    track_service: TrackService,
+    track_id: int,
+    snapshot: TrackSnapshot | None,
+) -> ArtworkPayload | None:
+    if snapshot is None:
+        return None
+    has_album_art = bool(
+        snapshot.album_art_path
+        or snapshot.album_art_blob_b64
+        or snapshot.album_art_filename
+        or int(snapshot.album_art_size_bytes or 0) > 0
+    )
+    if not has_album_art:
+        return None
+    fallback_mime_type = str(snapshot.album_art_mime_type or "").strip() or "image/jpeg"
+    try:
+        data, mime_type = track_service.fetch_media_bytes(int(track_id), "album_art")
+    except Exception:
+        return None
+    return ArtworkPayload(data=data, mime_type=mime_type or fallback_mime_type)
+
+
+def _audio_preview_track_queue_items_for_service(
+    track_service: TrackService,
+    track_order: list[int],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen: set[int] = set()
+    for position, track_id in enumerate(track_order, start=1):
+        try:
+            normalized_id = int(track_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_id in seen:
+            continue
+        seen.add(normalized_id)
+        title = ""
+        album = ""
+        try:
+            snapshot = track_service.fetch_track_snapshot(
+                normalized_id,
+                include_media_blobs=False,
+            )
+        except Exception:
+            snapshot = None
+        if snapshot is not None:
+            title = str(snapshot.track_title or "").strip()
+            album = str(snapshot.album_title or "").strip()
+        if not title:
+            title = f"Track {normalized_id}"
+        items.append(
+            {
+                "track_id": normalized_id,
+                "title": title,
+                "label": title,
+                "album": album,
+                "position": position,
+            }
+        )
+    return items
+
+
+def _audio_preview_state_for_preload_task(
+    task: _AudioPreviewPreloadTask,
+    prepared: _AudioPreviewPreparedMedia,
+) -> dict[str, object] | None:
+    if not task.build_preview_state:
+        return None
+    if task.cancel_event.is_set():
+        raise _AudioPreviewPreloadCancelled()
+    if not task.db_path:
+        return None
+
+    def _coerce_track_ids(values: list[int] | None) -> list[int]:
+        coerced: list[int] = []
+        seen: set[int] = set()
+        for track_id in list(values or []):
+            try:
+                normalized = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            coerced.append(normalized)
+        return coerced
+
+    base_track_order = _coerce_track_ids(task.base_track_order)
+    effective_track_order = _coerce_track_ids(task.effective_track_order)
+    if int(task.track_id) not in base_track_order:
+        base_track_order = [int(task.track_id), *base_track_order]
+    if not effective_track_order:
+        effective_track_order = list(base_track_order)
+
+    conn = SQLiteConnectionFactory().open(task.db_path)
+    try:
+        track_service = TrackService(conn, task.data_root)
+        snapshot = track_service.fetch_track_snapshot(
+            int(task.track_id),
+            include_media_blobs=False,
+        )
+        title = str(
+            (snapshot.track_title if snapshot is not None else None) or f"Track {task.track_id}"
+        ).strip()
+        artist = str((snapshot.artist_name if snapshot is not None else None) or "").strip()
+        album = str((snapshot.album_title if snapshot is not None else None) or "").strip()
+        artwork = _audio_preview_artwork_payload_for_snapshot(
+            track_service,
+            int(task.track_id),
+            snapshot,
+        )
+        base_queue = _audio_preview_track_queue_items_for_service(
+            track_service,
+            list(base_track_order),
+        )
+        effective_queue = _audio_preview_track_queue_items_for_service(
+            track_service,
+            list(effective_track_order),
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    if task.cancel_event.is_set():
+        raise _AudioPreviewPreloadCancelled()
+    return {
+        "track_id": int(task.track_id),
+        "track_order": list(base_track_order),
+        "track_queue": base_queue,
+        "effective_track_order": list(effective_track_order),
+        "effective_track_queue": effective_queue,
+        "title": title or f"Track {task.track_id}",
+        "artist": artist,
+        "album": album,
+        "audio_bytes": b"",
+        "audio_mime": str(prepared.audio_mime or "audio/wav"),
+        "prepared_media": prepared,
+        "artwork_payload": artwork,
+        "window_title": f"Audio Player — {title or f'Track {task.track_id}'}",
+        "export_actions": [],
+    }
+
+
+def _build_audio_preview_preload(task: _AudioPreviewPreloadTask) -> _AudioPreviewPreloadResult:
+    source_path = ""
+    owns_source_path = False
+    prepared: _AudioPreviewPreparedMedia | None = None
+    try:
+        source_path, owns_source_path, mime, byte_count = _audio_preview_fetch_source_for_preload(
+            task
+        )
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+
+        waveform_width = max(480, int(task.waveform_width or 480))
+        waveform_peaks = load_wav_peaks(source_path, waveform_width)
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+        spectrum_frames = load_audio_spectrum_frames(source_path)
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+        peak_frames = load_audio_peak_meter_frames(source_path)
+
+        prepared = _AudioPreviewPreparedMedia(
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            audio_mime=str(mime or "audio/wav"),
+            source_path=source_path,
+            owns_source_path=owns_source_path,
+            decoded_samples=None,
+            sample_rate=0,
+            waveform_peaks=list(waveform_peaks or []),
+            spectrum_frames=list(spectrum_frames or []),
+            peak_frames=list(peak_frames or []),
+            byte_count=int(byte_count or 0),
+            generation=int(task.generation),
+            created_at=time.monotonic(),
+        )
+        try:
+            prepared.preview_state = _audio_preview_state_for_preload_task(task, prepared)
+        except _AudioPreviewPreloadCancelled:
+            raise
+        except Exception:
+            prepared.preview_state = None
+        return _AudioPreviewPreloadResult(
+            generation=int(task.generation),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            prepared=prepared,
+        )
+    except _AudioPreviewPreloadCancelled:
+        if prepared is not None:
+            prepared.dispose()
+        elif owns_source_path and source_path:
+            try:
+                os.remove(source_path)
+            except Exception:
+                pass
+        return _AudioPreviewPreloadResult(
+            generation=int(task.generation),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            cancelled=True,
+        )
+    except Exception as exc:
+        if prepared is not None:
+            prepared.dispose()
+        elif owns_source_path and source_path:
+            try:
+                os.remove(source_path)
+            except Exception:
+                pass
+        return _AudioPreviewPreloadResult(
+            generation=int(task.generation),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            error=str(exc),
+        )
+
+
+def _build_audio_preview_track_load(
+    task: _AudioPreviewTrackLoadTask,
+) -> _AudioPreviewTrackLoadResult:
+    prepared = (
+        task.prepared_media if isinstance(task.prepared_media, _AudioPreviewPreparedMedia) else None
+    )
+    prepared_owned_by_result = False
+    try:
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+        if not task.db_path:
+            raise FileNotFoundError("No active profile database for audio preview.")
+
+        conn = SQLiteConnectionFactory().open(task.db_path)
+        try:
+            track_service = TrackService(conn, task.data_root)
+            snapshot = track_service.fetch_track_snapshot(
+                int(task.track_id),
+                include_media_blobs=False,
+            )
+            title = str(
+                (snapshot.track_title if snapshot is not None else None) or f"Track {task.track_id}"
+            ).strip()
+            artist = str((snapshot.artist_name if snapshot is not None else None) or "").strip()
+            album = str((snapshot.album_title if snapshot is not None else None) or "").strip()
+            artwork = _audio_preview_artwork_payload_for_snapshot(
+                track_service,
+                int(task.track_id),
+                snapshot,
+            )
+            base_queue = _audio_preview_track_queue_items_for_service(
+                track_service,
+                list(task.base_track_order),
+            )
+            effective_queue = _audio_preview_track_queue_items_for_service(
+                track_service,
+                list(task.effective_track_order),
+            )
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+
+        if prepared is None:
+            preload_result = _build_audio_preview_preload(
+                _AudioPreviewPreloadTask(
+                    generation=int(task.request_id),
+                    track_id=int(task.track_id),
+                    source_spec=dict(task.source_spec),
+                    source_key=task.source_key,
+                    db_path=task.db_path,
+                    data_root=task.data_root,
+                    cancel_event=task.cancel_event,
+                    waveform_width=max(480, int(task.waveform_width or 480)),
+                    cache_budget_bytes=int(task.cache_budget_bytes),
+                    require_decoded=True,
+                )
+            )
+            if preload_result.cancelled:
+                raise _AudioPreviewPreloadCancelled()
+            if preload_result.error:
+                raise RuntimeError(preload_result.error)
+            prepared = preload_result.prepared
+            prepared_owned_by_result = prepared is not None
+
+        if prepared is None:
+            raise FileNotFoundError(f"No playable audio for track {task.track_id}.")
+        if prepared.decoded_samples is None or int(prepared.sample_rate or 0) <= 0:
+            if task.cancel_event.is_set():
+                raise _AudioPreviewPreloadCancelled()
+            samples, decoded_sample_rate = _decode_audio_file(prepared.source_path)
+            prepared.decoded_samples = samples
+            prepared.sample_rate = int(decoded_sample_rate or 0)
+        if task.cancel_event.is_set():
+            raise _AudioPreviewPreloadCancelled()
+
+        state = {
+            "track_id": int(task.track_id),
+            "track_order": list(task.base_track_order),
+            "track_queue": base_queue,
+            "effective_track_order": list(task.effective_track_order),
+            "effective_track_queue": effective_queue,
+            "title": title or f"Track {task.track_id}",
+            "artist": artist,
+            "album": album,
+            "audio_bytes": b"",
+            "audio_mime": str(prepared.audio_mime or "audio/wav"),
+            "prepared_media": prepared,
+            "artwork_payload": artwork,
+            "window_title": f"Audio Player — {title or f'Track {task.track_id}'}",
+            "export_actions": [],
+            "_autoplay": bool(task.autoplay),
+        }
+        return _AudioPreviewTrackLoadResult(
+            request_id=int(task.request_id),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            state=state,
+            prepared_owned_by_result=prepared_owned_by_result,
+        )
+    except _AudioPreviewPreloadCancelled:
+        if prepared_owned_by_result and prepared is not None:
+            prepared.dispose()
+        return _AudioPreviewTrackLoadResult(
+            request_id=int(task.request_id),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            cancelled=True,
+        )
+    except Exception as exc:
+        if prepared_owned_by_result and prepared is not None:
+            prepared.dispose()
+        return _AudioPreviewTrackLoadResult(
+            request_id=int(task.request_id),
+            track_id=int(task.track_id),
+            source_key=task.source_key,
+            error=str(exc),
+        )
+
+
 class _AudioPreviewDialog(QDialog):
     SCRUB_STEP_MS = 1000
     JUMP_STEP_MS = 10000
@@ -37258,6 +37849,8 @@ class _AudioPreviewDialog(QDialog):
     PEAK_LABEL_OFFSET = 20
     CONTROL_ROW_TOP_OFFSET = 0
     CONTROL_BAND_HEIGHT = 88
+    PRELOAD_CACHE_BUDGET_BYTES = 192 * 1024 * 1024
+    PRELOAD_WORKERS = 2
     LOOP_MODE_OFF = "off"
     LOOP_MODE_PLAYLIST = "playlist"
     LOOP_MODE_TRACK = "track"
@@ -37277,6 +37870,7 @@ class _AudioPreviewDialog(QDialog):
         "repeat-one": "repeat-1.svg",
         "volume-up": "volume-up-fill.svg",
         "volume-mute": "volume-mute-fill.svg",
+        "equalizer": "sliders2-vertical.svg",
         "export": "box-arrow-down.svg",
     }
 
@@ -37284,6 +37878,8 @@ class _AudioPreviewDialog(QDialog):
         super().__init__(parent, Qt.Window)
         self.app = app
         self._tmp_path = None
+        self._source_tmp_path = None
+        self._tmp_path_owned = False
         self._source_spec = None
         self._current_track_id = None
         self._track_order = []
@@ -37307,6 +37903,22 @@ class _AudioPreviewDialog(QDialog):
         self._loop_mode = self.LOOP_MODE_OFF
         self._media_icon_cache: dict[tuple[str, bool, str], QIcon] = {}
         self._media_stage_syncing = False
+        self._equalizer_settings = load_equalizer_settings(getattr(app, "settings", None))
+        self._equalizer_dialog: EqualizerDialog | None = None
+        self._audio_preload_generation = 0
+        self._audio_preload_cache: dict[tuple[int, str], _AudioPreviewPreparedMedia] = {}
+        self._audio_preload_jobs: dict[tuple[int, str], tuple[Future, threading.Event, int]] = {}
+        self._audio_preload_executor = None
+        self._audio_load_request_id = 0
+        self._audio_load_jobs: dict[int, tuple[Future, threading.Event]] = {}
+        self._audio_load_waiting_for_preload: dict[str, object] | None = None
+        self._audio_load_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="audio-preview-load",
+        )
+        self._audio_preload_bridge = _AudioPreviewPreloadBridge(self)
+        self._audio_preload_bridge.ready.connect(self._on_audio_preload_result)
+        self._audio_preload_bridge.track_ready.connect(self._on_audio_track_load_result)
 
         self.setObjectName("audioPreviewDialog")
         self.setWindowFlags(
@@ -37339,9 +37951,10 @@ class _AudioPreviewDialog(QDialog):
             ]
             os.environ["PATH"] = ";".join([*extra, os.environ.get("PATH", "")])
 
-        self._player = QMediaPlayer(self)
+        self._player = LiveEqualizerPlayer(self)
         self._audio_out = QAudioOutput(self)
         self._player.setAudioOutput(self._audio_out)
+        self._player.set_equalizer_settings(self._equalizer_settings)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
@@ -37411,6 +38024,19 @@ class _AudioPreviewDialog(QDialog):
         self.wave_status_label.setProperty("role", "secondary")
         self.wave_status_label.setAlignment(Qt.AlignCenter)
         self.wave_status_label.hide()
+        self.equalizer_indicator_button = QToolButton(self.waveform_panel)
+        self.equalizer_indicator_button.setObjectName("audioPreviewEqualizerIndicator")
+        self.equalizer_indicator_button.setProperty("role", "mediaEqIndicator")
+        self.equalizer_indicator_button.setAutoRaise(False)
+        self.equalizer_indicator_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.equalizer_indicator_button.setFixedSize(26, 26)
+        self.equalizer_indicator_button.clicked.connect(self._open_equalizer_dialog)
+        self._set_icon_button_content(
+            self.equalizer_indicator_button,
+            "equalizer",
+            "EQ",
+        )
+        self.equalizer_indicator_button.hide()
         waveform_layout.addWidget(self.wave, 0, Qt.AlignVCenter)
         waveform_layout.addWidget(self.wave_status_label, 0, Qt.AlignCenter)
         waveform_layout.addStretch(1)
@@ -37564,7 +38190,7 @@ class _AudioPreviewDialog(QDialog):
         transport_buttons.addStretch(1)
 
         playback_footer = QHBoxLayout()
-        playback_footer.setSpacing(10)
+        playback_footer.setSpacing(6)
         self.shuffle_button = self._create_shuffle_button()
         playback_footer.addWidget(self.shuffle_button, 0, Qt.AlignLeft | Qt.AlignBottom)
         self.album_scope_button = self._create_album_scope_button()
@@ -37573,6 +38199,12 @@ class _AudioPreviewDialog(QDialog):
         self.auto_advance_check = self.auto_advance_button
         playback_footer.addWidget(
             self.auto_advance_button,
+            0,
+            Qt.AlignLeft | Qt.AlignBottom,
+        )
+        self.equalizer_button = self._create_equalizer_button()
+        playback_footer.addWidget(
+            self.equalizer_button,
             0,
             Qt.AlignLeft | Qt.AlignBottom,
         )
@@ -37737,6 +38369,7 @@ class _AudioPreviewDialog(QDialog):
         self.wave.seekRequested.connect(self._seek_to_ms)
         self._sync_volume_controls()
         self._sync_mute_button()
+        self._sync_equalizer_surfaces()
         self._install_shortcuts()
         QTimer.singleShot(0, self._sync_media_stage_size)
 
@@ -37806,8 +38439,22 @@ class _AudioPreviewDialog(QDialog):
             self.wave.updateGeometry()
             self.artwork_container.updateGeometry()
             self.artwork_label.updateGeometry()
+            self._position_equalizer_indicator()
         finally:
             self._media_stage_syncing = False
+
+    def _position_equalizer_indicator(self) -> None:
+        button = getattr(self, "equalizer_indicator_button", None)
+        panel = getattr(self, "waveform_panel", None)
+        if not isinstance(button, QToolButton) or panel is None:
+            return
+        margin = 8
+        button.move(
+            max(margin, panel.width() - button.width() - margin),
+            margin,
+        )
+        if button.isVisible():
+            button.raise_()
 
     def _media_icon_path(self, icon_key: str) -> Path:
         filename = self._MEDIA_ICON_FILES.get(str(icon_key or ""))
@@ -38015,6 +38662,10 @@ class _AudioPreviewDialog(QDialog):
             self._sync_album_scope_button()
         if hasattr(self, "loop_button"):
             self._sync_loop_button()
+        if hasattr(self, "equalizer_button"):
+            self._sync_equalizer_button()
+        if hasattr(self, "equalizer_indicator_button"):
+            self._sync_equalizer_indicator()
         if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
             self._sync_mute_button()
         export_button = getattr(self, "export_button", None)
@@ -38074,6 +38725,18 @@ class _AudioPreviewDialog(QDialog):
         self._sync_album_scope_button(button)
         return button
 
+    def _create_equalizer_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewEqualizerButton")
+        button.setProperty("role", "mediaToggle")
+        button.setCheckable(True)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.clicked.connect(lambda _checked=False: self._open_equalizer_dialog())
+        self._sync_equalizer_button(button)
+        return button
+
     def _apply_stop_button_font(self) -> None:
         if not hasattr(self, "stop_button"):
             return
@@ -38100,6 +38763,7 @@ class _AudioPreviewDialog(QDialog):
         self._loop_mode = normalized
         self._sync_loop_button()
         self._update_navigation_buttons()
+        self._refresh_audio_preload_window_if_ready()
 
     def _sync_loop_button(self, button: QToolButton | None = None) -> None:
         button = button or getattr(self, "loop_button", None)
@@ -38231,6 +38895,7 @@ class _AudioPreviewDialog(QDialog):
         self._apply_effective_track_order()
         self._sync_album_scope_button()
         self._update_navigation_buttons()
+        self._refresh_audio_preload_window_if_ready()
         if clean_title and self._source_spec is not None and self._track_order:
             self.open_track_preview(int(self._track_order[0]), self._source_spec, autoplay=False)
 
@@ -38283,6 +38948,92 @@ class _AudioPreviewDialog(QDialog):
         button.style().unpolish(button)
         button.style().polish(button)
         button.update()
+
+    def _effective_equalizer_settings(self) -> dict[str, object]:
+        return normalize_equalizer_settings(getattr(self, "_equalizer_settings", None))
+
+    def _sync_equalizer_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "equalizer_button", None)
+        if button is None:
+            return
+        settings = self._effective_equalizer_settings()
+        enabled = equalizer_is_enabled(settings)
+        button.blockSignals(True)
+        try:
+            button.setChecked(enabled)
+        finally:
+            button.blockSignals(False)
+        self._set_icon_button_content(
+            button,
+            "equalizer",
+            "EQ",
+            inactive=not enabled,
+        )
+        tooltip = "Equalizer On" if enabled else "Equalizer Off"
+        button.setToolTip(f"{tooltip} - Open Equalizer")
+        button.setAccessibleName("Equalizer")
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def _sync_equalizer_indicator(self) -> None:
+        button = getattr(self, "equalizer_indicator_button", None)
+        if not isinstance(button, QToolButton):
+            return
+        enabled = equalizer_is_enabled(self._effective_equalizer_settings())
+        self._set_icon_button_content(button, "equalizer", "EQ", inactive=False)
+        button.setToolTip("Equalizer On")
+        button.setAccessibleName("Equalizer On")
+        button.setVisible(enabled)
+        if enabled:
+            self._position_equalizer_indicator()
+
+    def _sync_equalizer_surfaces(self) -> None:
+        settings = self._effective_equalizer_settings()
+        if hasattr(self, "scope"):
+            self.scope.set_equalizer_settings(settings)
+        self._sync_equalizer_button()
+        self._sync_equalizer_indicator()
+        dialog = getattr(self, "_equalizer_dialog", None)
+        if isinstance(dialog, EqualizerDialog):
+            dialog.set_settings(settings)
+
+    def _open_equalizer_dialog(self) -> None:
+        self._sync_equalizer_button()
+        dialog = getattr(self, "_equalizer_dialog", None)
+        if not isinstance(dialog, EqualizerDialog):
+            dialog = EqualizerDialog(self._effective_equalizer_settings(), parent=self)
+            dialog.settingsChanged.connect(self._on_equalizer_dialog_settings_changed)
+            player = getattr(self, "_player", None)
+            spectrum_signal = getattr(player, "spectrumFrameChanged", None)
+            if spectrum_signal is not None:
+                spectrum_signal.connect(dialog.set_playback_spectrum)
+            self._equalizer_dialog = dialog
+        else:
+            dialog.set_settings(self._effective_equalizer_settings())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_equalizer_dialog_settings_changed(self, settings: dict[str, object]) -> None:
+        self._set_equalizer_settings(settings, persist=True)
+
+    def _set_equalizer_settings(
+        self,
+        settings: dict[str, object],
+        *,
+        persist: bool,
+    ) -> None:
+        normalized = normalize_equalizer_settings(settings)
+        self._equalizer_settings = normalized
+        if persist:
+            self._equalizer_settings = save_equalizer_settings(
+                getattr(self.app, "settings", None),
+                normalized,
+            )
+        if hasattr(self, "_player"):
+            self._player.set_equalizer_settings(self._equalizer_settings)
+        self._sync_equalizer_surfaces()
 
     def _hint_text_font(self) -> QFont:
         font = QFont(self.font())
@@ -38441,15 +39192,512 @@ class _AudioPreviewDialog(QDialog):
             shortcut.setContext(Qt.WindowShortcut)
             shortcut.activated.connect(handler)
 
-    def open_track_preview(self, track_id: int, source_spec: dict[str, object], *, autoplay: bool):
-        state = self.app._audio_preview_state_for_track(
-            int(track_id),
-            source_spec,
-            parent_widget=self,
+    @staticmethod
+    def _audio_preload_source_key(source_spec: dict[str, object] | None) -> str:
+        if not isinstance(source_spec, dict):
+            return "raw"
+        relevant: dict[str, object] = {
+            "kind": str(source_spec.get("kind") or "").strip().lower(),
+        }
+        if relevant["kind"] == "custom":
+            try:
+                relevant["field_id"] = int(source_spec.get("field_id") or 0)
+            except (TypeError, ValueError):
+                relevant["field_id"] = 0
+        else:
+            relevant["media_key"] = (
+                str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+            )
+        return json.dumps(relevant, sort_keys=True, separators=(",", ":"))
+
+    def _audio_preload_key(
+        self,
+        track_id: int,
+        source_spec: dict[str, object] | None = None,
+    ) -> tuple[int, str]:
+        return int(track_id), self._audio_preload_source_key(
+            source_spec if source_spec is not None else self._source_spec
         )
-        self._apply_preview_state(state, source_spec=source_spec, autoplay=autoplay)
+
+    def _log_audio_preload(self, action: str, **details) -> None:
+        logger = getattr(self.app, "logger", None)
+        message = f"Audio preview preload {action}"
+        if logger is not None:
+            try:
+                logger.info("%s: %s", message, details)
+            except Exception:
+                pass
+        log_event = getattr(self.app, "_log_event", None)
+        if callable(log_event):
+            try:
+                log_event(f"audio_preview.preload.{action}", message, **details)
+            except Exception:
+                pass
+
+    def _audio_preload_window_keys(self) -> list[tuple[int, str]]:
+        source_spec = self._source_spec if isinstance(self._source_spec, dict) else None
+        current_id = self._current_track_id_as_int()
+        if source_spec is None or current_id is None:
+            return []
+        track_ids = self._audio_preload_window_track_ids(current_id)
+        return [self._audio_preload_key(track_id, source_spec) for track_id in track_ids]
+
+    def _audio_preload_required_keys(self) -> set[tuple[int, str]]:
+        return set()
+
+    def _audio_preload_window_track_ids(
+        self,
+        current_id: int,
+        *,
+        radius: int | None = None,
+    ) -> list[int]:
+        ordered: list[int] = []
+        seen: set[int] = set()
+
+        def _add(track_id: int | None) -> None:
+            if track_id is None:
+                return
+            normalized = int(track_id)
+            if normalized in seen:
+                return
+            seen.add(normalized)
+            ordered.append(normalized)
+
+        track_order = [int(track_id) for track_id in self._track_order]
+        index = track_order.index(int(current_id)) if int(current_id) in track_order else -1
+        wrap = self._loop_mode == self.LOOP_MODE_PLAYLIST and len(track_order) > 1
+        preload_radius = max(1, int(1 if radius is None else radius))
+        _add(current_id)
+        if index >= 0:
+            for distance in range(1, preload_radius + 1):
+                next_index = index + distance
+                previous_index = index - distance
+                if wrap and track_order:
+                    next_index %= len(track_order)
+                    previous_index %= len(track_order)
+                _add(track_order[next_index] if 0 <= next_index < len(track_order) else None)
+                _add(
+                    track_order[previous_index] if 0 <= previous_index < len(track_order) else None
+                )
+        return ordered
+
+    def _cached_prepared_media_for(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+    ) -> _AudioPreviewPreparedMedia | None:
+        del track_id, source_spec
+        return None
+
+    def _track_order_for_load_request(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+    ) -> list[int]:
+        provider = getattr(self.app, "_audio_preview_navigation_track_ids", None)
+        track_order: list[int] = []
+        if callable(provider):
+            try:
+                track_order = self.app._normalize_track_ids(provider(source_spec))
+            except Exception:
+                track_order = []
+        if int(track_id) not in track_order:
+            track_order = [int(track_id), *track_order]
+        return track_order
+
+    def _effective_track_order_for_load_request(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        base_track_order: list[int],
+    ) -> list[int]:
+        request_source_key = self._audio_preload_source_key(source_spec)
+        current_source_key = self._audio_preload_source_key(self._source_spec)
+        existing_order = self.app._normalize_track_ids(getattr(self, "_track_order", []) or [])
+        if (
+            existing_order
+            and int(track_id) in existing_order
+            and request_source_key == current_source_key
+        ):
+            return existing_order
+        if self._shuffle_enabled:
+            return self._create_shuffled_track_order(list(base_track_order), int(track_id))
+        return list(base_track_order)
+
+    def _placeholder_track_queue_items(
+        self,
+        track_order: list[int],
+    ) -> list[dict[str, object]]:
+        known: dict[int, dict[str, object]] = {}
+        for source in (
+            getattr(self, "_base_track_queue", []) or [],
+            getattr(self, "_track_queue", []) or [],
+        ):
+            for spec in list(source):
+                try:
+                    track_id = int(spec.get("track_id"))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                known[track_id] = dict(spec)
+        items: list[dict[str, object]] = []
+        for position, track_id in enumerate(track_order, start=1):
+            normalized_id = int(track_id)
+            spec = dict(known.get(normalized_id) or {})
+            title = str(spec.get("title") or spec.get("label") or "").strip()
+            if not title:
+                title = f"Track {normalized_id}"
+            spec.update(
+                {
+                    "track_id": normalized_id,
+                    "title": title,
+                    "label": str(spec.get("label") or title).strip() or title,
+                    "position": position,
+                }
+            )
+            items.append(spec)
+        return items
+
+    def _begin_track_load(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        base_track_order: list[int],
+        effective_track_order: list[int],
+    ) -> None:
+        self._source_spec = dict(source_spec)
+        self._current_track_id = int(track_id)
+        self._base_track_order = list(base_track_order)
+        self._base_track_queue = self._placeholder_track_queue_items(base_track_order)
+        self._track_order = list(effective_track_order)
+        self._set_play_next_items(self._placeholder_track_queue_items(effective_track_order))
+        self._sync_album_scope_button()
+        self._reset_player_source()
+        self._cleanup_temp_file()
+        self._current_audio_bytes = b""
+        self._current_audio_mime = "audio/wav"
+        self._current_title = f"Track {track_id}"
+        self._current_artist = ""
+        self._current_album = ""
+        self.title_label.setText("Loading audio...")
+        self.artist_label.hide()
+        self.artist_label.setText("")
+        self.album_label.hide()
+        self.album_label.setText("")
+        self.setWindowTitle("Audio Player - Loading...")
+        self._set_export_actions([])
+        self._apply_artwork(None)
+        self.peak_meter.reset_signal_activity()
+        self.scope.set_spectrum_frames([])
+        self.peak_meter.set_peak_frames([])
+        self.wave.setVisible(False)
+        self.wave_status_label.setText("Loading audio...")
+        self.wave_status_label.setVisible(True)
+        self._apply_position(0, 0)
+        self._update_navigation_buttons()
+
+    @staticmethod
+    def _prepared_media_ready_for_instant_playback(
+        prepared_media: _AudioPreviewPreparedMedia | None,
+    ) -> bool:
+        del prepared_media
+        return False
+
+    def _apply_cached_track_preview(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        base_track_order: list[int],
+        effective_track_order: list[int],
+        prepared_media: _AudioPreviewPreparedMedia | None,
+        *,
+        autoplay: bool,
+    ) -> bool:
+        if not self._prepared_media_ready_for_instant_playback(prepared_media):
+            return False
+        self._cancel_audio_load_jobs(reason="cache-hit")
+        self._audio_load_waiting_for_preload = None
+        self._audio_load_request_id += 1
+        try:
+            cached_state = prepared_media.preview_state
+            if isinstance(cached_state, dict):
+                state = dict(cached_state)
+                state["prepared_media"] = prepared_media
+            else:
+                state = self.app._audio_preview_state_for_track(
+                    int(track_id),
+                    dict(source_spec),
+                    parent_widget=self,
+                    prepared_media=prepared_media,
+                )
+            if self.app._normalize_track_ids(state.get("track_order") or []) != list(
+                base_track_order
+            ):
+                state["track_queue"] = self._placeholder_track_queue_items(base_track_order)
+            elif not state.get("track_queue"):
+                state["track_queue"] = self._placeholder_track_queue_items(base_track_order)
+            state["track_order"] = list(base_track_order)
+            if self.app._normalize_track_ids(state.get("effective_track_order") or []) != list(
+                effective_track_order
+            ):
+                state["effective_track_queue"] = self._placeholder_track_queue_items(
+                    effective_track_order
+                )
+            elif not state.get("effective_track_queue"):
+                state["effective_track_queue"] = self._placeholder_track_queue_items(
+                    effective_track_order
+                )
+            state["effective_track_order"] = list(effective_track_order)
+            state["export_actions"] = self.app._audio_preview_export_actions_for_track(
+                int(track_id),
+                source_spec,
+                parent_widget=self,
+                title_override=str(state.get("title") or ""),
+            )
+            self._log_audio_preload(
+                "instant-hit",
+                track_id=int(track_id),
+                source_key=self._audio_preload_source_key(source_spec),
+                bytes=prepared_media.memory_cost(),
+            )
+            self._apply_preview_state(
+                state,
+                source_spec=dict(source_spec),
+                autoplay=bool(autoplay),
+            )
+            return True
+        except Exception as exc:
+            self._log_audio_preload(
+                "instant-hit-failed",
+                track_id=int(track_id),
+                source_key=self._audio_preload_source_key(source_spec),
+                error=str(exc),
+            )
+            return False
+
+    def _use_inflight_preload_for_track(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        base_track_order: list[int],
+        effective_track_order: list[int],
+        *,
+        autoplay: bool,
+    ) -> bool:
+        del track_id, source_spec, base_track_order, effective_track_order, autoplay
+        return False
+
+    def _waiting_preload_for_key(self, key: tuple[int, str]) -> dict[str, object] | None:
+        waiting = getattr(self, "_audio_load_waiting_for_preload", None)
+        if not isinstance(waiting, dict):
+            return None
+        waiting_key = waiting.get("key")
+        if waiting_key != key:
+            return None
+        return waiting
+
+    def _submit_waiting_preload_as_active_load(
+        self,
+        waiting: dict[str, object],
+        prepared_media: _AudioPreviewPreparedMedia | None,
+        *,
+        reason: str,
+    ) -> None:
+        self._audio_load_waiting_for_preload = None
+        self._audio_load_request_id += 1
+        request_id = int(self._audio_load_request_id)
+        track_id = int(waiting.get("track_id") or 0)
+        source_spec = dict(waiting.get("source_spec") or {})
+        base_track_order = list(waiting.get("base_track_order") or [])
+        effective_track_order = list(waiting.get("effective_track_order") or [])
+        self._log_audio_preload(
+            "wait-fallback",
+            track_id=track_id,
+            source_key=self._audio_preload_source_key(source_spec),
+            reason=reason,
+        )
+        self._submit_audio_track_load(
+            request_id,
+            track_id,
+            source_spec,
+            base_track_order,
+            effective_track_order,
+            prepared_media,
+            bool(waiting.get("autoplay", False)),
+        )
+
+    def _apply_waiting_preload_result(
+        self,
+        key: tuple[int, str],
+        prepared_media: _AudioPreviewPreparedMedia,
+    ) -> bool:
+        waiting = self._waiting_preload_for_key(key)
+        if waiting is None:
+            return False
+        if not self._prepared_media_ready_for_instant_playback(prepared_media):
+            self._submit_waiting_preload_as_active_load(
+                waiting,
+                prepared_media,
+                reason="preload-not-decoded",
+            )
+            return True
+        applied = self._apply_cached_track_preview(
+            int(waiting.get("track_id") or key[0]),
+            dict(waiting.get("source_spec") or {}),
+            list(waiting.get("base_track_order") or []),
+            list(waiting.get("effective_track_order") or []),
+            prepared_media,
+            autoplay=bool(waiting.get("autoplay", False)),
+        )
+        if applied:
+            self._audio_load_waiting_for_preload = None
+            self._log_audio_preload(
+                "wait-ready",
+                track_id=key[0],
+                source_key=key[1],
+            )
+        return applied
+
+    def _submit_audio_track_load(
+        self,
+        request_id: int,
+        track_id: int,
+        source_spec: dict[str, object],
+        base_track_order: list[int],
+        effective_track_order: list[int],
+        prepared_media: _AudioPreviewPreparedMedia | None,
+        autoplay: bool,
+    ) -> None:
+        executor = getattr(self, "_audio_load_executor", None)
+        if executor is None or bool(getattr(executor, "_shutdown", False)):
+            executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="audio-preview-load",
+            )
+            self._audio_load_executor = executor
+        cancel_event = threading.Event()
+        source_key = self._audio_preload_source_key(source_spec)
+        task = _AudioPreviewTrackLoadTask(
+            request_id=int(request_id),
+            track_id=int(track_id),
+            source_spec=dict(source_spec),
+            source_key=source_key,
+            autoplay=bool(autoplay),
+            db_path=str(getattr(self.app, "current_db_path", "") or ""),
+            data_root=str(getattr(self.app, "data_root", "") or "") or None,
+            base_track_order=list(base_track_order),
+            effective_track_order=list(effective_track_order),
+            cancel_event=cancel_event,
+            waveform_width=max(
+                480,
+                int(self.wave.width() if hasattr(self, "wave") else 480),
+            ),
+            cache_budget_bytes=int(self.PRELOAD_CACHE_BUDGET_BYTES),
+            prepared_media=prepared_media,
+        )
+        future = executor.submit(_build_audio_preview_track_load, task)
+        self._audio_load_jobs[int(request_id)] = (future, cancel_event)
+        self._log_audio_preload(
+            "load-start",
+            request_id=int(request_id),
+            track_id=int(track_id),
+            source_key=source_key,
+            cached=prepared_media is not None,
+        )
+
+        def _done(done_future: Future, *, bridge=self._audio_preload_bridge) -> None:
+            try:
+                result = done_future.result()
+            except Exception as exc:
+                result = _AudioPreviewTrackLoadResult(
+                    request_id=int(request_id),
+                    track_id=int(track_id),
+                    source_key=source_key,
+                    error=str(exc),
+                )
+            try:
+                bridge.track_ready.emit(result)
+            except RuntimeError:
+                if (
+                    isinstance(result, _AudioPreviewTrackLoadResult)
+                    and result.prepared_owned_by_result
+                    and isinstance(result.state, dict)
+                ):
+                    prepared = result.state.get("prepared_media")
+                    if isinstance(prepared, _AudioPreviewPreparedMedia):
+                        prepared.dispose()
+
+        future.add_done_callback(_done)
+
+    def _cancel_audio_load_jobs(self, *, reason: str) -> None:
+        had_jobs = bool(self._audio_load_jobs)
+        for request_id, (future, cancel_event) in list(self._audio_load_jobs.items()):
+            cancel_event.set()
+            future.cancel()
+            self._audio_load_jobs.pop(request_id, None)
+            self._log_audio_preload(
+                "load-cancel",
+                request_id=request_id,
+                reason=reason,
+            )
+        if had_jobs:
+            self._audio_load_request_id += 1
+
+    def open_track_preview(self, track_id: int, source_spec: dict[str, object], *, autoplay: bool):
+        normalized_track_id = int(track_id)
+        normalized_source_spec = dict(source_spec or {})
+        base_track_order = self._track_order_for_load_request(
+            normalized_track_id,
+            normalized_source_spec,
+        )
+        effective_track_order = self._effective_track_order_for_load_request(
+            normalized_track_id,
+            normalized_source_spec,
+            base_track_order,
+        )
+        prepared = self._cached_prepared_media_for(normalized_track_id, normalized_source_spec)
+        if self._apply_cached_track_preview(
+            normalized_track_id,
+            normalized_source_spec,
+            base_track_order,
+            effective_track_order,
+            prepared,
+            autoplay=autoplay,
+        ):
+            return
+        if self._use_inflight_preload_for_track(
+            normalized_track_id,
+            normalized_source_spec,
+            base_track_order,
+            effective_track_order,
+            autoplay=autoplay,
+        ):
+            return
+        self._cancel_audio_load_jobs(reason="new-track")
+        self._audio_load_waiting_for_preload = None
+        self._audio_load_request_id += 1
+        request_id = int(self._audio_load_request_id)
+        self._cancel_audio_preload_jobs(reason="active-track-load")
+        self._begin_track_load(
+            normalized_track_id,
+            normalized_source_spec,
+            base_track_order,
+            effective_track_order,
+        )
+        self._submit_audio_track_load(
+            request_id,
+            normalized_track_id,
+            normalized_source_spec,
+            base_track_order,
+            effective_track_order,
+            prepared,
+            autoplay,
+        )
 
     def open_raw_preview(self, data: bytes, mime: str, title: str, *, autoplay: bool):
+        self._cancel_audio_load_jobs(reason="raw-preview")
+        self._cancel_audio_preload_jobs(reason="raw-preview")
+        self._evict_audio_preload_cache(set(), reason="raw-preview")
+        self._audio_load_waiting_for_preload = None
         state = self.app._audio_preview_state_for_raw_bytes(
             data,
             mime,
@@ -38532,6 +39780,7 @@ class _AudioPreviewDialog(QDialog):
         self._apply_effective_track_order()
         self._sync_shuffle_button()
         self._update_navigation_buttons()
+        self._refresh_audio_preload_window_if_ready()
 
     def _apply_preview_state(
         self,
@@ -38544,7 +39793,21 @@ class _AudioPreviewDialog(QDialog):
         self._current_track_id = state.get("track_id")
         self._base_track_order = list(state.get("track_order") or [])
         self._base_track_queue = list(state.get("track_queue") or [])
-        self._apply_effective_track_order()
+        effective_track_order = self.app._normalize_track_ids(
+            state.get("effective_track_order") or []
+        )
+        if effective_track_order:
+            self._track_order = effective_track_order
+            self._set_play_next_items(
+                list(state.get("effective_track_queue") or [])
+                or self._ordered_track_queue_items(self._track_order)
+            )
+            self._sync_album_scope_button()
+        else:
+            self._apply_effective_track_order()
+        prepared_media = state.get("prepared_media")
+        if isinstance(prepared_media, _AudioPreviewPreparedMedia):
+            prepared_media.preview_state = None
         self._current_audio_bytes = bytes(state.get("audio_bytes") or b"")
         self._current_audio_mime = str(state.get("audio_mime") or "audio/wav")
         self._current_title = str(state.get("title") or "Audio Player").strip() or "Audio Player"
@@ -38565,15 +39828,44 @@ class _AudioPreviewDialog(QDialog):
         )
         self._set_export_actions(list(state.get("export_actions") or []))
         self._apply_artwork(state.get("artwork_payload"))
-        self._load_audio_source(self._current_audio_bytes, self._current_audio_mime)
+        self._load_audio_source(
+            self._current_audio_bytes,
+            self._current_audio_mime,
+            prepared_media=prepared_media,
+        )
+        self._promote_current_audio_to_preload_cache(prepared_media)
+        self._refresh_audio_preload_window()
         self._update_navigation_buttons()
         if autoplay:
             QTimer.singleShot(0, lambda: self._player.play())
 
-    def _load_audio_source(self, data: bytes, mime: str) -> None:
+    def _load_audio_source(
+        self,
+        data: bytes,
+        mime: str,
+        *,
+        prepared_media: object | None = None,
+    ) -> None:
         self._reset_player_source()
         self._cleanup_temp_file()
         self.peak_meter.reset_signal_activity()
+        if isinstance(prepared_media, _AudioPreviewPreparedMedia):
+            self._tmp_path = prepared_media.source_path
+            self._source_tmp_path = None
+            self._tmp_path_owned = bool(prepared_media.owns_source_path)
+            if self._tmp_path_owned:
+                prepared_media.owns_source_path = False
+            if prepared_media.decoded_samples is None or prepared_media.sample_rate <= 0:
+                raise RuntimeError("Audio was not prepared by the background loader.")
+            self._player.setDecodedSource(
+                prepared_media.decoded_samples,
+                int(prepared_media.sample_rate),
+                assume_prepared=True,
+            )
+            prepared_media.decoded_samples = None
+            self._load_waveform(self._tmp_path, prepared_media=prepared_media)
+            self._apply_position(0, self._player.duration())
+            return
         ext = {
             "audio/mpeg": ".mp3",
             "audio/wav": ".wav",
@@ -38588,25 +39880,259 @@ class _AudioPreviewDialog(QDialog):
             handle.write(data)
             handle.flush()
             handle.close()
-            self._tmp_path = handle.name
+            self._source_tmp_path = handle.name
+            self._tmp_path_owned = True
         except Exception as exc:
             raise RuntimeError(f"Could not create preview temp file: {exc}") from exc
+        self._tmp_path = self._source_tmp_path
         self._player.setSource(QUrl.fromLocalFile(self._tmp_path))
         self._load_waveform(self._tmp_path)
         self._apply_position(0, self._player.duration())
 
-    def _load_waveform(self, path: str) -> None:
-        self._load_waveform_peaks(path)
-        spectrum_frames = load_audio_spectrum_frames(path)
-        peak_frames = load_audio_peak_meter_frames(path)
+    def _promote_current_audio_to_preload_cache(self, prepared_media: object | None) -> None:
+        del prepared_media
+        return
+
+    def _refresh_audio_preload_window(self) -> None:
+        self._audio_preload_generation += 1
+        self._cancel_audio_preload_jobs(reason="disabled")
+        self._evict_audio_preload_cache(set(), reason="disabled")
+        self._log_audio_preload(
+            "disabled",
+            generation=int(self._audio_preload_generation),
+        )
+
+    def _refresh_audio_preload_window_if_ready(self) -> None:
+        return
+
+    def _submit_audio_preload(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        generation: int,
+    ) -> None:
+        del track_id, source_spec, generation
+        return
+
+    def _on_audio_preload_result(self, result: object) -> None:
+        if not isinstance(result, _AudioPreviewPreloadResult):
+            return
+        key = (int(result.track_id), str(result.source_key))
+        self._audio_preload_jobs.pop(key, None)
+        prepared = result.prepared
+        if isinstance(prepared, _AudioPreviewPreparedMedia):
+            prepared.dispose()
+        self._log_audio_preload(
+            "ignored",
+            track_id=result.track_id,
+            source_key=result.source_key,
+            reason="disabled",
+        )
+        return
+
+    def _dispose_track_load_result_media(self, result: _AudioPreviewTrackLoadResult) -> None:
+        if not result.prepared_owned_by_result or not isinstance(result.state, dict):
+            return
+        prepared = result.state.get("prepared_media")
+        if not isinstance(prepared, _AudioPreviewPreparedMedia):
+            return
+        key = (int(prepared.track_id), str(prepared.source_key))
+        if self._audio_preload_cache.get(key) is prepared:
+            return
+        prepared.dispose()
+
+    def _on_audio_track_load_result(self, result: object) -> None:
+        if not isinstance(result, _AudioPreviewTrackLoadResult):
+            return
+        self._audio_load_jobs.pop(int(result.request_id), None)
+        current_key = self._audio_preload_key(result.track_id, self._source_spec)
+        if result.cancelled:
+            self._log_audio_preload(
+                "load-cancelled",
+                request_id=result.request_id,
+                track_id=result.track_id,
+                source_key=result.source_key,
+            )
+            return
+        if (
+            int(result.request_id) != int(self._audio_load_request_id)
+            or int(result.track_id) != self._current_track_id_as_int()
+            or str(result.source_key) != str(current_key[1])
+        ):
+            self._dispose_track_load_result_media(result)
+            self._log_audio_preload(
+                "load-stale",
+                request_id=result.request_id,
+                active_request_id=self._audio_load_request_id,
+                track_id=result.track_id,
+                source_key=result.source_key,
+            )
+            return
+        if result.error:
+            self._log_audio_preload(
+                "load-failed",
+                request_id=result.request_id,
+                track_id=result.track_id,
+                source_key=result.source_key,
+                error=result.error,
+            )
+            self.wave.setVisible(False)
+            self.wave_status_label.setText("Could not load audio")
+            self.wave_status_label.setVisible(True)
+            QMessageBox.critical(
+                self,
+                "Audio Player",
+                f"Could not load the selected track:\n{result.error}",
+            )
+            return
+        if not isinstance(result.state, dict):
+            return
+
+        state = dict(result.state)
+        state["export_actions"] = self.app._audio_preview_export_actions_for_track(
+            int(result.track_id),
+            self._source_spec,
+            parent_widget=self,
+            title_override=str(state.get("title") or ""),
+        )
+        self._log_audio_preload(
+            "load-ready",
+            request_id=result.request_id,
+            track_id=result.track_id,
+            source_key=result.source_key,
+            cached=not result.prepared_owned_by_result,
+        )
+        autoplay = bool(state.pop("_autoplay", False))
+        try:
+            self._apply_preview_state(state, source_spec=self._source_spec, autoplay=autoplay)
+        except Exception as exc:
+            self._dispose_track_load_result_media(result)
+            self._log_audio_preload(
+                "load-apply-failed",
+                request_id=result.request_id,
+                track_id=result.track_id,
+                source_key=result.source_key,
+                error=str(exc),
+            )
+            QMessageBox.critical(
+                self,
+                "Audio Player",
+                f"Could not open the selected track:\n{exc}",
+            )
+
+    def _cancel_audio_preload_jobs(
+        self,
+        *,
+        keep_keys: set[tuple[int, str]] | None = None,
+        reason: str,
+    ) -> None:
+        keep = keep_keys or set()
+        for key, (future, cancel_event, generation) in list(self._audio_preload_jobs.items()):
+            if key in keep:
+                continue
+            cancel_event.set()
+            future.cancel()
+            self._audio_preload_jobs.pop(key, None)
+            self._log_audio_preload(
+                "cancel",
+                track_id=key[0],
+                source_key=key[1],
+                generation=generation,
+                reason=reason,
+            )
+
+    def _evict_audio_preload_cache(
+        self,
+        keep_keys: set[tuple[int, str]],
+        *,
+        reason: str,
+    ) -> None:
+        for key, prepared in list(self._audio_preload_cache.items()):
+            if key in keep_keys:
+                continue
+            self._audio_preload_cache.pop(key, None)
+            prepared.dispose()
+            self._log_audio_preload(
+                "evict",
+                track_id=key[0],
+                source_key=key[1],
+                reason=reason,
+            )
+
+    def _enforce_audio_preload_budget(self, window_keys: set[tuple[int, str]]) -> None:
+        budget = max(1, int(self.PRELOAD_CACHE_BUDGET_BYTES))
+        total = sum(prepared.memory_cost() for prepared in self._audio_preload_cache.values())
+        if total <= budget:
+            return
+        protected_keys = self._audio_preload_required_keys()
+        priority: dict[tuple[int, str], int] = {}
+        window_order = self._audio_preload_window_keys()
+        for index, key in enumerate(window_order):
+            priority[key] = index
+        for key, prepared in sorted(
+            list(self._audio_preload_cache.items()),
+            key=lambda item: (priority.get(item[0], 99), -item[1].created_at),
+            reverse=True,
+        ):
+            if total <= budget:
+                break
+            if key in protected_keys:
+                continue
+            self._audio_preload_cache.pop(key, None)
+            total -= prepared.memory_cost()
+            prepared.dispose()
+            self._log_audio_preload(
+                "evict",
+                track_id=key[0],
+                source_key=key[1],
+                reason="budget",
+                total_bytes=total,
+                budget_bytes=budget,
+            )
+
+    @staticmethod
+    def _remove_temp_path(path: str | None) -> None:
+        if not path:
+            return
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+    def _load_waveform(
+        self,
+        path: str,
+        *,
+        prepared_media: _AudioPreviewPreparedMedia | None = None,
+    ) -> None:
+        self._load_waveform_peaks(path, prepared_media=prepared_media)
+        if prepared_media is not None:
+            spectrum_frames = list(prepared_media.spectrum_frames)
+        else:
+            spectrum_frames = load_audio_spectrum_frames(path)
+        if prepared_media is not None:
+            peak_frames = list(prepared_media.peak_frames)
+        else:
+            peak_frames = load_audio_peak_meter_frames(path)
         self.scope.set_spectrum_frames(spectrum_frames)
         self.peak_meter.set_peak_frames(peak_frames)
         self._start_scope_visualization_if_playing()
 
-    def _load_waveform_peaks(self, path: str) -> None:
+    def _load_waveform_peaks(
+        self,
+        path: str,
+        *,
+        prepared_media: _AudioPreviewPreparedMedia | None = None,
+    ) -> None:
         cached = None
+        prepared_peaks = list(prepared_media.waveform_peaks or []) if prepared_media else []
         source_spec = self._source_spec if isinstance(self._source_spec, dict) else {}
-        if (
+        if prepared_media is not None:
+            peaks = prepared_peaks
+            self.wave.set_peaks(peaks)
+        elif (
             self._current_track_id is not None
             and str(source_spec.get("kind") or "").strip().lower() == "standard"
             and str(source_spec.get("media_key") or "audio_file").strip() == "audio_file"
@@ -38614,7 +40140,7 @@ class _AudioPreviewDialog(QDialog):
             cache_loader = getattr(self.app, "_audio_waveform_cache_for_track", None)
             if callable(cache_loader):
                 cached = cache_loader(int(self._current_track_id))
-        if cached is not None:
+        if prepared_media is None and cached is not None:
             peaks = list(getattr(cached, "peaks", []) or [])
             self.wave.set_cached_waveform(
                 peaks,
@@ -38622,11 +40148,13 @@ class _AudioPreviewDialog(QDialog):
                 dark_preview_png=getattr(cached, "dark_preview_png", None),
                 cache_key=getattr(cached, "source_fingerprint", None),
             )
-        else:
+        elif prepared_media is None:
             peaks = load_wav_peaks(path, max(self.wave.width(), 480))
             self.wave.set_peaks(peaks)
         has_peaks = bool(peaks)
         self.wave.setVisible(has_peaks)
+        if not has_peaks:
+            self.wave_status_label.setText("Waveform unavailable")
         self.wave_status_label.setVisible(not has_peaks)
 
     def _reload_peaks_for_current_width(self) -> None:
@@ -38990,18 +40518,39 @@ class _AudioPreviewDialog(QDialog):
             pass
 
     def _cleanup_temp_file(self) -> None:
-        if not self._tmp_path:
-            return
-        try:
-            os.remove(self._tmp_path)
-        except Exception:
-            pass
+        seen: set[str] = set()
+        owned_paths = []
+        if bool(getattr(self, "_tmp_path_owned", False)):
+            owned_paths.append(getattr(self, "_tmp_path", None))
+        owned_paths.append(getattr(self, "_source_tmp_path", None))
+        for path in owned_paths:
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            self._remove_temp_path(path)
         self._tmp_path = None
+        self._source_tmp_path = None
+        self._tmp_path_owned = False
 
     def closeEvent(self, event):
         self._visualization_timer.stop()
+        self._cancel_audio_load_jobs(reason="dialog-close")
+        self._cancel_audio_preload_jobs(reason="dialog-close")
         self._reset_player_source()
         self._cleanup_temp_file()
+        self._evict_audio_preload_cache(set(), reason="dialog-close")
+        for executor_name in ("_audio_load_executor", "_audio_preload_executor"):
+            executor = getattr(self, executor_name, None)
+            if executor is None:
+                continue
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
+            except Exception:
+                pass
+            setattr(self, executor_name, None)
+        self._audio_preload_executor = None
         super().closeEvent(event)
 
     def changeEvent(self, event):
@@ -39033,6 +40582,7 @@ class _AudioPreviewDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_media_stage_size()
+        self._position_equalizer_indicator()
         self._resize_timer.start()
 
 
@@ -39881,6 +41431,7 @@ class SpectrumGraphWidget(WaveformWidget):
         self._release_elapsed_ms = 0
         self._release_start_opacity = 0.0
         self._frequency_scale = self.SPECTRUM_SCALE_LINEAR
+        self._equalizer_settings = normalize_equalizer_settings(None)
         self._fade_timer = QTimer(self)
         self._fade_timer.setInterval(self.SPECTRUM_FADE_STEP_MS)
         self._fade_timer.timeout.connect(self._advance_fade_in)
@@ -39895,6 +41446,13 @@ class SpectrumGraphWidget(WaveformWidget):
     def set_spectrum_frames(self, frames):
         super().set_spectrum_frames(frames)
         self.reset_fade_in()
+
+    def set_equalizer_settings(self, settings) -> None:
+        normalized = normalize_equalizer_settings(settings)
+        if normalized == getattr(self, "_equalizer_settings", None):
+            return
+        self._equalizer_settings = normalized
+        self.update()
 
     def frequency_scale(self) -> str:
         return self._frequency_scale
@@ -40041,7 +41599,18 @@ class SpectrumGraphWidget(WaveformWidget):
     def _spectrum_display_values(self, frame) -> list[float]:
         values = [max(0.0, min(1.0, float(value))) for value in frame or []]
         if self._frequency_scale == self.SPECTRUM_SCALE_LOG:
-            return self._log_scaled_spectrum_values(values)
+            values = self._log_scaled_spectrum_values(values)
+        response = equalizer_response_for_bins(
+            len(values),
+            getattr(self, "_equalizer_settings", None),
+            frequency_scale=self._frequency_scale,
+            min_hz=self.SPECTRUM_MIN_HZ,
+            max_hz=self.SPECTRUM_MAX_HZ,
+        )
+        if response:
+            values = [
+                max(0.0, min(1.0, value * response[index])) for index, value in enumerate(values)
+            ]
         return values
 
     def _spectrum_line_segments(self, frame, visual_rect: QRectF):
