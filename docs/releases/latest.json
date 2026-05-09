@@ -1,7 +1,7 @@
 {
-  "version": "3.12.1",
-  "released_at": "2026-05-06",
-  "summary": "Expand media player controls and docs",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.12.1.md",
+  "version": "3.12.2",
+  "released_at": "2026-05-09",
+  "summary": "Improve media player loading and equalizer",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.12.2.md",
   "minimum_supported_version": null
 }
