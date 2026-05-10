@@ -11,11 +11,11 @@ The Theme page is a full visual builder for the app’s visible surfaces, includ
 - typography
 - workspace and panel surfaces
 - buttons and help buttons
-- inputs and state styling
+- inputs, sliders, and state styling
 - tables, lists, headers, and selections
 - menus, toolbars, dock chrome, tabs, and status surfaces
 - media badge icons for stored audio and image records
-- geometry controls such as padding, radius, and scrollbar thickness
+- geometry controls such as padding, radius, slider handle size, track thickness, and scrollbar thickness
 
 ## Theme Library
 

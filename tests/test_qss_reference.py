@@ -53,6 +53,7 @@ class QssReferenceTests(unittest.TestCase):
             )
             self.assertIn("#save_button", tokens)
             self.assertIn("QDockWidget::title", tokens)
+            self.assertIn("QSlider::handle:horizontal", tokens)
             self.assertIn("QToolBar#actionRibbonToolbar", selectors)
             self.assertIn('QToolBar[role="actionRibbonToolbar"]', selectors)
             self.assertIn('QToolButton[role="actionRibbonButton"]', selectors)

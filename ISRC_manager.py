@@ -2757,6 +2757,51 @@ class ApplicationSettingsDialog(QDialog):
         indicator_layout.addWidget(indicator_disabled)
         indicator_layout.addStretch(1)
         layout.addWidget(indicator_box)
+
+        slider_box = QGroupBox("Sliders", preview_root)
+        slider_layout = QGridLayout(slider_box)
+        self._configure_grid(slider_layout)
+        preview_slider = FocusWheelSlider(Qt.Horizontal, slider_box)
+        preview_slider.setRange(0, 100)
+        preview_slider.setValue(62)
+        preview_slider.setTickInterval(25)
+        preview_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        preview_vertical_slider = FocusWheelSlider(Qt.Vertical, slider_box)
+        preview_vertical_slider.setRange(0, 100)
+        preview_vertical_slider.setValue(38)
+        preview_vertical_slider.setTickInterval(25)
+        preview_vertical_slider.setTickPosition(QSlider.TickPosition.TicksBothSides)
+        preview_vertical_slider.setMinimumHeight(112)
+        disabled_slider = FocusWheelSlider(Qt.Horizontal, slider_box)
+        disabled_slider.setRange(0, 100)
+        disabled_slider.setValue(42)
+        disabled_slider.setEnabled(False)
+        slider_layout.addWidget(self._make_label("Horizontal"), 0, 0)
+        slider_layout.addWidget(preview_slider, 0, 1)
+        slider_layout.addWidget(
+            self._make_hint("Preview slider track, fill, handle, hover, and sizing."),
+            0,
+            2,
+        )
+        slider_layout.addWidget(self._make_label("Vertical"), 1, 0)
+        slider_layout.addWidget(preview_vertical_slider, 1, 1)
+        slider_layout.addWidget(
+            self._make_hint(
+                "Vertical sliders use the same token set with orientation-aware sizing."
+            ),
+            1,
+            2,
+        )
+        slider_layout.addWidget(self._make_label("Disabled"), 2, 0)
+        slider_layout.addWidget(disabled_slider, 2, 1)
+        slider_layout.addWidget(
+            self._make_hint(
+                "Disabled sliders preview their separate track, handle, and border colors."
+            ),
+            2,
+            2,
+        )
+        layout.addWidget(slider_box)
         layout.addStretch(1)
         preview_line_edit.setFocus(Qt.OtherFocusReason)
         return page

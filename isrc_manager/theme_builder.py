@@ -517,6 +517,77 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Border used when checkbox and radio indicators are disabled.",
     ),
     ThemeColorFieldSpec(
+        "slider_groove_bg",
+        "inputs",
+        "Sliders",
+        "Slider Track",
+        "Background used for the unfilled portion of horizontal and vertical sliders.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_groove_fill_bg",
+        "inputs",
+        "Sliders",
+        "Slider Fill",
+        "Fill color used between the minimum value and the slider handle.",
+        placeholder="Accent",
+    ),
+    ThemeColorFieldSpec(
+        "slider_groove_border",
+        "inputs",
+        "Sliders",
+        "Slider Track Border",
+        "Border color used around slider tracks.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_handle_bg",
+        "inputs",
+        "Sliders",
+        "Slider Handle",
+        "Background used for the draggable slider handle.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_handle_border",
+        "inputs",
+        "Sliders",
+        "Slider Handle Border",
+        "Border color used around slider handles.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_handle_hover_bg",
+        "inputs",
+        "Sliders",
+        "Slider Handle Hover",
+        "Background used while a slider handle is hovered.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_handle_hover_border",
+        "inputs",
+        "Sliders",
+        "Slider Handle Hover Border",
+        "Border color used while a slider handle is hovered.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_disabled_bg",
+        "inputs",
+        "Sliders",
+        "Slider Disabled Track",
+        "Track color used when a slider is disabled.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_disabled_handle_bg",
+        "inputs",
+        "Sliders",
+        "Slider Disabled Handle",
+        "Handle color used when a slider is disabled.",
+    ),
+    ThemeColorFieldSpec(
+        "slider_disabled_border",
+        "inputs",
+        "Sliders",
+        "Slider Disabled Border",
+        "Track and handle border color used when a slider is disabled.",
+    ),
+    ThemeColorFieldSpec(
         "table_bg",
         "data_views",
         "Tables & Lists",
@@ -982,6 +1053,61 @@ THEME_METRIC_FIELD_SPECS: tuple[ThemeMetricFieldSpec, ...] = (
         8,
         32,
         16,
+        " px",
+    ),
+    ThemeMetricFieldSpec(
+        "slider_groove_thickness",
+        "inputs",
+        "Slider Geometry",
+        "Slider Track Thickness",
+        "Height of horizontal slider tracks and width of vertical slider tracks.",
+        2,
+        24,
+        6,
+        " px",
+    ),
+    ThemeMetricFieldSpec(
+        "slider_groove_radius",
+        "inputs",
+        "Slider Geometry",
+        "Slider Track Radius",
+        "Corner radius used for slider tracks and filled slider ranges.",
+        0,
+        18,
+        3,
+        " px",
+    ),
+    ThemeMetricFieldSpec(
+        "slider_handle_width",
+        "inputs",
+        "Slider Geometry",
+        "Slider Handle Width",
+        "Width of horizontal slider handles and vertical slider handles.",
+        8,
+        48,
+        18,
+        " px",
+    ),
+    ThemeMetricFieldSpec(
+        "slider_handle_height",
+        "inputs",
+        "Slider Geometry",
+        "Slider Handle Height",
+        "Height of horizontal slider handles and vertical slider handles.",
+        8,
+        48,
+        18,
+        " px",
+    ),
+    ThemeMetricFieldSpec(
+        "slider_handle_radius",
+        "inputs",
+        "Slider Geometry",
+        "Slider Handle Radius",
+        "Corner radius used for the draggable slider handle.",
+        0,
+        24,
+        9,
         " px",
     ),
     ThemeMetricFieldSpec(
@@ -1539,6 +1665,16 @@ def theme_setting_defaults() -> dict[str, object]:
         "indicator_checked_border": "",
         "indicator_disabled_bg": "",
         "indicator_disabled_border": "",
+        "slider_groove_bg": "",
+        "slider_groove_fill_bg": "",
+        "slider_groove_border": "",
+        "slider_handle_bg": "",
+        "slider_handle_border": "",
+        "slider_handle_hover_bg": "",
+        "slider_handle_hover_border": "",
+        "slider_disabled_bg": "",
+        "slider_disabled_handle_bg": "",
+        "slider_disabled_border": "",
         "table_bg": palette.color(QPalette.Base).name().upper(),
         "table_fg": palette.color(QPalette.Text).name().upper(),
         "table_alt_bg": "",
@@ -1592,6 +1728,11 @@ def theme_setting_defaults() -> dict[str, object]:
         "input_padding_v": 4,
         "input_padding_h": 6,
         "indicator_size": 16,
+        "slider_groove_thickness": 6,
+        "slider_groove_radius": 3,
+        "slider_handle_width": 18,
+        "slider_handle_height": 18,
+        "slider_handle_radius": 9,
         "table_radius": 6,
         "scrollbar_thickness": 14,
         "scrollbar_radius": 6,
@@ -1877,6 +2018,32 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     indicator_disabled_border = _resolve_theme_color(
         normalized, defaults, "indicator_disabled_border", input_disabled_border
     )
+    slider_groove_bg = _resolve_theme_color(normalized, defaults, "slider_groove_bg", panel_alt_bg)
+    slider_groove_fill_bg = _resolve_theme_color(
+        normalized, defaults, "slider_groove_fill_bg", accent
+    )
+    slider_groove_border = _resolve_theme_color(
+        normalized, defaults, "slider_groove_border", border_color
+    )
+    slider_handle_bg = _resolve_theme_color(normalized, defaults, "slider_handle_bg", button_bg)
+    slider_handle_border = _resolve_theme_color(
+        normalized, defaults, "slider_handle_border", button_border
+    )
+    slider_handle_hover_bg = _resolve_theme_color(
+        normalized, defaults, "slider_handle_hover_bg", button_hover_bg
+    )
+    slider_handle_hover_border = _resolve_theme_color(
+        normalized, defaults, "slider_handle_hover_border", accent
+    )
+    slider_disabled_bg = _resolve_theme_color(
+        normalized, defaults, "slider_disabled_bg", input_disabled_bg
+    )
+    slider_disabled_handle_bg = _resolve_theme_color(
+        normalized, defaults, "slider_disabled_handle_bg", button_disabled_bg
+    )
+    slider_disabled_border = _resolve_theme_color(
+        normalized, defaults, "slider_disabled_border", input_disabled_border
+    )
 
     table_bg = _resolve_theme_color(normalized, defaults, "table_bg", str(defaults["table_bg"]))
     table_fg = _resolve_theme_color(normalized, defaults, "table_fg", str(defaults["table_fg"]))
@@ -2027,6 +2194,16 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             "indicator_checked_border": indicator_checked_border,
             "indicator_disabled_bg": indicator_disabled_bg,
             "indicator_disabled_border": indicator_disabled_border,
+            "slider_groove_bg": slider_groove_bg,
+            "slider_groove_fill_bg": slider_groove_fill_bg,
+            "slider_groove_border": slider_groove_border,
+            "slider_handle_bg": slider_handle_bg,
+            "slider_handle_border": slider_handle_border,
+            "slider_handle_hover_bg": slider_handle_hover_bg,
+            "slider_handle_hover_border": slider_handle_hover_border,
+            "slider_disabled_bg": slider_disabled_bg,
+            "slider_disabled_handle_bg": slider_disabled_handle_bg,
+            "slider_disabled_border": slider_disabled_border,
             "table_bg": table_bg,
             "table_fg": table_fg,
             "table_alt_bg": table_alt_bg,
@@ -2168,6 +2345,19 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         122 if panel_is_dark else 88,
     )
     audio_preview_metadata_border_width = max(1, int(theme["border_width"]))
+    slider_groove_thickness = int(theme["slider_groove_thickness"])
+    slider_groove_radius = int(theme["slider_groove_radius"])
+    slider_handle_width = int(theme["slider_handle_width"])
+    slider_handle_height = int(theme["slider_handle_height"])
+    slider_handle_radius = int(theme["slider_handle_radius"])
+    slider_horizontal_margin = max(0, (slider_handle_height - slider_groove_thickness) // 2)
+    slider_vertical_margin = max(0, (slider_handle_width - slider_groove_thickness) // 2)
+    slider_horizontal_margin_css = (
+        f"-{slider_horizontal_margin}px" if slider_horizontal_margin else "0px"
+    )
+    slider_vertical_margin_css = f"-{slider_vertical_margin}px" if slider_vertical_margin else "0px"
+    slider_min_height = max(slider_handle_height, slider_groove_thickness)
+    slider_min_width = max(slider_handle_width, slider_groove_thickness)
 
     stylesheet = f"""
     QWidget {{
@@ -2726,6 +2916,71 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     QRadioButton::indicator:disabled {{
         background-color: {theme["indicator_disabled_bg"]};
         border-color: {theme["indicator_disabled_border"]};
+    }}
+    QSlider:horizontal {{
+        min-height: {slider_min_height}px;
+    }}
+    QSlider:vertical {{
+        min-width: {slider_min_width}px;
+    }}
+    QSlider::groove:horizontal {{
+        height: {slider_groove_thickness}px;
+        background: {theme["slider_groove_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_groove_border"]};
+        border-radius: {slider_groove_radius}px;
+    }}
+    QSlider::groove:vertical {{
+        width: {slider_groove_thickness}px;
+        background: {theme["slider_groove_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_groove_border"]};
+        border-radius: {slider_groove_radius}px;
+    }}
+    QSlider::sub-page:horizontal,
+    QSlider::sub-page:vertical {{
+        background: {theme["slider_groove_fill_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_groove_fill_bg"]};
+        border-radius: {slider_groove_radius}px;
+    }}
+    QSlider::add-page:horizontal,
+    QSlider::add-page:vertical {{
+        background: {theme["slider_groove_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_groove_border"]};
+        border-radius: {slider_groove_radius}px;
+    }}
+    QSlider::handle:horizontal {{
+        width: {slider_handle_width}px;
+        height: {slider_handle_height}px;
+        margin: {slider_horizontal_margin_css} 0;
+        background: {theme["slider_handle_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_handle_border"]};
+        border-radius: {slider_handle_radius}px;
+    }}
+    QSlider::handle:vertical {{
+        width: {slider_handle_width}px;
+        height: {slider_handle_height}px;
+        margin: 0 {slider_vertical_margin_css};
+        background: {theme["slider_handle_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["slider_handle_border"]};
+        border-radius: {slider_handle_radius}px;
+    }}
+    QSlider::handle:horizontal:hover,
+    QSlider::handle:vertical:hover {{
+        background: {theme["slider_handle_hover_bg"]};
+        border-color: {theme["slider_handle_hover_border"]};
+    }}
+    QSlider::groove:horizontal:disabled,
+    QSlider::groove:vertical:disabled,
+    QSlider::add-page:horizontal:disabled,
+    QSlider::add-page:vertical:disabled,
+    QSlider::sub-page:horizontal:disabled,
+    QSlider::sub-page:vertical:disabled {{
+        background: {theme["slider_disabled_bg"]};
+        border-color: {theme["slider_disabled_border"]};
+    }}
+    QSlider::handle:horizontal:disabled,
+    QSlider::handle:vertical:disabled {{
+        background: {theme["slider_disabled_handle_bg"]};
+        border-color: {theme["slider_disabled_border"]};
     }}
     QTableWidget,
     QTableView,

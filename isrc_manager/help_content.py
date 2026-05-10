@@ -833,7 +833,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Typography</strong>: choose the application font and tune dialog titles, section headings, and supporting text sizes separately.</li>
           <li><strong>Surfaces</strong>: style the window, workspace-canvas, panel, group-title, compact-frame, border, tooltip, overlay, accent, and supporting-text palette for the entire app.</li>
           <li><strong>Buttons</strong>: configure normal, hover, pressed, checked, disabled, and round help-button states, plus radius and padding.</li>
-          <li><strong>Inputs</strong>: control editor backgrounds, focus styling, disabled states, placeholders, and checkbox/radio indicators.</li>
+          <li><strong>Inputs</strong>: control editor backgrounds, focus styling, disabled states, placeholders, checkbox/radio indicators, and slider tracks, fills, handles, hover colors, disabled colors, track thickness, and handle size.</li>
           <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, progress bars, progress text, and progress borders.</li>
           <li><strong>Navigation</strong>: theme menu bars, popup menus, toolbars, status bars, dock titles, headers, tab strips, tab panes, and tabs with separate normal, hover, and selected states.</li>
           <li><strong>Blob Icons</strong>: choose separate global icons for stored audio and image BLOBs using platform icons, emoji, or compressed custom images stored in the profile database.</li>

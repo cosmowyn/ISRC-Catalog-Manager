@@ -14,6 +14,7 @@ try:
         QLabel,
         QMenuBar,
         QMessageBox,
+        QSlider,
         QStyle,
         QStyleFactory,
         QWidget,
@@ -154,6 +155,14 @@ class ThemeBuilderTests(unittest.TestCase):
             "help_button_hover_bg",
             "input_focus_border",
             "indicator_checked_bg",
+            "slider_groove_bg",
+            "slider_groove_fill_bg",
+            "slider_handle_bg",
+            "slider_handle_hover_bg",
+            "slider_disabled_handle_bg",
+            "slider_groove_thickness",
+            "slider_handle_width",
+            "slider_handle_height",
             "scrollbar_handle_bg",
             "menu_selected_bg",
             "toolbar_bg",
@@ -247,6 +256,9 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertTrue(effective["button_hover_bg"])
         self.assertTrue(effective["button_pressed_bg"])
         self.assertTrue(effective["input_focus_border"])
+        self.assertEqual(effective["slider_groove_fill_bg"], "#0EA5E9")
+        self.assertTrue(effective["slider_groove_bg"])
+        self.assertTrue(effective["slider_handle_hover_bg"])
         self.assertTrue(effective["menu_selected_bg"])
         self.assertTrue(effective["tab_selected_bg"])
         self.assertTrue(effective["scrollbar_handle_bg"])
@@ -263,12 +275,22 @@ class ThemeBuilderTests(unittest.TestCase):
                 "catalog_toolbar_group_margin_top": 4,
                 "catalog_toolbar_zoom_label_font_size": 10,
                 "catalog_toolbar_zoom_step_button_size": 19,
+                "slider_groove_thickness": 8,
+                "slider_handle_width": 24,
+                "slider_handle_height": 22,
+                "slider_handle_radius": 11,
                 "custom_qss": "QLabel#marker { color: #123456; }",
             }
         )
 
         self.assertIn('QToolButton[role="helpButton"]:hover', stylesheet)
         self.assertIn("QCheckBox::indicator", stylesheet)
+        self.assertIn("QSlider::groove:horizontal", stylesheet)
+        self.assertIn("QSlider::handle:vertical", stylesheet)
+        self.assertIn("height: 8px", stylesheet)
+        self.assertIn("width: 24px", stylesheet)
+        self.assertIn("height: 22px", stylesheet)
+        self.assertIn("border-radius: 11px", stylesheet)
         self.assertIn("QScrollBar::handle:hover:vertical", stylesheet)
         self.assertIn("QProgressBar::chunk", stylesheet)
         self.assertIn("color: #F9FAFB", stylesheet)
@@ -368,6 +390,7 @@ class ThemeBuilderTests(unittest.TestCase):
                 "Sounds",
                 [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
             )
+            self.assertGreaterEqual(len(dialog.findChildren(QSlider)), 3)
             self.assertTrue(dialog.startup_sound_enabled_check.isChecked())
             self.assertTrue(dialog.click_sound_enabled_check.isChecked())
             self.assertTrue(dialog.notice_sound_enabled_check.isChecked())
@@ -390,14 +413,21 @@ class ThemeBuilderTests(unittest.TestCase):
                 "statusbar_bg",
                 "tab_bar_bg",
                 "tab_pane_bg",
+                "slider_groove_bg",
+                "slider_handle_bg",
+                "slider_disabled_handle_bg",
             ):
                 self.assertIn(key, dialog._theme_color_edits)
 
             dialog._theme_color_edits["button_hover_bg"].setText("#224488")
+            dialog._theme_color_edits["slider_groove_bg"].setText("#182033")
+            dialog._theme_color_edits["slider_handle_bg"].setText("#EAB308")
             dialog._theme_color_edits["menu_selected_bg"].setText("#BB5500")
             dialog._theme_color_edits["toolbar_bg"].setText("#1F2937")
             dialog._theme_color_edits["action_ribbon_bg"].setText("#0F4C81")
             dialog._theme_color_edits["tab_pane_bg"].setText("#0F172A")
+            dialog._theme_metric_spins["slider_groove_thickness"].setValue(9)
+            dialog._theme_metric_spins["slider_handle_width"].setValue(24)
             dialog._theme_metric_spins["menu_radius"].setValue(14)
             dialog._theme_metric_spins["dialog_title_font_size"].setValue(22)
             dialog._blob_icon_editors["audio_managed"].emoji_edit.setText("🎧")
@@ -415,6 +445,10 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertTrue(values["app_sound_settings"]["notice"])
             self.assertTrue(values["app_sound_settings"]["warning"])
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
+            self.assertEqual(values["theme_settings"]["slider_groove_bg"], "#182033")
+            self.assertEqual(values["theme_settings"]["slider_handle_bg"], "#EAB308")
+            self.assertEqual(values["theme_settings"]["slider_groove_thickness"], 9)
+            self.assertEqual(values["theme_settings"]["slider_handle_width"], 24)
             self.assertEqual(values["theme_settings"]["menu_selected_bg"], "#BB5500")
             self.assertEqual(values["theme_settings"]["toolbar_bg"], "#1F2937")
             self.assertEqual(values["theme_settings"]["action_ribbon_bg"], "#0F4C81")

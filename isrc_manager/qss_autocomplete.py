@@ -304,6 +304,21 @@ WIDGET_QSS_METADATA: dict[str, dict[str, object]] = {
         "properties": ("background-color", "border", "margin", "width", "height"),
         "template_properties": ("background-color", "border-radius", "width", "height"),
     },
+    "QSlider": {
+        "pseudo_states": ("disabled", "horizontal", "vertical"),
+        "subcontrols": ("groove", "handle", "add-page", "sub-page"),
+        "properties": (
+            "background-color",
+            "border",
+            "border-radius",
+            "height",
+            "margin",
+            "min-height",
+            "min-width",
+            "width",
+        ),
+        "template_properties": ("background-color", "border", "border-radius", "width", "height"),
+    },
     "QMenuBar": {
         "pseudo_states": ("disabled",),
         "subcontrols": ("item",),
@@ -373,6 +388,10 @@ SUBCONTROL_PSEUDO_STATES: dict[tuple[str, str], tuple[str, ...]] = {
     ("QScrollBar", "handle"): ("horizontal", "vertical", "hover", "pressed", "disabled"),
     ("QScrollBar", "add-line"): ("horizontal", "vertical", "hover", "pressed"),
     ("QScrollBar", "sub-line"): ("horizontal", "vertical", "hover", "pressed"),
+    ("QSlider", "groove"): ("horizontal", "vertical", "disabled"),
+    ("QSlider", "handle"): ("horizontal", "vertical", "hover", "pressed", "disabled"),
+    ("QSlider", "add-page"): ("horizontal", "vertical", "disabled"),
+    ("QSlider", "sub-page"): ("horizontal", "vertical", "disabled"),
     ("QTabBar", "tab"): ("disabled", "hover", "selected"),
     ("QComboBox", "drop-down"): ("disabled", "hover", "on"),
     ("QComboBox", "down-arrow"): ("disabled", "hover"),
@@ -1082,6 +1101,38 @@ WIDGET_TEMPLATE_BLOCKS: dict[str, tuple[QssTemplateBlock, ...]] = {
             "::handle:hover:horizontal",
             "Hovered horizontal handle",
             ("background-color",),
+        ),
+    ),
+    "QSlider": (
+        QssTemplateBlock(
+            "::groove:horizontal",
+            "Horizontal slider track",
+            ("height", "background-color", "border", "border-radius"),
+        ),
+        QssTemplateBlock(
+            "::sub-page:horizontal",
+            "Horizontal slider fill",
+            ("background-color", "border-radius"),
+        ),
+        QssTemplateBlock(
+            "::handle:horizontal",
+            "Horizontal slider handle",
+            ("width", "height", "margin", "background-color", "border", "border-radius"),
+        ),
+        QssTemplateBlock(
+            "::groove:vertical",
+            "Vertical slider track",
+            ("width", "background-color", "border", "border-radius"),
+        ),
+        QssTemplateBlock(
+            "::sub-page:vertical",
+            "Vertical slider fill",
+            ("background-color", "border-radius"),
+        ),
+        QssTemplateBlock(
+            "::handle:vertical",
+            "Vertical slider handle",
+            ("width", "height", "margin", "background-color", "border", "border-radius"),
         ),
     ),
     "QMenuBar": (
