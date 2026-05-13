@@ -811,7 +811,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
           <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
-          <li><strong>Sounds</strong>: app-wide sound controls for startup, scroll/slider click feedback, completed-action notices, and warnings. Each sound can be switched on or off independently. Click feedback is limited to scrolling and slider movement, not ordinary button presses, and scroll clicks scale with scroll speed.</li>
+          <li><strong>Sounds</strong>: app-wide sound controls for startup, completed-action notices, and warnings. Each bundled sound can be switched on or off independently.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
@@ -965,6 +965,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "auto advance",
             "album playlist",
             "loop",
+            "bookmarks",
             "export",
         ),
         content_html="""
@@ -973,6 +974,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Image preview</strong>: inspect stored image data such as album art, zoom with trackpad pinch or <code>Ctrl</code>/<code>Cmd</code> + scroll, double-click to reset the view to fit, and export the current image from the preview controls.</li>
           <li><strong>Now Playing</strong>: the audio player presents title, artist, album context, a waveform-first stage, and album artwork when artwork is available. Clicking the artwork opens it in the image preview.</li>
           <li><strong>Waveform and timeline</strong>: seek by clicking or dragging the waveform, use the timeline slider for precise scrubbing, and use the live spectrum graph for playback activity. The spectrum supports linear and log display modes from its context menu.</li>
+          <li><strong>Bookmarks</strong>: add per-track waveform bookmarks from the bookmark button. Saved bookmark entries jump the playhead back to their stored timestamp, and the same menu can remove one bookmark or clear the current track's list.</li>
           <li><strong>Transport controls</strong>: previous, rewind, play, pause, stop, fast-forward, next, and loop are available as icon buttons. Loop cycles between off, playlist loop, and current-track loop.</li>
           <li><strong>Play Next</strong>: the queue follows the currently visible catalog order and only includes tracks with playable media for the current preview source. Selecting an item loads that track into the player.</li>
           <li><strong>Shuffle</strong>: shuffle rearranges the available Play Next queue without leaving the current playable-track scope.</li>

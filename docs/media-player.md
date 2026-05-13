@@ -8,9 +8,11 @@ The Audio Player is the catalog-side auditioning surface for attached audio. It 
 
 - `Now Playing` shows the current title, artist, and album context.
 - The waveform stage supports click, drag, and slider scrubbing.
+- The bookmark button saves per-track waveform positions, lists saved bookmarks, jumps back to a selected timestamp, and removes bookmarks from that track's list.
 - Album artwork appears beside the waveform when available. Clicking the artwork opens it in the image preview.
 - The spectrum graph and peak meters show playback activity and fade smoothly when playback is paused or stopped.
 - Volume and mute are available in the player without changing catalog metadata.
+- The EQ button opens equalizer bands and a stereo pan dial for temporary auditioning.
 
 ## Transport And Queue
 
@@ -30,10 +32,9 @@ The export button uses the app's existing export workflows for the current track
 `Settings > Application Settings > Sounds` controls the bundled app-wide sounds:
 
 - startup after the application finishes loading
-- click feedback while scrolling or moving sliders
 - notice feedback for completed actions such as settings import/export
 - warning feedback when the app reports a problem
 
-Each sound can be switched on or off independently. Click feedback is limited to scrolling and slider motion, and scroll feedback scales with scroll speed.
+Each bundled sound can be switched on or off independently. Startup, completed-action notice, and warning sounds are available; scrolling does not trigger application audio feedback.
 
 All bundled application sound effects were designed and created by Aeon Cosmowyn.

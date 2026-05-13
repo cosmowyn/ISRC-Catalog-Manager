@@ -530,10 +530,30 @@ class LiveEqualizerPlayer(QObject):
             if bool(self._equalizer_settings.get("enabled")):
                 for filter_ in self._filters:
                     chunk = filter_.process(chunk)
+            chunk = self._apply_pan_locked(chunk)
             self._remember_output_samples_locked(chunk)
         chunk = np.clip(chunk, -0.98, 0.98)
         pcm = (chunk * 32767.0).astype("<i2", copy=False)
         return pcm.tobytes()
+
+    def _apply_pan_locked(self, samples):
+        if samples is None or getattr(samples, "size", 0) <= 0:
+            return samples
+        if len(getattr(samples, "shape", ())) < 2 or samples.shape[1] < 2:
+            return samples
+        try:
+            pan = float(self._equalizer_settings.get("pan", 0.0))
+        except (TypeError, ValueError):
+            pan = 0.0
+        pan = max(-1.0, min(1.0, pan))
+        if abs(pan) < 0.001:
+            return samples
+        output = samples.copy()
+        left_gain = 1.0 if pan <= 0.0 else 1.0 - pan
+        right_gain = 1.0 + pan if pan < 0.0 else 1.0
+        output[:, 0] *= left_gain
+        output[:, 1] *= right_gain
+        return output
 
     def _remember_output_samples_locked(self, samples) -> None:
         import numpy as np

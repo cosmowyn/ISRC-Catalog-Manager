@@ -16,6 +16,7 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
 )
+from isrc_manager.media.bookmarks import ensure_audio_bookmark_schema
 from isrc_manager.media.waveform_cache import ensure_audio_waveform_cache_schema
 from isrc_manager.parties.service import PartyService
 from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
@@ -320,6 +321,9 @@ class DatabaseSchemaService:
     def _ensure_audio_waveform_cache_table(self) -> None:
         ensure_audio_waveform_cache_schema(self.conn)
 
+    def _ensure_audio_bookmark_table(self) -> None:
+        ensure_audio_bookmark_schema(self.conn)
+
     def init_db(self) -> None:
         # Core entities
         self.cursor.execute(
@@ -343,6 +347,7 @@ class DatabaseSchemaService:
         self._ensure_current_track_columns()
         self._ensure_current_track_indexes_and_triggers()
         self._ensure_audio_waveform_cache_table()
+        self._ensure_audio_bookmark_table()
 
         # Licenses & Licensees
         self.cursor.execute(

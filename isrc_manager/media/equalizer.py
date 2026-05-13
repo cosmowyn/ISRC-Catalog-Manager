@@ -29,11 +29,14 @@ from PySide6.QtWidgets import (
 
 EQ_SETTINGS_ENABLED_KEY = "media_player/equalizer/enabled"
 EQ_SETTINGS_GAINS_KEY = "media_player/equalizer/gains_json"
+EQ_SETTINGS_PAN_KEY = "media_player/equalizer/pan"
 EQ_GAIN_MIN_DB = -9.0
 EQ_GAIN_MAX_DB = 9.0
 EQ_GAIN_STEP_DB = 0.5
 EQ_MIN_FREQUENCY_HZ = 20.0
 EQ_MAX_FREQUENCY_HZ = 20000.0
+EQ_PAN_MIN = -1.0
+EQ_PAN_MAX = 1.0
 
 
 @dataclass(frozen=True)
@@ -81,10 +84,22 @@ def _coerce_gain(value: Any) -> float:
     return round(gain / EQ_GAIN_STEP_DB) * EQ_GAIN_STEP_DB
 
 
+def _coerce_pan(value: Any) -> float:
+    try:
+        pan = float(value)
+    except (TypeError, ValueError):
+        pan = 0.0
+    pan = max(EQ_PAN_MIN, min(EQ_PAN_MAX, pan))
+    if abs(pan) < 0.005:
+        return 0.0
+    return round(pan, 2)
+
+
 def default_equalizer_settings() -> dict[str, object]:
     return {
         "enabled": False,
         "gains": [0.0 for _band in EQUALIZER_BANDS],
+        "pan": 0.0,
     }
 
 
@@ -109,6 +124,7 @@ def normalize_equalizer_settings(value: Any) -> dict[str, object]:
     return {
         "enabled": _coerce_bool(value.get("enabled"), False),
         "gains": gains,
+        "pan": _coerce_pan(value.get("pan", defaults["pan"])),
     }
 
 
@@ -127,10 +143,17 @@ def load_equalizer_settings(settings: Any) -> dict[str, object]:
         gains_raw = settings.value(EQ_SETTINGS_GAINS_KEY, "[]")
     except Exception:
         gains_raw = "[]"
+    try:
+        pan = settings.value(EQ_SETTINGS_PAN_KEY, 0.0, float)
+    except TypeError:
+        pan = settings.value(EQ_SETTINGS_PAN_KEY, 0.0)
+    except Exception:
+        pan = 0.0
     return normalize_equalizer_settings(
         {
             "enabled": enabled,
             "gains": gains_raw,
+            "pan": pan,
         }
     )
 
@@ -142,6 +165,7 @@ def save_equalizer_settings(settings: Any, value: Any) -> dict[str, object]:
     try:
         settings.setValue(EQ_SETTINGS_ENABLED_KEY, bool(normalized["enabled"]))
         settings.setValue(EQ_SETTINGS_GAINS_KEY, json.dumps(normalized["gains"]))
+        settings.setValue(EQ_SETTINGS_PAN_KEY, float(normalized["pan"]))
         sync = getattr(settings, "sync", None)
         if callable(sync):
             sync()
@@ -691,6 +715,152 @@ class EqualizerCurveWidget(QWidget):
             painter.end()
 
 
+class PanningDialWidget(QWidget):
+    panChanged = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pan = 0.0
+        self.setFixedSize(82, 38)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip("Stereo panning")
+
+    def sizeHint(self) -> QSize:
+        return QSize(82, 38)
+
+    def pan(self) -> float:
+        return float(self._pan)
+
+    def set_pan(self, value: Any, *, emit: bool = False) -> None:
+        pan = _coerce_pan(value)
+        if pan == self._pan:
+            return
+        self._pan = pan
+        self.update()
+        if emit:
+            self.panChanged.emit(self._pan)
+
+    @staticmethod
+    def _point_from_pan(center: QPointF, radius: float, pan: float) -> QPointF:
+        angle = math.radians(90.0 - (_coerce_pan(pan) * 90.0))
+        return QPointF(
+            center.x() + (math.cos(angle) * radius),
+            center.y() - (math.sin(angle) * radius),
+        )
+
+    def _arc_geometry(self) -> tuple[QPointF, float]:
+        outer = QRectF(self.rect()).adjusted(5.0, 4.0, -5.0, -5.0)
+        radius = max(12.0, min((outer.width() / 2.0) - 2.0, outer.height() - 2.0))
+        center = QPointF(outer.center().x(), outer.bottom())
+        return center, radius
+
+    def _pan_from_position(self, point) -> float:
+        center, radius = self._arc_geometry()
+        if radius <= 0.0:
+            return 0.0
+        ratio = (float(point.x()) - (center.x() - radius)) / max(1.0, radius * 2.0)
+        return _coerce_pan((ratio * 2.0) - 1.0)
+
+    def _event_position(self, event) -> QPointF:
+        try:
+            return QPointF(event.position())
+        except Exception:
+            return QPointF(event.pos())
+
+    def _set_pan_from_event(self, event) -> None:
+        self.set_pan(self._pan_from_position(self._event_position(event)), emit=True)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._set_pan_from_event(event)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.LeftButton:
+            self._set_pan_from_event(event)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.set_pan(0.0, emit=True)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Right):
+            step = -0.05 if key == Qt.Key_Left else 0.05
+            self.set_pan(self._pan + step, emit=True)
+            event.accept()
+            return
+        if key in (Qt.Key_Home, Qt.Key_C):
+            self.set_pan(0.0, emit=True)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    @staticmethod
+    def _relative_luminance(color: QColor) -> float:
+        return 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            palette = self.palette()
+            light_mode = self._relative_luminance(palette.window().color()) >= 0.5
+            arc_color = QColor("#AEB6C2" if light_mode else "#5D6674")
+            active_color = QColor("#0A84FF" if light_mode else "#4DA3FF")
+
+            center, radius = self._arc_geometry()
+            arc_rect = QRectF(
+                center.x() - radius,
+                center.y() - radius,
+                radius * 2.0,
+                radius * 2.0,
+            )
+
+            painter.setPen(QPen(arc_color, 2.0, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(arc_rect, 0, 180 * 16)
+
+            for pan in (-1.0, 0.0, 1.0):
+                point = self._point_from_pan(center, radius, pan)
+                tick_inner = self._point_from_pan(center, radius - 5.0, pan)
+                painter.setPen(QPen(arc_color, 1.2, Qt.SolidLine, Qt.RoundCap))
+                painter.drawLine(tick_inner, point)
+
+            pointer = self._point_from_pan(center, radius - 4.0, self._pan)
+            painter.setPen(QPen(active_color, 2.4, Qt.SolidLine, Qt.RoundCap))
+            painter.drawLine(center, pointer)
+            painter.setPen(QPen(active_color, 1.2))
+            painter.setBrush(active_color)
+            painter.drawEllipse(QRectF(pointer.x() - 5.0, pointer.y() - 5.0, 10.0, 10.0))
+
+            hub = QColor(active_color)
+            hub.setAlpha(180)
+            painter.setBrush(hub)
+            painter.drawEllipse(QRectF(center.x() - 3.5, center.y() - 3.5, 7.0, 7.0))
+        finally:
+            painter.end()
+
+
+class EqualizerBandSlider(QSlider):
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.setValue(0)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class EqualizerDialog(QDialog):
     settingsChanged = Signal(dict)
 
@@ -718,6 +888,26 @@ class EqualizerDialog(QDialog):
         self.enabled_check = QCheckBox("On", self)
         self.enabled_check.setObjectName("mediaEqualizerEnabledCheck")
         self.enabled_check.setToolTip("Turn equalizer on or off")
+        pan_cluster = QHBoxLayout()
+        pan_cluster.setContentsMargins(0, 0, 0, 0)
+        pan_cluster.setSpacing(4)
+        pan_label = QLabel("Pan", self)
+        pan_label.setObjectName("mediaEqualizerPanLabel")
+        pan_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        pan_left_label = QLabel("L", self)
+        pan_left_label.setObjectName("mediaEqualizerPanSideLabel")
+        pan_left_label.setAlignment(Qt.AlignCenter)
+        pan_left_label.setFixedWidth(10)
+        self.pan_dial = PanningDialWidget(self)
+        self.pan_dial.setObjectName("mediaEqualizerPanDial")
+        pan_right_label = QLabel("R", self)
+        pan_right_label.setObjectName("mediaEqualizerPanSideLabel")
+        pan_right_label.setAlignment(Qt.AlignCenter)
+        pan_right_label.setFixedWidth(10)
+        pan_cluster.addWidget(pan_label, 0, Qt.AlignVCenter)
+        pan_cluster.addWidget(pan_left_label, 0, Qt.AlignVCenter)
+        pan_cluster.addWidget(self.pan_dial, 0, Qt.AlignVCenter)
+        pan_cluster.addWidget(pan_right_label, 0, Qt.AlignVCenter)
         self.reset_button = QPushButton("Reset", self)
         self.reset_button.setObjectName("mediaEqualizerResetButton")
         self.reset_button.setFixedWidth(68)
@@ -729,6 +919,14 @@ class EqualizerDialog(QDialog):
         self.graph = EqualizerCurveWidget(self)
         self.graph.setObjectName("mediaEqualizerCurve")
         root.addWidget(self.graph)
+
+        pan_row = QHBoxLayout()
+        pan_row.setContentsMargins(0, 0, 0, 0)
+        pan_row.setSpacing(0)
+        pan_row.addStretch(1)
+        pan_row.addLayout(pan_cluster)
+        pan_row.addStretch(1)
+        root.addLayout(pan_row)
 
         slider_frame = QFrame(self)
         slider_frame.setObjectName("mediaEqualizerSliderFrame")
@@ -743,7 +941,7 @@ class EqualizerDialog(QDialog):
             tone.setToolTip(f"{band.tone_label}: {band.label}")
             tone.setMinimumWidth(58)
 
-            slider = QSlider(Qt.Vertical, slider_frame)
+            slider = EqualizerBandSlider(Qt.Vertical, slider_frame)
             slider.setObjectName(f"mediaEqualizerSlider_{band.key}")
             slider.setRange(int(EQ_GAIN_MIN_DB * 10), int(EQ_GAIN_MAX_DB * 10))
             slider.setSingleStep(int(EQ_GAIN_STEP_DB * 10))
@@ -773,6 +971,7 @@ class EqualizerDialog(QDialog):
         root.addWidget(slider_frame)
 
         self.enabled_check.toggled.connect(self._on_control_changed)
+        self.pan_dial.panChanged.connect(self._on_control_changed)
         self.reset_button.clicked.connect(self._reset_gains)
         self._sync_from_settings()
 
@@ -801,6 +1000,7 @@ class EqualizerDialog(QDialog):
             {
                 "enabled": bool(self.enabled_check.isChecked()),
                 "gains": gains,
+                "pan": self.pan_dial.pan(),
             }
         )
 
@@ -817,6 +1017,7 @@ class EqualizerDialog(QDialog):
             ):
                 slider.setValue(int(round(float(gain) * 10)))
                 label.setText(self._format_gain(float(gain)))
+            self.pan_dial.set_pan(normalized["pan"])
             self.graph.set_settings(normalized)
         finally:
             self._syncing = False
@@ -835,6 +1036,7 @@ class EqualizerDialog(QDialog):
             {
                 "enabled": bool(self.enabled_check.isChecked()),
                 "gains": [0.0 for _band in EQUALIZER_BANDS],
+                "pan": self.pan_dial.pan(),
             }
         )
         self._sync_from_settings()

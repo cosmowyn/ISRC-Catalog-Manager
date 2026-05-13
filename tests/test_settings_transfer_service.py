@@ -169,7 +169,6 @@ class SettingsTransferServiceTests(unittest.TestCase):
         self.assertEqual(payload["general"]["artist_code"], "42")
         self.assertTrue(payload["general"]["startup_sound"]["enabled"])
         self.assertTrue(payload["general"]["app_sounds"]["startup"])
-        self.assertTrue(payload["general"]["app_sounds"]["click"])
         self.assertTrue(payload["general"]["app_sounds"]["notice"])
         self.assertTrue(payload["general"]["app_sounds"]["warning"])
         self.assertTrue(payload["gs1"]["template"]["present"])
@@ -244,7 +243,6 @@ class SettingsTransferServiceTests(unittest.TestCase):
 
         self.assertEqual(result.values["window_title"], "Migrated Catalog")
         self.assertTrue(result.values["startup_sound_enabled"])
-        self.assertTrue(result.values["app_sound_settings"]["click"])
         self.assertTrue(result.values["app_sound_settings"]["notice"])
         self.assertTrue(result.values["app_sound_settings"]["warning"])
         self.assertTrue(Path(str(result.values["icon_path"])).exists())

@@ -658,7 +658,23 @@ class FocusWheelCalendarWidget(_WheelIntentMixin, QCalendarWidget):
 class FocusWheelSlider(_WheelIntentMixin, QSlider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._double_click_reset_value: int | None = None
         self.setFocusPolicy(Qt.StrongFocus)
+
+    def setDoubleClickResetValue(self, value: int | None) -> None:
+        self._double_click_reset_value = None if value is None else int(value)
+
+    def mouseDoubleClickEvent(self, event):
+        if (
+            self._double_click_reset_value is not None
+            and hasattr(event, "button")
+            and event.button() == Qt.LeftButton
+        ):
+            reset_value = max(self.minimum(), min(self.maximum(), self._double_click_reset_value))
+            self.setValue(reset_value)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class TwoDigitSpinBox(FocusWheelSpinBox):

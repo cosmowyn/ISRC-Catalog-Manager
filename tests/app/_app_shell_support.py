@@ -9824,6 +9824,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(playback_group.isAncestorOf(dialog.shuffle_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.album_scope_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.equalizer_button))
+        self.assertTrue(playback_group.isAncestorOf(dialog.bookmark_button))
         self.assertTrue(playback_group.isAncestorOf(dialog.export_button))
         self.assertEqual(dialog.shuffle_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.shuffle_button.text(), "")
@@ -9847,6 +9848,11 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(dialog.equalizer_button.text(), "")
         self.assertFalse(dialog.equalizer_button.icon().isNull())
         self.assertEqual(dialog.equalizer_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertEqual(dialog.bookmark_button.size(), dialog.play_button.size())
+        self.assertEqual(dialog.bookmark_button.text(), "")
+        self.assertFalse(dialog.bookmark_button.icon().isNull())
+        self.assertEqual(dialog.bookmark_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
+        self.assertEqual(dialog.bookmark_button.popupMode(), app_module.QToolButton.InstantPopup)
         self.assertEqual(dialog.export_button.size(), dialog.play_button.size())
         self.assertEqual(dialog.export_button.text(), "")
         self.assertFalse(dialog.export_button.icon().isNull())
@@ -9916,6 +9922,67 @@ class AppShellTestCase(unittest.TestCase):
         pump_events()
         self.assertEqual(dialog.volume_label.text(), "37%")
         self.assertAlmostEqual(dialog._audio_out.volume(), 0.37, places=2)
+        volume_double_click = _FakeMouseDoubleClickEvent()
+        dialog.volume_slider.mouseDoubleClickEvent(volume_double_click)
+        pump_events()
+        self.assertTrue(volume_double_click.accepted)
+        self.assertEqual(dialog.volume_label.text(), "100%")
+        self.assertAlmostEqual(dialog._audio_out.volume(), 1.0, places=2)
+        dialog._seek_to_ms(100)
+        dialog._rebuild_bookmark_menu()
+        dialog.bookmark_button.menu().actions()[0].trigger()
+        pump_events()
+        dialog._seek_to_ms(350)
+        dialog._rebuild_bookmark_menu()
+        dialog.bookmark_button.menu().actions()[0].trigger()
+        pump_events()
+        self.assertEqual(len(dialog._current_bookmarks), 2)
+        self.assertEqual(
+            dialog.wave._bookmarks_ms,
+            [bookmark.position_ms for bookmark in dialog._current_bookmarks],
+        )
+        saved_bookmark_rows = self.window.conn.execute(
+            """
+            SELECT position_ms
+            FROM TrackAudioBookmarks
+            WHERE track_id=?
+            ORDER BY position_ms
+            """,
+            (track_id,),
+        ).fetchall()
+        self.assertEqual(
+            [int(row[0]) for row in saved_bookmark_rows],
+            [bookmark.position_ms for bookmark in dialog._current_bookmarks],
+        )
+        dialog._rebuild_bookmark_menu()
+        bookmark_menu = dialog.bookmark_button.menu()
+        self.assertIsNotNone(bookmark_menu)
+        jump_bookmark = dialog._current_bookmarks[-1]
+        jump_action = next(
+            action
+            for action in bookmark_menu.actions()
+            if action.data() == jump_bookmark.id and action.menu() is None
+        )
+        dialog._seek_to_ms(0)
+        jump_action.trigger()
+        pump_events()
+        self.assertEqual(dialog._slider.value(), jump_bookmark.position_ms)
+        remove_menu_action = next(
+            action for action in bookmark_menu.actions() if action.text() == "Remove Bookmark"
+        )
+        remove_action = remove_menu_action.menu().actions()[0]
+        removed_bookmark_id = int(remove_action.data())
+        remove_action.trigger()
+        pump_events()
+        self.assertEqual(len(dialog._current_bookmarks), 1)
+        self.assertNotIn(
+            removed_bookmark_id,
+            [bookmark.id for bookmark in dialog._current_bookmarks],
+        )
+        dialog._remove_all_bookmarks_for_current_track()
+        pump_events()
+        self.assertEqual(dialog._current_bookmarks, [])
+        self.assertEqual(dialog.wave._bookmarks_ms, [])
         self.assertFalse(dialog.mute_button.icon().isNull())
         self.assertEqual(dialog.mute_button.toolButtonStyle(), Qt.ToolButtonIconOnly)
         dialog._set_muted(True)
@@ -9962,7 +10029,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(footer_row.itemAt(1).widget(), dialog.album_scope_button)
         self.assertIs(footer_row.itemAt(2).widget(), dialog.auto_advance_button)
         self.assertIs(footer_row.itemAt(3).widget(), dialog.equalizer_button)
-        self.assertIs(footer_row.itemAt(5).widget(), dialog.export_button)
+        self.assertIs(footer_row.itemAt(4).widget(), dialog.bookmark_button)
+        self.assertIs(footer_row.itemAt(6).widget(), dialog.export_button)
         original_order = list(dialog._track_order)
         self.assertGreaterEqual(len(original_order), 1)
         with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
@@ -10070,6 +10138,7 @@ class AppShellTestCase(unittest.TestCase):
             "#audioPreviewAutoAdvanceButton",
             "#audioPreviewAlbumScopeButton",
             "#audioPreviewLoopButton",
+            "#audioPreviewBookmarkButton",
             '[role="mediaTransportButton"]',
             'QToolButton[role="mediaTransportButton"]',
             '[role="mediaVolumeSlider"]',
@@ -10565,6 +10634,11 @@ class AppShellTestCase(unittest.TestCase):
             dialog._sync_visualization_timer()
         self.assertTrue(dialog.scope.is_releasing())
         self.assertTrue(dialog._visualization_timer.isActive())
+        pause_release_opacity = dialog.scope._fade_opacity
+        with mock.patch.object(dialog, "_is_media_playing", return_value=False):
+            dialog._apply_position(0, 1000)
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertEqual(dialog.scope._fade_opacity, pause_release_opacity)
         dialog._visualization_timer.stop()
         dialog.scope._release_active = False
         dialog.scope._fade_opacity = 1.0
@@ -10574,6 +10648,28 @@ class AppShellTestCase(unittest.TestCase):
         dialog.peak_meter.mark_signal_activity()
         dialog.peak_meter.set_playhead_ms(0)
         dialog._stop_playback()
+        self.assertTrue(dialog.scope.is_releasing())
+        self.assertTrue(dialog.peak_meter.is_releasing())
+        self.assertTrue(dialog._visualization_timer.isActive())
+        dialog._visualization_timer.stop()
+        dialog.scope._release_active = False
+        dialog.peak_meter._release_active = False
+        dialog.scope._fade_opacity = 1.0
+        dialog.scope.set_gain(1.0)
+        dialog.peak_meter.set_peak_frames([(-3.0, -6.0)])
+        dialog.peak_meter.set_duration_ms(1000)
+        dialog.peak_meter.mark_signal_activity()
+        dialog.peak_meter.set_playhead_ms(0)
+        dialog._visualization_gain = 1.0
+        dialog._set_loop_mode(dialog.LOOP_MODE_OFF)
+        dialog.auto_advance_button.setChecked(True)
+        dialog._sync_auto_advance_button()
+        end_status = getattr(
+            app_module.QMediaPlayer,
+            "MediaStatus",
+            app_module.QMediaPlayer,
+        ).EndOfMedia
+        dialog._on_media_status_changed(end_status)
         self.assertTrue(dialog.scope.is_releasing())
         self.assertTrue(dialog.peak_meter.is_releasing())
         self.assertTrue(dialog._visualization_timer.isActive())

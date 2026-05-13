@@ -9,7 +9,6 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from isrc_manager.app_sounds import (
-    APP_SOUND_CLICK,
     APP_SOUND_NOTICE,
     APP_SOUND_STARTUP,
     APP_SOUND_WARNING,
@@ -412,7 +411,6 @@ class ApplicationSettingsTransferService:
             auto_snapshot.get("interval_minutes") or 0
         )
         after_values["startup_sound_enabled"] = app_sounds[APP_SOUND_STARTUP]
-        after_values["click_sound_enabled"] = app_sounds[APP_SOUND_CLICK]
         after_values["notice_sound_enabled"] = app_sounds[APP_SOUND_NOTICE]
         after_values["warning_sound_enabled"] = app_sounds[APP_SOUND_WARNING]
         after_values["app_sound_settings"] = dict(app_sounds)

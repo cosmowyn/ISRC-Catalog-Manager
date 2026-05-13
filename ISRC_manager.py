@@ -84,7 +84,6 @@ from PySide6.QtMultimedia import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QAbstractSlider,
     QApplication,
     QCalendarWidget,
     QCheckBox,
@@ -117,7 +116,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
-    QScrollBar,
     QSizePolicy,
     QSlider,
     QSplitter,
@@ -147,7 +145,6 @@ from isrc_manager.app_dialogs import (
     ReleaseNotesDialog,
 )
 from isrc_manager.app_sounds import (
-    APP_SOUND_CLICK,
     APP_SOUND_DEFAULTS,
     APP_SOUND_FILENAMES,
     APP_SOUND_IDS,
@@ -325,6 +322,13 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportCoordinator,
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
+)
+from isrc_manager.media.bookmarks import (
+    AudioBookmark,
+    add_audio_bookmark,
+    delete_audio_bookmark,
+    delete_audio_bookmarks_for_track,
+    load_audio_bookmarks,
 )
 from isrc_manager.media.equalizer import (
     EqualizerDialog,
@@ -1729,10 +1733,6 @@ class ApplicationSettingsDialog(QDialog):
             "startup_sound_enabled": (
                 self._sounds_tab_index,
                 self.startup_sound_enabled_check,
-            ),
-            "click_sound_enabled": (
-                self._sounds_tab_index,
-                self._app_sound_checks[APP_SOUND_CLICK],
             ),
             "notice_sound_enabled": (
                 self._sounds_tab_index,
@@ -4419,7 +4419,6 @@ class ApplicationSettingsDialog(QDialog):
             "auto_snapshot_enabled": self.auto_snapshot_enabled_check.isChecked(),
             "auto_snapshot_interval_minutes": int(self.auto_snapshot_interval_spin.value()),
             "startup_sound_enabled": app_sound_values[APP_SOUND_STARTUP],
-            "click_sound_enabled": app_sound_values[APP_SOUND_CLICK],
             "notice_sound_enabled": app_sound_values[APP_SOUND_NOTICE],
             "warning_sound_enabled": app_sound_values[APP_SOUND_WARNING],
             "app_sound_settings": app_sound_values,
@@ -6870,14 +6869,10 @@ class App(QMainWindow):
     STARTUP_SOUND_DELAY_MS = 250
     APP_SOUND_VOLUMES = {
         APP_SOUND_STARTUP: 0.45,
-        APP_SOUND_CLICK: 0.24,
         APP_SOUND_NOTICE: 0.42,
         APP_SOUND_WARNING: 0.50,
     }
     APP_SOUND_THROTTLE_MS = {
-        APP_SOUND_CLICK: 55,
-        "scroll": 90,
-        "slider": 75,
         APP_SOUND_NOTICE: 1500,
         APP_SOUND_WARNING: 1500,
     }
@@ -6907,7 +6902,6 @@ class App(QMainWindow):
         self._app_sound_effects: dict[str, QSoundEffect] = {}
         self._app_sound_last_played: dict[str, float] = {}
         self._app_sound_missing_reported: set[str] = set()
-        self._app_sound_scroll_state: dict[int, tuple[int, float]] = {}
         self._app_sound_interactions_ready = False
         self._app_sound_hook_timer = QTimer(self)
         self._app_sound_hook_timer.setSingleShot(False)
@@ -7779,59 +7773,6 @@ class App(QMainWindow):
     def _play_startup_sound(self) -> None:
         self._play_app_sound(APP_SOUND_STARTUP)
 
-    def _play_click_sound(
-        self,
-        *,
-        throttle_key: str = APP_SOUND_CLICK,
-        throttle_ms: int | None = None,
-    ) -> None:
-        if not getattr(self, "_app_sound_interactions_ready", False):
-            return
-        self._play_app_sound(
-            APP_SOUND_CLICK,
-            throttle_key=throttle_key,
-            throttle_ms=(
-                int(throttle_ms)
-                if throttle_ms is not None
-                else int(self.APP_SOUND_THROTTLE_MS[APP_SOUND_CLICK])
-            ),
-        )
-
-    def _scroll_click_throttle_ms(self, scrollbar: QScrollBar, value: int) -> int:
-        now = monotonic()
-        state_key = id(scrollbar)
-        previous = self._app_sound_scroll_state.get(state_key)
-        self._app_sound_scroll_state[state_key] = (int(value), now)
-        if previous is None:
-            return int(self.APP_SOUND_THROTTLE_MS["scroll"])
-
-        previous_value, previous_time = previous
-        delta = abs(int(value) - int(previous_value))
-        if delta <= 0:
-            return int(self.APP_SOUND_THROTTLE_MS["scroll"])
-
-        elapsed = max(0.008, now - float(previous_time))
-        single_step = max(1, abs(int(scrollbar.singleStep() or 1)))
-        page_step = max(single_step, abs(int(scrollbar.pageStep() or single_step)))
-        speed_steps_per_second = (delta / single_step) / elapsed
-        page_distance = delta / page_step
-
-        if page_distance >= 1.0 or speed_steps_per_second >= 120.0:
-            return 24
-        if speed_steps_per_second >= 70.0:
-            return 34
-        if speed_steps_per_second >= 35.0:
-            return 50
-        if speed_steps_per_second >= 12.0:
-            return 75
-        return 120
-
-    def _play_scroll_click_sound(self, scrollbar: QScrollBar, value: int) -> None:
-        self._play_click_sound(
-            throttle_key=f"scroll:{id(scrollbar)}",
-            throttle_ms=self._scroll_click_throttle_ms(scrollbar, int(value)),
-        )
-
     def _play_notice_sound(self) -> None:
         self._play_app_sound(
             APP_SOUND_NOTICE,
@@ -7851,20 +7792,6 @@ class App(QMainWindow):
         if timer is not None and not timer.isActive():
             timer.start()
 
-    @staticmethod
-    def _widget_has_app_sound_hooks(widget: QWidget) -> bool:
-        try:
-            return bool(widget.property("_appSoundHooksInstalled"))
-        except Exception:
-            return False
-
-    @staticmethod
-    def _mark_widget_has_app_sound_hooks(widget: QWidget) -> None:
-        try:
-            widget.setProperty("_appSoundHooksInstalled", True)
-        except Exception:
-            pass
-
     def _install_app_sound_widget_hooks(self, root: QWidget | None = None) -> None:
         app = QApplication.instance()
         if app is None:
@@ -7876,36 +7803,6 @@ class App(QMainWindow):
             widgets = [widget for widget in app.allWidgets() if isinstance(widget, QWidget)]
         for widget in widgets:
             self._play_message_box_sound_once(widget)
-            self._install_app_sound_widget_hook(widget)
-
-    def _install_app_sound_widget_hook(self, widget: QWidget) -> None:
-        if self._widget_has_app_sound_hooks(widget):
-            return
-        self._mark_widget_has_app_sound_hooks(widget)
-        try:
-            if isinstance(widget, QSlider):
-                widget.sliderMoved.connect(
-                    lambda *_args, _self=self: _self._play_click_sound(
-                        throttle_key="slider",
-                        throttle_ms=int(_self.APP_SOUND_THROTTLE_MS["slider"]),
-                    )
-                )
-            elif isinstance(widget, QScrollBar):
-                widget.valueChanged.connect(
-                    lambda value, scrollbar=widget, _self=self: _self._play_scroll_click_sound(
-                        scrollbar,
-                        int(value),
-                    ),
-                )
-            elif isinstance(widget, QAbstractSlider):
-                widget.sliderMoved.connect(
-                    lambda *_args, _self=self: _self._play_click_sound(
-                        throttle_key="slider",
-                        throttle_ms=int(_self.APP_SOUND_THROTTLE_MS["slider"]),
-                    )
-                )
-        except Exception:
-            pass
 
     def _message_box_notice_worthy(self, message_box: QMessageBox) -> bool:
         text = " ".join(
@@ -12463,7 +12360,6 @@ class App(QMainWindow):
             "theme_library": self._load_theme_library(),
             "blob_icon_settings": dict(self.blob_icon_settings or self._load_blob_icon_settings()),
             "startup_sound_enabled": app_sound_settings[APP_SOUND_STARTUP],
-            "click_sound_enabled": app_sound_settings[APP_SOUND_CLICK],
             "notice_sound_enabled": app_sound_settings[APP_SOUND_NOTICE],
             "warning_sound_enabled": app_sound_settings[APP_SOUND_WARNING],
             "app_sound_settings": app_sound_settings,
@@ -37916,6 +37812,7 @@ class _AudioPreviewDialog(QDialog):
         "volume-up": "volume-up-fill.svg",
         "volume-mute": "volume-mute-fill.svg",
         "equalizer": "sliders2-vertical.svg",
+        "bookmark": "bookmark-plus-fill.svg",
         "export": "box-arrow-down.svg",
     }
 
@@ -37950,6 +37847,8 @@ class _AudioPreviewDialog(QDialog):
         self._media_stage_syncing = False
         self._equalizer_settings = load_equalizer_settings(getattr(app, "settings", None))
         self._equalizer_dialog: EqualizerDialog | None = None
+        self._current_bookmarks: list[AudioBookmark] = []
+        self._bookmark_menu: QMenu | None = None
         self._audio_preload_generation = 0
         self._audio_preload_cache: dict[tuple[int, str], _AudioPreviewPreparedMedia] = {}
         self._audio_preload_jobs: dict[tuple[int, str], tuple[Future, threading.Event, int]] = {}
@@ -38069,19 +37968,6 @@ class _AudioPreviewDialog(QDialog):
         self.wave_status_label.setProperty("role", "secondary")
         self.wave_status_label.setAlignment(Qt.AlignCenter)
         self.wave_status_label.hide()
-        self.equalizer_indicator_button = QToolButton(self.waveform_panel)
-        self.equalizer_indicator_button.setObjectName("audioPreviewEqualizerIndicator")
-        self.equalizer_indicator_button.setProperty("role", "mediaEqIndicator")
-        self.equalizer_indicator_button.setAutoRaise(False)
-        self.equalizer_indicator_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.equalizer_indicator_button.setFixedSize(26, 26)
-        self.equalizer_indicator_button.clicked.connect(self._open_equalizer_dialog)
-        self._set_icon_button_content(
-            self.equalizer_indicator_button,
-            "equalizer",
-            "EQ",
-        )
-        self.equalizer_indicator_button.hide()
         waveform_layout.addWidget(self.wave, 0, Qt.AlignVCenter)
         waveform_layout.addWidget(self.wave_status_label, 0, Qt.AlignCenter)
         waveform_layout.addStretch(1)
@@ -38253,6 +38139,12 @@ class _AudioPreviewDialog(QDialog):
             0,
             Qt.AlignLeft | Qt.AlignBottom,
         )
+        self.bookmark_button = self._create_bookmark_button()
+        playback_footer.addWidget(
+            self.bookmark_button,
+            0,
+            Qt.AlignLeft | Qt.AlignBottom,
+        )
         playback_footer.addStretch(1)
         self.export_button = QToolButton(playback_group)
         self.export_button.setObjectName("audioPreviewExportButton")
@@ -38266,7 +38158,7 @@ class _AudioPreviewDialog(QDialog):
         self.export_button.setAccessibleName("Export")
         self.export_menu = QMenu(self.export_button)
         self.export_button.setMenu(self.export_menu)
-        self.export_button.setEnabled(False)
+        self._set_media_button_enabled(self.export_button, False)
         playback_footer.addWidget(self.export_button, 0, Qt.AlignRight | Qt.AlignBottom)
         self.playback_control_band = QWidget(playback_group)
         self.playback_control_band.setObjectName("audioPreviewPlaybackControlBand")
@@ -38306,6 +38198,7 @@ class _AudioPreviewDialog(QDialog):
         self.volume_slider.setObjectName("audioPreviewVolumeSlider")
         self.volume_slider.setProperty("role", "mediaVolumeSlider")
         self.volume_slider.setRange(0, 100)
+        self.volume_slider.setDoubleClickResetValue(100)
         self.volume_slider.setSingleStep(5)
         self.volume_slider.setPageStep(10)
         self.volume_slider.setToolTip("Volume")
@@ -38484,22 +38377,8 @@ class _AudioPreviewDialog(QDialog):
             self.wave.updateGeometry()
             self.artwork_container.updateGeometry()
             self.artwork_label.updateGeometry()
-            self._position_equalizer_indicator()
         finally:
             self._media_stage_syncing = False
-
-    def _position_equalizer_indicator(self) -> None:
-        button = getattr(self, "equalizer_indicator_button", None)
-        panel = getattr(self, "waveform_panel", None)
-        if not isinstance(button, QToolButton) or panel is None:
-            return
-        margin = 8
-        button.move(
-            max(margin, panel.width() - button.width() - margin),
-            margin,
-        )
-        if button.isVisible():
-            button.raise_()
 
     def _media_icon_path(self, icon_key: str) -> Path:
         filename = self._MEDIA_ICON_FILES.get(str(icon_key or ""))
@@ -38628,7 +38507,17 @@ class _AudioPreviewDialog(QDialog):
         if not icon.isNull():
             pixmap = icon.pixmap(self.MEDIA_ICON_SIZE)
             if not pixmap.isNull():
-                icon = QIcon(self._tinted_media_icon_pixmap(pixmap, icon_color))
+                normal_pixmap = self._tinted_media_icon_pixmap(pixmap, icon_color)
+                disabled_color = QColor(icon_color)
+                disabled_color.setAlphaF(max(0.0, min(1.0, disabled_color.alphaF() * 0.38)))
+                disabled_pixmap = self._tinted_media_icon_pixmap(pixmap, disabled_color)
+                prepared_icon = QIcon()
+                for mode in (QIcon.Normal, QIcon.Active, QIcon.Selected):
+                    prepared_icon.addPixmap(normal_pixmap, mode, QIcon.Off)
+                    prepared_icon.addPixmap(normal_pixmap, mode, QIcon.On)
+                prepared_icon.addPixmap(disabled_pixmap, QIcon.Disabled, QIcon.Off)
+                prepared_icon.addPixmap(disabled_pixmap, QIcon.Disabled, QIcon.On)
+                icon = prepared_icon
 
         self._media_icon_cache[cache_key] = icon
         return icon
@@ -38683,6 +38572,21 @@ class _AudioPreviewDialog(QDialog):
         button.clicked.connect(slot)
         return button
 
+    def _set_media_button_enabled(self, button: QToolButton, enabled: bool) -> None:
+        was_enabled = bool(button.isEnabled())
+        next_enabled = bool(enabled)
+        button.setEnabled(next_enabled)
+        if was_enabled == next_enabled:
+            return
+        icon_key = str(button.property("mediaIconKey") or "")
+        fallback_text = str(button.property("mediaFallbackText") or "")
+        inactive = bool(button.property("mediaIconInactive"))
+        if icon_key:
+            self._set_icon_button_content(button, icon_key, fallback_text, inactive=inactive)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
     def _refresh_media_button_icons(self) -> None:
         for button in (
             getattr(self, "previous_button", None),
@@ -38709,8 +38613,8 @@ class _AudioPreviewDialog(QDialog):
             self._sync_loop_button()
         if hasattr(self, "equalizer_button"):
             self._sync_equalizer_button()
-        if hasattr(self, "equalizer_indicator_button"):
-            self._sync_equalizer_indicator()
+        if hasattr(self, "bookmark_button"):
+            self._sync_bookmark_button()
         if hasattr(self, "mute_button") and hasattr(self, "_audio_out"):
             self._sync_mute_button()
         export_button = getattr(self, "export_button", None)
@@ -38780,6 +38684,21 @@ class _AudioPreviewDialog(QDialog):
         button.setFixedSize(42, 34)
         button.clicked.connect(lambda _checked=False: self._open_equalizer_dialog())
         self._sync_equalizer_button(button)
+        return button
+
+    def _create_bookmark_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("audioPreviewBookmarkButton")
+        button.setProperty("role", "mediaToggle")
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setFixedSize(42, 34)
+        button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(button)
+        menu.aboutToShow.connect(self._rebuild_bookmark_menu)
+        button.setMenu(menu)
+        self._bookmark_menu = menu
+        self._sync_bookmark_button(button)
         return button
 
     def _apply_stop_button_font(self) -> None:
@@ -39021,24 +38940,11 @@ class _AudioPreviewDialog(QDialog):
         button.style().polish(button)
         button.update()
 
-    def _sync_equalizer_indicator(self) -> None:
-        button = getattr(self, "equalizer_indicator_button", None)
-        if not isinstance(button, QToolButton):
-            return
-        enabled = equalizer_is_enabled(self._effective_equalizer_settings())
-        self._set_icon_button_content(button, "equalizer", "EQ", inactive=False)
-        button.setToolTip("Equalizer On")
-        button.setAccessibleName("Equalizer On")
-        button.setVisible(enabled)
-        if enabled:
-            self._position_equalizer_indicator()
-
     def _sync_equalizer_surfaces(self) -> None:
         settings = self._effective_equalizer_settings()
         if hasattr(self, "scope"):
             self.scope.set_equalizer_settings(settings)
         self._sync_equalizer_button()
-        self._sync_equalizer_indicator()
         dialog = getattr(self, "_equalizer_dialog", None)
         if isinstance(dialog, EqualizerDialog):
             dialog.set_settings(settings)
@@ -39059,6 +38965,177 @@ class _AudioPreviewDialog(QDialog):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _bookmark_connection(self) -> sqlite3.Connection | None:
+        conn = getattr(self.app, "conn", None)
+        return conn if isinstance(conn, sqlite3.Connection) else None
+
+    def _bookmark_duration_ms(self) -> int:
+        duration = 0
+        for candidate in (
+            getattr(getattr(self, "_player", None), "duration", lambda: 0)(),
+            getattr(getattr(self, "_slider", None), "maximum", lambda: 0)(),
+        ):
+            try:
+                duration = max(duration, int(candidate or 0))
+            except (TypeError, ValueError):
+                continue
+        return max(0, duration)
+
+    def _bookmark_position_ms(self) -> int:
+        position = 0
+        for candidate in (
+            getattr(getattr(self, "_player", None), "position", lambda: 0)(),
+            getattr(getattr(self, "_slider", None), "value", lambda: 0)(),
+        ):
+            try:
+                position = max(position, int(candidate or 0))
+            except (TypeError, ValueError):
+                continue
+        duration = self._bookmark_duration_ms()
+        if duration > 0:
+            position = min(position, duration)
+        return max(0, position)
+
+    def _bookmark_label(self, bookmark: AudioBookmark) -> str:
+        label = str(getattr(bookmark, "label", "") or "").strip()
+        time_label = self._format_time(int(bookmark.position_ms))
+        if label:
+            return f"{time_label} - {label}"
+        return time_label
+
+    def _reload_current_bookmarks(self) -> None:
+        track_id = self._current_track_id_as_int()
+        conn = self._bookmark_connection()
+        bookmarks: list[AudioBookmark] = []
+        if track_id is not None and conn is not None:
+            try:
+                bookmarks = load_audio_bookmarks(conn, track_id)
+            except Exception:
+                bookmarks = []
+                logger = getattr(self.app, "logger", None)
+                if logger is not None:
+                    logger.exception("Failed to load audio bookmarks for track %s", track_id)
+        self._current_bookmarks = bookmarks
+        if hasattr(self, "wave"):
+            self.wave.set_bookmarks_ms([bookmark.position_ms for bookmark in bookmarks])
+        self._sync_bookmark_button()
+
+    def _sync_bookmark_button(self, button: QToolButton | None = None) -> None:
+        button = button or getattr(self, "bookmark_button", None)
+        if button is None:
+            return
+        track_id = self._current_track_id_as_int()
+        can_bookmark = track_id is not None and self._bookmark_connection() is not None
+        count = len(getattr(self, "_current_bookmarks", []) or [])
+        self._set_icon_button_content(
+            button,
+            "bookmark",
+            "Mark",
+            inactive=not can_bookmark,
+        )
+        button.setEnabled(can_bookmark)
+        if can_bookmark:
+            current_time = self._format_time(self._bookmark_position_ms())
+            noun = "bookmark" if count == 1 else "bookmarks"
+            button.setToolTip(f"Add Bookmark at {current_time} ({count} saved {noun})")
+            button.setAccessibleName("Audio Bookmarks")
+        else:
+            button.setToolTip("Bookmarks are available for saved tracks")
+            button.setAccessibleName("Audio Bookmarks")
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def _rebuild_bookmark_menu(self) -> None:
+        menu = self._bookmark_menu
+        if menu is None:
+            return
+        menu.clear()
+        track_id = self._current_track_id_as_int()
+        can_bookmark = track_id is not None and self._bookmark_connection() is not None
+
+        add_action = menu.addAction(
+            f"Add Bookmark at {self._format_time(self._bookmark_position_ms())}"
+        )
+        add_action.setEnabled(can_bookmark)
+        add_action.triggered.connect(
+            lambda _checked=False: self._add_bookmark_at_current_position()
+        )
+
+        bookmarks = list(getattr(self, "_current_bookmarks", []) or [])
+        menu.addSeparator()
+        if not bookmarks:
+            empty_action = menu.addAction("No bookmarks for this track")
+            empty_action.setEnabled(False)
+            return
+
+        for bookmark in bookmarks:
+            action = menu.addAction(self._bookmark_label(bookmark))
+            action.setData(int(bookmark.id))
+            action.triggered.connect(
+                lambda _checked=False, position_ms=bookmark.position_ms: self._jump_to_bookmark(
+                    position_ms
+                )
+            )
+
+        menu.addSeparator()
+        remove_menu = menu.addMenu("Remove Bookmark")
+        for bookmark in bookmarks:
+            action = remove_menu.addAction(self._bookmark_label(bookmark))
+            action.setData(int(bookmark.id))
+            action.triggered.connect(
+                lambda _checked=False, bookmark_id=bookmark.id: self._remove_bookmark(bookmark_id)
+            )
+        clear_action = menu.addAction("Remove All Bookmarks")
+        clear_action.triggered.connect(
+            lambda _checked=False: self._remove_all_bookmarks_for_current_track()
+        )
+
+    def _add_bookmark_at_current_position(self) -> None:
+        track_id = self._current_track_id_as_int()
+        conn = self._bookmark_connection()
+        if track_id is None or conn is None:
+            return
+        try:
+            bookmark = add_audio_bookmark(
+                conn,
+                track_id,
+                self._bookmark_position_ms(),
+                duration_ms=self._bookmark_duration_ms(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Bookmark", f"Could not save bookmark:\n{exc}")
+            return
+        self._reload_current_bookmarks()
+        self._jump_to_bookmark(bookmark.position_ms)
+
+    def _jump_to_bookmark(self, position_ms: int) -> None:
+        self._seek_to_ms(int(position_ms))
+
+    def _remove_bookmark(self, bookmark_id: int) -> None:
+        track_id = self._current_track_id_as_int()
+        conn = self._bookmark_connection()
+        if track_id is None or conn is None:
+            return
+        try:
+            delete_audio_bookmark(conn, bookmark_id, track_id=track_id)
+        except Exception as exc:
+            QMessageBox.warning(self, "Bookmark", f"Could not remove bookmark:\n{exc}")
+            return
+        self._reload_current_bookmarks()
+
+    def _remove_all_bookmarks_for_current_track(self) -> None:
+        track_id = self._current_track_id_as_int()
+        conn = self._bookmark_connection()
+        if track_id is None or conn is None:
+            return
+        try:
+            delete_audio_bookmarks_for_track(conn, track_id)
+        except Exception as exc:
+            QMessageBox.warning(self, "Bookmark", f"Could not remove bookmarks:\n{exc}")
+            return
+        self._reload_current_bookmarks()
 
     def _on_equalizer_dialog_settings_changed(self, settings: dict[str, object]) -> None:
         self._set_equalizer_settings(settings, persist=True)
@@ -39411,6 +39488,7 @@ class _AudioPreviewDialog(QDialog):
     ) -> None:
         self._source_spec = dict(source_spec)
         self._current_track_id = int(track_id)
+        self._reload_current_bookmarks()
         self._base_track_order = list(base_track_order)
         self._base_track_queue = self._placeholder_track_queue_items(base_track_order)
         self._track_order = list(effective_track_order)
@@ -39836,6 +39914,7 @@ class _AudioPreviewDialog(QDialog):
     ) -> None:
         self._source_spec = source_spec
         self._current_track_id = state.get("track_id")
+        self._reload_current_bookmarks()
         self._base_track_order = list(state.get("track_order") or [])
         self._base_track_queue = list(state.get("track_queue") or [])
         effective_track_order = self.app._normalize_track_ids(
@@ -40219,7 +40298,7 @@ class _AudioPreviewDialog(QDialog):
                 continue
             action = self.export_menu.addAction(text)
             action.triggered.connect(handler)
-        self.export_button.setEnabled(bool(self.export_menu.actions()))
+        self._set_media_button_enabled(self.export_button, bool(self.export_menu.actions()))
 
     def _open_artwork_preview(self) -> None:
         if not self._current_artwork_data:
@@ -40297,7 +40376,7 @@ class _AudioPreviewDialog(QDialog):
         self._visualization_gain = gain
         self.peak_meter.set_gain(gain)
         if hasattr(self, "scope"):
-            self.scope.set_gain(gain)
+            self.scope.set_gain(gain, cancel_release=playing)
         if not playing:
             return
         if gain > 0.0:
@@ -40491,8 +40570,11 @@ class _AudioPreviewDialog(QDialog):
         can_wrap_playlist = (
             self._loop_mode == self.LOOP_MODE_PLAYLIST and index >= 0 and len(self._track_order) > 1
         )
-        self.previous_button.setEnabled(can_wrap_playlist or index > 0)
-        self.next_button.setEnabled(can_wrap_playlist or 0 <= index < len(self._track_order) - 1)
+        self._set_media_button_enabled(self.previous_button, can_wrap_playlist or index > 0)
+        self._set_media_button_enabled(
+            self.next_button,
+            can_wrap_playlist or 0 <= index < len(self._track_order) - 1,
+        )
         self._sync_play_next_selection()
 
     def _navigate_relative(self, offset: int, *, autoplay: bool, wrap: bool = False) -> bool:
@@ -40532,14 +40614,20 @@ class _AudioPreviewDialog(QDialog):
             return
         self._handling_end_of_media = True
         try:
+            continued_playback = False
             self._apply_position(self._player.duration(), self._player.duration())
             if self._loop_mode == self.LOOP_MODE_TRACK:
                 self._restart_current_media()
+                continued_playback = True
             elif self._loop_mode == self.LOOP_MODE_PLAYLIST:
-                if not self._navigate_relative(1, autoplay=True, wrap=True):
+                continued_playback = self._navigate_relative(1, autoplay=True, wrap=True)
+                if not continued_playback:
                     self._restart_current_media()
+                    continued_playback = True
             elif self._auto_advance_enabled():
-                self._navigate_relative(1, autoplay=True)
+                continued_playback = self._navigate_relative(1, autoplay=True)
+            if not continued_playback:
+                self._ensure_visualization_release_running()
         finally:
             self._handling_end_of_media = False
 
@@ -40627,7 +40715,6 @@ class _AudioPreviewDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_media_stage_size()
-        self._position_equalizer_indicator()
         self._resize_timer.start()
 
 
@@ -40933,6 +41020,7 @@ class WaveformWidget(QWidget):
         self._stored_waveform_pixmaps: dict[str, QPixmap] = {}
         self._stored_waveform_cache_key = None
         self._harmonic_frames = []
+        self._bookmarks_ms: list[int] = []
         self._duration = 1
         self._playhead = 0
         self._preferred_height = 120
@@ -41016,6 +41104,24 @@ class WaveformWidget(QWidget):
             self._update_playhead_regions(previous_playhead, next_playhead)
         else:
             self.update()
+
+    def set_bookmarks_ms(self, positions_ms) -> None:
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for position_ms in positions_ms or []:
+            try:
+                clean_position = max(0, int(position_ms))
+            except (TypeError, ValueError):
+                continue
+            if clean_position in seen:
+                continue
+            cleaned.append(clean_position)
+            seen.add(clean_position)
+        cleaned.sort()
+        if cleaned == self._bookmarks_ms:
+            return
+        self._bookmarks_ms = cleaned
+        self.update()
 
     def _position_from_x(self, x_pos: float) -> int:
         rect = self.rect()
@@ -41448,6 +41554,18 @@ class WaveformWidget(QWidget):
                 p.drawPixmap(QPoint(0, 0), self._static_waveform_pixmap(waveform_rect))
             p.restore()
 
+        if self._bookmarks_ms and self._duration > 0:
+            marker_color = QColor("#0A84FF" if light_mode else "#4DA3FF")
+            marker_shadow = QColor(0, 0, 0, 70) if light_mode else QColor(255, 255, 255, 60)
+            for position_ms in self._bookmarks_ms:
+                ratio = max(0.0, min(1.0, position_ms / self._duration))
+                x = r.left() + (r.width() - 1) * ratio
+                x_pos = int(round(x))
+                p.setPen(QPen(marker_shadow, 3))
+                p.drawLine(x_pos, int(waveform_rect.top()), x_pos, int(waveform_rect.bottom()))
+                p.setPen(QPen(marker_color, 2))
+                p.drawLine(x_pos, int(waveform_rect.top()), x_pos, int(waveform_rect.bottom()))
+
         # playhead
         if self._duration > 0:
             x = r.left() + (r.width() - 1) * (self._playhead / self._duration)
@@ -41536,9 +41654,9 @@ class SpectrumGraphWidget(WaveformWidget):
         self._release_elapsed_ms = 0
         self.update()
 
-    def set_gain(self, gain: float) -> None:
+    def set_gain(self, gain: float, *, cancel_release: bool = True) -> None:
         self._gain = max(0.0, min(1.0, float(gain)))
-        if self._gain > 0.0 and self._release_active:
+        if cancel_release and self._gain > 0.0 and self._release_active:
             self._release_active = False
             self._release_elapsed_ms = 0
         self.update()

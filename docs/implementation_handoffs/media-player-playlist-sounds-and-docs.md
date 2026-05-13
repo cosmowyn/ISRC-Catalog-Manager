@@ -6,7 +6,7 @@ Date: 2026-05-06
 
 This change set expands the Audio Player into a stronger catalog auditioning surface, adds app-wide sound-effect controls, wires new playlist control icons, fixes the catalog quick-filter icon rendering, and updates the public documentation surfaces for the media player.
 
-The Audio Player now supports icon-based auto advance, album-scoped playlist playback, shuffle scoped to the active queue, and stop-button visualization fade behavior that matches pause. The catalog search toolbar has a compact selection-filter button that applies the current table cell to the existing search filter. App-wide sound effects now live in a dedicated Sounds settings tab with independent toggles for startup, click, notice, and warning sounds.
+The Audio Player now supports icon-based auto advance, album-scoped playlist playback, shuffle scoped to the active queue, and stop-button visualization fade behavior that matches pause. The catalog search toolbar has a compact selection-filter button that applies the current table cell to the existing search filter. App-wide sound effects now live in a dedicated Sounds settings tab with independent toggles for startup, notice, and warning sounds.
 
 All bundled application sound effects were designed and created by Aeon Cosmowyn.
 
@@ -14,14 +14,11 @@ All bundled application sound effects were designed and created by Aeon Cosmowyn
 
 - Added `Settings > Application Settings > Sounds` with independent toggles for:
   - startup sound
-  - scroll/slider click feedback
   - completed-action notice feedback
   - warning/error feedback
 - Moved startup sound control out of General and into the new Sounds tab.
 - Added sound-effect attribution to the Sounds settings page and help/docs.
-- Added `sounds/click.wav`, `sounds/notice.wav`, and `sounds/warning.wav`.
-- Click sound is limited to scrolling and slider movement. Button clicks do not trigger it.
-- Scroll click feedback scales its throttle with scroll speed.
+- Added `sounds/notice.wav` and `sounds/warning.wav`.
 - Notice/warning sounds are played for completed actions and warning/error message paths.
 - Added icon-only media player controls for:
   - Auto Advance using `icons/music-note-list.svg`

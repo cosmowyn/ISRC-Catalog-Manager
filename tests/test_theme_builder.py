@@ -392,7 +392,6 @@ class ThemeBuilderTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(dialog.findChildren(QSlider)), 3)
             self.assertTrue(dialog.startup_sound_enabled_check.isChecked())
-            self.assertTrue(dialog.click_sound_enabled_check.isChecked())
             self.assertTrue(dialog.notice_sound_enabled_check.isChecked())
             self.assertTrue(dialog.warning_sound_enabled_check.isChecked())
             label_texts = [label.text() for label in dialog.findChildren(QLabel)]
@@ -435,13 +434,10 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._blob_icon_editors["audio_lossy_database"].emoji_edit.setText("📼")
             dialog._blob_icon_editors["image_database"].emoji_edit.setText("🗂️")
             dialog.startup_sound_enabled_check.setChecked(False)
-            dialog.click_sound_enabled_check.setChecked(False)
             values = dialog.values()
 
             self.assertFalse(values["startup_sound_enabled"])
-            self.assertFalse(values["click_sound_enabled"])
             self.assertFalse(values["app_sound_settings"]["startup"])
-            self.assertFalse(values["app_sound_settings"]["click"])
             self.assertTrue(values["app_sound_settings"]["notice"])
             self.assertTrue(values["app_sound_settings"]["warning"])
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
