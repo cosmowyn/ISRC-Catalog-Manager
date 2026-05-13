@@ -28,7 +28,7 @@ dependencies = [
   "soundfile==0.13.1",
   "scipy==1.15.3; python_version < '3.14'",
   "scipy==1.17.1; python_version >= '3.14'",
-  "cryptography==47.0.0",
+  "cryptography==48.0.0",
 ]
 
 [project.optional-dependencies]
