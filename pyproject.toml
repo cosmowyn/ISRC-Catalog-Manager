@@ -60,6 +60,8 @@ packages = [
   "isrc_manager.contract_templates",
   "isrc_manager.conversion",
   "isrc_manager.conversion.adapters",
+  "isrc_manager.custom_fields",
+  "isrc_manager.diagnostics",
   "isrc_manager.domain",
   "isrc_manager.exchange",
   "isrc_manager.forensics",
@@ -74,6 +76,7 @@ packages = [
   "isrc_manager.services",
   "isrc_manager.tags",
   "isrc_manager.tasks",
+  "isrc_manager.tracks",
   "isrc_manager.works",
 ]
 

@@ -5,6 +5,7 @@ from .catalog import (
     ContractTemplateCatalogSection,
     ContractTemplateCatalogService,
 )
+from .errors import ContractTemplateIngestionError
 from .export_service import (
     ContractTemplateExportError,
     ContractTemplateExportService,
@@ -19,7 +20,6 @@ from .html_support import (
 )
 from .ingestion import (
     SUPPORTED_TEMPLATE_SOURCE_FORMATS,
-    ContractTemplateIngestionError,
     DOCXTemplateScanner,
     PagesTemplateAdapter,
     detect_template_source_format,

@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMainWindow
 
-import ISRC_manager as app_module
+from isrc_manager import main_window as app_module
 
 
 class _ShortcutOwner(QMainWindow):

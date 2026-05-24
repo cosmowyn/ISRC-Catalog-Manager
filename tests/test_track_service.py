@@ -10,7 +10,8 @@ from unittest import mock
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.media import waveform_cache
-from isrc_manager.media.waveform_cache import AudioWaveformCacheService, AudioWaveformCacheWorker
+from isrc_manager.media.waveform_cache import AudioWaveformCacheService
+from isrc_manager.media.waveform_cache_worker import AudioWaveformCacheWorker
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
 
 

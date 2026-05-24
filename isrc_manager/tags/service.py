@@ -53,7 +53,6 @@ except ImportError:  # pragma: no cover - exercised indirectly in runtime packag
 from isrc_manager.domain.codes import normalize_isrc, to_iso_isrc
 from isrc_manager.file_storage import deduplicate_export_path, export_package_name
 
-from .catalog import has_exportable_catalog_tag_data
 from .models import (
     ArtworkPayload,
     AudioTagData,
@@ -65,6 +64,7 @@ from .models import (
     TaggedAudioExportItem,
     TaggedAudioExportResult,
 )
+from .validation import has_exportable_catalog_tag_data
 
 TAGGED_AUDIO_EXPORT_STAGE_COUNT = 3
 

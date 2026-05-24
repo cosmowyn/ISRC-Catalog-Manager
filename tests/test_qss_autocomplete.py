@@ -21,7 +21,7 @@ else:
     QSS_AUTOCOMPLETE_IMPORT_ERROR = None
 
 try:
-    import ISRC_manager as app_module
+    from isrc_manager import main_window as app_module
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_module = None
     APP_IMPORT_ERROR = exc

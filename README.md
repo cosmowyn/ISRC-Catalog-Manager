@@ -221,7 +221,7 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
-- the docked workspace keeps Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the docked workspace keeps Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, and Global Search open beside the table as tabbed panels, while stored artist/album cleanup lives with Diagnostics
 - the Code Registry Workspace separates app-managed internal codes from external identifiers, shows shared usage counts, and lets you link an unassigned generated value later
 - the Contract Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive drafting, preview, and PDF export from one HTML working draft
 - exchange import can classify canonical internal-looking catalog values into the internal registry, keep non-conforming values as external identifiers, and report accepted, external, mismatch, skipped, merged, and conflicted outcomes explicitly
@@ -242,7 +242,7 @@ ISRC Catalog Manager is especially useful for:
 
 - independent artists maintaining their own release history
 - boutique labels managing a developing catalog
-- catalog managers cleaning up metadata across legacy projects
+- catalog managers cleaning up stored artist and album metadata across legacy projects
 - publishers and rights coordinators who need a reliable local reference
 - teams that want durable, local files instead of browser-only workflows
 
@@ -299,9 +299,9 @@ The screenshots below are regenerated from the bundled demo workspace and captur
 
 ![Custom columns](docs/screenshots/custom-columns.png)
 
-### Catalog Managers
+### Catalog Cleanup
 
-![Catalog managers](docs/screenshots/catalog-managers.png)
+![Catalog cleanup](docs/screenshots/catalog-managers.png)
 
 ## Workspace Design
 

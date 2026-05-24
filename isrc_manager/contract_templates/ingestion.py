@@ -15,6 +15,7 @@ from zipfile import BadZipFile, ZipFile
 from isrc_manager.file_storage import coalesce_filename
 
 from ..external_launch import run_external_launcher_subprocess
+from .errors import ContractTemplateIngestionError
 from .html_support import (
     HTMLTemplateBundle,
     build_html_bundle_from_source_bytes,
@@ -31,10 +32,6 @@ from .parser import extract_placeholders
 SUPPORTED_TEMPLATE_SOURCE_FORMATS = frozenset({"docx", "pages", "html"})
 
 _DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-
-
-class ContractTemplateIngestionError(RuntimeError):
-    """Raised when a template source cannot be converted or scanned."""
 
 
 def detect_template_source_format(

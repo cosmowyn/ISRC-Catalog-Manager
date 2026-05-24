@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from isrc_manager import history_retention_controller
 from isrc_manager.constants import APP_NAME
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.media.derivatives import DerivativeLedgerService
@@ -42,7 +43,7 @@ try:
     from PySide6.QtGui import QColor, QFontMetrics, QIcon, QImage, QKeyEvent, QKeySequence
     from PySide6.QtWidgets import QScrollArea, QStyle, QStyleOptionSlider, QTabBar
 
-    import ISRC_manager as app_module
+    from isrc_manager import main_window as app_module
     from isrc_manager.qss_reference import collect_qss_reference_entries
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_module = None
@@ -1315,7 +1316,7 @@ class AppShellTestCase(unittest.TestCase):
         self._close_window()
         settings = self._settings()
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
-        repo_root = Path(app_module.__file__).resolve().parent
+        repo_root = Path(app_module.__file__).resolve().parents[1]
         demo_runtime_db = (
             repo_root / "demo" / ".runtime" / "localappdata" / APP_NAME / "Database" / "library.db"
         )
@@ -5279,7 +5280,7 @@ class AppShellTestCase(unittest.TestCase):
                 return self._clicked_button
 
         with (
-            mock.patch.object(app_module, "QMessageBox", _CleanupPromptBox),
+            mock.patch.object(history_retention_controller, "QMessageBox", _CleanupPromptBox),
             mock.patch.object(
                 self.window,
                 "open_application_storage_admin_dialog",
@@ -10033,7 +10034,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(footer_row.itemAt(6).widget(), dialog.export_button)
         original_order = list(dialog._track_order)
         self.assertGreaterEqual(len(original_order), 1)
-        with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
+        with mock.patch("isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()):
             dialog.shuffle_button.click()
         pump_events()
         self.assertTrue(dialog.shuffle_button.isChecked())
@@ -10232,7 +10233,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertNotIn(other_album_track, dialog._track_order)
 
-        with mock.patch("ISRC_manager.random.shuffle", side_effect=lambda values: values.reverse()):
+        with mock.patch("isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()):
             dialog.shuffle_button.click()
         pump_events()
         self.assertTrue(dialog.shuffle_button.isChecked())

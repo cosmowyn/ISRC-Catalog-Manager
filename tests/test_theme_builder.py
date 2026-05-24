@@ -20,7 +20,7 @@ try:
         QWidget,
     )
 
-    import ISRC_manager as app_module
+    from isrc_manager import main_window as app_module
     from isrc_manager.parties import PartyRecord
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
     from isrc_manager.storage_admin import StorageAdminAudit, StorageAdminSummary

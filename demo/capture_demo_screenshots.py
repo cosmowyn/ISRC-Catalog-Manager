@@ -118,7 +118,7 @@ def capture() -> list[Path]:
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("ISRC Catalog Manager Demo Capture")
 
-    from ISRC_manager import App, CatalogManagersDialog, CustomColumnsDialog
+    from ISRC_manager import App, CustomColumnsDialog, DiagnosticsDialog
     from isrc_manager.history.dialogs import HistoryDialog
 
     with (
@@ -172,11 +172,11 @@ def capture() -> list[Path]:
         _show_and_capture(window, workspace_path, wait_ms=450)
         captured.append(workspace_path)
 
-        managers = CatalogManagersDialog(window, initial_tab="artists", parent=window)
-        managers.focus_tab("albums")
+        managers = DiagnosticsDialog(window, parent=window)
+        managers.focus_cleanup_tab("albums")
         managers.resize(1220, 780)
-        managers.tabs.setCurrentIndex(1)
-        managers.albums_tab.reload()
+        if managers.catalog_cleanup_panel is not None:
+            managers.catalog_cleanup_panel.refresh()
         managers_path = SCREENSHOT_DIR / "catalog-managers.png"
         _show_and_capture(managers, managers_path, wait_ms=350)
         captured.append(managers_path)

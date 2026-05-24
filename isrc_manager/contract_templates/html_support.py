@@ -11,6 +11,7 @@ from zipfile import ZipFile
 
 from isrc_manager.file_storage import ManagedFileStorage
 
+from .errors import ContractTemplateIngestionError
 from .models import (
     ContractTemplateScanEntry,
     ContractTemplateScanOccurrence,
@@ -39,8 +40,6 @@ def replace_html_placeholders(html_text: str, replacements: dict[str, str]) -> s
 
 
 def _ingestion_error(message: str) -> RuntimeError:
-    from .ingestion import ContractTemplateIngestionError
-
     return ContractTemplateIngestionError(message)
 
 

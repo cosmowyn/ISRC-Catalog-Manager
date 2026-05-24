@@ -7,7 +7,7 @@ from tests.qt_test_helpers import pump_events, require_qapplication
 try:
     from PySide6.QtGui import QAction
 
-    import ISRC_manager as app_module
+    from isrc_manager import main_window as app_module
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     QAction = None
     APP_IMPORT_ERROR = exc

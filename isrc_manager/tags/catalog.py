@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .mapping import catalog_metadata_to_tags
 from .models import ArtworkPayload, AudioTagData
+from .validation import has_exportable_catalog_tag_data
 
 if TYPE_CHECKING:
     from isrc_manager.releases import ReleaseService
@@ -160,16 +160,6 @@ def build_catalog_export_tag_data(
         release_policy=CATALOG_EXPORT_RELEASE_POLICY,
         include_artwork_bytes=include_artwork_bytes,
     )
-
-
-def has_exportable_catalog_tag_data(tag_data: AudioTagData) -> bool:
-    for field in dataclass_fields(AudioTagData):
-        if field.name in {"raw_fields", "warnings"}:
-            continue
-        value = getattr(tag_data, field.name)
-        if value not in (None, "", [], {}, ()):
-            return True
-    return False
 
 
 def write_catalog_export_tags(

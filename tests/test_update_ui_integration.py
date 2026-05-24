@@ -6,7 +6,7 @@ from unittest import mock
 from isrc_manager.update_checker import ReleaseManifest, UpdateCheckResult, UpdateCheckStatus
 
 try:
-    import ISRC_manager as app_module
+    from isrc_manager import main_window as app_module
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_module = None
     APP_IMPORT_ERROR = exc

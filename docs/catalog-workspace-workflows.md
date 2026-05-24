@@ -1,6 +1,6 @@
 # Catalog Workspace Workflows
 
-This guide mirrors the in-app help chapters for the main workspace, catalog managers, releases, media preview, and reviewed media attachment.
+This guide mirrors the in-app help chapters for the main workspace, diagnostics catalog cleanup, releases, media preview, and reviewed media attachment.
 
 Use `Help > Help Contents` for the integrated manual. This page is the repository-side companion for that workflow.
 

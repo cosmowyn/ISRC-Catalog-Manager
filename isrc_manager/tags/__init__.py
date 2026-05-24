@@ -4,7 +4,6 @@ from .catalog import (
     CATALOG_EXPORT_RELEASE_POLICY,
     build_catalog_export_tag_data,
     build_catalog_tag_data,
-    has_exportable_catalog_tag_data,
     write_catalog_export_tags,
 )
 from .mapping import (
@@ -33,6 +32,7 @@ from .service import (
     BulkAudioAttachService,
     TaggedAudioExportService,
 )
+from .validation import has_exportable_catalog_tag_data
 
 __all__ = [
     "ArtworkPayload",
