@@ -1,7 +1,7 @@
 {
-  "version": "3.14.1",
+  "version": "3.14.2",
   "released_at": "2026-05-24",
-  "summary": "Update change control planning docs",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.14.1.md",
+  "summary": "De-monolithize ISRC manager entrypoint",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.14.2.md",
   "minimum_supported_version": null
 }
