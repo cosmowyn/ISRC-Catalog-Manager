@@ -16,6 +16,10 @@ Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
 
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
+
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
 Do not infer permission for adjacent phase work.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
 
@@ -107,7 +123,7 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
@@ -116,18 +132,30 @@ Execute **Plan 1 / Phase 3 — Media Preview Dialogs** only.
 
 ## Scope
 - move `_ImagePreviewDialog`
+- move `_HiDpiArtworkLabel`
 - move `_AudioPreviewDialog`
+- move audio preview preload/result classes and helper functions with the dialog
 - add `MediaPreviewHost` seam if needed
 - preserve runtime behavior and navigation/export callbacks
+- preserve integration with waveform/visualizer widgets, artwork export, queue navigation, bookmarks, and equalizer playback
+- enforce media responsibility separation:
+  - visualization
+  - preparation/preload
+  - playback
+  - export
 
 ## Allowed
 - extraction into `isrc_manager/media/preview_dialogs.py`
 - creation/update of host protocol for preview callbacks
 - compatibility imports/re-exports if needed
 - focused media preview tests and compile/import validation
+- narrowly scoped imports from existing `waveform_cache`, `equalizer`, `equalizer_player`, and `bookmarks` modules
 
 ## Not allowed
 - no waveform move beyond what Phase 2 already established
+- no new media-player feature work
+- no single media module owning visualization, preparation/preload, playback, and export
+- no media preview extraction that becomes a new platform monolith
 - no album/edit dialog extraction
 - no catalog manager work
 - no Phase 4+ work
@@ -135,6 +163,8 @@ Execute **Plan 1 / Phase 3 — Media Preview Dialogs** only.
 ## Validation
 - preview dialogs still open and function
 - navigation/export callbacks behave correctly
+- media-player UI workflow tests still pass
+- media architecture boundaries are documented in the handoff
 - compile/import sanity passes
 
 ## Handoff filename
@@ -148,7 +178,7 @@ Execute **Plan 1 / Phase 3 — Media Preview Dialogs** only.
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction

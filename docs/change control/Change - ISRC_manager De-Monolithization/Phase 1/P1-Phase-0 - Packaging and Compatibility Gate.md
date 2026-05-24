@@ -16,6 +16,10 @@ Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
 
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
+
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
 Do not infer permission for adjacent phase work.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
 
@@ -107,7 +123,7 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
@@ -119,22 +135,44 @@ Execute **Plan 1 / Phase 0 — Packaging and Compatibility Gate** only.
 - fix packaging configuration so live packages are represented correctly
 - define the root alias / compatibility import policy for Plan 1
 - ensure new or already-live packages are visible to packaging/runtime
+- record the current top-level class/function inventory as the extraction baseline
+- audit current root `ISRC_manager` imports in tests/callers that will need temporary compatibility aliases
+- create `root/docs/change control/Change - ISRC_manager De-Monolithization/compatibility_inventory.md`
+- initialize `root/docs/change control/Change - ISRC_manager De-Monolithization/architecture_metrics.md` as a planning gate record
 
 ## Allowed
 - package list audit
 - `pyproject.toml` package configuration corrections
 - `__init__.py` parity corrections
 - documentation of root alias policy
+- documentation of current class/function inventory and root-tested imports
+- creation of the compatibility inventory with required schema/headings
+- creation of the architecture metrics placeholder with required metrics/headings
 - narrowly scoped compile/import fixes required for packaging sanity
 
 ## Not allowed
 - no class moves yet
 - no runtime behavior changes beyond packaging visibility fixes
 - no extraction of dialogs/widgets/panels
+- no media visualizer or preview extraction
 - no Phase 1+ work
 
 ## Validation
 - packaging config includes all live packages needed by the repo
+- any newly planned packages are represented before they are used
+- `compatibility_inventory.md` exists and includes required fields:
+  - alias source
+  - alias target
+  - owning phase
+  - dependent runtime callers
+  - dependent tests
+  - deprecation warning status
+  - migration target path
+  - planned removal phase
+  - current status
+  - notes / exception references
+- no compatibility alias is planned without a removal phase
+- `architecture_metrics.md` exists with required metric headings
 - compile/import sanity passes
 - no runtime behavior changed
 
@@ -149,7 +187,7 @@ Execute **Plan 1 / Phase 0 — Packaging and Compatibility Gate** only.
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction

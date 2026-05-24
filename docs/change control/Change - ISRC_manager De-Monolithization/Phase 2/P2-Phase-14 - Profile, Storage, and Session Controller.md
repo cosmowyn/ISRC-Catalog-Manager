@@ -1,4 +1,4 @@
-# Codex Prompt — Execute Phase 16 Only
+# Codex Prompt — Execute Phase 14 Only
 
 Act as a senior software engineer working directly in the live repository, with strong judgment for migration discipline, scope control, repository hygiene, QA/QC rigor, token-budget discipline, and production-grade code quality.
 
@@ -15,6 +15,10 @@ Execute only the phase specified in this document.
 Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 2 - App Decomposition and Final Entry-Facade Reduction.md`
+
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
 
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P2.15.1` for Plan 2 Phase 15 exception 1
 
@@ -107,51 +123,53 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 2 / Phase 16 — Theme, Settings, and History Retention Controllers** only.
+Execute **Plan 2 / Phase 14 — Profile, Storage, and Session Controller** only.
 
 ## Scope
-- move theme load/apply/save logic
-- move settings current/apply logic
-- move history retention and storage budget logic
-- keep behavior stable through delegation/shims
+- move profile selection, profile CRUD, DB preparation/open/close/session activation into `profile_session.py`
+- reuse existing `ProfileWorkflowService` and session/database helpers
+- include storage-root transition, startup profile loading, and migration prompt orchestration currently owned by `App`
+- preserve public behavior and stable entry points
+- keep `App` runnable through delegation/shims
 
 ## Allowed
-- creation or update of `isrc_manager/theme_controller.py`
-- creation or update of `isrc_manager/settings_controller.py`
-- creation or update of `isrc_manager/history_retention_controller.py`
+- creation or update of `isrc_manager/profile_session.py`
+- extraction of profile/session orchestration
+- delegation to existing profile workflow/session services
 - thin delegation shims in `App`
-- focused settings/theme/history validation
+- focused profile/database/storage-root validation
 
 ## Not allowed
-- no layout/action ribbon extraction yet
-- no catalog workflow extraction yet
-- no feature-family workflow extraction
-- no final `App` move
-- no Phase 17+ work
+- no diagnostics extraction yet
+- no theme/settings/history extraction
+- no layout/action ribbon extraction
+- no unrelated feature workflow moves
+- no Phase 15+ work
 
 ## Validation
-- settings and theme tests pass
-- history/storage flows remain stable
+- profile switching works
+- DB open/close flows work
+- storage root transition tests still pass
 - compile/import sanity passes
 
 ## Handoff filename
-`P2 Phase 16 handoff.md`
+`P2 Phase 14 handoff.md`
 
 ## Execution order
 1. Read the engineering plan
-2. Confirm Phase 16 scope
-3. Inspect theme/settings/history code only as needed
-4. Execute Phase 16 only
+2. Confirm Phase 14 scope
+3. Inspect profile/session code only as needed
+4. Execute Phase 14 only
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction
-Execute only **Plan 2 / Phase 16**.
+Execute only **Plan 2 / Phase 14**.

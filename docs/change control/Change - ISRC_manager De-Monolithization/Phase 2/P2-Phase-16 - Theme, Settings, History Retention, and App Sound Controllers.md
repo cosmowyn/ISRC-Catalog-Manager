@@ -1,4 +1,4 @@
-# Codex Prompt — Execute Phase 9 Only
+# Codex Prompt — Execute Phase 16 Only
 
 Act as a senior software engineer working directly in the live repository, with strong judgment for migration discipline, scope control, repository hygiene, QA/QC rigor, token-budget discipline, and production-grade code quality.
 
@@ -6,7 +6,7 @@ You are the central authority and final decision-maker for this task.
 Use worker agents only as bounded support units.
 Use a maximum of 6 worker agents.
 Close all idle workers as soon as they are no longer needed.
-Do not deviate from Engineering Plan 1.
+Do not deviate from Engineering Plan 2.
 Do not widen scope.
 Execute only the phase specified in this document.
 
@@ -14,7 +14,11 @@ Execute only the phase specified in this document.
 
 Read the engineering plan from:
 
-`root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 2 - App Decomposition and Final Entry-Facade Reduction.md`
+
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
 
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,15 +103,17 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
-- use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
+- use phase-based exception ids, for example `P2.15.1` for Plan 2 Phase 15 exception 1
 
 ## Final output expectation
 
@@ -107,47 +123,56 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 1 / Phase 9 — Album Editor Host Seam** only.
+Execute **Plan 2 / Phase 16 — Theme, Settings, History Retention, and App Sound Controllers** only.
 
 ## Scope
-- introduce `AlbumEditorHost`
-- prepare extraction without moving the album dialog yet
-- establish seam without changing runtime behavior
+- move theme load/apply/save logic
+- move settings current/apply logic
+- move history retention and storage budget logic
+- move app sound/startup sound settings and playback orchestration
+- reuse existing `theme_builder.py`, settings transfer services, and `app_sounds.py`
+- keep behavior stable through delegation/shims
 
 ## Allowed
-- creation/update of `isrc_manager/tracks/host_protocols.py`
-- narrowly scoped adapter/seam code
-- type-only/import-safe changes required to prepare extraction
-- focused compile/tests
+- creation or update of `isrc_manager/theme_controller.py`
+- creation or update of `isrc_manager/settings_controller.py`
+- creation or update of `isrc_manager/history_retention_controller.py`
+- creation or update of `isrc_manager/app_sound_controller.py`
+- thin delegation shims in `App`
+- focused settings/theme/history/app-sound validation
 
 ## Not allowed
-- no dialog move yet
-- no edit dialog seam work yet
-- no unrelated App decomposition
-- no Phase 10+ work
+- no layout/action ribbon extraction yet
+- no catalog workflow extraction yet
+- no feature-family workflow extraction
+- no final `App` move
+- no Phase 17+ work
 
 ## Validation
-- no runtime behavior change
-- compile/tests green
+- settings and theme tests pass
+- QSS autocomplete/theme builder tests pass
+- history/storage flows remain stable
+- startup/app sound tests remain stable
+- compile/import sanity passes
 
 ## Handoff filename
-`P1 Phase 9 handoff.md`
+`P2 Phase 16 handoff.md`
 
 ## Execution order
 1. Read the engineering plan
-2. Confirm Phase 9 scope
-3. Inspect album dialog dependencies only as needed
-4. Execute Phase 9 only
+2. Confirm Phase 16 scope
+3. Inspect theme/settings/history code only as needed
+4. Execute Phase 16 only
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction
-Execute only **Plan 1 / Phase 9**.
+Execute only **Plan 2 / Phase 16**.

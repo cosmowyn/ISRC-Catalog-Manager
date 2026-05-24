@@ -1,4 +1,4 @@
-# Codex Prompt — Execute Phase 17 Only
+# Codex Prompt — Execute Phase 11 Only
 
 Act as a senior software engineer working directly in the live repository, with strong judgment for migration discipline, scope control, repository hygiene, QA/QC rigor, token-budget discipline, and production-grade code quality.
 
@@ -6,7 +6,7 @@ You are the central authority and final decision-maker for this task.
 Use worker agents only as bounded support units.
 Use a maximum of 6 worker agents.
 Close all idle workers as soon as they are no longer needed.
-Do not deviate from Engineering Plan 2.
+Do not deviate from Engineering Plan 1.
 Do not widen scope.
 Execute only the phase specified in this document.
 
@@ -14,7 +14,11 @@ Execute only the phase specified in this document.
 
 Read the engineering plan from:
 
-`root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 2 - App Decomposition and Final Entry-Facade Reduction.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
+
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
 
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,15 +103,17 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
-- use phase-based exception ids, for example `P2.15.1` for Plan 2 Phase 15 exception 1
+- use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
 
 ## Final output expectation
 
@@ -107,49 +123,48 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 2 / Phase 17 — Layout and Action Ribbon Controllers** only.
+Execute **Plan 1 / Phase 11 — Track Editor Final Seam Check** only.
 
 ## Scope
-- move named layouts
-- move dock state persistence
-- move ribbon registry/configuration and view toggle logic
-- preserve shell behavior through delegation/shims
+- verify `TrackEditorHost` covers the currently expanded `EditDialog` behavior
+- add missing protocol methods/adapters if the Phase 9 seam is incomplete
+- prepare extraction of `EditDialog` without moving it yet and without changing runtime behavior
 
 ## Allowed
-- creation or update of `isrc_manager/main_window_layout.py`
-- creation or update of `isrc_manager/action_ribbon.py`
-- thin delegation shims in `App`
-- focused layout/ribbon validation
+- creation/update of `isrc_manager/tracks/host_protocols.py`
+- narrowly scoped adapter/seam code
+- type-only/import-safe changes required to prepare extraction
+- focused compile/tests
 
 ## Not allowed
-- no catalog workflow extraction yet
-- no feature-family workflow extraction
-- no final `App` move
-- no Phase 18+ work
+- no `EditDialog` move yet
+- no unrelated dialog extraction
+- no broader App decomposition
+- no feature workflow extraction from `App`
+- no Phase 12 work
 
 ## Validation
-- layouts restore correctly
-- ribbon still behaves correctly
-- compile/import sanity passes
+- no runtime behavior change
+- compile/tests green
 
 ## Handoff filename
-`P2 Phase 17 handoff.md`
+`P1 Phase 11 handoff.md`
 
 ## Execution order
 1. Read the engineering plan
-2. Confirm Phase 17 scope
-3. Inspect layout/ribbon code only as needed
-4. Execute Phase 17 only
+2. Confirm Phase 11 scope
+3. Inspect edit dialog dependencies only as needed
+4. Execute Phase 11 only
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction
-Execute only **Plan 2 / Phase 17**.
+Execute only **Plan 1 / Phase 11**.

@@ -16,6 +16,10 @@ Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
 
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
+
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
 Do not infer permission for adjacent phase work.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
 
@@ -107,33 +123,36 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 1 / Phase 10 — Album Entry Extraction** only.
+Execute **Plan 1 / Phase 10 — Album Dialog Extraction** only.
 
 ## Scope
 - move `_AlbumTrackSection` and `AlbumEntryDialog` together
-- preserve compatibility alias
-- use the previously introduced `AlbumEditorHost`
+- move `_AlbumTrackOrderingTable` and `AlbumTrackOrderingDialog` in the same album-family batch unless risk justifies a separate preliminary commit
+- preserve compatibility aliases
+- use the previously introduced album/editor host seams
 
 ## Allowed
 - extraction into `isrc_manager/tracks/album_entry_dialog.py`
+- extraction into `isrc_manager/tracks/album_ordering_dialog.py`
 - compatibility imports/re-exports
 - narrowly scoped host/adaptor work required by the move
-- focused album/track creation validation
+- focused album/track creation and album-ordering validation
 
 ## Not allowed
 - no `EditDialog` move yet
-- no track editor seam work yet
+- no new track editor seam work beyond required imports from Phase 9
 - no broader App decomposition
 - no Phase 11+ work
 
 ## Validation
 - add-album / track creation workflows still function
-- host seam works
+- album track ordering workflow still functions
+- host seams work
 - compile/import sanity passes
 
 ## Handoff filename
@@ -142,12 +161,12 @@ Execute **Plan 1 / Phase 10 — Album Entry Extraction** only.
 ## Execution order
 1. Read the engineering plan
 2. Confirm Phase 10 scope
-3. Inspect album dialog code only as needed
+3. Inspect album dialog and album ordering code only as needed
 4. Execute Phase 10 only
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction

@@ -1,4 +1,4 @@
-# Codex Prompt — Execute Phase 11 Only
+# Codex Prompt — Execute Phase 2 Only
 
 Act as a senior software engineer working directly in the live repository, with strong judgment for migration discipline, scope control, repository hygiene, QA/QC rigor, token-budget discipline, and production-grade code quality.
 
@@ -15,6 +15,10 @@ Execute only the phase specified in this document.
 Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 1 - Non-App Class Extraction and Compatibility Stabilization.md`
+
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
 
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P1.3.1` for Plan 1 Phase 3 exception 1
 
@@ -107,47 +123,53 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 1 / Phase 11 — Track Editor Host Seam** only.
+Execute **Plan 1 / Phase 2 — Audio Visualizer Extraction** only.
 
 ## Scope
-- introduce `TrackEditorHost`
-- prepare extraction of `EditDialog` without moving it yet
-- establish seam without changing runtime behavior
+- move `WaveformWidget`
+- move `SpectrumGraphWidget`, `OscilloscopeWidget`, and `StereoPeakMeterWidget`
+- move `load_wav_peaks()`
+- move `load_audio_harmonic_frames()`, `load_audio_peak_meter_frames()`, and `load_audio_spectrum_frames()`
+- establish stable imports/aliases as needed
 
 ## Allowed
-- creation/update of `isrc_manager/tracks/host_protocols.py`
-- narrowly scoped adapter/seam code
-- type-only/import-safe changes required to prepare extraction
-- focused compile/tests
+- extraction into `isrc_manager/media/waveform.py`
+- extraction into `isrc_manager/media/audio_visualization.py` if splitting visualizer concerns keeps the module healthier
+- compatibility imports/re-exports if needed
+- focused media/widget tests
+- narrowly scoped import/call-site updates required by the move
 
 ## Not allowed
-- no `EditDialog` move yet
-- no unrelated dialog extraction
-- no broader App decomposition
-- no Phase 12 work
+- no media preview dialog extraction yet
+- no audio preview preload/task extraction yet
+- no dialog decomposition beyond waveform dependencies
+- no catalog manager work
+- no Phase 3+ work
 
 ## Validation
-- no runtime behavior change
-- compile/tests green
+- focused media/widget tests pass
+- audio frame loader tests pass
+- compile/import sanity passes
+- no user-visible behavior regression
 
 ## Handoff filename
-`P1 Phase 11 handoff.md`
+`P1 Phase 2 handoff.md`
 
 ## Execution order
 1. Read the engineering plan
-2. Confirm Phase 11 scope
-3. Inspect edit dialog dependencies only as needed
-4. Execute Phase 11 only
+2. Confirm Phase 2 scope
+3. Inspect waveform/visualizer-related code only as needed
+4. Execute Phase 2 only
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction
-Execute only **Plan 1 / Phase 11**.
+Execute only **Plan 1 / Phase 2**.

@@ -16,6 +16,10 @@ Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 2 - App Decomposition and Final Entry-Facade Reduction.md`
 
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
+
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
 Do not infer permission for adjacent phase work.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P2.15.1` for Plan 2 Phase 15 exception 1
 
@@ -107,33 +123,39 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
 
-Execute **Plan 2 / Phase 19 — Feature Workflow Controllers** only.
+Execute one named **Plan 2 / Phase 19 subphase** only.
 
 ## Scope
-- move feature command families one package at a time:
-  - releases
-  - works
-  - exchange
-  - import/export
-  - tags
-  - audio
-  - authenticity
-  - quality
+- choose exactly one named Phase 19 subphase from the engineering plan:
+  - Phase 19A — Releases and Works Workflow Controllers
+  - Phase 19B — Exchange, Master Transfer, Import, and Export Controllers
+  - Phase 19C — Tags and Metadata Workflow Controllers
+  - Phase 19D — Media Player, Bookmarks, Equalizer, Waveform Cache Orchestration, and Audio Export Controllers
+  - Phase 19E — Audio Conversion, Watermarking, Authenticity, and Provenance Controllers
+  - Phase 19F — Quality Workflow Controllers
+  - Phase 19G — Update Workflow Controller Finalization
+  - Phase 19H — Promo Code Workflow Controllers
+  - Phase 19I — Contract Templates, Contracts, Rights, Assets, and Parties Controllers
 - preserve user-visible behavior through delegation/shims
+- update architecture metrics and compatibility inventory if affected
 
 ## Allowed
-- one feature family per run if needed
+- one named subphase per Codex run
 - controller/orchestration extraction into existing feature packages
 - thin delegation shims in `App`
 - focused validation for the selected feature family
+- for Phase 19D only, media responsibility separation checks for visualization, preparation/preload, playback, and export
 
 ## Not allowed
-- do not combine all feature families into one oversized batch
+- do not combine Phase 19 subphases unless a later planning document explicitly authorizes a combined run
+- do not turn any subphase into a catch-all feature migration
+- for Phase 19D, do not pull preview dialogs back into controller modules
+- for Phase 19D, do not create a single media module that owns visualization, preparation/preload, playback, and export
 - no final `App` move yet
 - no final compatibility cleanup
 - no Phase 20+ work
@@ -142,22 +164,23 @@ Execute **Plan 2 / Phase 19 — Feature Workflow Controllers** only.
 - focused feature tests for the moved family pass
 - compile/import sanity passes
 - campaign gates at checkpoints as appropriate
+- media-player/audio workflow tests after media controller batches
+- update workflow tests after update controller batches
+- architecture metrics and compatibility inventory status are documented
 
 ## Handoff filename
-`P2 Phase 19 handoff.md`
+`P2 Phase 19<subphase-letter> handoff.md`
 
 ## Execution order
 1. Read the engineering plan
-2. Confirm Phase 19 scope
-3. Select one feature family if needed to stay within medium token budget
-4. Inspect only the chosen feature-family code as needed
-5. Execute Phase 19 only
-6. Run phase-scoped validation
-7. Perform QA/QC scope audit
-8. Write the handoff
-9. Update `Milestones.md`
-10. Stop
+2. Confirm the selected Phase 19 subphase
+3. Inspect only the chosen subphase code as needed
+4. Execute only the selected Phase 19 subphase
+5. Run phase-scoped validation
+6. Perform QA/QC scope audit
+7. Write the handoff
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
+9. Stop
 
 ### Final instruction
-Execute only **Plan 2 / Phase 19**.
-If the family is too large, split internally into a bounded sub-batch and document the split clearly.
+Execute only the selected **Plan 2 / Phase 19 subphase**.

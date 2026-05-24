@@ -16,6 +16,10 @@ Read the engineering plan from:
 
 `root/docs/change control/Change - ISRC_manager De-Monolithization/Engineering Plan 2 - App Decomposition and Final Entry-Facade Reduction.md`
 
+Read the mandatory architecture enforcement plan from:
+
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Follow-Up_Engineering_Plan_Architecture_Enforcement.md`
+
 Base all work on the actual live repository.
 Inspect only what is needed to execute this phase cleanly and safely.
 Do not infer permission for adjacent phase work.
@@ -81,6 +85,16 @@ The handoff must explain:
 - what QA checks were performed
 - what QC checks were performed
 - whether any dormant imports, wrappers, seams, aliases, or deprecation markers were added
+- compatibility inventory change status
+- root alias additions/removals
+- deprecated wrapper additions/removals
+- architecture boundary observations
+- package parity impact
+- import-cycle risk observations
+- module-size / mini-monolith risk observations
+- architecture metrics impact
+- confirmation that no phase created permanent migration glue
+- confirmation that any new compatibility alias has target path, deprecation policy, removal phase, and inventory entry
 - confirmation that no adjacent-phase work was performed
 - risks or follow-up notes for the next phase
 - repo-specific conventions discovered that matter for later phases
@@ -89,13 +103,15 @@ The handoff must explain:
 
 On completion of this prompt, update:
 
-`root/docs/change control/Milestones.md`
+`root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 Rules:
 - append only
 - do not rewrite or reorder old milestone history
 - create the file if it does not exist
 - include the phase identifier, completion timestamp, completion status, and exception references if any
+- mention compatibility inventory status
+- mention architecture metrics status when relevant
 - maintain an `Exceptions` section
 - use phase-based exception ids, for example `P2.15.1` for Plan 2 Phase 15 exception 1
 
@@ -107,7 +123,7 @@ When finished, provide:
 3. QA/QC summary
 4. the handoff document path
 5. any follow-up notes for the next phase
-6. confirmation that the milestone was written to `Milestones.md`
+6. confirmation that the milestone was written to `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 
 ## Task
@@ -117,6 +133,7 @@ Execute **Plan 2 / Phase 15 — Diagnostics Report and Controller** only.
 ## Scope
 - move diagnostics data assembly
 - move diagnostics repair/application storage flows into diagnostics modules
+- keep `app_dialogs.py` as the dialog/UI home unless the engineering plan explicitly justifies a UI split
 - preserve diagnostics and storage-admin behavior
 
 ## Allowed
@@ -124,17 +141,20 @@ Execute **Plan 2 / Phase 15 — Diagnostics Report and Controller** only.
 - creation or update of `isrc_manager/diagnostics/controller.py`
 - thin delegation shims in `App`
 - focused diagnostics/storage validation
+- focused update-backup/cache cleanup validation when those paths are touched
 
 ## Not allowed
-- no theme/settings/history extraction yet
+- no theme/settings/history/app-sound extraction yet
 - no layout/action ribbon extraction
 - no catalog workflow extraction yet
 - no unrelated feature-family extraction
+- no unnecessary move of `DiagnosticsDialog` or `ApplicationStorageAdminDialog` out of `app_dialogs.py`
 - no Phase 16+ work
 
 ## Validation
 - diagnostics dialog/report flows still function
 - application storage flows still function
+- update-backup and waveform-cache diagnostics still report/clean correctly where touched
 - compile/import sanity passes
 
 ## Handoff filename
@@ -148,7 +168,7 @@ Execute **Plan 2 / Phase 15 — Diagnostics Report and Controller** only.
 5. Run phase-scoped validation
 6. Perform QA/QC scope audit
 7. Write the handoff
-8. Update `Milestones.md`
+8. Update `root/docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 9. Stop
 
 ### Final instruction
