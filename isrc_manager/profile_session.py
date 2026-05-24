@@ -231,9 +231,7 @@ def _run_storage_layout_migration(app):
         )
 
     inspection = app.storage_migration_service.inspect()
-    source_root = (
-        inspection.legacy_root.resolve() if inspection.legacy_root is not None else None
-    )
+    source_root = inspection.legacy_root.resolve() if inspection.legacy_root is not None else None
     previous_current_path = str(getattr(app, "current_db_path", "") or "").strip()
     previous_was_open = getattr(app, "conn", None) is not None
 
@@ -442,9 +440,7 @@ def remove_selected_profile(app):
         if deleting_current:
             app._close_database_connection()
 
-        result = app.profile_workflows.delete_profile(
-            path, getattr(app, "current_db_path", None)
-        )
+        result = app.profile_workflows.delete_profile(path, getattr(app, "current_db_path", None))
         app._sync_application_isrc_registry()
 
         app._reload_profiles_list(select_path=None)
@@ -858,9 +854,7 @@ def _activate_profile_in_background(
             )
             try:
                 app.active_custom_fields = app.load_active_custom_fields()
-                interface_progress(
-                    1, 3, "Loaded active custom fields for the selected profile."
-                )
+                interface_progress(1, 3, "Loaded active custom fields for the selected profile.")
                 app._rebuild_table_headers()
                 interface_progress(2, 3, "Rebuilt catalog headers for the selected profile.")
                 app._load_header_state()

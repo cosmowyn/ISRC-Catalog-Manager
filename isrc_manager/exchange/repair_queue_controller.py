@@ -17,9 +17,7 @@ from isrc_manager.exchange.repair_dialogs import (
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -110,9 +108,7 @@ def _repair_track_import_queue_entry(app, entry_id: int) -> None:
         for key, value in dict(entry.options or {}).items()
         if key in allowed_option_fields
     }
-    options = (
-        ExchangeImportOptions(**option_values) if option_values else ExchangeImportOptions()
-    )
+    options = ExchangeImportOptions(**option_values) if option_values else ExchangeImportOptions()
     if options.mode == "dry_run":
         options.mode = "create"
 
@@ -167,9 +163,7 @@ def _repair_track_import_queue_entry(app, entry_id: int) -> None:
                 app.statusBar().showMessage("Import repair row applied.", 5000)
             return
         details = (
-            "\n".join(report.warnings[:12])
-            if report.warnings
-            else "The row still needs repair."
+            "\n".join(report.warnings[:12]) if report.warnings else "The row still needs repair."
         )
         _message_box().warning(
             app,

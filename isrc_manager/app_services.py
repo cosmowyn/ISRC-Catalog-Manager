@@ -118,9 +118,7 @@ def initialize_foreground_services(app: Any) -> None:
     )
     app.catalog_service = CatalogAdminService(app.conn) if app.conn is not None else None
     app.catalog_reads = CatalogReadService(app.conn) if app.conn is not None else None
-    app.code_registry_service = (
-        CodeRegistryService(app.conn) if app.conn is not None else None
-    )
+    app.code_registry_service = CodeRegistryService(app.conn) if app.conn is not None else None
     app.promo_code_service = PromoCodeService(app.conn) if app.conn is not None else None
     app.profile_kv = ProfileKVService(app.conn) if app.conn is not None else None
     app.track_import_repair_queue_service = (
@@ -151,14 +149,10 @@ def initialize_foreground_services(app: Any) -> None:
         if app.conn is not None
         else None
     )
-    app.release_service = (
-        ReleaseService(app.conn, app.data_root) if app.conn is not None else None
-    )
+    app.release_service = ReleaseService(app.conn, app.data_root) if app.conn is not None else None
     app.party_service = PartyService(app.conn) if app.conn is not None else None
     app.work_service = (
-        WorkService(app.conn, party_service=app.party_service)
-        if app.conn is not None
-        else None
+        WorkService(app.conn, party_service=app.party_service) if app.conn is not None else None
     )
     app.governed_track_creation_service = (
         GovernedImportCoordinator(
@@ -194,9 +188,7 @@ def initialize_foreground_services(app: Any) -> None:
         else None
     )
     app.rights_service = RightsService(app.conn) if app.conn is not None else None
-    app.asset_service = (
-        AssetService(app.conn, app.data_root) if app.conn is not None else None
-    )
+    app.asset_service = AssetService(app.conn, app.data_root) if app.conn is not None else None
     app.contract_template_form_service = (
         ContractTemplateFormService(
             template_service=app.contract_template_service,
@@ -321,9 +313,7 @@ def initialize_foreground_services(app: Any) -> None:
     app.repertoire_workflow_service = (
         RepertoireWorkflowService(app.conn) if app.conn is not None else None
     )
-    app.global_search_service = (
-        GlobalSearchService(app.conn) if app.conn is not None else None
-    )
+    app.global_search_service = GlobalSearchService(app.conn) if app.conn is not None else None
     app._refresh_audio_conversion_action_states()
 
 

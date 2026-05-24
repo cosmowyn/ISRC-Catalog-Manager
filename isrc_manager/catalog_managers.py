@@ -470,6 +470,7 @@ class DiagnosticsCatalogCleanupPanel(QWidget):
         self.artists_tab.reload()
         self.albums_tab.reload()
 
+
 class CatalogManagersPanel(QWidget):
     TAB_ORDER = ("artists", "albums")
 
@@ -540,6 +541,7 @@ class CatalogManagersPanel(QWidget):
     def refresh(self) -> None:
         self.artists_tab.reload()
         self.albums_tab.reload()
+
 
 __all__ = [
     "_CatalogManagerPaneBase",

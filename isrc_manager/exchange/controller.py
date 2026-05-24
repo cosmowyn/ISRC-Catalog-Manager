@@ -17,9 +17,7 @@ from isrc_manager.tasks.history_helpers import run_file_history_action, run_snap
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -126,9 +124,7 @@ def import_exchange_file(app, format_name: str):
         return
 
     def _inspection_worker(bundle, ctx):
-        inspection_progress = app._scaled_progress_callback(
-            ctx.report_progress, start=0, end=90
-        )
+        inspection_progress = app._scaled_progress_callback(ctx.report_progress, start=0, end=90)
         ctx.report_progress(
             value=0,
             maximum=100,
@@ -513,9 +509,7 @@ def _show_exchange_import_report(app, path: str, report: ExchangeImportReport) -
     ]
     if report.mode == "dry_run":
         lines.append("")
-        lines.append(
-            "No database changes were made because this run used Dry run validation mode."
-        )
+        lines.append("No database changes were made because this run used Dry run validation mode.")
         if report.would_create_tracks:
             lines.append(f"Would create tracks: {report.would_create_tracks}")
         if report.would_update_tracks:
@@ -573,9 +567,7 @@ def _show_exchange_import_report(app, path: str, report: ExchangeImportReport) -
     message_box.addButton(_message_box().Ok)
     message_box.exec()
     if open_queue_button is not None and message_box.clickedButton() is open_queue_button:
-        focus_entry_id = (
-            report.repair_queue_entry_ids[0] if report.repair_queue_entry_ids else None
-        )
+        focus_entry_id = report.repair_queue_entry_ids[0] if report.repair_queue_entry_ids else None
         app.open_track_import_repair_queue(focus_entry_id=focus_entry_id)
 
 

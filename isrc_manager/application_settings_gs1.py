@@ -419,4 +419,5 @@ class ApplicationSettingsGs1Mixin:
         self.gs1_active_contract_edit.setCurrentText("")
         self._configure_gs1_contract_combo()
 
+
 __all__ = ["ApplicationSettingsGs1Mixin"]

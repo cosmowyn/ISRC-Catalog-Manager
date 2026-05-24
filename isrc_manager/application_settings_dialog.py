@@ -115,7 +115,9 @@ from isrc_manager.ui_common import (
 )
 
 
-class ApplicationSettingsDialog(ApplicationSettingsThemeMixin, ApplicationSettingsGs1Mixin, QDialog):
+class ApplicationSettingsDialog(
+    ApplicationSettingsThemeMixin, ApplicationSettingsGs1Mixin, QDialog
+):
     CUSTOM_THEME_LABEL = "Custom Theme"
     COLOR_FIELD_SPECS = THEME_COLOR_FIELD_SPECS
     METRIC_FIELD_SPECS = THEME_METRIC_FIELD_SPECS
@@ -1888,5 +1890,6 @@ class ApplicationSettingsDialog(ApplicationSettingsThemeMixin, ApplicationSettin
             self.theme_custom_qss_edit.setFocus(Qt.OtherFocusReason)
             return
         self.accept()
+
 
 __all__ = ["ApplicationSettingsDialog"]

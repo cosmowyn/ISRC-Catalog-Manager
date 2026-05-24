@@ -1685,4 +1685,5 @@ class ApplicationSettingsThemeMixin:
         if path:
             self.icon_path_edit.setText(path)
 
+
 __all__ = ["ApplicationSettingsThemeMixin"]

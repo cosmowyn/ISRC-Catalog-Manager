@@ -248,4 +248,5 @@ class AlbumTrackOrderingDialog(QDialog):
         self.move_up_button.setEnabled(has_selection and current_row > 0)
         self.move_down_button.setEnabled(has_selection and current_row < (row_count - 1))
 
+
 __all__ = ["AlbumTrackOrderingDialog", "_AlbumTrackOrderingTable"]

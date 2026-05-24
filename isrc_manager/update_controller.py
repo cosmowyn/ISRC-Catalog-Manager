@@ -41,9 +41,7 @@ from isrc_manager.update_installer import (
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 

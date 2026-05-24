@@ -1371,4 +1371,5 @@ class AlbumEntryDialog(QDialog):
             ),
         )
 
+
 __all__ = ["AlbumEntryDialog", "_AlbumTrackSection"]

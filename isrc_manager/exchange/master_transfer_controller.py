@@ -16,9 +16,7 @@ from isrc_manager.tasks.history_helpers import run_file_history_action, run_snap
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -54,19 +52,14 @@ def _open_master_transfer_export_preview_dialog(app, preview) -> list[str] | Non
 
 def _master_transfer_export_issue_prompt_lines(issues: list[object]) -> list[str]:
     lines = [
-        (
-            "Some items cannot be read and would make the master catalog transfer export "
-            "fail."
-        ),
+        ("Some items cannot be read and would make the master catalog transfer export " "fail."),
         "",
         "Proceed anyway and omit these items from the ZIP?",
         "",
     ]
     for issue in issues[:10]:
         section = str(
-            getattr(issue, "section_label", "")
-            or getattr(issue, "section_id", "")
-            or "Export item"
+            getattr(issue, "section_label", "") or getattr(issue, "section_id", "") or "Export item"
         ).strip()
         label = str(
             getattr(issue, "label", "") or getattr(issue, "item_id", "") or "Unnamed item"
@@ -359,9 +352,7 @@ def import_master_transfer_package(app) -> None:
                 source_app_version=result.app_version,
                 included_sections=included_section_ids,
                 seeded_parties=(
-                    0
-                    if repertoire_party_phase is None
-                    else repertoire_party_phase.imported_parties
+                    0 if repertoire_party_phase is None else repertoire_party_phase.imported_parties
                 ),
                 reused_parties=(
                     0

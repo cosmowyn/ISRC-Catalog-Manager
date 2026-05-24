@@ -37,9 +37,7 @@ from isrc_manager.tasks.history_helpers import run_snapshot_history_action
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -373,11 +371,7 @@ def _build_dropped_audio_import_payloads(
     for row in normalized_rows:
         album_art_source_path = None
         artwork = row.get("artwork")
-        if (
-            bool(row.get("import_artwork"))
-            and isinstance(artwork, ArtworkPayload)
-            and artwork.data
-        ):
+        if bool(row.get("import_artwork")) and isinstance(artwork, ArtworkPayload) and artwork.data:
             album_art_source_path = app._materialize_artwork_payload(artwork)
             temp_artwork_paths.append(album_art_source_path)
         payloads.append(
@@ -414,11 +408,7 @@ def _create_tracks_from_dropped_audio_files(
     *,
     title: str = "Create Tracks from Audio Files",
 ) -> None:
-    if (
-        app.audio_tag_service is None
-        or app.track_service is None
-        or app.work_service is None
-    ):
+    if app.audio_tag_service is None or app.track_service is None or app.work_service is None:
         _message_box().warning(app, title, "Open a profile first.")
         return
     prepared_paths = [
@@ -554,9 +544,7 @@ def _create_tracks_from_dropped_audio_files(
                         ctx.report_progress(
                             value=index,
                             maximum=total,
-                            message=(
-                                f"Creating track {index} of {total} from dropped audio..."
-                            ),
+                            message=(f"Creating track {index} of {total} from dropped audio..."),
                         )
                     release_ids = app._sync_releases_for_tracks(
                         created_track_ids,
@@ -579,9 +567,7 @@ def _create_tracks_from_dropped_audio_files(
                     entity_type="Track",
                     entity_id="batch",
                     payload={
-                        "source_paths": [
-                            payload.audio_file_source_path for payload in payloads
-                        ],
+                        "source_paths": [payload.audio_file_source_path for payload in payloads],
                         "storage_mode": storage_mode,
                         "embedded_artwork_count": artwork_payload_count,
                     },
@@ -641,11 +627,7 @@ def _create_tracks_from_dropped_audio_files(
                     if artwork_payload_count
                     else ""
                 )
-                + (
-                    "\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12])
-                    if plan_warnings
-                    else ""
-                ),
+                + ("\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12]) if plan_warnings else ""),
             )
 
         app._submit_background_bundle_task(
@@ -744,9 +726,7 @@ def import_tags_from_audio(app, track_ids: list[int] | None = None):
 
         def _import_worker(bundle, ctx):
             profile_name = app._current_profile_name()
-            import_progress = app._scaled_progress_callback(
-                ctx.report_progress, start=0, end=90
-            )
+            import_progress = app._scaled_progress_callback(ctx.report_progress, start=0, end=90)
 
             def _mutation():
                 updated_track_ids: list[int] = []
@@ -755,9 +735,7 @@ def import_tags_from_audio(app, track_ids: list[int] | None = None):
                     cur = bundle.conn.cursor()
                     for index, entry in enumerate(prepared, start=1):
                         track_id = int(entry["track_id"])
-                        snapshot = bundle.track_service.fetch_track_snapshot(
-                            track_id, cursor=cur
-                        )
+                        snapshot = bundle.track_service.fetch_track_snapshot(track_id, cursor=cur)
                         if snapshot is None:
                             continue
                         database_values = app._catalog_tag_data_for_track(

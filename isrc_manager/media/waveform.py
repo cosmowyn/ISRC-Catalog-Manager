@@ -602,8 +602,6 @@ class WaveformWidget(QWidget):
             p.drawLine(int(x), int(waveform_rect.top()), int(x), int(waveform_rect.bottom()))
 
 
-
-
 def load_wav_peaks(path: str, width_px: int):
     """
     Build stereo peaks for drawing a waveform.
@@ -1079,8 +1077,6 @@ def load_wav_peaks(path: str, width_px: int):
 
     # Last resort
     return []
-
-
 
 
 __all__ = ["WaveformWidget", "load_wav_peaks"]

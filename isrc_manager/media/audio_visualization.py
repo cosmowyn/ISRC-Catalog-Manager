@@ -282,8 +282,6 @@ class StereoPeakMeterWidget(QWidget):
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
 
-
-
 class SpectrumGraphWidget(WaveformWidget):
     SPECTRUM_SCALE_LINEAR = "linear"
     SPECTRUM_SCALE_LOG = "log"
@@ -560,8 +558,6 @@ class SpectrumGraphWidget(WaveformWidget):
 
 
 OscilloscopeWidget = SpectrumGraphWidget
-
-
 
 
 def load_audio_harmonic_frames(path: str, *, target_sr: int = 22050):
@@ -1161,8 +1157,6 @@ def load_audio_spectrum_frames(path: str, *, target_sr: int = 22050, bin_count: 
         smoothed.append([float(max(0.0, min(1.0, value))) for value in current])
         previous = current
     return smoothed
-
-
 
 
 __all__ = [

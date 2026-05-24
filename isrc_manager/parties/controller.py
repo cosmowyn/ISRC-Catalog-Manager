@@ -36,9 +36,7 @@ from isrc_manager.tasks.history_helpers import run_file_history_action, run_snap
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -73,6 +71,7 @@ def _run_snapshot_history_action(*args, **kwargs):
 def _run_file_history_action(*args, **kwargs):
     return _root_attr("run_file_history_action", run_file_history_action)(*args, **kwargs)
 
+
 def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
     return _party_manager_panel_class()(
         party_service_provider=lambda: self.party_service,
@@ -82,6 +81,8 @@ def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
         export_party_handler=self.export_party_exchange_file,
         parent=parent,
     )
+
+
 def _ensure_party_manager_dock(self) -> QDockWidget:
     dock = ensure_catalog_workspace_dock(
         self,
@@ -92,6 +93,8 @@ def _ensure_party_manager_dock(self) -> QDockWidget:
     )
     self.party_manager_dock = dock
     return dock
+
+
 def _party_identity_primary_label(record: PartyRecord) -> str:
     return (
         str(record.display_name or "").strip()
@@ -100,17 +103,23 @@ def _party_identity_primary_label(record: PartyRecord) -> str:
         or str(record.legal_name or "").strip()
         or f"Party #{int(record.id)}"
     )
+
+
 def _owner_party_choice_label(record: PartyRecord) -> str:
     primary = _party_identity_primary_label(record)
     legal_name = str(record.legal_name or "").strip()
     if legal_name and legal_name.casefold() != primary.casefold():
         return f"{primary} ({legal_name})"
     return primary
+
+
 def _current_owner_party_id(self) -> int | None:
     settings_reads = getattr(self, "settings_reads", None)
     if settings_reads is None:
         return None
     return settings_reads.load_owner_party_id()
+
+
 def _current_owner_party_record(self) -> PartyRecord | None:
     party_service = getattr(self, "party_service", None)
     if party_service is None:
@@ -119,6 +128,8 @@ def _current_owner_party_record(self) -> PartyRecord | None:
     if owner_party_id is None:
         return None
     return party_service.fetch_party(int(owner_party_id))
+
+
 def _legacy_owner_snapshot_has_data(snapshot: OwnerPartySettings) -> bool:
     fields = (
         snapshot.legal_name,
@@ -151,6 +162,8 @@ def _legacy_owner_snapshot_has_data(snapshot: OwnerPartySettings) -> bool:
         snapshot.notes,
     )
     return any(str(value or "").strip() for value in fields)
+
+
 def _owner_snapshot_name_candidates(snapshot: OwnerPartySettings) -> list[str]:
     person_name = " ".join(
         part
@@ -170,11 +183,11 @@ def _owner_snapshot_name_candidates(snapshot: OwnerPartySettings) -> list[str]:
         person_name,
     ):
         clean_value = str(raw_value or "").strip()
-        if clean_value and clean_value.casefold() not in {
-            item.casefold() for item in candidates
-        }:
+        if clean_value and clean_value.casefold() not in {item.casefold() for item in candidates}:
             candidates.append(clean_value)
     return candidates
+
+
 def _owner_snapshot_to_party_payload(
     snapshot: OwnerPartySettings,
     *,
@@ -210,8 +223,7 @@ def _owner_snapshot_to_party_payload(
         postal_code=str(snapshot.postal_code or "").strip() or None,
         country=str(snapshot.country or "").strip() or None,
         bank_account_number=str(snapshot.bank_account_number or "").strip() or None,
-        chamber_of_commerce_number=str(snapshot.chamber_of_commerce_number or "").strip()
-        or None,
+        chamber_of_commerce_number=str(snapshot.chamber_of_commerce_number or "").strip() or None,
         tax_id=str(snapshot.tax_id or "").strip() or None,
         vat_number=str(snapshot.vat_number or "").strip() or None,
         pro_affiliation=str(snapshot.pro_affiliation or "").strip() or None,
@@ -220,6 +232,8 @@ def _owner_snapshot_to_party_payload(
         notes=str(snapshot.notes or "").strip() or None,
         profile_name=str(profile_name or "").strip() or None,
     )
+
+
 def _merge_owner_snapshot_into_party(
     record: PartyRecord,
     snapshot: OwnerPartySettings,
@@ -265,6 +279,8 @@ def _merge_owner_snapshot_into_party(
         profile_name=choose(record.profile_name, None),
         artist_aliases=list(record.artist_aliases),
     )
+
+
 def _assign_owner_party(
     self,
     party_id: int | None,
@@ -294,20 +310,16 @@ def _assign_owner_party(
             4000,
         )
     return saved_owner_party_id
+
+
 def _migrate_legacy_owner_party_if_needed(self) -> None:
-    if (
-        self.party_service is None
-        or self.settings_reads is None
-        or self.settings_mutations is None
-    ):
+    if self.party_service is None or self.settings_reads is None or self.settings_mutations is None:
         return
     current_owner = self._current_owner_party_record()
     legacy_snapshot = self.settings_reads.load_legacy_owner_party_snapshot()
     if current_owner is not None:
         if self._legacy_owner_snapshot_has_data(legacy_snapshot):
-            merged_payload = self._merge_owner_snapshot_into_party(
-                current_owner, legacy_snapshot
-            )
+            merged_payload = self._merge_owner_snapshot_into_party(current_owner, legacy_snapshot)
             try:
                 self.party_service.update_party(int(current_owner.id), merged_payload)
             except Exception:
@@ -351,13 +363,19 @@ def _migrate_legacy_owner_party_if_needed(self) -> None:
     with self.conn:
         self.conn.execute("DELETE FROM BTW WHERE id=1")
         self.conn.execute("DELETE FROM BUMA_STEMRA WHERE id=1")
+
+
 def _owner_bootstrap_required(self) -> bool:
     return self.party_service is not None and self._current_owner_party_record() is None
+
+
 def _schedule_owner_party_bootstrap(self) -> None:
     if getattr(self, "_owner_party_bootstrap_scheduled", False):
         return
     self._owner_party_bootstrap_scheduled = True
     _timer().singleShot(0, lambda: self._ensure_owner_party_bootstrap())
+
+
 def _ensure_owner_party_bootstrap(self) -> None:
     self._owner_party_bootstrap_scheduled = False
     if not self._owner_bootstrap_required():
@@ -376,10 +394,16 @@ def _ensure_owner_party_bootstrap(self) -> None:
         if selected_party_id is None:
             continue
         self._assign_owner_party(int(selected_party_id), record_history=False)
+
+
 def _artist_party_primary_label(record: PartyRecord) -> str:
     return artist_primary_label(record)
+
+
 def _artist_party_choice_label(record: PartyRecord) -> str:
     return artist_choice_label(record)
+
+
 def _artist_party_records(self) -> list[PartyRecord]:
     if self.party_service is None:
         return []
@@ -387,6 +411,8 @@ def _artist_party_records(self) -> list[PartyRecord]:
         return list(self.party_service.list_artist_parties() or [])
     except Exception:
         return []
+
+
 def _configure_artist_party_combo(
     self,
     combo: QComboBox,
@@ -436,6 +462,8 @@ def _configure_artist_party_combo(
             combo.setCurrentIndex(0)
     finally:
         combo.blockSignals(previous_state)
+
+
 def _resolve_artist_party_choice(self, combo: QComboBox) -> tuple[str, int | None]:
     clean = str(combo.currentText() or "").strip()
     if not clean:
@@ -456,6 +484,8 @@ def _resolve_artist_party_choice(self, combo: QComboBox) -> tuple[str, int | Non
             primary_label = str(combo.itemData(index, Qt.UserRole + 1) or label).strip()
             return primary_label or label, int(data)
     return clean, None
+
+
 def _resolve_party_backed_artist_name(
     self,
     raw_name: str,
@@ -487,6 +517,8 @@ def _resolve_party_backed_artist_name(
     if record is None:
         return clean_name, int(party_id)
     return self._artist_party_primary_label(record), int(record.id)
+
+
 def _resolve_party_backed_additional_artist_names(
     self,
     names: list[str],
@@ -506,6 +538,8 @@ def _resolve_party_backed_additional_artist_names(
         seen.add(normalized)
         resolved.append(clean_name)
     return resolved
+
+
 def _refresh_add_track_artist_party_choices(self) -> None:
     for combo, allow_empty in (
         (getattr(self, "artist_field", None), False),
@@ -520,6 +554,8 @@ def _refresh_add_track_artist_party_choices(self) -> None:
             selected_party_id=selected_party_id,
             current_text=current_text,
         )
+
+
 def _on_party_authority_changed(self) -> None:
     if self.conn is None:
         return
@@ -571,6 +607,8 @@ def _on_party_authority_changed(self) -> None:
         self._refresh_add_track_artist_party_choices()
     except Exception:
         pass
+
+
 def open_party_manager(self, party_id: int | None = None):
     if self.party_service is None:
         _message_box().warning(self, "Party Manager", "Open a profile first.")
@@ -581,6 +619,8 @@ def open_party_manager(self, party_id: int | None = None):
         legacy_attr="party_manager_dialog",
         configure=lambda panel: panel.focus_party(party_id),
     )
+
+
 def _selected_party_manager_ids(self) -> list[int]:
     seen_panel_ids: set[int] = set()
     candidate_panels: list[PartyManagerPanel] = []
@@ -612,6 +652,8 @@ def _selected_party_manager_ids(self) -> list[int]:
         if selected_ids:
             return selected_ids
     return []
+
+
 def _party_import_review_summary(report: PartyImportReport) -> list[str]:
     evaluated_mode = str(report.evaluated_mode or report.mode or "dry_run")
     lines = [
@@ -631,6 +673,8 @@ def _party_import_review_summary(report: PartyImportReport) -> list[str]:
     if report.unknown_fields:
         lines.append("Unmapped fields: " + ", ".join(report.unknown_fields[:8]))
     return lines
+
+
 def _show_party_import_report(self, path: str, report: PartyImportReport) -> None:
     lines = [
         f"Format: {report.format_name.upper()}",
@@ -671,6 +715,8 @@ def _show_party_import_report(self, path: str, report: PartyImportReport) -> Non
         "Import Parties",
         "\n".join(lines) + f"\n\nSource:\n{path}",
     )
+
+
 def import_party_exchange_file(self, format_name: str):
     if self.party_exchange_service is None:
         _message_box().warning(self, "Import Parties", "Open a profile first.")
@@ -982,6 +1028,8 @@ def import_party_exchange_file(self, format_name: str):
             user_message="Could not inspect the selected Party file:",
         ),
     )
+
+
 def export_party_exchange_file(
     self,
     format_name: str,
@@ -1114,6 +1162,8 @@ def export_party_exchange_file(
             user_message="Could not export the selected Party data:",
         ),
     )
+
+
 def _refresh_party_manager_panel(self) -> None:
     seen_panel_ids: set[int] = set()
     for attr in ("party_manager_panel", "party_manager_dialog"):
@@ -1127,6 +1177,8 @@ def _refresh_party_manager_panel(self) -> None:
         refresh = getattr(panel, "refresh", None)
         if callable(refresh):
             refresh()
+
+
 def _redirect_owner_registration_edit_to_party_manager(self, field_label: str) -> None:
     owner_party_id = self._current_owner_party_id()
     if owner_party_id is None:

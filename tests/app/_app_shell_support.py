@@ -10034,7 +10034,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIs(footer_row.itemAt(6).widget(), dialog.export_button)
         original_order = list(dialog._track_order)
         self.assertGreaterEqual(len(original_order), 1)
-        with mock.patch("isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()):
+        with mock.patch(
+            "isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()
+        ):
             dialog.shuffle_button.click()
         pump_events()
         self.assertTrue(dialog.shuffle_button.isChecked())
@@ -10233,7 +10235,9 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertNotIn(other_album_track, dialog._track_order)
 
-        with mock.patch("isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()):
+        with mock.patch(
+            "isrc_manager.main_window.random.shuffle", side_effect=lambda values: values.reverse()
+        ):
             dialog.shuffle_button.click()
         pump_events()
         self.assertTrue(dialog.shuffle_button.isChecked())

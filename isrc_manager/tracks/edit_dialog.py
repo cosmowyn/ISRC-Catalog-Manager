@@ -2203,4 +2203,5 @@ class EditDialog(QDialog):
                 parent.logger.exception(f"Bulk update failed: {e}")
             QMessageBox.critical(self, "Update Error", f"Failed to update selected records:\n{e}")
 
+
 __all__ = ["EditDialog"]

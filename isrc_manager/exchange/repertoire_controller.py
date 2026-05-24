@@ -15,9 +15,7 @@ from isrc_manager.tasks.history_helpers import run_file_history_action, run_snap
 def _root_attr(name: str, fallback):
     main_window_module = sys.modules.get("isrc_manager.main_window")
     return (
-        getattr(main_window_module, name, fallback)
-        if main_window_module is not None
-        else fallback
+        getattr(main_window_module, name, fallback) if main_window_module is not None else fallback
     )
 
 
@@ -210,9 +208,7 @@ def import_repertoire_exchange(app, format_name: str):
 
     def _submit_import_task() -> None:
         def _worker(bundle, ctx):
-            import_progress = app._scaled_progress_callback(
-                ctx.report_progress, start=0, end=90
-            )
+            import_progress = app._scaled_progress_callback(ctx.report_progress, start=0, end=90)
             ctx.report_progress(
                 value=0,
                 maximum=100,
@@ -304,9 +300,7 @@ def import_repertoire_exchange(app, format_name: str):
         )
 
     def _inspection_worker(bundle, ctx):
-        inspection_progress = app._scaled_progress_callback(
-            ctx.report_progress, start=0, end=96
-        )
+        inspection_progress = app._scaled_progress_callback(ctx.report_progress, start=0, end=96)
         ctx.report_progress(
             value=0,
             maximum=100,

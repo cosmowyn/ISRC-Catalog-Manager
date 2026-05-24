@@ -875,7 +875,7 @@ def _flush_pending_catalog_repaints(
             except Exception:
                 pass
         try:
-                qapp.processEvents()
+            qapp.processEvents()
         except Exception:
             pass
         if QCoreApplication is not None:
@@ -896,7 +896,7 @@ def _flush_pending_catalog_repaints(
             except Exception:
                 continue
         try:
-                qapp.processEvents()
+            qapp.processEvents()
         except Exception:
             pass
 

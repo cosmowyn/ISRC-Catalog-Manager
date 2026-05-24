@@ -1281,22 +1281,30 @@ class App(QMainWindow):
         return waveform_cache_controller._audio_waveform_cache_service(self, *args, **kwargs)
 
     def _audio_waveform_cache_worker_for_current_profile(self, *args, **kwargs):
-        return waveform_cache_controller._audio_waveform_cache_worker_for_current_profile(self, *args, **kwargs)
+        return waveform_cache_controller._audio_waveform_cache_worker_for_current_profile(
+            self, *args, **kwargs
+        )
 
     def _stop_audio_waveform_cache_worker(self, *args, **kwargs):
         return waveform_cache_controller._stop_audio_waveform_cache_worker(self, *args, **kwargs)
 
     def _queue_audio_waveform_cache_for_track(self, *args, **kwargs):
-        return waveform_cache_controller._queue_audio_waveform_cache_for_track(self, *args, **kwargs)
+        return waveform_cache_controller._queue_audio_waveform_cache_for_track(
+            self, *args, **kwargs
+        )
 
     def _queue_startup_audio_waveform_cache_pass(self, *args, **kwargs):
-        return waveform_cache_controller._queue_startup_audio_waveform_cache_pass(self, *args, **kwargs)
+        return waveform_cache_controller._queue_startup_audio_waveform_cache_pass(
+            self, *args, **kwargs
+        )
 
     def _audio_waveform_cache_for_track(self, *args, **kwargs):
         return waveform_cache_controller._audio_waveform_cache_for_track(self, *args, **kwargs)
 
     def _run_startup_audio_waveform_cache_pass(self, *args, **kwargs):
-        return waveform_cache_controller._run_startup_audio_waveform_cache_pass(self, *args, **kwargs)
+        return waveform_cache_controller._run_startup_audio_waveform_cache_pass(
+            self, *args, **kwargs
+        )
 
     def _maybe_finish_startup_loading(self) -> None:
         if self._startup_ready_emitted:
@@ -2342,7 +2350,9 @@ class App(QMainWindow):
         initialize_foreground_services(self)
 
     def _refresh_audio_conversion_action_states(self, *args, **kwargs):
-        return audio_conversion_controller._refresh_audio_conversion_action_states(self, *args, **kwargs)
+        return audio_conversion_controller._refresh_audio_conversion_action_states(
+            self, *args, **kwargs
+        )
 
     # -------------------------------------------------------------------------
     # Identity & Profiles
@@ -3653,7 +3663,9 @@ class App(QMainWindow):
         return promo_code_controller._create_promo_code_ledger_panel(self, *args, **kwargs)
 
     def _create_contract_template_workspace_panel(self, *args, **kwargs):
-        return contract_template_controller._create_contract_template_workspace_panel(self, *args, **kwargs)
+        return contract_template_controller._create_contract_template_workspace_panel(
+            self, *args, **kwargs
+        )
 
     def _create_rights_matrix_panel(self, *args, **kwargs):
         return rights_controller._create_rights_matrix_panel(self, *args, **kwargs)
@@ -3726,7 +3738,9 @@ class App(QMainWindow):
         return promo_code_controller._ensure_promo_code_ledger_dock(self, *args, **kwargs)
 
     def _ensure_contract_template_workspace_dock(self, *args, **kwargs):
-        return contract_template_controller._ensure_contract_template_workspace_dock(self, *args, **kwargs)
+        return contract_template_controller._ensure_contract_template_workspace_dock(
+            self, *args, **kwargs
+        )
 
     def _ensure_rights_matrix_dock(self, *args, **kwargs):
         return rights_controller._ensure_rights_matrix_dock(self, *args, **kwargs)
@@ -6762,7 +6776,9 @@ class App(QMainWindow):
 
     @staticmethod
     def _master_transfer_export_issue_prompt_lines(*args, **kwargs):
-        return master_transfer_controller._master_transfer_export_issue_prompt_lines(*args, **kwargs)
+        return master_transfer_controller._master_transfer_export_issue_prompt_lines(
+            *args, **kwargs
+        )
 
     def export_master_transfer_package(self, *args, **kwargs):
         return master_transfer_controller.export_master_transfer_package(self, *args, **kwargs)
@@ -6783,7 +6799,9 @@ class App(QMainWindow):
         return repair_queue_controller._track_import_repair_work_choices(self, *args, **kwargs)
 
     def _refresh_track_import_repair_queue_dialog(self, *args, **kwargs):
-        return repair_queue_controller._refresh_track_import_repair_queue_dialog(self, *args, **kwargs)
+        return repair_queue_controller._refresh_track_import_repair_queue_dialog(
+            self, *args, **kwargs
+        )
 
     def _delete_track_import_repair_entries(self, *args, **kwargs):
         return repair_queue_controller._delete_track_import_repair_entries(self, *args, **kwargs)
@@ -7006,7 +7024,9 @@ class App(QMainWindow):
         return media_export_controller._iter_audio_tag_preview_fields(*args, **kwargs)
 
     def _build_tagged_audio_export_preview_rows(self, *args, **kwargs):
-        return media_export_controller._build_tagged_audio_export_preview_rows(self, *args, **kwargs)
+        return media_export_controller._build_tagged_audio_export_preview_rows(
+            self, *args, **kwargs
+        )
 
     @staticmethod
     def _tagged_audio_export_name(*args, **kwargs):
@@ -7660,7 +7680,9 @@ class App(QMainWindow):
         return audio_conversion_controller._audio_export_source_label(*args, **kwargs)
 
     def _audio_conversion_unavailable_message(self, *args, **kwargs):
-        return audio_conversion_controller._audio_conversion_unavailable_message(self, *args, **kwargs)
+        return audio_conversion_controller._audio_conversion_unavailable_message(
+            self, *args, **kwargs
+        )
 
     def _prompt_audio_conversion_format(self, *args, **kwargs):
         return audio_conversion_controller._prompt_audio_conversion_format(self, *args, **kwargs)
@@ -7696,16 +7718,24 @@ class App(QMainWindow):
         return authenticity_controller.export_authenticity_provenance_audio(self, *args, **kwargs)
 
     def _selected_track_audio_verification_option(self, *args, **kwargs):
-        return authenticity_controller._selected_track_audio_verification_option(self, *args, **kwargs)
+        return authenticity_controller._selected_track_audio_verification_option(
+            self, *args, **kwargs
+        )
 
     def _selected_track_audio_verification_candidate(self, *args, **kwargs):
-        return authenticity_controller._selected_track_audio_verification_candidate(self, *args, **kwargs)
+        return authenticity_controller._selected_track_audio_verification_candidate(
+            self, *args, **kwargs
+        )
 
     def _prompt_audio_authenticity_verification_source(self, *args, **kwargs):
-        return authenticity_controller._prompt_audio_authenticity_verification_source(self, *args, **kwargs)
+        return authenticity_controller._prompt_audio_authenticity_verification_source(
+            self, *args, **kwargs
+        )
 
     def _pick_audio_authenticity_verification_file(self, *args, **kwargs):
-        return authenticity_controller._pick_audio_authenticity_verification_file(self, *args, **kwargs)
+        return authenticity_controller._pick_audio_authenticity_verification_file(
+            self, *args, **kwargs
+        )
 
     def verify_audio_authenticity(self, *args, **kwargs):
         return authenticity_controller.verify_audio_authenticity(self, *args, **kwargs)
@@ -7911,7 +7941,9 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Error", f"Could not save SENA number:\n{e}")
 
     def _redirect_owner_registration_edit_to_party_manager(self, *args, **kwargs):
-        return party_controller._redirect_owner_registration_edit_to_party_manager(self, *args, **kwargs)
+        return party_controller._redirect_owner_registration_edit_to_party_manager(
+            self, *args, **kwargs
+        )
 
     def set_btw_number(self, value: str | None = None):
         del value
@@ -8113,13 +8145,17 @@ class App(QMainWindow):
         return media_player_controller._audio_preview_album_titles(self, *args, **kwargs)
 
     def _audio_preview_track_has_source_payload(self, *args, **kwargs):
-        return media_player_controller._audio_preview_track_has_source_payload(self, *args, **kwargs)
+        return media_player_controller._audio_preview_track_has_source_payload(
+            self, *args, **kwargs
+        )
 
     def _audio_preview_album_track_ids(self, *args, **kwargs):
         return media_player_controller._audio_preview_album_track_ids(self, *args, **kwargs)
 
     def _audio_preview_export_actions_for_track(self, *args, **kwargs):
-        return media_player_controller._audio_preview_export_actions_for_track(self, *args, **kwargs)
+        return media_player_controller._audio_preview_export_actions_for_track(
+            self, *args, **kwargs
+        )
 
     def _audio_preview_track_queue_items(self, *args, **kwargs):
         return media_player_controller._audio_preview_track_queue_items(self, *args, **kwargs)
@@ -9081,7 +9117,9 @@ class App(QMainWindow):
         )
 
     def _media_cell_has_payload_for_export_spec(self, *args, **kwargs):
-        return media_export_controller._media_cell_has_payload_for_export_spec(self, *args, **kwargs)
+        return media_export_controller._media_cell_has_payload_for_export_spec(
+            self, *args, **kwargs
+        )
 
     def _proxy_ordered_track_ids(self, *args, **kwargs):
         return media_export_controller._proxy_ordered_track_ids(self, *args, **kwargs)
