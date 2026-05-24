@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -21,19 +22,38 @@ from PySide6.QtWidgets import QApplication
 from isrc_manager.file_storage import coalesce_filename, sha256_digest
 
 from .catalog import registry_binding_for_catalog_entry, registry_binding_for_symbol
+from .formatting import DEFAULT_MANUAL_DATE_FORMAT, format_manual_date_value
 from .html_support import clone_html_package_tree, decode_html_bytes, replace_html_placeholders
 from .ingestion import DOCXHtmlAdapter, PagesTemplateAdapter
 from .models import (
     ContractTemplateExportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateResolvedSnapshotPayload,
+    build_contract_template_indexed_selection_key,
     build_contract_template_selector_scope_key,
 )
-from .parser import parse_placeholder
+from .parser import base_symbol_for_indexed_placeholder, extract_placeholders, parse_placeholder
 
 _DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 _DOCX_PART_RE = re.compile(r"^word/(document|header\d+|footer\d+)\.xml$")
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_DATE_HINT_RE = re.compile(
+    r"(^|_)(date|day|deadline|signed|effective|start|end|renewal|termination|reversion|notice)($|_)",
+    re.IGNORECASE,
+)
+_DUPLICATE_START_SYMBOL = "{{duplicate.start}}"
+_DUPLICATE_END_SYMBOL = "{{duplicate.end}}"
+_DUPLICATE_NUMBER_SYMBOL = "{{duplicate.number}}"
+_PAGE_INDEX_SYMBOL = "{{page.index}}"
+_PAGE_TOTAL_SYMBOL = "{{page.total}}"
+_CUSTOM_INDEX_SYMBOL = "{{custom.index}}"
+_DB_INDEX_SYMBOL = "{{db.index}}"
+_DUPLICATE_BLOCK_RE = re.compile(
+    rf"{re.escape(_DUPLICATE_START_SYMBOL)}(.*?){re.escape(_DUPLICATE_END_SYMBOL)}",
+    re.DOTALL,
+)
+_PAGE_COUNTER_RE = re.compile(rf"{re.escape(_PAGE_INDEX_SYMBOL)}|{re.escape(_PAGE_TOTAL_SYMBOL)}")
+_MAX_DUPLICATE_COPIES = 200
 _DEFAULT_SCOPE_ENTITY_BY_NAMESPACE = {
     "track": "track",
     "release": "release",
@@ -309,6 +329,7 @@ class ContractTemplateExportService:
         strict: bool = True,
         draft_id: int | None = None,
         allow_registry_generation: bool = False,
+        duplicate_iterated_symbols: set[str] | None = None,
     ) -> tuple[dict[str, str], tuple[str, ...]]:
         placeholders = self.template_service.list_placeholders(revision_id)
         bindings = {
@@ -320,6 +341,8 @@ class ContractTemplateExportService:
         }
         db_selections = dict(editable_payload.get("db_selections") or {})
         manual_values = dict(editable_payload.get("manual_values") or {})
+        manual_formats = dict(editable_payload.get("manual_formats") or {})
+        iterated_symbols = set(duplicate_iterated_symbols or set())
         resolved: dict[str, str] = {}
         missing_required: list[str] = []
         group_selections, warnings = self._normalized_group_db_selections(
@@ -331,6 +354,26 @@ class ContractTemplateExportService:
         for placeholder in placeholders:
             canonical = placeholder.canonical_symbol
             token = parse_placeholder(canonical)
+            if token.binding_kind == "current":
+                resolved[canonical] = self._resolve_current_value(token.key)
+                continue
+            if token.binding_kind in {"page", "custom"}:
+                resolved[canonical] = ""
+                continue
+            if token.binding_kind == "db_index":
+                resolved[canonical] = ""
+                continue
+            if token.binding_kind == "duplicate":
+                if token.key == "number":
+                    if canonical not in manual_values:
+                        if strict:
+                            raise ContractTemplateExportError(
+                                f"Duplicate control placeholder {canonical} does not have a saved value."
+                            )
+                    else:
+                        self._duplicate_copy_count(manual_values.get(canonical), strict=strict)
+                resolved[canonical] = ""
+                continue
             if token.binding_kind == "manual":
                 if canonical not in manual_values:
                     if strict:
@@ -338,9 +381,18 @@ class ContractTemplateExportService:
                             f"Manual placeholder {canonical} does not have a saved value."
                         )
                     continue
-                resolved[canonical] = self._render_output_value(manual_values.get(canonical))
+                if self._is_manual_date_placeholder(
+                    placeholder,
+                    binding=bindings.get(canonical),
+                ):
+                    resolved[canonical] = format_manual_date_value(
+                        manual_values.get(canonical),
+                        manual_formats.get(canonical) or DEFAULT_MANUAL_DATE_FORMAT,
+                    )
+                else:
+                    resolved[canonical] = self._render_output_value(manual_values.get(canonical))
                 continue
-            catalog_entry = catalog.get(canonical)
+            catalog_entry = self._catalog_entry_for_symbol(canonical, catalog)
             if catalog_entry is None:
                 if strict:
                     raise ContractTemplateExportError(
@@ -349,6 +401,9 @@ class ContractTemplateExportService:
                 warnings.append(
                     f"Skipped {canonical} because it is no longer present in the symbol catalog."
                 )
+                continue
+            if token.indexed and canonical in iterated_symbols:
+                resolved[canonical] = ""
                 continue
             if str(catalog_entry.namespace or "").strip().lower() == "owner":
                 try:
@@ -362,7 +417,10 @@ class ContractTemplateExportService:
                     if strict:
                         raise
                     continue
-                rendered = self._render_output_value(resolved_value)
+                rendered = self._render_catalog_output_value(
+                    catalog_entry=catalog_entry,
+                    value=resolved_value,
+                )
                 if not rendered and placeholder.required:
                     if strict and str(catalog_entry.namespace or "").strip().lower() == "owner":
                         missing_required.append(
@@ -389,6 +447,9 @@ class ContractTemplateExportService:
                 getattr(catalog_entry, "key", None),
             )
             if selection_value is None:
+                if canonical in iterated_symbols:
+                    resolved[canonical] = ""
+                    continue
                 if strict and not (registry_binding is not None and draft_id is not None):
                     raise ContractTemplateExportError(
                         f"Database-backed placeholder {canonical} does not have a selected record."
@@ -409,7 +470,10 @@ class ContractTemplateExportService:
                     f"Skipped {canonical} because its selected record could not be resolved."
                 )
                 continue
-            rendered = self._render_output_value(resolved_value)
+            rendered = self._render_catalog_output_value(
+                catalog_entry=catalog_entry,
+                value=resolved_value,
+            )
             if not rendered and placeholder.required:
                 if strict and str(catalog_entry.namespace or "").strip().lower() == "owner":
                     missing_required.append(
@@ -429,6 +493,155 @@ class ContractTemplateExportService:
                 f"{detail}"
             )
         return resolved, tuple(warnings)
+
+    @staticmethod
+    def _resolve_current_value(key: str) -> str:
+        if str(key or "").strip().lower() == "year":
+            return str(date.today().year)
+        return ""
+
+    def _runtime_replacements_for_text(
+        self,
+        text: str,
+        resolved_values: dict[str, str],
+    ) -> dict[str, str]:
+        replacements: dict[str, str] = {}
+        if "{{current.year}}" in str(text or "") and "{{current.year}}" not in resolved_values:
+            replacements["{{current.year}}"] = self._resolve_current_value("year")
+        return replacements
+
+    @staticmethod
+    def _is_manual_date_placeholder(placeholder, *, binding) -> bool:
+        if binding is not None and isinstance(getattr(binding, "validation", None), dict):
+            field_type = str(binding.validation.get("field_type") or "").strip().lower()
+            if field_type == "date":
+                return True
+            if field_type:
+                return False
+        inferred = str(getattr(placeholder, "inferred_field_type", "") or "").strip().lower()
+        if inferred == "date":
+            return True
+        key = str(getattr(placeholder, "placeholder_key", "") or "").strip().lower()
+        return bool(_DATE_HINT_RE.search(key))
+
+    @staticmethod
+    def _duplicate_copy_count(value: object | None, *, strict: bool) -> int | None:
+        text = str(value if value is not None else "").strip()
+        if not text:
+            if strict:
+                raise ContractTemplateExportError(
+                    "Duplicate Number is required when duplicate block cymbols are present."
+                )
+            return None
+        try:
+            number = float(text)
+        except ValueError as exc:
+            raise ContractTemplateExportError("Duplicate Number must be a whole number.") from exc
+        if not number.is_integer():
+            raise ContractTemplateExportError("Duplicate Number must be a whole number.")
+        count = int(number)
+        if count < 0:
+            raise ContractTemplateExportError("Duplicate Number cannot be negative.")
+        if count > _MAX_DUPLICATE_COPIES:
+            raise ContractTemplateExportError(
+                f"Duplicate Number cannot be greater than {_MAX_DUPLICATE_COPIES}."
+            )
+        return count
+
+    @staticmethod
+    def _catalog_entry_for_symbol(
+        canonical_symbol: str,
+        catalog: dict[str, object],
+    ) -> object | None:
+        base_symbol = base_symbol_for_indexed_placeholder(canonical_symbol)
+        return catalog.get(base_symbol or canonical_symbol)
+
+    @staticmethod
+    def _coerce_record_id(value: object | None) -> int | None:
+        try:
+            record_id = int(str(value if value is not None else "").strip())
+        except (TypeError, ValueError):
+            return None
+        return record_id if record_id > 0 else None
+
+    def _indexed_db_symbols_for_text(self, text: str) -> tuple[str, ...]:
+        catalog = {
+            item.canonical_symbol: item for item in self.catalog_service.list_known_symbols()
+        }
+        symbols: list[str] = []
+        for occurrence in extract_placeholders(str(text or "")):
+            token = occurrence.token
+            if token.binding_kind != "db" or not token.indexed:
+                continue
+            base_symbol = base_symbol_for_indexed_placeholder(token.canonical_symbol)
+            if base_symbol not in catalog:
+                continue
+            symbols.append(token.canonical_symbol)
+        return tuple(dict.fromkeys(symbols))
+
+    def _duplicate_iterated_indexed_symbols(
+        self,
+        html_text: str,
+    ) -> set[str]:
+        block_symbols: set[str] = set()
+        for match in _DUPLICATE_BLOCK_RE.finditer(str(html_text or "")):
+            block_symbols.update(self._indexed_db_symbols_for_text(str(match.group(1) or "")))
+        if not block_symbols:
+            return set()
+        outside_duplicate_blocks = _DUPLICATE_BLOCK_RE.sub("", str(html_text or ""))
+        outside_symbols = set(self._indexed_db_symbols_for_text(outside_duplicate_blocks))
+        return block_symbols - outside_symbols
+
+    def _indexed_db_replacements(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        index: int,
+        db_selections: dict[str, object],
+        draft_id: int | None,
+        allow_registry_generation: bool,
+        strict: bool,
+        warnings: list[str],
+    ) -> dict[str, str]:
+        catalog = {
+            item.canonical_symbol: item for item in self.catalog_service.list_known_symbols()
+        }
+        replacements: dict[str, str] = {}
+        for symbol in symbols:
+            catalog_entry = self._catalog_entry_for_symbol(symbol, catalog)
+            if catalog_entry is None:
+                continue
+            selection_key = build_contract_template_indexed_selection_key(symbol, index)
+            selection_value = db_selections.get(selection_key)
+            if selection_value is None:
+                message = (
+                    f"Indexed placeholder {symbol} at DB Index {index} does not have "
+                    "a selected record."
+                )
+                if strict:
+                    raise ContractTemplateExportError(message)
+                warnings.append(message)
+                replacements[symbol] = ""
+                continue
+            try:
+                resolved_value = self._resolve_catalog_value(
+                    catalog_entry=catalog_entry,
+                    selection_value=selection_value,
+                    draft_id=draft_id,
+                    allow_registry_generation=allow_registry_generation,
+                )
+            except ContractTemplateExportError:
+                if strict:
+                    raise
+                warnings.append(
+                    f"Skipped {symbol} at DB Index {index} because it could not be resolved."
+                )
+                continue
+            replacements[symbol] = self._render_catalog_output_value(
+                catalog_entry=catalog_entry,
+                value=resolved_value,
+            )
+        return replacements
 
     def _normalized_group_db_selections(
         self,
@@ -955,18 +1168,126 @@ class ContractTemplateExportService:
         package_root = self.template_service.resolve_html_revision_bundle_root(revision.revision_id)
         if package_root is None:
             package_root = source_html_path.parent
+        raw_html = decode_html_bytes(source_html_path.read_bytes())
+        duplicate_iterated_symbols = self._duplicate_iterated_indexed_symbols(raw_html)
         resolved_values, warnings = self._resolve_payload_values(
             revision.revision_id,
             editable_payload,
             strict=strict,
             draft_id=draft_id,
             allow_registry_generation=allow_registry_generation,
+            duplicate_iterated_symbols=duplicate_iterated_symbols,
         )
+        source_html, duplicate_warnings = self._apply_duplicate_controls(
+            raw_html,
+            editable_payload,
+            strict=strict,
+            draft_id=draft_id,
+            allow_registry_generation=allow_registry_generation,
+        )
+        source_html = self._apply_index_controls(source_html)
+        effective_replacements = {
+            **resolved_values,
+            **self._runtime_replacements_for_text(raw_html, resolved_values),
+        }
         rendered_html = replace_html_placeholders(
-            decode_html_bytes(source_html_path.read_bytes()),
-            resolved_values,
+            source_html,
+            effective_replacements,
         )
-        return rendered_html, package_root, warnings
+        return rendered_html, package_root, tuple(dict.fromkeys((*warnings, *duplicate_warnings)))
+
+    def _apply_duplicate_controls(
+        self,
+        html_text: str,
+        editable_payload: dict[str, object],
+        *,
+        strict: bool,
+        draft_id: int | None = None,
+        allow_registry_generation: bool = False,
+    ) -> tuple[str, tuple[str, ...]]:
+        rendered = str(html_text or "")
+        has_start = _DUPLICATE_START_SYMBOL in rendered
+        has_end = _DUPLICATE_END_SYMBOL in rendered
+        has_number = _DUPLICATE_NUMBER_SYMBOL in rendered
+        has_db_index = _DB_INDEX_SYMBOL in rendered
+        if not (has_start or has_end or has_number or has_db_index):
+            return rendered, ()
+        manual_values = dict(editable_payload.get("manual_values") or {})
+        db_selections = dict(editable_payload.get("db_selections") or {})
+        count = self._duplicate_copy_count(
+            manual_values.get(_DUPLICATE_NUMBER_SYMBOL),
+            strict=strict,
+        )
+        warnings: list[str] = []
+        matched = False
+        missing_count_warning_added = False
+
+        def _repeat_block(match: re.Match[str]) -> str:
+            nonlocal matched, missing_count_warning_added
+            matched = True
+            block = str(match.group(1) or "")
+            indexed_symbols = self._indexed_db_symbols_for_text(block)
+            if count is None:
+                copy_count = 1
+                message = "Duplicate block preview uses one copy until Duplicate Number is set."
+                if not missing_count_warning_added:
+                    warnings.append(message)
+                    missing_count_warning_added = True
+            else:
+                copy_count = int(count)
+            if not (indexed_symbols or _DB_INDEX_SYMBOL in block):
+                return block * copy_count
+            rendered_blocks: list[str] = []
+            for index in range(1, copy_count + 1):
+                replacements = {_DB_INDEX_SYMBOL: str(index)}
+                replacements.update(
+                    self._indexed_db_replacements(
+                        symbols=indexed_symbols,
+                        index=index,
+                        db_selections=db_selections,
+                        draft_id=draft_id,
+                        allow_registry_generation=allow_registry_generation,
+                        strict=strict,
+                        warnings=warnings,
+                    )
+                )
+                rendered_blocks.append(replace_html_placeholders(block, replacements))
+            return "".join(rendered_blocks)
+
+        rendered = _DUPLICATE_BLOCK_RE.sub(_repeat_block, rendered)
+        if (has_start or has_end) and not matched:
+            message = "Duplicate cymbols must use {{duplicate.start}} before {{duplicate.end}}."
+            if strict:
+                raise ContractTemplateExportError(message)
+            warnings.append(message)
+        rendered = rendered.replace(_DUPLICATE_START_SYMBOL, "")
+        rendered = rendered.replace(_DUPLICATE_END_SYMBOL, "")
+        rendered = rendered.replace(_DUPLICATE_NUMBER_SYMBOL, "")
+        rendered = rendered.replace(_DB_INDEX_SYMBOL, "")
+        return rendered, tuple(warnings)
+
+    def _apply_index_controls(self, html_text: str) -> str:
+        rendered = str(html_text or "")
+        page_total = rendered.count(_PAGE_INDEX_SYMBOL)
+        page_index = 0
+
+        def _replace_page_counter(match: re.Match[str]) -> str:
+            nonlocal page_index
+            token = match.group(0)
+            if token == _PAGE_TOTAL_SYMBOL:
+                return str(page_total)
+            page_index += 1
+            return str(page_index)
+
+        rendered = _PAGE_COUNTER_RE.sub(_replace_page_counter, rendered)
+        custom_index = 0
+
+        def _replace_custom_counter(_match: re.Match[str]) -> str:
+            nonlocal custom_index
+            custom_index += 1
+            return str(custom_index)
+
+        return re.sub(re.escape(_CUSTOM_INDEX_SYMBOL), _replace_custom_counter, rendered)
 
     def _export_html_payload_to_pdf(
         self,
@@ -977,12 +1298,22 @@ class ContractTemplateExportService:
         draft_id: int,
         draft_name: str | None = None,
     ) -> ContractTemplateExportResult:
+        source_html_path = self.template_service.ensure_html_revision_source_path(
+            revision.revision_id
+        )
+        if source_html_path is None:
+            raise ContractTemplateExportError(
+                f"HTML working draft source is unavailable for revision {revision.revision_id}."
+            )
+        raw_html = decode_html_bytes(source_html_path.read_bytes())
+        duplicate_iterated_symbols = self._duplicate_iterated_indexed_symbols(raw_html)
         resolved_values, resolution_warnings = self._resolve_payload_values(
             revision.revision_id,
             editable_payload,
             strict=True,
             draft_id=int(draft_id),
             allow_registry_generation=True,
+            duplicate_iterated_symbols=duplicate_iterated_symbols,
         )
         resolved_docx_bytes = None
         resolved_docx_name = None
@@ -993,20 +1324,13 @@ class ContractTemplateExportService:
                 resolved_docx_bytes,
                 resolved_values,
             )
-        rendered_html, source_package_root, _warnings = self._render_html_content(
+        rendered_html, source_package_root, html_warnings = self._render_html_content(
             revision=revision,
             editable_payload=editable_payload,
             strict=True,
             draft_id=int(draft_id),
             allow_registry_generation=True,
         )
-        source_html_path = self.template_service.ensure_html_revision_source_path(
-            revision.revision_id
-        )
-        if source_html_path is None:
-            raise ContractTemplateExportError(
-                f"HTML working draft source is unavailable for revision {revision.revision_id}."
-            )
         working_html_path = self._materialize_html_working_copy(
             draft_id=draft_id,
             source_html_path=source_html_path,
@@ -1026,7 +1350,7 @@ class ContractTemplateExportService:
             relative_html = Path(working_html_path.name)
         stem = _slugify(draft_name or template.name, fallback="contract-template-export")
         rendered_html_bytes = rendered_html.encode("utf-8")
-        warnings = tuple(dict.fromkeys((*resolution_warnings, *docx_warnings)))
+        warnings = tuple(dict.fromkeys((*resolution_warnings, *html_warnings, *docx_warnings)))
 
         snapshot = self.template_service.create_resolved_snapshot(
             ContractTemplateResolvedSnapshotPayload(
@@ -1277,6 +1601,31 @@ class ContractTemplateExportService:
         if isinstance(value, (list, tuple, set)):
             return ", ".join(str(item).strip() for item in value if str(item).strip())
         return str(value)
+
+    @classmethod
+    def _render_catalog_output_value(cls, *, catalog_entry: object, value: object | None) -> str:
+        namespace = str(getattr(catalog_entry, "namespace", "") or "").strip().lower()
+        key = str(getattr(catalog_entry, "key", "") or "").strip().lower()
+        if namespace == "track" and key == "track_length_sec":
+            return cls._render_track_length(value)
+        return cls._render_output_value(value)
+
+    @staticmethod
+    def _render_track_length(value: object | None) -> str:
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if not text:
+            return ""
+        try:
+            seconds = int(float(text))
+        except (TypeError, ValueError):
+            return text
+        if seconds < 0:
+            return text
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     def _write_resolved_docx_artifact(
         self,

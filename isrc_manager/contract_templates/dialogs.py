@@ -75,6 +75,7 @@ from isrc_manager.ui_common import (
 )
 
 from .catalog import registry_binding_for_symbol
+from .formatting import DEFAULT_MANUAL_DATE_FORMAT, MANUAL_DATE_FORMAT_PRESETS
 from .ingestion import detect_template_source_format
 from .models import (
     ContractTemplateCatalogEntry,
@@ -91,6 +92,7 @@ from .models import (
     ContractTemplateResolvedSnapshotRecord,
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
+    build_contract_template_indexed_selection_key,
 )
 
 
@@ -1738,9 +1740,9 @@ class _FillHtmlPreviewController(QWidget):
         self._latest_requested_reason = ""
         self._current_revision_id: int | None = None
         self._latest_payload: dict[str, object] | None = None
-        self._latest_request_key: tuple[int | None, str] | None = None
-        self._pending_request_key: tuple[int | None, str] | None = None
-        self._active_request_key: tuple[int | None, str] | None = None
+        self._latest_request_key: tuple[int | None, str, str] | None = None
+        self._pending_request_key: tuple[int | None, str, str] | None = None
+        self._active_request_key: tuple[int | None, str, str] | None = None
         self._active_candidate: _PreviewCandidate | None = None
         self._active_tree: Path | None = None
         self._pending_candidate: _PreviewCandidate | None = None
@@ -1840,17 +1842,34 @@ class _FillHtmlPreviewController(QWidget):
                 "HTML preview becomes available when the selected revision can be prepared as an HTML working draft."
             )
 
-    @staticmethod
     def _request_key_for(
+        self,
         revision_id: int | None,
         payload: dict[str, object] | None,
-    ) -> tuple[int | None, str]:
+    ) -> tuple[int | None, str, str]:
         normalized_revision = int(revision_id) if revision_id is not None else None
         try:
             payload_key = json.dumps(payload or {}, sort_keys=True, ensure_ascii=True)
         except Exception:
             payload_key = repr(payload or {})
-        return (normalized_revision, payload_key)
+        return (normalized_revision, payload_key, self._runtime_preview_key(normalized_revision))
+
+    def _runtime_preview_key(self, revision_id: int | None) -> str:
+        year = QDate.currentDate().year()
+        source_signature = ""
+        template_service = self.panel._template_service()
+        if revision_id is not None and template_service is not None:
+            try:
+                source_path = template_service.resolve_html_revision_source_path(int(revision_id))
+            except Exception:
+                source_path = None
+            if source_path is not None and Path(source_path).exists():
+                try:
+                    stat = Path(source_path).stat()
+                    source_signature = f"{Path(source_path)}:{stat.st_mtime_ns}:{stat.st_size}"
+                except OSError:
+                    source_signature = str(source_path)
+        return f"current_year={year};source={source_signature}"
 
     def request_refresh(self, *, reason: str, delay_ms: int = 180) -> None:
         view = self.panel.fill_html_preview_view
@@ -2109,6 +2128,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_type_overrides: dict[str, str] = {}
         self._fill_payload_extras: dict[str, object] = {}
         self._fill_generation_warnings: list[str] = []
+        self._fill_indexed_selector_count = 1
         self.fill_html_preview_view = None
         self.fill_preview_stale_label = None
         self.fill_preview_zoom_label = None
@@ -2118,6 +2138,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_preview_rebuild_pending = False
         self.selector_widgets: dict[str, QWidget] = {}
         self.manual_widgets: dict[str, QWidget] = {}
+        self.manual_date_format_widgets: dict[str, QLineEdit] = {}
+        self.manual_date_format_combo_widgets: dict[str, QComboBox] = {}
         self._tab_pages: dict[str, QWidget] = {}
         self._tab_hosts: dict[str, _DockableWorkspaceTab] = {}
         self._pending_tab_layout_states: dict[str, dict[str, object] | None] = {
@@ -3998,10 +4020,17 @@ class ContractTemplateWorkspacePanel(QWidget):
             for value in [self._read_widget_value(widget)]
             if value is not None
         }
+        manual_formats = {
+            key: format_code
+            for key, widget in self.manual_date_format_widgets.items()
+            for format_code in [str(widget.text() or "").strip()]
+            if key in manual_values and format_code and format_code != DEFAULT_MANUAL_DATE_FORMAT
+        }
         payload = form_service.build_editable_payload(
             revision_id,
             db_selections=db_selections,
             manual_values=manual_values,
+            manual_formats=manual_formats,
             type_overrides=self._fill_type_overrides,
         )
         payload.update(self._fill_payload_extras)
@@ -4270,11 +4299,26 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_payload_extras = {
             key: value
             for key, value in payload_map.items()
-            if key not in {"revision_id", "db_selections", "manual_values", "type_overrides"}
+            if key
+            not in {
+                "revision_id",
+                "db_selections",
+                "manual_values",
+                "manual_formats",
+                "type_overrides",
+            }
         }
-        self._clear_fill_input_values()
         db_values = dict(payload_map.get("db_selections") or {})
         manual_values = dict(payload_map.get("manual_values") or {})
+        manual_formats = dict(payload_map.get("manual_formats") or {})
+        if self._fill_definition is not None and self._fill_definition.indexed_selector_fields:
+            indexed_count = self._indexed_selector_count_from_manual_values(manual_values)
+            if indexed_count != self._fill_indexed_selector_count:
+                self._rebuild_selector_fields(
+                    self._fill_definition,
+                    indexed_count=indexed_count,
+                )
+        self._clear_fill_input_values()
         previous_suspend = self._suspend_fill_updates
         self._suspend_fill_updates = True
         try:
@@ -4286,6 +4330,8 @@ class ContractTemplateWorkspacePanel(QWidget):
                 widget = self.manual_widgets.get(str(key))
                 if widget is not None:
                     self._write_widget_value(widget, value, explicit=True)
+            for key, value in manual_formats.items():
+                self._set_manual_date_format(str(key), str(value))
         finally:
             self._suspend_fill_updates = previous_suspend
         self._fill_dirty = False
@@ -5619,9 +5665,54 @@ class ContractTemplateWorkspacePanel(QWidget):
                     self._write_widget_value(widget, None, explicit=False)
                 finally:
                     widget.blockSignals(previous_signal_state)
+            for key in list(self.manual_date_format_widgets):
+                self._set_manual_date_format(key, DEFAULT_MANUAL_DATE_FORMAT)
         finally:
             self._suspend_fill_updates = previous_suspend
         self._fill_dirty = False
+
+    @staticmethod
+    def _indexed_selector_count_from_manual_values(
+        manual_values: dict[str, object],
+    ) -> int:
+        raw_value = dict(manual_values or {}).get("{{duplicate.number}}")
+        try:
+            value = float(str(raw_value if raw_value is not None else "").strip())
+        except (TypeError, ValueError):
+            return 1
+        if not value.is_integer():
+            return 1
+        return max(0, min(200, int(value)))
+
+    def _current_indexed_selector_count(self) -> int:
+        widget = self.manual_widgets.get("{{duplicate.number}}")
+        if widget is None:
+            return 1
+        value = self._read_widget_value(widget)
+        return self._indexed_selector_count_from_manual_values({"{{duplicate.number}}": value})
+
+    def _sync_indexed_selector_fields_from_duplicate_number(self) -> None:
+        if self._fill_definition is None or not self._fill_definition.indexed_selector_fields:
+            return
+        indexed_count = self._current_indexed_selector_count()
+        if indexed_count == self._fill_indexed_selector_count:
+            return
+        preserved_values = {
+            key: value
+            for key, widget in self.selector_widgets.items()
+            for value in [self._read_widget_value(widget)]
+            if value is not None
+        }
+        previous_suspend = self._suspend_fill_updates
+        self._suspend_fill_updates = True
+        try:
+            self._rebuild_selector_fields(
+                self._fill_definition,
+                indexed_count=indexed_count,
+                preserved_values=preserved_values,
+            )
+        finally:
+            self._suspend_fill_updates = previous_suspend
 
     def _write_widget_value(
         self,
@@ -5663,6 +5754,43 @@ class ContractTemplateWorkspacePanel(QWidget):
             return
         if isinstance(widget, QLineEdit):
             widget.setText(str(value) if explicit and value is not None else "")
+
+    def _set_manual_date_format(self, canonical_symbol: str, format_code: str) -> None:
+        edit = self.manual_date_format_widgets.get(str(canonical_symbol))
+        if edit is None:
+            return
+        clean_format = str(format_code or "").strip() or DEFAULT_MANUAL_DATE_FORMAT
+        previous_edit_state = edit.blockSignals(True)
+        try:
+            edit.setText(clean_format)
+        finally:
+            edit.blockSignals(previous_edit_state)
+        combo = self.manual_date_format_combo_widgets.get(str(canonical_symbol))
+        if combo is None:
+            return
+        previous_combo_state = combo.blockSignals(True)
+        try:
+            index = combo.findData(clean_format)
+            if index < 0:
+                index = combo.findData("__custom__")
+            combo.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            combo.blockSignals(previous_combo_state)
+
+    def _sync_manual_date_format_combo(self, canonical_symbol: str) -> None:
+        combo = self.manual_date_format_combo_widgets.get(str(canonical_symbol))
+        edit = self.manual_date_format_widgets.get(str(canonical_symbol))
+        if combo is None or edit is None:
+            return
+        clean_format = str(edit.text() or "").strip()
+        index = combo.findData(clean_format)
+        if index < 0:
+            index = combo.findData("__custom__")
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            combo.blockSignals(previous_state)
 
     @staticmethod
     def _read_widget_value(widget: QWidget) -> object | None:
@@ -5867,6 +5995,7 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _rebuild_fill_fields(self, form_definition: ContractTemplateFormDefinition) -> None:
         self._clear_fill_fields()
         self._fill_generation_warnings = []
+        self._fill_indexed_selector_count = 1
         for field in form_definition.auto_fields:
             widget = self._build_auto_field_widget(field)
             self._fill_generation_warnings.extend(
@@ -5877,7 +6006,35 @@ class ContractTemplateWorkspacePanel(QWidget):
                 ]
             )
             self.fill_auto_form.addRow(field.display_label, widget)
-        for field in form_definition.selector_fields:
+        self._rebuild_selector_fields(
+            form_definition,
+            indexed_count=self._fill_indexed_selector_count,
+        )
+        for field in form_definition.manual_fields:
+            widget = self._build_manual_widget(field)
+            value_widget = widget.property("manual_value_widget")
+            self.manual_widgets[field.canonical_symbol] = (
+                value_widget if isinstance(value_widget, QWidget) else widget
+            )
+            self.fill_manual_form.addRow(field.display_label, widget)
+        self.fill_auto_empty_label.setVisible(not bool(form_definition.auto_fields))
+        self.fill_manual_empty_label.setVisible(not bool(form_definition.manual_fields))
+
+    def _rebuild_selector_fields(
+        self,
+        form_definition: ContractTemplateFormDefinition,
+        *,
+        indexed_count: int,
+        preserved_values: dict[str, object] | None = None,
+    ) -> None:
+        self._clear_form_layout(self.fill_selector_form)
+        self.selector_widgets = {}
+        self._fill_indexed_selector_count = max(0, min(200, int(indexed_count)))
+        fields: list[ContractTemplateFormSelectorField] = list(form_definition.selector_fields)
+        for template in form_definition.indexed_selector_fields:
+            for index in range(1, self._fill_indexed_selector_count + 1):
+                fields.append(self._indexed_selector_field(template, index))
+        for field in fields:
             widget = self._build_selector_widget(field)
             self._fill_generation_warnings.extend(
                 [
@@ -5889,13 +6046,37 @@ class ContractTemplateWorkspacePanel(QWidget):
             for placeholder_symbol in field.placeholder_symbols:
                 self.selector_widgets[placeholder_symbol] = widget
             self.fill_selector_form.addRow(field.display_label, widget)
-        for field in form_definition.manual_fields:
-            widget = self._build_manual_widget(field)
-            self.manual_widgets[field.canonical_symbol] = widget
-            self.fill_manual_form.addRow(field.display_label, widget)
-        self.fill_auto_empty_label.setVisible(not bool(form_definition.auto_fields))
-        self.fill_selector_empty_label.setVisible(not bool(form_definition.selector_fields))
-        self.fill_manual_empty_label.setVisible(not bool(form_definition.manual_fields))
+        for key, value in dict(preserved_values or {}).items():
+            widget = self.selector_widgets.get(str(key))
+            if widget is not None:
+                self._write_widget_value(widget, value, explicit=True)
+        self.fill_selector_empty_label.setVisible(not bool(fields))
+
+    @staticmethod
+    def _indexed_selector_field(
+        template: ContractTemplateFormSelectorField,
+        index: int,
+    ) -> ContractTemplateFormSelectorField:
+        placeholder_symbols = tuple(
+            build_contract_template_indexed_selection_key(symbol, index)
+            for symbol in template.placeholder_symbols
+        )
+        return ContractTemplateFormSelectorField(
+            selector_key=build_contract_template_indexed_selection_key(
+                template.selector_key,
+                index,
+            ),
+            display_label=f"{template.display_label} {index}",
+            scope_entity_type=template.scope_entity_type,
+            scope_policy=template.scope_policy,
+            widget_kind=template.widget_kind,
+            required=template.required,
+            placeholder_symbols=placeholder_symbols,
+            choices=template.choices,
+            description=(
+                f"{template.description or ''} This selector is used for DB Index {index}."
+            ).strip(),
+        )
 
     def _clear_fill_fields(self) -> None:
         self._clear_form_layout(self.fill_auto_form)
@@ -5904,6 +6085,9 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_generation_warnings = []
         self.selector_widgets = {}
         self.manual_widgets = {}
+        self.manual_date_format_widgets = {}
+        self.manual_date_format_combo_widgets = {}
+        self._fill_indexed_selector_count = 1
         self.fill_auto_empty_label.setVisible(True)
         self.fill_selector_empty_label.setVisible(True)
         self.fill_manual_empty_label.setVisible(True)
@@ -5925,7 +6109,10 @@ class ContractTemplateWorkspacePanel(QWidget):
         actions: list[tuple[str, str]] = []
         seen: set[str] = set()
         for symbol in field.placeholder_symbols:
-            binding = registry_binding_for_symbol(symbol)
+            try:
+                binding = registry_binding_for_symbol(symbol)
+            except ValueError:
+                continue
             if binding is None or binding.owner_kind != field.scope_entity_type:
                 continue
             if binding.system_key in seen:
@@ -6147,18 +6334,32 @@ class ContractTemplateWorkspacePanel(QWidget):
             spin.setProperty("field_type", field.field_type)
             spin.setProperty("widget_kind", field.widget_kind)
             spin.setProperty("has_user_value", False)
-            spin.setRange(-999999999.0, 999999999.0)
-            spin.setDecimals(6)
+            if field.canonical_symbol == "{{duplicate.number}}":
+                spin.setRange(0.0, 200.0)
+                spin.setDecimals(0)
+            else:
+                spin.setRange(-999999999.0, 999999999.0)
+                spin.setDecimals(6)
 
             def _handle_number_change(_value: float, *, widget=spin) -> None:
                 widget.setProperty("has_user_value", True)
+                if (
+                    widget.property("canonical_symbol") == "{{duplicate.number}}"
+                    and not self._suspend_fill_updates
+                ):
+                    self._sync_indexed_selector_fields_from_duplicate_number()
                 self._mark_fill_dirty()
 
             spin.valueChanged.connect(_handle_number_change)
             return spin
 
         if field.field_type == "date":
-            edit = QDateEdit(self.fill_form_tab)
+            container = QWidget(self.fill_form_tab)
+            container.setObjectName("contractTemplateManualDateContainer")
+            row = QHBoxLayout(container)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            edit = QDateEdit(container)
             edit.setObjectName("contractTemplateManualDateWidget")
             edit.setProperty("canonical_symbol", field.canonical_symbol)
             edit.setProperty("field_type", field.field_type)
@@ -6167,13 +6368,41 @@ class ContractTemplateWorkspacePanel(QWidget):
             edit.setCalendarPopup(True)
             edit.setDisplayFormat("yyyy-MM-dd")
             edit.setDate(QDate.currentDate())
+            format_combo = QComboBox(container)
+            format_combo.setObjectName("contractTemplateManualDateFormatCombo")
+            for preset in MANUAL_DATE_FORMAT_PRESETS:
+                format_combo.addItem(preset, preset)
+            format_combo.addItem("Custom", "__custom__")
+            format_edit = QLineEdit(container)
+            format_edit.setObjectName("contractTemplateManualDateFormatEdit")
+            format_edit.setPlaceholderText("d.mmm.yyyy")
+            format_edit.setText(DEFAULT_MANUAL_DATE_FORMAT)
+            format_edit.setMinimumWidth(110)
+            row.addWidget(edit, 1)
+            row.addWidget(format_combo)
+            row.addWidget(format_edit)
+            container.setProperty("manual_value_widget", edit)
+            self.manual_date_format_widgets[field.canonical_symbol] = format_edit
+            self.manual_date_format_combo_widgets[field.canonical_symbol] = format_combo
 
             def _handle_date_change(_date: QDate, *, widget=edit) -> None:
                 widget.setProperty("has_user_value", True)
                 self._mark_fill_dirty()
 
+            def _handle_format_choice(_index: int, *, combo=format_combo, line=format_edit) -> None:
+                value = combo.currentData()
+                if value and value != "__custom__":
+                    line.setText(str(value))
+                self._mark_fill_dirty()
+
+            def _handle_format_text(_text: str, *, symbol=field.canonical_symbol) -> None:
+                self._sync_manual_date_format_combo(symbol)
+                self._mark_fill_dirty()
+
             edit.dateChanged.connect(_handle_date_change)
-            return edit
+            format_combo.currentIndexChanged.connect(_handle_format_choice)
+            format_edit.textChanged.connect(_handle_format_text)
+            return container
 
         line_edit = QLineEdit(self.fill_form_tab)
         line_edit.setObjectName("contractTemplateManualTextWidget")

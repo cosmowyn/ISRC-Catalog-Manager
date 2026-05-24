@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -17,6 +18,10 @@ from isrc_manager.contract_templates import (
     ContractTemplatePayload,
     ContractTemplateRevisionPayload,
     ContractTemplateService,
+)
+from isrc_manager.contract_templates.models import (
+    build_contract_template_indexed_selection_key,
+    build_contract_template_selector_scope_key,
 )
 from isrc_manager.contracts import ContractPayload, ContractService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
@@ -289,7 +294,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             {
                 "{{db.track.artist_name}}": "Moonwake",
                 "{{db.track.track_title}}": "Export Service Song",
-                "{{manual.license_date}}": "2026-03-31",
+                "{{manual.license_date}}": "31.Mar.2026",
             },
         )
         self.assertEqual(
@@ -373,8 +378,8 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         self.assertEqual(result.resolved_html_artifact.artifact_type, "resolved_html")
         self.assertTrue(Path(result.resolved_html_artifact.output_path).exists())
         self.assertTrue(Path(result.pdf_artifact.output_path).read_bytes().startswith(b"%PDF"))
-        self.assertIn("2026-04-05", Path(result.resolved_html_artifact.output_path).read_text())
-        self.assertIn("2026-04-05", refreshed_working_path.read_text(encoding="utf-8"))
+        self.assertIn("05.Apr.2026", Path(result.resolved_html_artifact.output_path).read_text())
+        self.assertIn("05.Apr.2026", refreshed_working_path.read_text(encoding="utf-8"))
         self.assertNotIn(
             "{{manual.license_date}}",
             refreshed_working_path.read_text(encoding="utf-8"),
@@ -396,6 +401,258 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         rendered_source, rendered_pdf = self.html_pdf_adapter.file_calls[0]
         self.assertEqual(rendered_source, Path(result.resolved_html_artifact.output_path))
         self.assertEqual(rendered_pdf, Path(result.pdf_artifact.output_path))
+
+    def test_html_export_applies_current_year_date_format_and_duplicate_controls(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Runtime Control Template",
+                description="Current year and duplicate block coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        source_path = self.root / "runtime-control.html"
+        source_path.write_text(
+            "<html><body><main>{{duplicate.start}}"
+            "<section><p>{{current.year}}</p><p>{{manual.license_date}}</p>"
+            "<p>{{page.index}}/{{page.total}}</p><p>{{custom.index}}</p>"
+            "<span>{{duplicate.number}}</span></section>"
+            "{{duplicate.end}}</main></body></html>",
+            encoding="utf-8",
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Runtime Control Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {},
+                    "manual_values": {
+                        "{{manual.license_date}}": "2026-04-05",
+                        "{{duplicate.number}}": 3,
+                    },
+                    "manual_formats": {"{{manual.license_date}}": "d.mmm.yy"},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        rendered_html = Path(result.resolved_html_artifact.output_path).read_text(encoding="utf-8")
+
+        self.assertEqual(rendered_html.count("<section>"), 3)
+        self.assertEqual(rendered_html.count(str(date.today().year)), 3)
+        self.assertEqual(rendered_html.count("5.Apr.26"), 3)
+        self.assertIn("<p>1/3</p><p>1</p>", rendered_html)
+        self.assertIn("<p>2/3</p><p>2</p>", rendered_html)
+        self.assertIn("<p>3/3</p><p>3</p>", rendered_html)
+        self.assertNotIn("{{duplicate.start}}", rendered_html)
+        self.assertNotIn("{{duplicate.end}}", rendered_html)
+        self.assertNotIn("{{duplicate.number}}", rendered_html)
+        self.assertNotIn("{{page.index}}", rendered_html)
+        self.assertNotIn("{{page.total}}", rendered_html)
+        self.assertNotIn("{{custom.index}}", rendered_html)
+        self.assertEqual(
+            result.snapshot.resolved_values["{{current.year}}"], str(date.today().year)
+        )
+        self.assertEqual(result.snapshot.resolved_values["{{manual.license_date}}"], "5.Apr.26")
+
+    def test_html_export_formats_track_length_as_timecode(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Track Length Template",
+                description="Track length cymbol formatting coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        source_path = self.root / "track-length.html"
+        source_path.write_text(
+            "<html><body><p>{{db.track.track_length_sec}}</p></body></html>",
+            encoding="utf-8",
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Track Length Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {
+                        "{{db.track.track_length_sec}}": str(self.primary_track_id),
+                    },
+                    "manual_values": {},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        rendered_html = Path(result.resolved_html_artifact.output_path).read_text(encoding="utf-8")
+
+        self.assertIn("<p>00:03:41</p>", rendered_html)
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.track.track_length_sec}}"],
+            "00:03:41",
+        )
+        self.assertNotIn("<p>221</p>", rendered_html)
+
+    def test_html_duplicate_track_block_uses_indexed_db_selections(self):
+        second_track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-TST-26-00603",
+                track_title="Album Continuation",
+                artist_name="Moonwake",
+                additional_artists=[],
+                album_title="Export Coverage",
+                release_date="2026-03-25",
+                track_length_sec=199,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+            )
+        )
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Indexed Track Duplicate Template",
+                description="Duplicate block indexed track context coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        source_path = self.root / "indexed-track-duplicate.html"
+        source_path.write_text(
+            "<html><body><h1>{{db.release.title}}</h1>{{duplicate.number}}"
+            "{{duplicate.start}}<section><p>{{db.index}}</p>"
+            "<p>{{db.track.track_title.indexed}}</p><p>{{db.track.isrc.indexed}}</p>"
+            "<p>{{db.track.track_length_sec.indexed}}</p></section>"
+            "{{duplicate.end}}</body></html>",
+            encoding="utf-8",
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        release_scope_key = build_contract_template_selector_scope_key(
+            "release",
+            "release_selection_required",
+        )
+        title_symbol = "{{db.track.track_title.indexed}}"
+        isrc_symbol = "{{db.track.isrc.indexed}}"
+        length_symbol = "{{db.track.track_length_sec.indexed}}"
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Indexed Track Duplicate Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {
+                        release_scope_key: str(self.release_id),
+                        build_contract_template_indexed_selection_key(title_symbol, 1): str(
+                            self.primary_track_id
+                        ),
+                        build_contract_template_indexed_selection_key(isrc_symbol, 1): str(
+                            self.primary_track_id
+                        ),
+                        build_contract_template_indexed_selection_key(length_symbol, 1): str(
+                            self.primary_track_id
+                        ),
+                        build_contract_template_indexed_selection_key(title_symbol, 2): str(
+                            second_track_id
+                        ),
+                        build_contract_template_indexed_selection_key(isrc_symbol, 2): str(
+                            second_track_id
+                        ),
+                        build_contract_template_indexed_selection_key(length_symbol, 2): str(
+                            second_track_id
+                        ),
+                    },
+                    "manual_values": {"{{duplicate.number}}": 2},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        rendered_html = Path(result.resolved_html_artifact.output_path).read_text(encoding="utf-8")
+
+        self.assertEqual(rendered_html.count("<section>"), 2)
+        self.assertIn("<h1>Export Coverage Release</h1>", rendered_html)
+        self.assertIn(
+            "<p>1</p><p>Export Service Song</p><p>NL-TST-26-00601</p><p>00:03:41</p>",
+            rendered_html,
+        )
+        self.assertIn(
+            "<p>2</p><p>Album Continuation</p><p>NL-TST-26-00603</p><p>00:03:19</p>",
+            rendered_html,
+        )
+        self.assertEqual(rendered_html.count("Export Service Song"), 1)
+        self.assertNotIn("{{db.track.track_title.indexed}}", rendered_html)
+        self.assertNotIn("{{db.track.isrc.indexed}}", rendered_html)
+        self.assertNotIn("{{db.track.track_length_sec.indexed}}", rendered_html)
+        self.assertNotIn("{{db.index}}", rendered_html)
+        self.assertNotIn("{{duplicate.number}}", rendered_html)
+
+    def test_html_preview_replaces_current_year_even_when_scan_inventory_is_stale(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Stale Runtime Inventory Template",
+                description="Runtime symbol preview coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        source_path = self.root / "stale-runtime.html"
+        source_path.write_text(
+            "<html><body><p>{{current.year}}</p><p>{{page.index}}/{{page.total}}</p>"
+            "<p>{{custom.index}}</p></body></html>",
+            encoding="utf-8",
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        self.template_service.replace_revision_placeholder_inventory(
+            revision.revision_id,
+            placeholders=(),
+        )
+
+        _preview_root, preview_html, _warnings = (
+            self.export_service.materialize_html_preview_session(
+                revision_id=revision.revision_id,
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {},
+                    "manual_values": {},
+                    "type_overrides": {},
+                },
+                strict=False,
+            )
+        )
+
+        rendered_html = preview_html.read_text(encoding="utf-8")
+        self.assertIn(str(date.today().year), rendered_html)
+        self.assertIn("<p>1/1</p>", rendered_html)
+        self.assertIn("<p>1</p>", rendered_html)
+        self.assertNotIn("{{current.year}}", rendered_html)
+        self.assertNotIn("{{page.index}}", rendered_html)
+        self.assertNotIn("{{page.total}}", rendered_html)
+        self.assertNotIn("{{custom.index}}", rendered_html)
 
     def test_export_normalizes_conflicting_legacy_track_selections_to_one_scope(self):
         draft = self.template_service.create_draft(

@@ -193,6 +193,15 @@ def build_contract_template_selector_scope_key(
     return f"db_scope.{clean_entity_type}.{clean_scope_policy}"
 
 
+def build_contract_template_indexed_selection_key(
+    canonical_symbol: str,
+    index: int,
+) -> str:
+    clean_symbol = str(canonical_symbol or "").strip()
+    clean_index = max(1, int(index))
+    return f"{clean_symbol}#index:{clean_index}"
+
+
 @dataclass(slots=True)
 class ContractTemplateCatalogEntry:
     binding_kind: str
@@ -217,6 +226,14 @@ class ContractTemplateCatalogEntry:
 
     @property
     def source_kind(self) -> str:
+        if self.binding_kind in {"page", "custom"}:
+            return "Template Counter"
+        if self.binding_kind == "db_index":
+            return "Template Counter"
+        if self.binding_kind == "current":
+            return "Automatic Value"
+        if self.binding_kind == "duplicate":
+            return "Template Control"
         if self.is_custom_field:
             return "Custom Field"
         if self.is_settings_field:
@@ -335,6 +352,7 @@ class ContractTemplateFormDefinition:
     auto_fields: tuple[ContractTemplateFormAutoField, ...]
     selector_fields: tuple[ContractTemplateFormSelectorField, ...]
     manual_fields: tuple[ContractTemplateFormManualField, ...]
+    indexed_selector_fields: tuple[ContractTemplateFormSelectorField, ...] = ()
     unresolved_placeholders: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -348,6 +366,7 @@ class ContractTemplateFormDefinition:
             "auto_fields": [item.to_dict() for item in self.auto_fields],
             "selector_fields": [item.to_dict() for item in self.selector_fields],
             "manual_fields": [item.to_dict() for item in self.manual_fields],
+            "indexed_selector_fields": [item.to_dict() for item in self.indexed_selector_fields],
             "unresolved_placeholders": list(self.unresolved_placeholders),
             "warnings": list(self.warnings),
         }

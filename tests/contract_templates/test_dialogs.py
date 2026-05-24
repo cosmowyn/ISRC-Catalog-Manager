@@ -27,6 +27,7 @@ from isrc_manager.contract_templates.dialogs import (
     _InteractiveHtmlPreviewView,
 )
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
+from isrc_manager.contract_templates.models import build_contract_template_indexed_selection_key
 from isrc_manager.external_launch import (
     clear_recorded_external_launches,
     get_recorded_external_launches,
@@ -416,6 +417,105 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.assertTrue(self.panel.selected_symbol_edit.text().startswith("{{db.custom.cf_"))
         self.assertEqual(self.panel.detail_source_label.text(), "Source Kind: Custom Field")
 
+    def test_panel_symbol_generator_exposes_runtime_and_duplicate_cymbols(self):
+        self._focus_symbols()
+        self.panel.focus_namespace("page")
+        self.panel.search_edit.setText("index")
+        pump_events(app=self.app, cycles=3)
+
+        page_symbols = {
+            self.panel.table.item(row, 4).text() for row in range(self.panel.table.rowCount())
+        }
+        self.assertIn("{{page.index}}", page_symbols)
+
+        self.panel.search_edit.setText("total")
+        pump_events(app=self.app, cycles=3)
+        page_total_symbols = {
+            self.panel.table.item(row, 4).text() for row in range(self.panel.table.rowCount())
+        }
+        self.assertIn("{{page.total}}", page_total_symbols)
+
+        self.panel.focus_namespace("current")
+        self.panel.search_edit.setText("year")
+        pump_events(app=self.app, cycles=3)
+
+        current_symbols = {
+            self.panel.table.item(row, 4).text() for row in range(self.panel.table.rowCount())
+        }
+        self.assertIn("{{current.year}}", current_symbols)
+
+        self.panel.focus_namespace("duplicate")
+        self.panel.search_edit.setText("duplicate")
+        pump_events(app=self.app, cycles=3)
+
+        duplicate_symbols = {
+            self.panel.table.item(row, 4).text() for row in range(self.panel.table.rowCount())
+        }
+        self.assertTrue(
+            {
+                "{{duplicate.start}}",
+                "{{duplicate.end}}",
+                "{{duplicate.number}}",
+                "{{db.index}}",
+            }
+            <= duplicate_symbols
+        )
+
+        self.panel.focus_namespace("custom")
+        self.panel.search_edit.setText("custom index")
+        pump_events(app=self.app, cycles=3)
+        custom_symbols = {
+            self.panel.table.item(row, 4).text() for row in range(self.panel.table.rowCount())
+        }
+        self.assertIn("{{custom.index}}", custom_symbols)
+
+    def test_fill_tab_expands_indexed_selectors_from_duplicate_number(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Indexed Dialog Template",
+                description="Indexed selector dialog coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "indexed-dialog-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Indexed ",
+                        "{{duplicate.start}}",
+                        "{{db.index}}",
+                        "{{db.track.track_title.indexed}}",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+
+        self._focus_fill()
+        self.panel._select_revision_context(template.template_id, revision.revision_id)
+        pump_events(app=self.app, cycles=3)
+
+        title_symbol = "{{db.track.track_title.indexed}}"
+        first_key = build_contract_template_indexed_selection_key(title_symbol, 1)
+        second_key = build_contract_template_indexed_selection_key(title_symbol, 2)
+        self.assertIn(first_key, self.panel.selector_widgets)
+        self.assertNotIn(second_key, self.panel.selector_widgets)
+
+        duplicate_widget = self.panel.manual_widgets["{{duplicate.number}}"]
+        duplicate_widget.setValue(2)
+        pump_events(app=self.app, cycles=3)
+
+        self.assertIn(first_key, self.panel.selector_widgets)
+        self.assertIn(second_key, self.panel.selector_widgets)
+
     def test_panel_exposes_fill_tab_and_focuses_requested_form_workspace(self):
         tab_texts = [
             self.panel.workspace_tabs.tabText(index).lower()
@@ -578,6 +678,26 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
                 "db_selections": {"{{db.track.track_title}}": "1"},
                 "manual_values": {"{{manual.license_date}}": updated_date.toString("yyyy-MM-dd")},
                 "type_overrides": {},
+            },
+        )
+
+    def test_fill_tab_manual_date_supports_custom_output_format(self):
+        self._focus_fill()
+
+        date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        format_widget = self.panel.manual_date_format_widgets["{{manual.license_date}}"]
+        date_widget.setDate(QDate(2026, 4, 5))
+        format_widget.setText("d.m.yy")
+        pump_events(app=self.app, cycles=2)
+
+        self.assertEqual(
+            self.panel.current_fill_state(),
+            {
+                "revision_id": self.revision.revision_id,
+                "db_selections": {},
+                "manual_values": {"{{manual.license_date}}": "2026-04-05"},
+                "type_overrides": {},
+                "manual_formats": {"{{manual.license_date}}": "d.m.yy"},
             },
         )
 

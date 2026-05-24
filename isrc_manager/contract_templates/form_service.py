@@ -17,7 +17,7 @@ from .models import (
     ContractTemplatePlaceholderRecord,
     build_contract_template_selector_scope_key,
 )
-from .parser import parse_placeholder
+from .parser import base_symbol_for_indexed_placeholder, parse_placeholder
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -92,7 +92,10 @@ class ContractTemplateFormService:
         bindings = [
             self._merged_binding_payload(
                 placeholder,
-                catalog_entry=catalog.get(placeholder.canonical_symbol),
+                catalog_entry=self._catalog_entry_for_placeholder(
+                    placeholder.canonical_symbol,
+                    catalog,
+                ),
                 current=existing.get(placeholder.canonical_symbol),
             )
             for placeholder in placeholders
@@ -114,6 +117,7 @@ class ContractTemplateFormService:
         }
 
         selector_fields: list[ContractTemplateFormSelectorField] = []
+        indexed_selector_fields: list[ContractTemplateFormSelectorField] = []
         auto_fields: list[ContractTemplateFormAutoField] = []
         manual_fields: list[ContractTemplateFormManualField] = []
         unresolved: list[str] = []
@@ -128,13 +132,29 @@ class ContractTemplateFormService:
                 ]
             ],
         ] = {}
+        indexed_selector_groups: dict[
+            str,
+            list[
+                tuple[
+                    ContractTemplatePlaceholderRecord,
+                    ContractTemplatePlaceholderBindingRecord | None,
+                    ContractTemplateCatalogEntry | None,
+                ]
+            ],
+        ] = {}
 
         for placeholder in placeholders:
             token = parse_placeholder(placeholder.canonical_symbol)
             binding = bindings.get(placeholder.canonical_symbol)
+            if token.binding_kind == "db_index":
+                auto_fields.append(self._db_index_auto_field(placeholder))
+                continue
             if token.binding_kind == "db":
-                catalog_entry = catalog.get(placeholder.canonical_symbol)
-                if self._is_auto_resolved_scope(
+                catalog_entry = self._catalog_entry_for_placeholder(
+                    placeholder.canonical_symbol,
+                    catalog,
+                )
+                if not token.indexed and self._is_auto_resolved_scope(
                     placeholder,
                     binding=binding,
                     catalog_entry=catalog_entry,
@@ -165,16 +185,41 @@ class ContractTemplateFormService:
                         f"No selector mapping could be derived for {placeholder.canonical_symbol}."
                     )
                     continue
+                if token.indexed:
+                    indexed_selector_groups.setdefault(selector_scope, []).append(
+                        (placeholder, binding, catalog_entry)
+                    )
+                    continue
                 selector_groups.setdefault(selector_scope, []).append(
                     (placeholder, binding, catalog_entry)
                 )
                 continue
-            manual_fields.append(
-                self._manual_field(
-                    placeholder,
-                    binding=binding,
+            if token.binding_kind == "current":
+                auto_fields.append(self._current_auto_field(placeholder))
+                continue
+            if token.binding_kind in {"page", "custom"}:
+                auto_fields.append(self._counter_auto_field(placeholder))
+                continue
+            if token.binding_kind == "duplicate":
+                if token.key == "number":
+                    manual_fields.append(
+                        self._manual_field(
+                            placeholder,
+                            binding=binding,
+                        )
+                    )
+                else:
+                    auto_fields.append(self._duplicate_marker_auto_field(placeholder))
+                continue
+            if token.binding_kind == "manual":
+                manual_fields.append(
+                    self._manual_field(
+                        placeholder,
+                        binding=binding,
+                    )
                 )
-            )
+                continue
+            unresolved.append(placeholder.canonical_symbol)
 
         for group in selector_groups.values():
             selector_field = self._selector_field(group)
@@ -184,6 +229,14 @@ class ContractTemplateFormService:
             if not selector_field.choices:
                 warnings.append(f"{selector_field.display_label} has no selectable records yet.")
             selector_fields.append(selector_field)
+        for group in indexed_selector_groups.values():
+            selector_field = self._selector_field(group, indexed=True)
+            if selector_field is None:
+                unresolved.extend(item[0].canonical_symbol for item in group)
+                continue
+            if not selector_field.choices:
+                warnings.append(f"{selector_field.display_label} has no selectable records yet.")
+            indexed_selector_fields.append(selector_field)
 
         return ContractTemplateFormDefinition(
             template_id=template.template_id,
@@ -194,6 +247,7 @@ class ContractTemplateFormService:
             auto_fields=tuple(auto_fields),
             selector_fields=tuple(selector_fields),
             manual_fields=tuple(manual_fields),
+            indexed_selector_fields=tuple(indexed_selector_fields),
             unresolved_placeholders=tuple(sorted(unresolved)),
             warnings=tuple(dict.fromkeys(warnings)),
         )
@@ -204,14 +258,31 @@ class ContractTemplateFormService:
         *,
         db_selections: dict[str, object] | None = None,
         manual_values: dict[str, object] | None = None,
+        manual_formats: dict[str, str] | None = None,
         type_overrides: dict[str, str] | None = None,
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "revision_id": int(revision_id),
             "db_selections": dict(db_selections or {}),
             "manual_values": dict(manual_values or {}),
             "type_overrides": dict(type_overrides or {}),
         }
+        clean_formats = {
+            str(key): str(value)
+            for key, value in dict(manual_formats or {}).items()
+            if str(key or "").strip() and str(value or "").strip()
+        }
+        if clean_formats:
+            payload["manual_formats"] = clean_formats
+        return payload
+
+    @staticmethod
+    def _catalog_entry_for_placeholder(
+        canonical_symbol: str,
+        catalog: dict[str, ContractTemplateCatalogEntry],
+    ) -> ContractTemplateCatalogEntry | None:
+        base_symbol = base_symbol_for_indexed_placeholder(canonical_symbol)
+        return catalog.get(base_symbol or canonical_symbol)
 
     def _merged_binding_payload(
         self,
@@ -226,6 +297,16 @@ class ContractTemplateFormService:
                 placeholder,
                 catalog_entry=catalog_entry,
             )
+        elif token.binding_kind == "manual":
+            derived = self._manual_binding_payload(placeholder)
+        elif token.binding_kind == "current":
+            derived = self._current_binding_payload(placeholder)
+        elif token.binding_kind == "db_index":
+            derived = self._db_index_binding_payload(placeholder)
+        elif token.binding_kind in {"page", "custom"}:
+            derived = self._counter_binding_payload(placeholder)
+        elif token.binding_kind == "duplicate":
+            derived = self._duplicate_binding_payload(placeholder)
         else:
             derived = self._manual_binding_payload(placeholder)
         if current is None:
@@ -310,6 +391,69 @@ class ContractTemplateFormService:
             metadata={"display_label": placeholder.display_label},
         )
 
+    def _current_binding_payload(
+        self, placeholder: ContractTemplatePlaceholderRecord
+    ) -> ContractTemplatePlaceholderBindingPayload:
+        return ContractTemplatePlaceholderBindingPayload(
+            canonical_symbol=placeholder.canonical_symbol,
+            resolver_kind="current",
+            resolver_target=placeholder.canonical_symbol,
+            scope_entity_type=None,
+            scope_policy="automatic",
+            widget_hint="auto_value",
+            validation={"field_type": "int"},
+            metadata={"display_label": placeholder.display_label},
+        )
+
+    def _db_index_binding_payload(
+        self, placeholder: ContractTemplatePlaceholderRecord
+    ) -> ContractTemplatePlaceholderBindingPayload:
+        return ContractTemplatePlaceholderBindingPayload(
+            canonical_symbol=placeholder.canonical_symbol,
+            resolver_kind="db_index",
+            resolver_target=placeholder.canonical_symbol,
+            scope_entity_type=None,
+            scope_policy="automatic",
+            widget_hint="auto_counter",
+            validation={"field_type": "int"},
+            metadata={"display_label": placeholder.display_label},
+        )
+
+    def _duplicate_binding_payload(
+        self, placeholder: ContractTemplatePlaceholderRecord
+    ) -> ContractTemplatePlaceholderBindingPayload:
+        token = parse_placeholder(placeholder.canonical_symbol)
+        if token.key == "number":
+            validation: dict[str, object] = {"field_type": "number"}
+            widget_hint = "number_input"
+        else:
+            validation = {"field_type": "control"}
+            widget_hint = "structural_marker"
+        return ContractTemplatePlaceholderBindingPayload(
+            canonical_symbol=placeholder.canonical_symbol,
+            resolver_kind="duplicate",
+            resolver_target=placeholder.canonical_symbol,
+            scope_entity_type=None,
+            scope_policy="template_control",
+            widget_hint=widget_hint,
+            validation=validation,
+            metadata={"display_label": placeholder.display_label},
+        )
+
+    def _counter_binding_payload(
+        self, placeholder: ContractTemplatePlaceholderRecord
+    ) -> ContractTemplatePlaceholderBindingPayload:
+        return ContractTemplatePlaceholderBindingPayload(
+            canonical_symbol=placeholder.canonical_symbol,
+            resolver_kind="counter",
+            resolver_target=placeholder.canonical_symbol,
+            scope_entity_type=None,
+            scope_policy="automatic",
+            widget_hint="auto_counter",
+            validation={"field_type": "int"},
+            metadata={"display_label": placeholder.display_label},
+        )
+
     def _selector_scope(
         self,
         placeholder: ContractTemplatePlaceholderRecord,
@@ -385,6 +529,81 @@ class ContractTemplateFormService:
             description=description,
         )
 
+    def _current_auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+    ) -> ContractTemplateFormAutoField:
+        display_label = placeholder.display_label or _display_label_from_key(
+            placeholder.placeholder_key
+        )
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label="Current Date",
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=f"{display_label} resolves automatically from the local application clock.",
+        )
+
+    def _duplicate_marker_auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+    ) -> ContractTemplateFormAutoField:
+        display_label = placeholder.display_label or _display_label_from_key(
+            placeholder.placeholder_key
+        )
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label="Template Control",
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=(
+                "Structural duplicate marker removed after the matching duplicate block "
+                "is expanded."
+            ),
+        )
+
+    def _counter_auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+    ) -> ContractTemplateFormAutoField:
+        token = parse_placeholder(placeholder.canonical_symbol)
+        display_label = placeholder.display_label or _display_label_from_key(
+            placeholder.placeholder_key
+        )
+        source_label = "Page Counter" if token.binding_kind == "page" else "Custom Counter"
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label=source_label,
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=(
+                f"{display_label} resolves automatically from the final HTML output after "
+                "duplicate blocks are expanded."
+            ),
+        )
+
+    def _db_index_auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+    ) -> ContractTemplateFormAutoField:
+        display_label = placeholder.display_label or _display_label_from_key(
+            placeholder.placeholder_key
+        )
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label="DB Index",
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=(
+                f"{display_label} resolves to the current duplicate-block copy number "
+                "for indexed database cymbols."
+            ),
+        )
+
     def _auto_field_warning(
         self,
         placeholder: ContractTemplatePlaceholderRecord,
@@ -420,6 +639,8 @@ class ContractTemplateFormService:
                 ContractTemplateCatalogEntry | None,
             ]
         ],
+        *,
+        indexed: bool = False,
     ) -> ContractTemplateFormSelectorField | None:
         first_placeholder, first_binding, first_catalog_entry = group[0]
         token = parse_placeholder(first_placeholder.canonical_symbol)
@@ -450,6 +671,8 @@ class ContractTemplateFormService:
             scope_entity_type,
             f"{scope_entity_type.replace('_', ' ').title()} Selection",
         )
+        if indexed:
+            display_label = f"Indexed {display_label}"
         placeholder_symbols = tuple(item[0].canonical_symbol for item in group)
         referenced_labels = tuple(
             dict.fromkeys(
@@ -461,14 +684,15 @@ class ContractTemplateFormService:
                 for item in group
             )
         )
+        description_prefix = "For each duplicate index, select" if indexed else "Select"
         if len(referenced_labels) == 1:
             description = (
-                f"Select the authoritative {scope_entity_type} record used to resolve "
+                f"{description_prefix} the authoritative {scope_entity_type} record used to resolve "
                 f"{referenced_labels[0]}."
             )
         else:
             description = (
-                f"Select the authoritative {scope_entity_type} record used to resolve "
+                f"{description_prefix} the authoritative {scope_entity_type} record used to resolve "
                 + ", ".join(referenced_labels)
                 + "."
             )
@@ -490,10 +714,14 @@ class ContractTemplateFormService:
         *,
         binding: ContractTemplatePlaceholderBindingRecord | None,
     ) -> ContractTemplateFormManualField:
+        token = parse_placeholder(placeholder.canonical_symbol)
         field_type, widget_hint = self._manual_field_type(
             placeholder.placeholder_key,
             placeholder.inferred_field_type,
         )
+        if token.binding_kind == "duplicate" and token.key == "number":
+            field_type = "number"
+            widget_hint = "number_input"
         options: tuple[str, ...] = ()
         if binding is not None and isinstance(binding.validation, dict):
             field_type = _clean_text(binding.validation.get("field_type")) or field_type
@@ -509,7 +737,14 @@ class ContractTemplateFormService:
             widget_kind=widget_hint,
             required=placeholder.required,
             placeholder_count=placeholder.source_occurrence_count,
-            description=f"Manual value for {placeholder.canonical_symbol}.",
+            description=(
+                "Number of rendered copies for every duplicate block. Place "
+                "{{duplicate.number}} once outside the {{duplicate.start}}/{{duplicate.end}} "
+                "block in the template source. Indexed database cymbols create one selector set "
+                "per rendered copy."
+                if token.binding_kind == "duplicate" and token.key == "number"
+                else f"Manual value for {placeholder.canonical_symbol}."
+            ),
             options=options,
         )
 

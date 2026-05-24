@@ -20,6 +20,7 @@ class PlaceholderToken:
     namespace: str | None
     key: str
     canonical_symbol: str
+    indexed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,18 +59,40 @@ def parse_placeholder(raw: str) -> PlaceholderToken:
 
     binding_kind = _normalize_segment(parts[0])
     if binding_kind == "db":
-        if len(parts) != 3:
-            raise InvalidPlaceholderError("Database placeholders must use db.namespace.key")
+        if len(parts) == 2:
+            key = _normalize_segment(parts[1])
+            if key != "index":
+                raise InvalidPlaceholderError("Database control placeholders support db.index")
+            return PlaceholderToken(
+                binding_kind="db_index",
+                namespace="duplicate",
+                key=key,
+                canonical_symbol="{{db.index}}",
+            )
+        if len(parts) not in {3, 4}:
+            raise InvalidPlaceholderError(
+                "Database placeholders must use db.namespace.key or db.namespace.key.indexed"
+            )
         namespace = _normalize_segment(parts[1])
         key = _normalize_segment(parts[2])
+        indexed = False
+        if len(parts) == 4:
+            suffix = _normalize_segment(parts[3])
+            if suffix != "indexed":
+                raise InvalidPlaceholderError(
+                    "Database placeholders only support the indexed suffix"
+                )
+            indexed = True
         if namespace == "custom" and not re.fullmatch(r"cf_\d+", key):
             raise InvalidPlaceholderError("Custom database placeholders must use cf_<id>")
-        canonical = f"{{{{db.{namespace}.{key}}}}}"
+        suffix = ".indexed" if indexed else ""
+        canonical = f"{{{{db.{namespace}.{key}{suffix}}}}}"
         return PlaceholderToken(
             binding_kind="db",
             namespace=namespace,
             key=key,
             canonical_symbol=canonical,
+            indexed=indexed,
         )
 
     if binding_kind == "manual":
@@ -84,7 +107,72 @@ def parse_placeholder(raw: str) -> PlaceholderToken:
             canonical_symbol=canonical,
         )
 
+    if binding_kind == "current":
+        if len(parts) != 2:
+            raise InvalidPlaceholderError("Current placeholders must use current.key")
+        key = _normalize_segment(parts[1])
+        if key != "year":
+            raise InvalidPlaceholderError("Current placeholders currently support current.year")
+        canonical = f"{{{{current.{key}}}}}"
+        return PlaceholderToken(
+            binding_kind="current",
+            namespace=None,
+            key=key,
+            canonical_symbol=canonical,
+        )
+
+    if binding_kind == "page":
+        if len(parts) != 2:
+            raise InvalidPlaceholderError("Page placeholders must use page.key")
+        key = _normalize_segment(parts[1])
+        if key not in {"index", "total"}:
+            raise InvalidPlaceholderError("Page placeholders support page.index and page.total")
+        canonical = f"{{{{page.{key}}}}}"
+        return PlaceholderToken(
+            binding_kind="page",
+            namespace=None,
+            key=key,
+            canonical_symbol=canonical,
+        )
+
+    if binding_kind == "custom":
+        if len(parts) != 2:
+            raise InvalidPlaceholderError("Custom placeholders must use custom.key")
+        key = _normalize_segment(parts[1])
+        if key != "index":
+            raise InvalidPlaceholderError("Custom placeholders currently support custom.index")
+        canonical = f"{{{{custom.{key}}}}}"
+        return PlaceholderToken(
+            binding_kind="custom",
+            namespace=None,
+            key=key,
+            canonical_symbol=canonical,
+        )
+
+    if binding_kind == "duplicate":
+        if len(parts) != 2:
+            raise InvalidPlaceholderError("Duplicate placeholders must use duplicate.key")
+        key = _normalize_segment(parts[1])
+        if key not in {"start", "end", "number"}:
+            raise InvalidPlaceholderError(
+                "Duplicate placeholders support duplicate.start, duplicate.end, and duplicate.number"
+            )
+        canonical = f"{{{{duplicate.{key}}}}}"
+        return PlaceholderToken(
+            binding_kind="duplicate",
+            namespace=None,
+            key=key,
+            canonical_symbol=canonical,
+        )
+
     raise InvalidPlaceholderError(f"Unsupported placeholder binding kind: {binding_kind}")
+
+
+def base_symbol_for_indexed_placeholder(raw: str) -> str | None:
+    token = parse_placeholder(raw)
+    if token.binding_kind != "db" or not token.indexed or token.namespace is None:
+        return None
+    return f"{{{{db.{token.namespace}.{token.key}}}}}"
 
 
 def extract_placeholders(text: str) -> tuple[PlaceholderOccurrence, ...]:

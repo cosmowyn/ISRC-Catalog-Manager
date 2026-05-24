@@ -313,6 +313,13 @@ from isrc_manager.import_review_dialog import ImportReviewDialog
 from isrc_manager.isrc_registry import ApplicationISRCRegistryService, ISRCRegistryConflict
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.media import AudioConversionService
+from isrc_manager.media.bookmarks import (
+    AudioBookmark,
+    add_audio_bookmark,
+    delete_audio_bookmark,
+    delete_audio_bookmarks_for_track,
+    load_audio_bookmarks,
+)
 from isrc_manager.media.derivatives import (
     MANAGED_DERIVATIVE_KIND_LOSSY,
     MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC,
@@ -322,13 +329,6 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportCoordinator,
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
-)
-from isrc_manager.media.bookmarks import (
-    AudioBookmark,
-    add_audio_bookmark,
-    delete_audio_bookmark,
-    delete_audio_bookmarks_for_track,
-    load_audio_bookmarks,
 )
 from isrc_manager.media.equalizer import (
     EqualizerDialog,

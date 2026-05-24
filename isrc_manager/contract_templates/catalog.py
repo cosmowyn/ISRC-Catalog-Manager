@@ -36,10 +36,14 @@ _NAMESPACE_ORDER = (
     "work",
     "contract",
     "owner",
+    "page",
+    "current",
+    "duplicate",
     "party",
     "right",
     "asset",
     "custom",
+    "db_index",
 )
 _TRACK_SOURCE_OVERRIDES = {
     "album_title": ("TrackSnapshot", "album_title"),
@@ -89,6 +93,7 @@ class _CatalogSeed:
     description: str | None = None
     options: tuple[str, ...] = ()
     is_settings_field: bool = False
+    binding_kind: str = "db"
 
 
 @dataclass(slots=True)
@@ -666,6 +671,89 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
     _CatalogSeed("asset", "notes", "Asset Notes", "text", "AssetVersions", "notes"),
 )
 
+_CONTROL_SEEDS: tuple[_CatalogSeed, ...] = (
+    _CatalogSeed(
+        "page",
+        "index",
+        "Page Index",
+        "int",
+        "Template Engine",
+        "page.index",
+        "Sequential page counter. The first {{page.index}} renders as 1, then counts upward after duplicate blocks are expanded.",
+        binding_kind="page",
+    ),
+    _CatalogSeed(
+        "page",
+        "total",
+        "Page Total",
+        "int",
+        "Template Engine",
+        "page.total",
+        "Highest rendered {{page.index}} number in the final HTML output.",
+        binding_kind="page",
+    ),
+    _CatalogSeed(
+        "current",
+        "year",
+        "Current Year",
+        "int",
+        "Runtime",
+        "year",
+        "Current calendar year from the local application clock.",
+        binding_kind="current",
+    ),
+    _CatalogSeed(
+        "duplicate",
+        "start",
+        "Duplicate Start",
+        "control",
+        "Template Engine",
+        "duplicate.start",
+        "Marks the beginning of the HTML range to repeat before normal cymbol replacement. If the block contains cymbols suffixed with .indexed, each copy uses its matching DB Index selector.",
+        binding_kind="duplicate",
+    ),
+    _CatalogSeed(
+        "duplicate",
+        "end",
+        "Duplicate End",
+        "control",
+        "Template Engine",
+        "duplicate.end",
+        "Marks the end of the HTML range to repeat before normal cymbol replacement.",
+        binding_kind="duplicate",
+    ),
+    _CatalogSeed(
+        "duplicate",
+        "number",
+        "Duplicate Number",
+        "number",
+        "Template Engine",
+        "duplicate.number",
+        "Manual count for how many copies of each duplicate block should be rendered. Place it once anywhere outside the {{duplicate.start}} and {{duplicate.end}} block it controls. Indexed database cymbols create one selector set per copy.",
+        binding_kind="duplicate",
+    ),
+    _CatalogSeed(
+        "duplicate",
+        "index",
+        "DB Index",
+        "int",
+        "Template Engine",
+        "db.index",
+        "Sequential duplicate-block index for indexed database cymbols. Use it inside {{duplicate.start}}/{{duplicate.end}} alongside cymbols suffixed with .indexed.",
+        binding_kind="db_index",
+    ),
+    _CatalogSeed(
+        "custom",
+        "index",
+        "Custom Index",
+        "int",
+        "Template Engine",
+        "custom.index",
+        "Separate sequential counter for custom numbering. The first {{custom.index}} renders as 1, then counts upward independently from page.index.",
+        binding_kind="custom",
+    ),
+)
+
 
 class ContractTemplateCatalogService:
     """Exposes copy-ready canonical placeholders from authoritative app data fields."""
@@ -770,7 +858,7 @@ class ContractTemplateCatalogService:
         return parse_placeholder(f"{{{{manual.{normalized}}}}}").canonical_symbol
 
     def _static_entries(self) -> tuple[ContractTemplateCatalogEntry, ...]:
-        return tuple(self._entry_from_seed(seed) for seed in _STATIC_SEEDS)
+        return tuple(self._entry_from_seed(seed) for seed in (*_STATIC_SEEDS, *_CONTROL_SEEDS))
 
     def _custom_field_entries(self) -> tuple[ContractTemplateCatalogEntry, ...]:
         fields = self.custom_field_definition_service.list_active_fields()
@@ -804,9 +892,14 @@ class ContractTemplateCatalogService:
         return tuple(entries)
 
     def _entry_from_seed(self, seed: _CatalogSeed) -> ContractTemplateCatalogEntry:
-        token = parse_placeholder(f"{{{{db.{seed.namespace}.{seed.key}}}}}")
+        if seed.binding_kind == "db":
+            token = parse_placeholder(f"{{{{db.{seed.namespace}.{seed.key}}}}}")
+        elif seed.binding_kind == "db_index":
+            token = parse_placeholder("{{db.index}}")
+        else:
+            token = parse_placeholder(f"{{{{{seed.binding_kind}.{seed.key}}}}}")
         return ContractTemplateCatalogEntry(
-            binding_kind="db",
+            binding_kind=token.binding_kind,
             namespace=seed.namespace,
             key=seed.key,
             canonical_symbol=token.canonical_symbol,

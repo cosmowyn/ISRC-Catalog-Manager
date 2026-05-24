@@ -39,7 +39,20 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
 
         self.assertEqual(
             namespaces,
-            ["track", "release", "work", "contract", "owner", "party", "right", "asset", "custom"],
+            [
+                "track",
+                "release",
+                "work",
+                "contract",
+                "owner",
+                "page",
+                "current",
+                "duplicate",
+                "party",
+                "right",
+                "asset",
+                "custom",
+            ],
         )
         self.assertIn("{{db.track.track_title}}", symbols)
         self.assertIn("{{db.release.title}}", symbols)
@@ -48,6 +61,14 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertIn("{{db.contract.license_number}}", symbols)
         self.assertIn("{{db.contract.registry_sha256_key}}", symbols)
         self.assertIn("{{db.owner.legal_name}}", symbols)
+        self.assertIn("{{page.index}}", symbols)
+        self.assertIn("{{page.total}}", symbols)
+        self.assertIn("{{current.year}}", symbols)
+        self.assertIn("{{db.index}}", symbols)
+        self.assertIn("{{duplicate.start}}", symbols)
+        self.assertIn("{{duplicate.end}}", symbols)
+        self.assertIn("{{duplicate.number}}", symbols)
+        self.assertIn("{{custom.index}}", symbols)
         self.assertTrue(any(symbol.startswith("{{db.custom.cf_") for symbol in symbols))
         self.assertFalse(
             any(
@@ -134,8 +155,9 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
     def test_all_generated_symbols_round_trip_through_canonical_parser(self):
         for entry in self.service.list_entries():
             token = parse_placeholder(entry.canonical_symbol)
-            self.assertEqual(token.binding_kind, "db")
-            self.assertEqual(token.namespace, entry.namespace)
+            self.assertEqual(token.binding_kind, entry.binding_kind)
+            if token.binding_kind == "db":
+                self.assertEqual(token.namespace, entry.namespace)
             self.assertEqual(token.key, entry.key)
 
     def test_manual_symbol_helper_normalizes_human_labels(self):

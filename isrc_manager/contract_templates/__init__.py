@@ -53,11 +53,13 @@ from .models import (
     ContractTemplateScanEntry,
     ContractTemplateScanOccurrence,
     ContractTemplateScanResult,
+    build_contract_template_indexed_selection_key,
 )
 from .parser import (
     InvalidPlaceholderError,
     PlaceholderOccurrence,
     PlaceholderToken,
+    base_symbol_for_indexed_placeholder,
     dedupe_placeholders,
     extract_placeholders,
     parse_placeholder,
@@ -112,6 +114,8 @@ __all__ = [
     "QtWebEngineHtmlPdfAdapter",
     "SUPPORTED_TEMPLATE_SOURCE_FORMATS",
     "TextutilDocxRenderAdapter",
+    "base_symbol_for_indexed_placeholder",
+    "build_contract_template_indexed_selection_key",
     "dedupe_placeholders",
     "detect_template_source_format",
     "extract_placeholders",

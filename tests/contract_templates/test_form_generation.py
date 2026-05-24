@@ -367,3 +367,95 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         )
         self.assertFalse(definition.unresolved_placeholders)
         self.assertFalse(definition.warnings)
+
+    def test_current_year_and_duplicate_controls_build_expected_fill_fields(self):
+        template = self._create_template()
+        source_path = self.root / "runtime-control-form.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Year ", "{{current.year}}"),
+                    (
+                        "Block ",
+                        "{{duplicate.start}}",
+                        "{{page.index}}",
+                        "{{page.total}}",
+                        "{{custom.index}}",
+                        "Body",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+        auto_fields = {item.canonical_symbol: item for item in definition.auto_fields}
+        manual_fields = {item.canonical_symbol: item for item in definition.manual_fields}
+
+        self.assertEqual(
+            set(auto_fields),
+            {
+                "{{current.year}}",
+                "{{custom.index}}",
+                "{{duplicate.start}}",
+                "{{duplicate.end}}",
+                "{{page.index}}",
+                "{{page.total}}",
+            },
+        )
+        self.assertEqual(auto_fields["{{current.year}}"].source_label, "Current Date")
+        self.assertEqual(auto_fields["{{page.index}}"].source_label, "Page Counter")
+        self.assertEqual(auto_fields["{{custom.index}}"].source_label, "Custom Counter")
+        self.assertEqual(manual_fields["{{duplicate.number}}"].field_type, "number")
+        self.assertEqual(manual_fields["{{duplicate.number}}"].widget_kind, "number_input")
+
+    def test_indexed_db_symbols_build_indexed_selector_templates(self):
+        template = self._create_template()
+        source_path = self.root / "indexed-db-form.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Indexed block ",
+                        "{{duplicate.start}}",
+                        "{{db.index}}",
+                        "{{db.track.track_title.indexed}}",
+                        "{{db.track.isrc.indexed}}",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+        auto_fields = {item.canonical_symbol: item for item in definition.auto_fields}
+        manual_fields = {item.canonical_symbol: item for item in definition.manual_fields}
+
+        self.assertIn("{{db.index}}", auto_fields)
+        self.assertEqual(auto_fields["{{db.index}}"].source_label, "DB Index")
+        self.assertIn("{{duplicate.number}}", manual_fields)
+        self.assertEqual(len(definition.selector_fields), 0)
+        self.assertEqual(len(definition.indexed_selector_fields), 1)
+        indexed_selector = definition.indexed_selector_fields[0]
+        self.assertEqual(indexed_selector.display_label, "Indexed Track Selection")
+        self.assertEqual(indexed_selector.scope_entity_type, "track")
+        self.assertEqual(
+            indexed_selector.placeholder_symbols,
+            (
+                "{{db.track.isrc.indexed}}",
+                "{{db.track.track_title.indexed}}",
+            ),
+        )
+        self.assertGreaterEqual(len(indexed_selector.choices), 1)

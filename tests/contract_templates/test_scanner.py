@@ -68,7 +68,11 @@ class ContractTemplateScannerTests(unittest.TestCase):
 
     def test_html_scanner_extracts_placeholders_directly_from_native_html(self):
         result = HTMLTemplateScanner().scan_bytes(
-            b"<html><body><img src='assets/banner.png'><p>{{db.track.track_title}}</p><footer>{{manual.license_date}}</footer></body></html>",
+            b"<html><body><img src='assets/banner.png'><p>{{db.track.track_title}}</p>"
+            b"<footer>{{manual.license_date}}</footer>{{current.year}}"
+            b"{{duplicate.start}}x{{duplicate.end}}{{duplicate.number}}"
+            b"{{db.index}}{{db.track.track_title.indexed}}"
+            b"{{page.index}}{{page.total}}{{custom.index}}</body></html>",
             source_filename="agreement.html",
         )
 
@@ -76,7 +80,19 @@ class ContractTemplateScannerTests(unittest.TestCase):
         self.assertEqual(result.scan_adapter, "html_source_direct")
         self.assertEqual(
             [item.canonical_symbol for item in result.placeholders],
-            ["{{db.track.track_title}}", "{{manual.license_date}}"],
+            [
+                "{{current.year}}",
+                "{{custom.index}}",
+                "{{db.index}}",
+                "{{db.track.track_title.indexed}}",
+                "{{db.track.track_title}}",
+                "{{duplicate.end}}",
+                "{{duplicate.number}}",
+                "{{duplicate.start}}",
+                "{{manual.license_date}}",
+                "{{page.index}}",
+                "{{page.total}}",
+            ],
         )
 
     def test_pages_adapter_uses_pages_app_export_via_osascript(self):
