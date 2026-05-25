@@ -445,20 +445,27 @@ The supported source runtime is Python `3.14.4`.
 CI runs quality gates and grouped tests on Python `3.14.4` for current compatibility and release packaging.
 Formatting and type-checking targets stay aligned with the Python `3.14` baseline.
 
-Install developer tooling with:
+Install developer tooling with the full Python 3.14.4 test/runtime bootstrap:
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python3 -m pip install -r requirements.txt
+python3 -m pip install -e .[dev]
+```
+
+Legacy one-step development bootstrap (still supported):
+
+```bash
+python3 -m pip install -r requirements-dev.txt
 ```
 
 Run the main quality checks with:
 
 ```bash
-python -m ruff check build.py isrc_manager tests
-python -m black --check build.py isrc_manager tests
-python -m mypy
-python -m pytest -q tests
-python -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
+QT_QPA_PLATFORM=offscreen python3 -m ruff check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m mypy
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
 ```
 
 Or use the bundled shortcuts:

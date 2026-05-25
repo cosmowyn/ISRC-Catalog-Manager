@@ -44,8 +44,16 @@
 ## 2) Current test tooling and gate alignment
 
 - `pyproject.toml` now includes pytest-cov settings with `--cov-branch` and `--cov-fail-under=95` in test addopts.
+- `pyproject.toml` `[project].dependencies` includes runtime blockers needed by test collection (`PySide6`, `openpyxl`) and migration checks (`numpy`, `scipy`, `cryptography`), so runtime bootstrap installs them.
+- `[project].optional-dependencies.dev` includes `pytest`, `pytest-cov`, `ruff`, `black`, `mypy`, and `coverage`, matching the documented test/tooling requirements.
+- `requirements-dev.txt` is retained as a legacy one-step bootstrap (`-e .[dev]`) and remains documented as an optional shortcut.
 - no `tox.ini` or `noxfile.py` files exist in this repository.
 - existing grouped-test infrastructure (`tests/ci_groups.py`, `tests/run_group.py`) is still functionally oriented around module-level grouped execution and has not been migrated in this pass.
+- `tests.run_group` executes `coverage run --parallel-mode` over `tests.run_module` (unittest-backed), so the runtime-only `pytest-cov` blocker does not affect CI shard execution.
+
+## 2.1) Headless/UI execution standard
+
+- repository CI and local recommendation now treat Qt UI tests as headless via `QT_QPA_PLATFORM=offscreen` for both direct `pytest` commands and grouped command paths.
 
 ## 3) Baseline inventory and gap map
 
@@ -119,11 +127,21 @@ Executed in the current environment:
 
 ## 5) Remaining follow-up actions
 
-- install runtime and dev dependencies in a dedicated environment, then rerun full coverage:
+- Recommended reproducible bootstrap for all QA gates:
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m pip install -e .[dev]
+```
+
+- Recommended primary QA verification command set:
+
+```bash
+python3 -m compileall ISRC_manager.py isrc_manager tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+python3 -m mypy
 ```
 
 - run grouped validation with the existing workflow command shape:
