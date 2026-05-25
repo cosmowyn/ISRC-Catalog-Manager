@@ -7,14 +7,12 @@ name = "isrc-catalog-manager"
 version = "3.14.4"
 description = "Desktop ISRC catalog manager for tracks, metadata, licensing, and exports."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14.4"
 authors = [
   { name = "M. van de Kleut" },
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
@@ -23,11 +21,9 @@ dependencies = [
   "pillow==12.2.0",
   "openpyxl==3.1.5",
   "mutagen==1.47.0",
-  "numpy==2.2.6; python_version < '3.14'",
-  "numpy==2.3.2; python_version >= '3.14'",
+  "numpy==2.3.2",
   "soundfile==0.13.1",
-  "scipy==1.15.3; python_version < '3.14'",
-  "scipy==1.17.1; python_version >= '3.14'",
+  "scipy==1.17.1",
   "cryptography==48.0.0",
 ]
 
@@ -38,6 +34,8 @@ build = [
 dev = [
   "black==25.12.0",
   "coverage[toml]==7.14.0",
+  "pytest==9.0.3",
+  "pytest-cov==6.2.0",
   "mypy==2.1.0",
   "ruff==0.15.14",
 ]
@@ -82,7 +80,7 @@ packages = [
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py314"]
 extend-exclude = '''
 (
   ^/ISRC_manager\.py
@@ -96,7 +94,7 @@ extend-exclude = '''
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py314"
 extend-exclude = [
   "ISRC_manager.py",
   "icon_factory.py",
@@ -110,7 +108,7 @@ extend-exclude = [
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 files = [
   "isrc_manager/constants.py",
   "isrc_manager/domain/codes.py",
@@ -153,6 +151,7 @@ show_error_codes = true
 
 [tool.coverage.run]
 source = ["isrc_manager"]
+branch = true
 omit = [
   "isrc_manager/app_dialogs.py",
   "isrc_manager/assets/dialogs.py",
@@ -166,9 +165,20 @@ omit = [
 ]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 95
 show_missing = true
 skip_covered = true
 
 [tool.coverage.xml]
 output = "coverage.xml"
+
+[tool.pytest.ini_options]
+addopts = [
+  "--cov=isrc_manager",
+  "--cov=ISRC_manager",
+  "--cov-branch",
+  "--cov-report=term-missing",
+  "--cov-report=html",
+  "--cov-fail-under=95",
+  "-q",
+]

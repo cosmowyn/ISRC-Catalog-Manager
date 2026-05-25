@@ -441,10 +441,9 @@ The architecture is local-first, desktop-native, and designed for safe backgroun
 
 ## Developer Workflow
 
-The supported source runtime is Python `>=3.10`. CI keeps Python `3.10` coverage for the minimum
-runtime, Python `3.13` coverage for the primary compatibility lane, and exact Python `3.14.4`
-coverage for current compatibility and release packaging. Formatting and type-checking targets stay
-at Python `3.10` syntax so older supported runtimes are not accidentally dropped.
+The supported source runtime is Python `3.14.4`.
+CI runs quality gates and grouped tests on Python `3.14.4` for current compatibility and release packaging.
+Formatting and type-checking targets stay aligned with the Python `3.14` baseline.
 
 Install developer tooling with:
 
@@ -458,9 +457,8 @@ Run the main quality checks with:
 python -m ruff check build.py isrc_manager tests
 python -m black --check build.py isrc_manager tests
 python -m mypy
-python -m unittest discover -s tests -p 'test_*.py'
-python -m coverage run -m unittest discover -s tests -p 'test_*.py'
-python -m coverage report
+python -m pytest -q tests
+python -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
 ```
 
 Or use the bundled shortcuts:
@@ -482,10 +480,10 @@ GitHub Actions verifies the project with:
 - Ruff linting
 - Black formatting checks
 - mypy type checking
-- unit and integration tests on multiple Python versions
+- unit and integration tests on Python 3.14.4
 - exact Python 3.14.4 compatibility checks
 - headless Qt app-shell coverage
-- coverage thresholds
+- coverage thresholds (95% minimum with branch coverage enabled)
 - packaging smoke validation on Python 3.14.4
 
 When a `vX.Y.Z` tag is pushed, or when the Version Bump workflow creates one, the release-build

@@ -65,7 +65,7 @@ class Python314CompatibilityTests(unittest.TestCase):
         project_section = _section_text(text, "project")
         classifiers = _list_values(project_section, "classifiers")
 
-        self.assertIn('requires-python = ">=3.10"', project_section)
+        self.assertIn('requires-python = ">=3.14.4"', project_section)
         self.assertIn("Programming Language :: Python :: 3.14", classifiers)
 
     def test_pyinstaller_pin_uses_python_314_supported_release(self):
@@ -88,21 +88,11 @@ class Python314CompatibilityTests(unittest.TestCase):
             _section_text(pyproject_text, "project"), "dependencies"
         )
 
-        for requirement in (
-            "numpy==2.2.6; python_version < '3.14'",
-            "numpy==2.3.2; python_version >= '3.14'",
-            "scipy==1.15.3; python_version < '3.14'",
-            "scipy==1.17.1; python_version >= '3.14'",
-        ):
+        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, project_dependencies)
 
-        for requirement in (
-            'numpy==2.2.6; python_version < "3.14"',
-            'numpy==2.3.2; python_version >= "3.14"',
-            'scipy==1.15.3; python_version < "3.14"',
-            'scipy==1.17.1; python_version >= "3.14"',
-        ):
+        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, requirements)
 
@@ -160,9 +150,7 @@ class Python314CompatibilityTests(unittest.TestCase):
         self.assertIn("sys.version_info[:3] != (3, 14, 4)", workflow)
 
     def test_local_python_3144_environment_when_running_under_314(self):
-        if sys.version_info[:2] != (3, 14):
-            self.skipTest("Exact Python 3.14.4 assertion only applies to Python 3.14 runs")
-
+        self.assertEqual(sys.version_info[:2], (3, 14))
         self.assertEqual(sys.version_info[:3], (3, 14, 4))
 
 

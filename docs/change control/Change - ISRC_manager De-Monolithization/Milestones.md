@@ -1127,3 +1127,59 @@ Exception references:
 
 - `QAQC-CLOSE.1` — Missing dependency (`PySide6`; environment-readiness blocker preventing full test completion)
 - `QAQC-CLOSE.2` — Additional environment readiness follow-up for complete dependency/bootstrap verification (`openpyxl` and full test-group matrix)
+
+## Python 3.14.4 Test Coverage Audit
+
+Completion timestamp: 2026-05-25 11:18:00 CEST
+Status: In Progress (environment-readiness blocked)
+
+Files changed:
+
+- `requirements.txt`
+- `pyproject.toml`
+- `Makefile`
+- `.github/workflows/ci.yml`
+- `.github/workflows/version-bump.yml`
+- `.github/workflows/release-build.yml`
+- `tests/test_python_314_compatibility.py`
+- `docs/testing/Python_3_14_4_Test_Coverage_Audit.md`
+- `docs/change control/Change - ISRC_manager De-Monolithization/final QA QC/Targeted Duplication Follow-Up Report.md`
+- `docs/change control/Change - ISRC_manager De-Monolithization/final QA QC/Duplicate Code Inventory.md`
+- `docs/change control/Change - ISRC_manager De-Monolithization/final QA QC/Lean Codebase Remediation Plan.md`
+- `docs/change control/Change - ISRC_manager De-Monolithization/final QA QC/Architecture Metrics.md`
+
+Summary:
+
+- Removed legacy multi-version runtime targets from CI and test-version metadata.
+- Migrated version-compatibility assertions to a strict Python `3.14.4` posture.
+- Added pytest-centric test command wiring in `Makefile` and updated CI smoke test invocation.
+- Confirmed environment-readiness is the current blocker for full validation and 95% coverage attainment.
+
+Validation command results:
+
+- `python3 --version` → `Python 3.14.4`
+- `python3 -m compileall ISRC_manager.py isrc_manager tests` → passed
+- `python3 -m pytest` → failed (addopts requires `pytest-cov`, not installed in environment)
+- `python3 -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95` → failed (duplicate `--cov` options in this environment due missing plugin)
+- `python3 -m pytest --override-ini addopts= tests/test_python_314_compatibility.py` → failed at collection due missing dependency:
+  - `ModuleNotFoundError: No module named 'PySide6'`
+- `python3 -m ruff check build.py isrc_manager scripts tests` → failed (`No module named ruff`)
+- `python3 -m black --check build.py isrc_manager scripts tests` → failed (`No module named black`)
+- `python3 -m mypy` → failed (`No module named mypy`)
+
+Remaining environment-readiness action:
+
+- install exact runtime/test dependencies and rerun grouped validation:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m pip install -e .[dev]
+QT_QPA_PLATFORM=offscreen python3 -m tests.run_group catalog-services --module-timeout-seconds 120 --group-timeout-seconds 600
+```
+
+- continue with `exchange-import`, `history-storage-migration`, and `ui-app-workflows` once the first group passes.
+
+Exception references:
+
+- `QAQC-CLOSE.1` — Missing dependency (`PySide6` / `openpyxl` in full test/runtime environments) blocked import/test collection.
+- `QAQC-CLOSE.2` — Toolchain dependency gap (`ruff`, `black`, `mypy`, `pytest-cov`) blocked quality + coverage commands.

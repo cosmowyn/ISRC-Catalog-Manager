@@ -4,6 +4,7 @@ BLACK ?= $(PYTHON) -m black
 COVERAGE ?= $(PYTHON) -m coverage
 MYPY ?= $(PYTHON) -m mypy
 RUFF ?= $(PYTHON) -m ruff
+PYTEST ?= $(PYTHON) -m pytest
 
 HEADLESS_TEST_ENV ?= QT_QPA_PLATFORM=offscreen CI=1 PYTHONUNBUFFERED=1
 
@@ -21,10 +22,7 @@ check: compile
 	$(RUFF) check $(CHECK_PATHS)
 	$(BLACK) --check $(CHECK_PATHS)
 	$(MYPY)
-	$(HEADLESS_TEST_ENV) $(COVERAGE) erase
-	$(HEADLESS_TEST_ENV) $(COVERAGE) run -m unittest discover -s tests -p 'test_*.py'
-	$(HEADLESS_TEST_ENV) $(COVERAGE) report
-	$(HEADLESS_TEST_ENV) $(COVERAGE) xml
+	$(HEADLESS_TEST_ENV) $(PYTEST)
 
 compile:
 	$(PYTHON) -m py_compile ISRC_manager.py build.py icon_factory.py
@@ -45,10 +43,7 @@ type-check:
 	$(MYPY)
 
 test:
-	$(HEADLESS_TEST_ENV) $(PYTHON) -m unittest discover -s tests -p 'test_*.py'
+	$(HEADLESS_TEST_ENV) $(PYTEST)
 
 coverage:
-	$(HEADLESS_TEST_ENV) $(COVERAGE) erase
-	$(HEADLESS_TEST_ENV) $(COVERAGE) run -m unittest discover -s tests -p 'test_*.py'
-	$(HEADLESS_TEST_ENV) $(COVERAGE) report
-	$(HEADLESS_TEST_ENV) $(COVERAGE) xml
+	$(HEADLESS_TEST_ENV) $(PYTEST) --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
