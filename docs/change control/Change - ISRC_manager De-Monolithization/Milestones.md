@@ -1100,3 +1100,30 @@ Architecture metrics status:
 Exception references:
 
 - None. No `P2.21.*` exceptions are recorded for this milestone.
+
+## QA/QC Duplication Review Closure
+
+Completion timestamp: 2026-05-25 10:57:42 CEST
+Status: Completed
+
+Files changed:
+
+- `final QA QC/Targeted Duplication Follow-Up Report.md`
+- `final QA QC/Duplicate Code Inventory.md`
+- `final QA QC/Lean Codebase Remediation Plan.md`
+- `final QA QC/Architecture Metrics.md`
+
+Summary:
+
+- Source-code changes: `None`
+- Documentation-only closure completed for two targeted duplication findings.
+- Validation commands attempted:
+  - `python3 -m compileall ISRC_manager.py isrc_manager` (passed)
+  - `QT_QPA_PLATFORM=offscreen python3 -m tests.run_group catalog-services --module-timeout-seconds 120 --group-timeout-seconds 600` (blocked at module import during collection, missing dependency)
+- Validation limitation: full pytest could not continue due missing dependencies (`PySide6` currently missing; README/docs also note `openpyxl` as required test/runtime dependency).
+- Remaining environment-readiness action: install runtime/test dependencies and rerun grouped validation.
+
+Exception references:
+
+- `QAQC-CLOSE.1` — Missing dependency (`PySide6`; environment-readiness blocker preventing full test completion)
+- `QAQC-CLOSE.2` — Additional environment readiness follow-up for complete dependency/bootstrap verification (`openpyxl` and full test-group matrix)
