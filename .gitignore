@@ -25,4 +25,5 @@ demo/.runtime/
 # Coverage
 .coverage
 .coverage.*
+coverage.json
 htmlcov/

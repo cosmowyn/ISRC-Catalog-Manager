@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from zipfile import ZipFile
 
 from openpyxl import Workbook
@@ -17,6 +18,7 @@ from isrc_manager.services import (
     GS1SettingsService,
     GS1TemplateAsset,
 )
+from isrc_manager.services.settings_transfer import ApplicationSettingsTransferError
 from isrc_manager.starter_themes import starter_theme_library
 
 
@@ -322,6 +324,243 @@ class SettingsTransferServiceTests(unittest.TestCase):
             result.values["history_storage_budget_mb"],
             MAX_HISTORY_STORAGE_BUDGET_MB,
         )
+
+    def test_prepare_import_rejects_missing_bad_and_malformed_archives(self):
+        transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=self.root / "import-data",
+        )
+
+        with self.assertRaisesRegex(ApplicationSettingsTransferError, "was not found"):
+            transfer.prepare_import(self.root / "missing.zip", current_values={})
+
+        bad_zip = self.root / "bad.zip"
+        bad_zip.write_text("not a zip", encoding="utf-8")
+        with self.assertRaisesRegex(ApplicationSettingsTransferError, "not a valid settings ZIP"):
+            transfer.prepare_import(bad_zip, current_values={})
+
+        cases = [
+            ("missing-settings.zip", {}, "does not contain settings.json"),
+            ("bad-json.zip", {"settings.json": b"{"}, "unreadable settings.json"),
+            (
+                "list-payload.zip",
+                {"settings.json": json.dumps([]).encode("utf-8")},
+                "payload is invalid",
+            ),
+            (
+                "wrong-format.zip",
+                {
+                    "settings.json": json.dumps(
+                        {"bundle_format": "other", "bundle_version": 1}
+                    ).encode("utf-8")
+                },
+                "not a Music Catalog Manager settings bundle",
+            ),
+            (
+                "wrong-version.zip",
+                {
+                    "settings.json": json.dumps(
+                        {
+                            "bundle_format": "isrc-catalog-manager-settings",
+                            "bundle_version": 99,
+                        }
+                    ).encode("utf-8")
+                },
+                "unsupported format version 99",
+            ),
+        ]
+        for filename, members, pattern in cases:
+            archive_path = self.root / filename
+            with ZipFile(archive_path, "w") as archive:
+                for member_name, data in members.items():
+                    archive.writestr(member_name, data)
+            with self.subTest(filename=filename):
+                with self.assertRaisesRegex(ApplicationSettingsTransferError, pattern):
+                    transfer.prepare_import(archive_path, current_values={})
+
+    def test_general_import_icon_attachment_warnings_and_missing_attachment_errors(self):
+        transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=None,
+        )
+        archive_path = self.root / "icon.zip"
+        with ZipFile(archive_path, "w") as archive:
+            archive.writestr("general/icon/app.ico", b"ICON")
+
+        with ZipFile(archive_path) as archive:
+            after_values = {}
+            warnings = []
+            transfer._apply_general_import(
+                after_values=after_values,
+                payload={
+                    "identity": {
+                        "icon_attachment_path": "general/icon/app.ico",
+                        "icon_filename": "app.ico",
+                    }
+                },
+                archive=archive,
+                warnings=warnings,
+            )
+        self.assertEqual(after_values["icon_path"], "")
+        self.assertEqual(
+            warnings,
+            [
+                "The bundled application icon could not be restored because managed app storage is not configured."
+            ],
+        )
+
+        with ZipFile(archive_path) as archive:
+            after_values = {}
+            warnings = []
+            transfer._apply_general_import(
+                after_values=after_values,
+                payload={"identity": {"icon_path": "/old/app.ico"}},
+                archive=archive,
+                warnings=warnings,
+            )
+        self.assertEqual(after_values["icon_path"], "/old/app.ico")
+        self.assertEqual(
+            warnings,
+            [
+                "The imported settings reference an application icon path, but no icon file was bundled."
+            ],
+        )
+
+        with ZipFile(archive_path) as archive:
+            with self.assertRaisesRegex(
+                ApplicationSettingsTransferError,
+                "missing the packaged icon attachment",
+            ):
+                transfer._apply_general_import(
+                    after_values={},
+                    payload={"identity": {"icon_attachment_path": "general/icon/missing.ico"}},
+                    archive=archive,
+                    warnings=[],
+                )
+
+    def test_theme_import_merges_custom_library_and_clears_missing_selection(self):
+        transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=self.root / "import-data",
+        )
+        after_values = {}
+
+        transfer._apply_theme_import(
+            after_values=after_values,
+            payload={
+                "theme_settings": {"selected_name": "Missing Imported Theme"},
+                "custom_theme_library": {
+                    "": {"font_size": 11},
+                    "Imported Theme": {"font_size": 15},
+                },
+                "blob_icon_settings": {"audio": "circle"},
+            },
+        )
+
+        self.assertIn("Apple Light", after_values["theme_library"])
+        self.assertIn("Imported Theme", after_values["theme_library"])
+        self.assertEqual(after_values["theme_settings"]["selected_name"], "")
+
+    def test_gs1_import_template_errors_and_contract_entry_regeneration_warning(self):
+        transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=self.root / "import-data",
+        )
+        archive_path = self.root / "gs1.zip"
+        with ZipFile(archive_path, "w") as archive:
+            archive.writestr("gs1/template/template.xlsx", b"TEMPLATE")
+
+        with ZipFile(archive_path) as archive:
+            with self.assertRaisesRegex(
+                ApplicationSettingsTransferError, "without an attachment path"
+            ):
+                transfer._apply_gs1_import(
+                    after_values={},
+                    payload={"template": {"present": True}},
+                    archive=archive,
+                    warnings=[],
+                )
+
+        with ZipFile(archive_path) as archive:
+            with self.assertRaisesRegex(
+                ApplicationSettingsTransferError,
+                "missing the packaged GS1 template",
+            ):
+                transfer._apply_gs1_import(
+                    after_values={},
+                    payload={
+                        "template": {
+                            "present": True,
+                            "attachment_path": "gs1/template/missing.xlsx",
+                        }
+                    },
+                    archive=archive,
+                    warnings=[],
+                )
+
+        with ZipFile(archive_path) as archive:
+            after_values = {}
+            warnings = []
+            transfer._apply_gs1_import(
+                after_values=after_values,
+                payload={
+                    "template": {
+                        "present": True,
+                        "attachment_path": "gs1/template/template.xlsx",
+                        "filename": "template.xlsx",
+                        "storage_mode": "managed_file",
+                    },
+                    "contracts": {
+                        "entries": [
+                            {
+                                "contract_number": "10070050",
+                                "product": "Code Package",
+                                "status": "Active",
+                            },
+                            {"contract_number": ""},
+                        ]
+                    },
+                },
+                archive=archive,
+                warnings=warnings,
+            )
+
+        self.assertEqual(after_values["gs1_template_import_bytes"], b"TEMPLATE")
+        self.assertEqual(after_values["gs1_template_storage_mode"], "managed_file")
+        self.assertEqual(
+            [entry.contract_number for entry in after_values["gs1_contract_entries"]],
+            ["10070050"],
+        )
+        self.assertEqual(
+            warnings,
+            [
+                "The imported settings bundle did not include the GTIN contracts CSV attachment, so a canonical CSV will be regenerated from the stored contract entries."
+            ],
+        )
+
+    def test_materialize_attachment_returns_empty_for_empty_or_unwritable_data(self):
+        transfer = ApplicationSettingsTransferService(
+            gs1_settings_service=None,
+            data_root=self.root / "import-data",
+        )
+
+        self.assertEqual(
+            transfer._materialize_attachment(b"", filename="asset.bin", subdir="assets"),
+            "",
+        )
+        with mock.patch.object(
+            transfer._attachment_store,
+            "write_bytes",
+            side_effect=OSError("read-only"),
+        ):
+            self.assertEqual(
+                transfer._materialize_attachment(
+                    b"asset",
+                    filename="asset.bin",
+                    subdir="assets",
+                ),
+                "",
+            )
 
 
 if __name__ == "__main__":

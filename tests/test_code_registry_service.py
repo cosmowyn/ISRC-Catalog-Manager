@@ -9,7 +9,9 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
+    CATALOG_MODE_INTERNAL,
     CodeRegistryCategoryPayload,
     CodeRegistryService,
 )
@@ -565,6 +567,185 @@ class CodeRegistryServiceTests(unittest.TestCase):
         assert contract is not None
         self.assertEqual(contract.contract_number, raw_value)
         self.assertEqual(contract.contract_registry_entry_id, entry.id)
+
+    def test_identifier_classification_edges_for_prefix_sha_and_unknown_category(self):
+        unknown = self.registry.classify_identifier_value(
+            system_key="missing.category",
+            value="External Value",
+        )
+        self.assertEqual(unknown.classification, CATALOG_MODE_EXTERNAL)
+        self.assertEqual(unknown.reason, "The requested identifier category is not configured.")
+
+        blank = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value="",
+        )
+        self.assertEqual(blank.classification, CATALOG_MODE_EMPTY)
+
+        no_prefix_candidate = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value="ABC260001",
+        )
+        self.assertEqual(no_prefix_candidate.classification, "canonical_candidate")
+        no_prefix_external = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value="album import value",
+        )
+        self.assertEqual(no_prefix_external.classification, CATALOG_MODE_EXTERNAL)
+
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        yy = datetime.now().year % 100
+        malformed = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=f"ACR{yy:02d}ABCD",
+        )
+        self.assertEqual(malformed.classification, "mismatch")
+        out_of_range = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=f"ACR{yy:02d}0000",
+        )
+        self.assertEqual(out_of_range.classification, "mismatch")
+
+        canonical_value = f"ACR{yy:02d}0042"
+        internal = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=canonical_value,
+        )
+        self.assertEqual(internal.classification, CATALOG_MODE_INTERNAL)
+        captured = self.registry.capture_value_for_category(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=canonical_value,
+            created_via="test.classify",
+            entry_kind="manual_capture",
+        )
+        matched = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=canonical_value,
+        )
+        self.assertEqual(matched.existing_entry_id, captured.id)
+
+        sha_entry = self.registry.generate_sha256_key(created_via="test.sha").entry
+        sha_external = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            value=sha_entry.value,
+            allow_existing_internal_match=False,
+        )
+        self.assertEqual(sha_external.classification, CATALOG_MODE_EXTERNAL)
+        sha_internal = self.registry.classify_identifier_value(
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            value=sha_entry.value,
+            allow_existing_internal_match=True,
+        )
+        self.assertEqual(sha_internal.classification, CATALOG_MODE_EXTERNAL)
+        self.assertIn("remain external", sha_internal.reason)
+
+    def test_category_update_validation_and_generation_unavailable_edges(self):
+        category_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Sequential One",
+                subject_kind="generic",
+                generation_strategy="sequential",
+                prefix="SEQ",
+                active_flag=True,
+            )
+        )
+        other_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Sequential Two",
+                subject_kind="generic",
+                generation_strategy="sequential",
+                prefix="ALT",
+                active_flag=True,
+            )
+        )
+
+        with self.assertRaises(ValueError) as exc_info:
+            self.registry.update_category(other_id, prefix="SEQX")
+        self.assertIn("conflicts", str(exc_info.exception))
+
+        updated = self.registry.update_category(category_id, active_flag=False)
+        self.assertFalse(updated.active_flag)
+        self.assertIn(
+            "inactive",
+            self.registry.generation_unavailable_reason(category_id=category_id),
+        )
+
+        builtin = self.registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER)
+        self.assertIsNotNone(builtin)
+        assert builtin is not None
+        with self.assertRaises(ValueError):
+            self.registry.update_category(builtin.id, display_name="Renamed Catalog")
+        with self.assertRaises(ValueError):
+            self.registry.delete_category(builtin.id)
+        with self.assertRaises(ValueError):
+            self.registry.update_category(999999, display_name="Missing")
+
+    def test_external_identifier_resolution_assignment_and_suggestions_cover_contract_paths(self):
+        contract_id = self._create_contract(title="External Contract Number")
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Contracts
+                SET contract_number=?,
+                    contract_registry_entry_id=NULL,
+                    contract_external_code_identifier_id=NULL
+                WHERE id=?
+                """,
+                ("RAW-CTR-77", contract_id),
+            )
+
+        self.assertIn(
+            "RAW-CTR-77",
+            self.registry.external_identifier_suggestions(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER
+            ),
+        )
+        self.assertEqual(
+            self.registry.external_identifier_suggestions(system_key="unsupported"), []
+        )
+
+        resolution = self.registry.resolve_identifier_input(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            mode=CATALOG_MODE_EXTERNAL,
+            value="EXT-CTR-88",
+            created_via="test.external",
+        )
+        internal_id, external_id, value = self.registry.assign_identifier_to_owner(
+            owner_kind="contract",
+            owner_id=contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            resolution=resolution,
+            provenance_kind="manual",
+            source_label="test.external",
+        )
+        self.assertIsNone(internal_id)
+        self.assertIsNotNone(external_id)
+        self.assertEqual(value, "EXT-CTR-88")
+        external_record = self.registry.fetch_external_code_identifier(external_id)
+        self.assertIsNotNone(external_record)
+        assert external_record is not None
+        self.assertTrue(external_record.linked_flag)
+
+        stored = self.registry.list_external_code_identifiers(
+            search_text="EXT-CTR",
+            category_system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+        )
+        self.assertEqual([record.id for record in stored], [external_id])
+
+        with self.assertRaises(ValueError):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                mode=CATALOG_MODE_INTERNAL,
+                value="bad",
+                external_identifier_id=external_id,
+            )
+        with self.assertRaises(ValueError):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                mode=CATALOG_MODE_EXTERNAL,
+                value="bad",
+                registry_entry_id=999999,
+            )
 
 
 if __name__ == "__main__":

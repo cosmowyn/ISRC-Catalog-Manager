@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from isrc_manager.code_registry import (
@@ -324,6 +325,152 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
 
         with self.assertRaises(ContractTemplateExportError):
             self.export_service.export_draft_to_pdf(broken.draft_id)
+
+    def test_export_helper_edges_for_duplicate_index_and_date_controls(self):
+        self.assertEqual(
+            self.export_service._runtime_replacements_for_text("{{current.year}}", {}),
+            {"{{current.year}}": str(date.today().year)},
+        )
+        self.assertEqual(
+            self.export_service._apply_index_controls(
+                "{{page.index}}/{{page.total}} {{page.index}} {{custom.index}} {{custom.index}}"
+            ),
+            "1/2 2 1 2",
+        )
+        self.assertEqual(
+            self.export_service._html_output_filename("My Draft: Final?", "source.html"),
+            "My-Draft-Final.html",
+        )
+        self.assertEqual(
+            self.export_service._html_output_filename(None, "source template.html"),
+            "source-template.html",
+        )
+        self.assertEqual(self.export_service._coerce_record_id(" 12 "), 12)
+        self.assertIsNone(self.export_service._coerce_record_id("0"))
+        self.assertIsNone(self.export_service._coerce_record_id("not an id"))
+
+        date_placeholder = SimpleNamespace(
+            inferred_field_type="",
+            placeholder_key="renewal_deadline",
+        )
+        text_placeholder = SimpleNamespace(
+            inferred_field_type="",
+            placeholder_key="description",
+        )
+        self.assertTrue(
+            self.export_service._is_manual_date_placeholder(date_placeholder, binding=None)
+        )
+        self.assertFalse(
+            self.export_service._is_manual_date_placeholder(
+                text_placeholder,
+                binding=SimpleNamespace(validation={"field_type": "text"}),
+            )
+        )
+
+    def test_duplicate_controls_preview_strict_and_indexed_warning_paths(self):
+        html = "A{{duplicate.start}}" "{{db.track.track_title}} #{{db.index}}" "{{duplicate.end}}Z"
+        rendered, warnings = self.export_service._apply_duplicate_controls(
+            html,
+            {
+                "manual_values": {},
+                "db_selections": {
+                    build_contract_template_indexed_selection_key(
+                        "{{db.track.track_title}}",
+                        1,
+                    ): str(self.primary_track_id),
+                },
+            },
+            strict=False,
+        )
+
+        self.assertIn("{{db.track.track_title}} #1", rendered)
+        self.assertIn("Duplicate block preview uses one copy", warnings[0])
+        indexed_warnings: list[str] = []
+        indexed = self.export_service._indexed_db_replacements(
+            symbols=("{{db.track.track_title}}",),
+            index=1,
+            db_selections={
+                build_contract_template_indexed_selection_key(
+                    "{{db.track.track_title}}",
+                    1,
+                ): str(self.primary_track_id),
+            },
+            draft_id=None,
+            allow_registry_generation=False,
+            strict=True,
+            warnings=indexed_warnings,
+        )
+        self.assertEqual(indexed, {"{{db.track.track_title}}": "Export Service Song"})
+        self.assertEqual(indexed_warnings, [])
+
+        repeated, repeat_warnings = self.export_service._apply_duplicate_controls(
+            "{{duplicate.start}}X{{duplicate.end}}",
+            {"manual_values": {"{{duplicate.number}}": "3"}},
+            strict=True,
+        )
+        self.assertEqual(repeated, "XXX")
+        self.assertEqual(repeat_warnings, ())
+
+        malformed, malformed_warnings = self.export_service._apply_duplicate_controls(
+            "{{duplicate.end}} stray",
+            {"manual_values": {"{{duplicate.number}}": "1"}},
+            strict=False,
+        )
+        self.assertEqual(malformed, " stray")
+        self.assertIn("Duplicate cymbols must use", malformed_warnings[0])
+        with self.assertRaises(ContractTemplateExportError):
+            self.export_service._apply_duplicate_controls(
+                "{{duplicate.end}}",
+                {"manual_values": {"{{duplicate.number}}": "1"}},
+                strict=True,
+            )
+
+    def test_duplicate_copy_count_validation_errors_are_explicit(self):
+        self.assertIsNone(self.export_service._duplicate_copy_count("", strict=False))
+        self.assertEqual(self.export_service._duplicate_copy_count("2", strict=True), 2)
+        for value, message in (
+            ("", "Duplicate Number is required"),
+            ("1.5", "whole number"),
+            ("-1", "cannot be negative"),
+            ("201", "cannot be greater"),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(ContractTemplateExportError) as exc_info:
+                    self.export_service._duplicate_copy_count(value, strict=True)
+                self.assertIn(message, str(exc_info.exception))
+
+    def test_selected_record_labels_cover_available_service_namespaces(self):
+        self.assertEqual(
+            self.export_service._selected_record_label(
+                namespace="track",
+                selection_value=self.primary_track_id,
+            ),
+            "Export Service Song",
+        )
+        self.assertEqual(
+            self.export_service._selected_record_label(
+                namespace="release",
+                selection_value=self.release_id,
+            ),
+            "Export Coverage Release",
+        )
+        self.assertEqual(
+            self.export_service._selected_record_label(
+                namespace="contract",
+                selection_value=self.contract_id,
+            ),
+            "Export Registry Contract",
+        )
+        self.assertEqual(
+            self.export_service._selected_record_label(
+                namespace="party",
+                selection_value=self.party_id,
+            ),
+            "Aeonium",
+        )
+        self.assertIsNone(
+            self.export_service._selected_record_label(namespace="asset", selection_value=123456)
+        )
 
     def test_export_html_draft_to_pdf_uses_native_html_working_copy_and_preserves_source(self):
         template = self.template_service.create_template(

@@ -175,7 +175,6 @@ output = "coverage.xml"
 [tool.pytest.ini_options]
 addopts = [
   "--cov=isrc_manager",
-  "--cov=ISRC_manager",
   "--cov-branch",
   "--cov-report=term-missing",
   "--cov-report=html",

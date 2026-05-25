@@ -452,7 +452,7 @@ python3 -m pip install -r requirements.txt
 python3 -m pip install -e .[dev]
 ```
 
-Legacy one-step development bootstrap (still supported):
+Compatibility bootstrap alias (for existing workflows):
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
@@ -465,7 +465,7 @@ QT_QPA_PLATFORM=offscreen python3 -m ruff check build.py isrc_manager scripts te
 QT_QPA_PLATFORM=offscreen python3 -m black --check build.py isrc_manager scripts tests
 QT_QPA_PLATFORM=offscreen python3 -m mypy
 QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests
-QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
 ```
 
 Or use the bundled shortcuts:

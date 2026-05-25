@@ -99,6 +99,46 @@ class UpdaterHelperTests(unittest.TestCase):
 
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
 
+    def test_replace_installation_preflight_errors_and_existing_backup_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "app.txt"
+            replacement = root / "stage" / "new-app.txt"
+            backup = root / "app.backup"
+
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "not found"):
+                updater_helper.replace_installation(target, replacement, backup, io.StringIO())
+
+            target.write_text("old", encoding="utf-8")
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "replacement"):
+                updater_helper.replace_installation(target, replacement, backup, io.StringIO())
+
+            replacement.parent.mkdir()
+            replacement.write_text("new", encoding="utf-8")
+            renamed_target = root / "new-app.txt"
+            renamed_target.write_text("already here", encoding="utf-8")
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "already exists"):
+                updater_helper.replace_installation(target, replacement, backup, io.StringIO())
+            renamed_target.unlink()
+
+            backup.mkdir()
+            (backup / "old-backup.txt").write_text("stale", encoding="utf-8")
+            updater_helper.replace_installation(target, replacement, backup, io.StringIO())
+            self.assertEqual(renamed_target.read_text(encoding="utf-8"), "new")
+            self.assertEqual(backup.read_text(encoding="utf-8"), "old")
+
+    def test_restart_application_rejects_empty_command_and_reports_popen_failure(self):
+        with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "empty"):
+            updater_helper.restart_application([], io.StringIO())
+
+        with mock.patch.object(
+            updater_helper.subprocess,
+            "Popen",
+            side_effect=OSError("blocked"),
+        ):
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "Could not restart"):
+                updater_helper.restart_application(["/tmp/app"], io.StringIO())
+
     def test_run_update_restores_backup_if_restart_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -228,8 +268,151 @@ class UpdaterHelperTests(unittest.TestCase):
 
             self.assertEqual(updater_helper.run_update(args), updater_helper.EXIT_INVALID_ARGUMENTS)
 
+    def test_run_update_returns_wait_timeout_and_replacement_failure_codes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = argparse.Namespace(
+                current_pid=123,
+                target=str(root / "app.txt"),
+                replacement=str(root / "new.txt"),
+                expected_version="3.5.4",
+                backup=str(root / "app.backup"),
+                handoff_json=str(root / "handoff.json"),
+                restart_json=json.dumps([str(root / "app.txt")]),
+                log=str(root / "update.log"),
+                wait_timeout=0.01,
+            )
+
+            with mock.patch.object(
+                updater_helper,
+                "wait_for_process_exit",
+                side_effect=updater_helper.UpdaterHelperError("still running"),
+            ):
+                self.assertEqual(updater_helper.run_update(args), updater_helper.EXIT_WAIT_TIMEOUT)
+
+            args.current_pid = 0
+            self.assertEqual(
+                updater_helper.run_update(args),
+                updater_helper.EXIT_REPLACEMENT_FAILED,
+            )
+
+    def test_run_update_restart_failure_logs_handoff_update_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "app.txt"
+            replacement = root / "stage" / "app.txt"
+            backup = root / "app.backup"
+            handoff = root / "handoff.json"
+            log = root / "update.log"
+            target.write_text("old", encoding="utf-8")
+            replacement.parent.mkdir()
+            replacement.write_text("new", encoding="utf-8")
+            args = argparse.Namespace(
+                current_pid=0,
+                target=str(target),
+                replacement=str(replacement),
+                expected_version="3.5.4",
+                backup=str(backup),
+                handoff_json=str(handoff),
+                restart_json=json.dumps([str(target)]),
+                log=str(log),
+                wait_timeout=1.0,
+            )
+
+            with (
+                mock.patch.object(
+                    updater_helper,
+                    "restart_application",
+                    side_effect=updater_helper.UpdaterHelperError("restart failed"),
+                ),
+                mock.patch.object(
+                    updater_helper,
+                    "mark_update_backup_destroyed",
+                    side_effect=OSError("handoff write failed"),
+                ),
+            ):
+                exit_code = updater_helper.run_update(args)
+
+            self.assertEqual(exit_code, updater_helper.EXIT_RESTART_FAILED)
+            self.assertIn(
+                "Could not update handoff after rollback",
+                log.read_text(encoding="utf-8"),
+            )
+
     def test_wait_for_process_exit_ignores_zero_pid(self):
         updater_helper.wait_for_process_exit(0, timeout_seconds=0.01)
+
+    def test_wait_for_process_exit_ignores_current_pid_and_times_out(self):
+        updater_helper.wait_for_process_exit(updater_helper.os.getpid(), timeout_seconds=0.01)
+
+        with (
+            mock.patch.object(updater_helper, "_process_exists", return_value=True),
+            mock.patch.object(updater_helper.time, "sleep"),
+            mock.patch.object(updater_helper.time, "monotonic", side_effect=[0.0, 0.0, 1.0]),
+        ):
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "did not exit"):
+                updater_helper.wait_for_process_exit(999, timeout_seconds=0.5)
+
+    def test_parse_restart_command_rejects_empty_and_blank_arguments(self):
+        with self.assertRaisesRegex(ValueError, "non-empty JSON list"):
+            updater_helper._parse_restart_command("[]")
+        with self.assertRaisesRegex(ValueError, "empty argument"):
+            updater_helper._parse_restart_command(json.dumps(["/tmp/app", " "]))
+
+    def test_restore_backup_handles_missing_backup_and_removes_installed_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "app.txt"
+            backup = root / "backup.txt"
+            installed_target = root / "renamed.txt"
+
+            with self.assertRaisesRegex(updater_helper.UpdaterHelperError, "Backup was not"):
+                updater_helper._restore_backup(target, backup, io.StringIO())
+
+            backup.write_text("old", encoding="utf-8")
+            target.write_text("broken", encoding="utf-8")
+            installed_target.write_text("new", encoding="utf-8")
+            updater_helper._restore_backup(
+                target,
+                backup,
+                io.StringIO(),
+                installed_target=installed_target,
+            )
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+            self.assertFalse(installed_target.exists())
+
+    def test_process_exists_posix_and_windows_branches(self):
+        with mock.patch.object(updater_helper.os, "name", "posix"):
+            with mock.patch.object(updater_helper.os, "kill", side_effect=ProcessLookupError):
+                self.assertFalse(updater_helper._process_exists(123))
+            with mock.patch.object(updater_helper.os, "kill", side_effect=PermissionError):
+                self.assertTrue(updater_helper._process_exists(123))
+            with mock.patch.object(updater_helper.os, "kill", return_value=None):
+                self.assertTrue(updater_helper._process_exists(123))
+
+        with mock.patch.object(updater_helper.os, "name", "nt"):
+            with mock.patch.object(updater_helper, "_windows_process_exists", return_value=False):
+                self.assertFalse(updater_helper._process_exists(123))
+
+    def test_windows_process_exists_handles_missing_api_handles_and_exceptions(self):
+        with mock.patch.object(updater_helper.ctypes, "windll", None, create=True):
+            self.assertTrue(updater_helper._windows_process_exists(123))
+
+        kernel32 = mock.Mock()
+        kernel32.OpenProcess.return_value = 0
+        windll = mock.Mock(kernel32=kernel32)
+        with mock.patch.object(updater_helper.ctypes, "windll", windll, create=True):
+            self.assertFalse(updater_helper._windows_process_exists(123))
+
+        kernel32.OpenProcess.return_value = 42
+        kernel32.WaitForSingleObject.return_value = 0x00000102
+        with mock.patch.object(updater_helper.ctypes, "windll", windll, create=True):
+            self.assertTrue(updater_helper._windows_process_exists(123))
+            kernel32.CloseHandle.assert_called_with(42)
+
+        kernel32.OpenProcess.side_effect = OSError("blocked")
+        with mock.patch.object(updater_helper.ctypes, "windll", windll, create=True):
+            self.assertTrue(updater_helper._windows_process_exists(123))
 
 
 if __name__ == "__main__":

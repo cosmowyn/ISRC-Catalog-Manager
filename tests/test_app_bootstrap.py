@@ -11,7 +11,11 @@ try:
 
     from isrc_manager import packaged_smoke
     from isrc_manager import settings as app_settings
-    from isrc_manager.app_bootstrap import get_or_create_application, run_desktop_application
+    from isrc_manager.app_bootstrap import (
+        _window_factory_supports_startup_feedback,
+        get_or_create_application,
+        run_desktop_application,
+    )
     from isrc_manager.catalog_workspace import CatalogWorkspaceDock
     from isrc_manager.constants import SETTINGS_BASENAME
     from isrc_manager.startup_progress import StartupPhase, startup_phase_label
@@ -27,6 +31,7 @@ except Exception as exc:  # pragma: no cover - environment-specific fallback
     packaged_smoke = None
     get_or_create_application = None
     run_desktop_application = None
+    _window_factory_supports_startup_feedback = None
     SETTINGS_BASENAME = None
     StartupPhase = None
     startup_phase_label = None
@@ -88,6 +93,24 @@ class _FakeWindow:
             return
         self._startup_feedback = None
         controller.finish(self)
+
+
+class _NoProcessEventApplication:
+    _instance = None
+
+    def __init__(self, argv):
+        self.argv = list(argv)
+        self.exec_calls = 0
+        self._single_instance_lock = None
+        type(self)._instance = self
+
+    @classmethod
+    def instance(cls):
+        return cls._instance
+
+    def exec(self):
+        self.exec_calls += 1
+        return 7
 
 
 class _FakeSignal:
@@ -290,6 +313,38 @@ class AppBootstrapTests(unittest.TestCase):
             [(StartupPhase.STARTING, "Starting application…")],
         )
         self.assertEqual(splash.finish_calls, [window])
+
+    def test_window_factory_supports_startup_feedback_for_matching_signatures(self):
+        self.assertTrue(
+            _window_factory_supports_startup_feedback(lambda startup_feedback=None: None)
+        )
+        self.assertTrue(_window_factory_supports_startup_feedback(lambda **_: None))
+        self.assertFalse(_window_factory_supports_startup_feedback(lambda: None))
+
+    def test_window_factory_supports_startup_feedback_non_callable_returns_false(self):
+        self.assertFalse(_window_factory_supports_startup_feedback(42))
+
+    def test_run_desktop_application_with_window_factory_without_feedback(self):
+        created: list[str] = []
+        window = _FakeWindow()
+
+        result = run_desktop_application(
+            argv=["catalog"],
+            init_settings=lambda: None,
+            install_qt_message_filter=lambda: None,
+            enforce_single_instance=lambda timeout: object(),
+            window_factory=lambda: created.append("called") or window,
+            application_factory=_NoProcessEventApplication,
+            message_box=mock.Mock(),
+            splash_factory=lambda _app: None,
+        )
+
+        self.assertEqual(result, 7)
+        self.assertEqual(created, ["called"])
+        self.assertEqual(window.show_calls, 1)
+        app = _NoProcessEventApplication.instance()
+        self.assertIsNotNone(app)
+        self.assertEqual(app.exec_calls, 1)
 
 
 class SettingsIntegrationTests(unittest.TestCase):

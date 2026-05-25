@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+from isrc_manager import update_installer
 from isrc_manager.constants import PACKAGED_APP_NAME
 from isrc_manager.update_checker import ReleaseAsset, ReleaseManifest
 from isrc_manager.update_installer import (
@@ -16,9 +17,11 @@ from isrc_manager.update_installer import (
     UpdateInstallerError,
     backup_path_for_target,
     build_helper_command,
+    create_helper_runtime_copy,
     detect_platform_key,
     download_update_asset,
     extract_update_package,
+    file_sha256,
     install_target_for_replacement,
     launch_update_helper,
     locate_replacement_candidate,
@@ -27,6 +30,8 @@ from isrc_manager.update_installer import (
     restart_command_for_prepared_install,
     restart_command_for_target,
     select_platform_asset,
+    validate_install_destination_is_available,
+    validate_install_target_is_replaceable,
 )
 
 
@@ -104,6 +109,10 @@ class UpdateInstallerTests(unittest.TestCase):
 
         self.assertEqual(asset.name, "ISRCManager-v3.5.4-linux-x64.tar.gz")
 
+    def test_select_platform_asset_wraps_missing_platform_error(self):
+        with self.assertRaisesRegex(UpdateInstallerError, "No update package"):
+            select_platform_asset(_manifest(), platform_key="freebsd")
+
     def test_download_update_asset_verifies_checksum(self):
         data = b"package"
         asset = _asset(
@@ -151,6 +160,46 @@ class UpdateInstallerTests(unittest.TestCase):
                     is_cancelled=lambda: True,
                 )
             self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_download_update_asset_rejects_invalid_empty_large_and_cancelled_fetch(self):
+        valid_asset = _asset(
+            "ISRCManager-v3.5.4-linux-x64.tar.gz",
+            "https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/download/v3.5.4/pkg",
+            data=b"package",
+        )
+        invalid_url_asset = ReleaseAsset(
+            name="pkg.zip",
+            url="http://example.test/pkg.zip",
+            sha256="a" * 64,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(UpdateInstallerError, "HTTPS"):
+                download_update_asset(invalid_url_asset, root, fetcher=lambda *_args: b"data")
+            with self.assertRaisesRegex(UpdateInstallerError, "empty"):
+                download_update_asset(valid_asset, root, fetcher=lambda *_args: b"")
+            with mock.patch.object(update_installer, "MAX_UPDATE_PACKAGE_BYTES", 3):
+                with self.assertRaisesRegex(UpdateInstallerError, "unexpectedly large"):
+                    download_update_asset(valid_asset, root, fetcher=lambda *_args: b"package")
+
+            cancel_states = iter([False, False, True])
+            with self.assertRaises(InterruptedError):
+                download_update_asset(
+                    valid_asset,
+                    root,
+                    fetcher=lambda *_args: b"package",
+                    is_cancelled=lambda: next(cancel_states),
+                )
+            self.assertFalse((root / valid_asset.name).exists())
+
+    def test_file_sha256_can_cancel_between_chunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "pkg.bin"
+            package.write_bytes(b"x" * (1024 * 1024 + 1))
+            cancel_states = iter([False, True])
+
+            with self.assertRaises(InterruptedError):
+                file_sha256(package, is_cancelled=lambda: next(cancel_states))
 
     def test_streaming_update_download_cancels_between_chunks_and_removes_partial_file(self):
         chunks = [b"first", b"second"]
@@ -240,6 +289,17 @@ class UpdateInstallerTests(unittest.TestCase):
             with self.assertRaises(UpdateInstallerError):
                 extract_update_package(package, root / "stage", platform_key="windows")
 
+    def test_extract_update_package_rejects_missing_and_unsupported_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(UpdateInstallerError, "was not found"):
+                extract_update_package(root / "missing.zip", root / "stage", platform_key="linux")
+
+            unsupported = root / "update.dmg"
+            unsupported.write_bytes(b"package")
+            with self.assertRaisesRegex(UpdateInstallerError, "Unsupported update package type"):
+                extract_update_package(unsupported, root / "stage", platform_key="macos")
+
     def test_safe_zip_extract_preserves_macos_bundle_symlink(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -290,6 +350,28 @@ class UpdateInstallerTests(unittest.TestCase):
             staged = extract_update_package(package, root / "stage", platform_key="linux")
 
             self.assertEqual(staged.replacement_path.name, PACKAGED_APP_NAME)
+
+    def test_locate_replacement_candidate_errors_and_linux_direct_executable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            linux_exe = root / PACKAGED_APP_NAME
+            linux_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+            linux_exe.chmod(0o755)
+            self.assertEqual(locate_replacement_candidate(root, "linux"), linux_exe)
+
+            linux_exe.unlink()
+            with self.assertRaisesRegex(UpdateInstallerError, "runnable application"):
+                locate_replacement_candidate(root, "linux")
+
+            win_root = root / "win"
+            win_root.mkdir()
+            with self.assertRaisesRegex(UpdateInstallerError, "Windows update package"):
+                locate_replacement_candidate(win_root, "windows")
+
+            mac_root = root / "mac"
+            (mac_root / f"{PACKAGED_APP_NAME}.app").mkdir(parents=True)
+            with self.assertRaisesRegex(UpdateInstallerError, "valid app bundle"):
+                locate_replacement_candidate(mac_root, "macos")
 
     def test_locate_replacement_candidate_finds_macos_app_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -348,6 +430,38 @@ class UpdateInstallerTests(unittest.TestCase):
                 backup_path_for_target(target, "3.5.4", timestamp="20260426").name,
                 f"{PACKAGED_APP_NAME}.backup-before-v3.5.4-20260426",
             )
+
+    def test_restart_commands_raise_when_directory_has_no_executable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / PACKAGED_APP_NAME
+            replacement = Path(tmp) / "replacement"
+            target.mkdir()
+            replacement.mkdir()
+
+            with self.assertRaisesRegex(UpdateInstallerError, "No restart executable"):
+                restart_command_for_target(target, platform_key="linux")
+            with self.assertRaisesRegex(UpdateInstallerError, "No restart executable"):
+                restart_command_for_prepared_install(
+                    target,
+                    replacement,
+                    platform_key="linux",
+                )
+
+    def test_backup_path_deduplicates_and_reports_exhausted_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / PACKAGED_APP_NAME
+            target.write_text("app", encoding="utf-8")
+            first = backup_path_for_target(target, "3/5/4", timestamp="stamp")
+            first.write_text("existing", encoding="utf-8")
+
+            self.assertEqual(
+                backup_path_for_target(target, "3/5/4", timestamp="stamp").name,
+                f"{PACKAGED_APP_NAME}.backup-before-v3-5-4-stamp-2",
+            )
+            for index in range(2, 100):
+                (target.parent / f"{first.name}-{index}").write_text("existing", encoding="utf-8")
+            with self.assertRaisesRegex(UpdateInstallerError, "unique backup path"):
+                backup_path_for_target(target, "3/5/4", timestamp="stamp")
 
     def test_prepared_install_renames_versioned_target_to_packaged_app_name(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,6 +532,156 @@ class UpdateInstallerTests(unittest.TestCase):
                         cache_root=root,
                         platform_key="macos",
                     )
+
+    def test_prepare_update_plan_happy_path_uses_staging_pipeline(self):
+        manifest = _manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "package.zip"
+            package.write_bytes(b"package")
+            target = root / PACKAGED_APP_NAME
+            target.write_text("app", encoding="utf-8")
+            replacement = root / "staged" / PACKAGED_APP_NAME
+            replacement.parent.mkdir()
+            replacement.write_text("new app", encoding="utf-8")
+            staged = StagedUpdatePackage(
+                package_path=package,
+                staging_dir=root / "staging",
+                replacement_path=replacement,
+                platform_key="linux",
+            )
+            helper = root / "helper"
+            helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            progress = []
+
+            with (
+                mock.patch("isrc_manager.update_installer.sys.frozen", True, create=True),
+                mock.patch(
+                    "isrc_manager.update_installer.update_workspace_root",
+                    return_value=root / "workspace",
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.extract_update_package",
+                    return_value=staged,
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.resolve_installed_target_path",
+                    return_value=target,
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.validate_install_target_is_replaceable"
+                ) as validate_target,
+                mock.patch(
+                    "isrc_manager.update_installer.validate_install_destination_is_available"
+                ) as validate_destination,
+                mock.patch(
+                    "isrc_manager.update_installer.restart_command_for_prepared_install",
+                    return_value=(str(target),),
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.update_backup_handoff_path",
+                    return_value=root / "handoff.json",
+                ),
+                mock.patch(
+                    "isrc_manager.update_installer.create_helper_runtime_copy",
+                    return_value=helper,
+                ),
+            ):
+                plan = prepare_update_install_plan(
+                    manifest,
+                    package,
+                    current_pid=1234,
+                    cache_root=root,
+                    platform_key="linux",
+                    progress_callback=lambda *args: progress.append(args),
+                )
+
+            validate_target.assert_called_once_with(target, platform_key="linux")
+            validate_destination.assert_called_once()
+            self.assertEqual(plan.replacement_path, replacement)
+            self.assertEqual(plan.handoff_path, root / "handoff.json")
+            self.assertEqual(plan.helper_command[0], str(helper))
+            self.assertIn("--current-pid", plan.helper_command)
+            self.assertIn("1234", plan.helper_command)
+            self.assertEqual(progress[-1], (90, 100, "Update installer prepared."))
+
+    def test_prepare_update_plan_rejects_unfrozen_builds(self):
+        with mock.patch("isrc_manager.update_installer.sys.frozen", False, create=True):
+            with self.assertRaisesRegex(UpdateInstallerError, "packaged builds"):
+                prepare_update_install_plan(
+                    _manifest(),
+                    Path("/tmp/package.zip"),
+                    platform_key="linux",
+                )
+
+    def test_install_target_validation_and_destination_conflicts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / PACKAGED_APP_NAME
+            target.write_text("app", encoding="utf-8")
+            validate_install_target_is_replaceable(target, platform_key="linux")
+
+            with self.assertRaisesRegex(UpdateInstallerError, "could not be found"):
+                validate_install_target_is_replaceable(root / "missing", platform_key="linux")
+
+            with mock.patch("isrc_manager.update_installer.os.access", return_value=False):
+                with self.assertRaisesRegex(UpdateInstallerError, "not writable"):
+                    validate_install_target_is_replaceable(target, platform_key="linux")
+
+            destination = root / "renamed"
+            destination.write_text("other app", encoding="utf-8")
+            with self.assertRaisesRegex(UpdateInstallerError, "target name already exists"):
+                validate_install_destination_is_available(target, destination)
+
+    def test_create_helper_runtime_copy_file_and_error_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_exe = root / "python"
+            source_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+            source_exe.chmod(0o755)
+            target = root / "installed.exe"
+            target.write_text("app", encoding="utf-8")
+
+            helper = create_helper_runtime_copy(
+                target,
+                root / "helper",
+                platform_key="windows",
+                executable=source_exe,
+            )
+            self.assertTrue(helper.is_file())
+            self.assertTrue(os.access(helper, os.X_OK))
+
+            app_dir = root / "app-dir"
+            app_dir.mkdir()
+            with self.assertRaisesRegex(UpdateInstallerError, "not runnable"):
+                create_helper_runtime_copy(
+                    app_dir,
+                    root / "helper2",
+                    platform_key="linux",
+                )
+
+            with self.assertRaisesRegex(UpdateInstallerError, "executable was not found"):
+                create_helper_runtime_copy(
+                    target,
+                    root / "helper3",
+                    platform_key="windows",
+                    executable=root / "missing-python",
+                )
+
+    def test_archive_private_validation_helpers_cover_unsafe_paths(self):
+        with self.assertRaisesRegex(UpdateInstallerError, "absolute path"):
+            update_installer._validate_archive_member("/absolute")
+        with self.assertRaisesRegex(UpdateInstallerError, "relative path"):
+            update_installer._validate_archive_member("app/../evil")
+        with self.assertRaisesRegex(UpdateInstallerError, "drive-qualified"):
+            update_installer._validate_archive_member("C:/evil")
+        with self.assertRaisesRegex(UpdateInstallerError, "unsafe symbolic link"):
+            update_installer._collapse_archive_path(("..", "escape"))
+        with self.assertRaisesRegex(UpdateInstallerError, "entries below a symbolic link"):
+            update_installer._reject_entries_below_symlinks(
+                {update_installer.PurePosixPath("app/link/file")},
+                {update_installer.PurePosixPath("app/link")},
+            )
 
     def test_launch_update_helper_detaches_process(self):
         calls = []

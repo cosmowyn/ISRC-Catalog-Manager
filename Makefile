@@ -46,4 +46,4 @@ test:
 	$(HEADLESS_TEST_ENV) $(PYTEST)
 
 coverage:
-	$(HEADLESS_TEST_ENV) $(PYTEST) --cov=isrc_manager --cov=ISRC_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
+	$(HEADLESS_TEST_ENV) $(PYTEST) --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
