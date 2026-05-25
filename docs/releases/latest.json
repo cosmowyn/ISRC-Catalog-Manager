@@ -1,7 +1,7 @@
 {
-  "version": "3.14.5",
+  "version": "3.14.6",
   "released_at": "2026-05-25",
-  "summary": "Enforce Python 3.14.4 test runtime and add coverage audit docs",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.14.5.md",
+  "summary": "align Python 3.14.4 reproducibility and headless QA instructions",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.14.6.md",
   "minimum_supported_version": null
 }
