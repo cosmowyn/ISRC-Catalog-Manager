@@ -32,6 +32,15 @@ class HistorySnapshotTests(HistoryManagerTestCase):
     test_snapshot_restore_rolls_back_database_when_external_restore_fails = (
         HistoryManagerTestCase.case_snapshot_restore_rolls_back_database_when_external_restore_fails
     )
+    test_snapshot_restore_action_rolls_back_when_history_recording_fails_after_apply = (
+        HistoryManagerTestCase.case_snapshot_restore_action_rolls_back_when_history_recording_fails_after_apply
+    )
+    test_snapshot_missing_delete_and_restore_boundaries_are_explicit = (
+        HistoryManagerTestCase.case_snapshot_missing_delete_and_restore_boundaries_are_explicit
+    )
+    test_redo_and_corrupted_snapshot_boundaries_fail_explicitly = (
+        HistoryManagerTestCase.case_redo_and_corrupted_snapshot_boundaries_fail_explicitly
+    )
     test_restore_snapshot_missing_file_does_not_create_extra_restore_point = (
         HistoryManagerTestCase.case_restore_snapshot_missing_file_does_not_create_extra_restore_point
     )

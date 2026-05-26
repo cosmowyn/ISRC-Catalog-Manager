@@ -5,6 +5,7 @@ import textwrap
 import unittest
 from datetime import time, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
@@ -1360,6 +1361,259 @@ class ExchangeServiceTestCase(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def case_package_helper_edges_cover_missing_media_and_schema_boundaries(self):
+        unique_names: dict[int, list[str]] = {}
+        self.service._append_unique_name(unique_names, 1, "")
+        self.service._append_unique_name(unique_names, 1, "Owner Publishing")
+        self.service._append_unique_name(unique_names, 1, "Owner Publishing")
+        self.assertEqual(unique_names, {1: ["Owner Publishing"]})
+
+        self.assertEqual(self.service._work_export_overrides([0, -1]), {})
+        minimal_conn = sqlite3.connect(":memory:")
+        try:
+            minimal_service = object.__new__(ExchangeService)
+            minimal_service.conn = minimal_conn
+            self.assertEqual(minimal_service._work_export_overrides([1]), {})
+            minimal_conn.execute("CREATE TABLE Tracks (id INTEGER PRIMARY KEY)")
+            self.assertEqual(minimal_service._work_export_overrides([1]), {})
+        finally:
+            minimal_conn.close()
+
+        track_id = self._create_track(isrc="NL-ABC-26-00037", title="Owned Work", audio=True)
+        work_id = self._govern_track_with_work(
+            track_id,
+            work_title="Owned Work",
+            work_iswc="T-123.000.000-1",
+            registration_number="BUMA-OWN-1",
+            writer_name="Owned Writer",
+            publisher_name="Fallback Publisher",
+        )
+        self.conn.execute(
+            """
+            INSERT INTO WorkOwnershipInterests(work_id, display_name, ownership_role, share_percent)
+            VALUES (?, ?, 'publisher', 100)
+            """,
+            (work_id, "Owner Publishing"),
+        )
+        overrides = self.service._work_export_overrides([track_id])
+        self.assertEqual(overrides[track_id]["publisher"], "Owner Publishing")
+        audio_path, artwork_path = self.service._effective_track_media_paths(track_id)
+        self.assertTrue(audio_path)
+        self.assertEqual(artwork_path, "")
+
+        absolute_media = self.data_root / "outside.wav"
+        absolute_media.write_bytes(b"RIFFabsolute")
+        self.assertIsNone(self.service._resolve_packaged_media_source(""))
+        self.assertEqual(
+            self.service._resolve_packaged_media_source(str(absolute_media)), absolute_media
+        )
+        no_root_service = object.__new__(ExchangeService)
+        no_root_service.data_root = None
+        self.assertIsNone(no_root_service._resolve_packaged_media_source("relative.wav"))
+        self.assertTrue(
+            self.service._package_media_arcname(str(absolute_media)).startswith("media/external/")
+        )
+
+        warnings: list[str] = []
+        seen_warnings: set[str] = set()
+        self.service._append_unique_warning(warnings, seen_warnings, "")
+        self.service._append_unique_warning(warnings, seen_warnings, "Missing media")
+        self.service._append_unique_warning(warnings, seen_warnings, "Missing media")
+        self.assertEqual(warnings, ["Missing media"])
+
+        def fetch_track_bytes(_track_id: int, _media_key: str) -> tuple[bytes, str]:
+            return b"RIFFpackaged", "audio/wav"
+
+        track_packager = object.__new__(ExchangeService)
+        track_packager.data_root = self.data_root
+        track_packager.track_service = SimpleNamespace(
+            get_media_meta=lambda _track_id, _media_key: {
+                "has_media": True,
+                "storage_mode": "database",
+                "path": "",
+                "owner_scope": "track",
+                "owner_id": 7,
+                "filename": "embedded.wav",
+            },
+            fetch_media_bytes=fetch_track_bytes,
+        )
+        package_path = self.data_root / "helper-media.zip"
+        row: dict[str, object] = {}
+        packaged_index: dict[str, str] = {}
+        with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
+            track_packager._package_track_media(
+                archive,
+                row=row,
+                field_name="audio_file_path",
+                track_id=7,
+                media_key="audio_file",
+                written_media=set(),
+                packaged_media_index=packaged_index,
+                warnings=[],
+                seen_warnings=set(),
+            )
+        self.assertEqual(row["audio_file_storage_mode"], "database")
+        self.assertIn("embedded/track/7/audio_file/embedded.wav", packaged_index)
+
+        stored_packager = object.__new__(ExchangeService)
+        stored_packager.data_root = self.data_root
+        stored_packager.track_service = SimpleNamespace(
+            get_media_meta=lambda _track_id, _media_key: {
+                "has_media": True,
+                "storage_mode": "managed",
+                "path": "track_media/audio/fallback.wav",
+                "filename": "fallback.wav",
+            },
+            fetch_media_bytes=fetch_track_bytes,
+        )
+        stored_row: dict[str, object] = {}
+        stored_index: dict[str, str] = {}
+        stored_package_path = self.data_root / "helper-stored-media.zip"
+        with ZipFile(stored_package_path, "w", compression=ZIP_DEFLATED) as archive:
+            stored_packager._package_track_media(
+                archive,
+                row=stored_row,
+                field_name="audio_file_path",
+                track_id=8,
+                media_key="audio_file",
+                written_media=set(),
+                packaged_media_index=stored_index,
+                warnings=[],
+                seen_warnings=set(),
+            )
+            self.assertIn("media/track_media/audio/fallback.wav", archive.namelist())
+        self.assertEqual(stored_row["audio_file_path"], "track_media/audio/fallback.wav")
+
+        def missing_track_bytes(_track_id: int, _media_key: str) -> tuple[bytes, str]:
+            raise FileNotFoundError("missing track media")
+
+        missing_packager = object.__new__(ExchangeService)
+        missing_packager.data_root = self.data_root
+        missing_packager.track_service = SimpleNamespace(
+            get_media_meta=lambda _track_id, _media_key: {
+                "has_media": True,
+                "storage_mode": "managed",
+                "path": "track_media/audio/missing.wav",
+                "filename": "missing.wav",
+            },
+            fetch_media_bytes=missing_track_bytes,
+        )
+        missing_row = {"audio_file_path": "old", "audio_file_storage_mode": "managed"}
+        missing_warnings: list[str] = []
+        missing_zip_path = self.data_root / "helper-missing-media.zip"
+        with ZipFile(missing_zip_path, "w", compression=ZIP_DEFLATED) as archive:
+            missing_packager._package_track_media(
+                archive,
+                row=missing_row,
+                field_name="audio_file_path",
+                track_id=9,
+                media_key="audio_file",
+                written_media=set(),
+                packaged_media_index={},
+                warnings=missing_warnings,
+                seen_warnings=set(),
+            )
+        self.assertEqual(missing_row["audio_file_path"], "")
+        self.assertTrue(any("omitted audio file" in warning for warning in missing_warnings))
+
+        release_packager = object.__new__(ExchangeService)
+        release_packager.data_root = self.data_root
+        release_packager.release_service = SimpleNamespace(fetch_release=lambda _release_id: None)
+        release_row = {"release_id": object(), "release_artwork_path": "keep"}
+        with ZipFile(self.data_root / "helper-release-id.zip", "w") as archive:
+            release_packager._package_release_artwork(
+                archive,
+                row=release_row,
+                written_media=set(),
+                packaged_media_index={},
+                warnings=[],
+                seen_warnings=set(),
+            )
+            release_row["release_id"] = 999
+            release_packager._package_release_artwork(
+                archive,
+                row=release_row,
+                written_media=set(),
+                packaged_media_index={},
+                warnings=[],
+                seen_warnings=set(),
+            )
+        self.assertEqual(release_row["release_artwork_path"], "keep")
+
+        release_packager.release_service = SimpleNamespace(
+            fetch_release=lambda _release_id: SimpleNamespace(
+                artwork_storage_mode="managed",
+                artwork_path="release_artwork/missing.png",
+                artwork_filename="cover.png",
+            ),
+            fetch_artwork_bytes=lambda _release_id: (b"PNGDATA", "image/png"),
+        )
+        release_row = {"release_id": 12}
+        release_index: dict[str, str] = {}
+        release_package_path = self.data_root / "helper-release-art.zip"
+        with ZipFile(release_package_path, "w", compression=ZIP_DEFLATED) as archive:
+            release_packager._package_release_artwork(
+                archive,
+                row=release_row,
+                written_media=set(),
+                packaged_media_index=release_index,
+                warnings=[],
+                seen_warnings=set(),
+            )
+            self.assertIn("media/release_artwork/missing.png", archive.namelist())
+        self.assertEqual(release_row["release_artwork_storage_mode"], "managed")
+
+        bad_json_path = self.data_root / "bad-schema.json"
+        bad_json_path.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Unsupported JSON schema"):
+            self.service._load_json_payload(bad_json_path)
+
+        missing_manifest_path = self.data_root / "missing-manifest.zip"
+        with ZipFile(missing_manifest_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("readme.txt", "no manifest")
+        with self.assertRaisesRegex(ValueError, "manifest.json"):
+            self.service._load_package_payload(missing_manifest_path)
+
+        bad_package_path = self.data_root / "bad-schema-package.zip"
+        with ZipFile(bad_package_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps({"schema_version": 999}))
+        with self.assertRaisesRegex(ValueError, "Unsupported package schema"):
+            self.service._load_package_payload(bad_package_path)
+
+        unsafe_path = self.data_root / "unsafe-package.zip"
+        with ZipFile(unsafe_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("../escape.txt", "unsafe")
+        with self.assertRaisesRegex(ValueError, "unsafe path"):
+            self.service._safe_extract_zip(unsafe_path, self.data_root / "unsafe-extract")
+
+        directory_path = self.data_root / "directory-package.zip"
+        with ZipFile(directory_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("nested/", "")
+            archive.writestr("nested/file.txt", "ok")
+        extract_root = self.data_root / "directory-extract"
+        self.service._safe_extract_zip(directory_path, extract_root)
+        self.assertTrue((extract_root / "nested").is_dir())
+        self.assertEqual((extract_root / "nested" / "file.txt").read_text(), "ok")
+
+        prepared_root = self.data_root / "prepared-package"
+        prepared_root.mkdir()
+        (prepared_root / "direct.wav").write_bytes(b"RIFFdirect")
+        prepared = self.service._prepare_packaged_rows(
+            {
+                "packaged_media_index": {"": "ignored"},
+                "rows": [
+                    {
+                        "audio_file_path": "direct.wav",
+                        "album_art_path": "",
+                        "release_artwork_path": "missing.png",
+                    }
+                ],
+            },
+            extracted_root=prepared_root,
+        )
+        self.assertEqual(prepared[0]["audio_file_path"], str(prepared_root / "direct.wav"))
+        self.assertEqual(prepared[0]["release_artwork_path"], "missing.png")
+
     def case_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"
         csv_path.write_text(
@@ -1435,6 +1689,225 @@ class ExchangeServiceTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(inspection.resolved_delimiter, "\t")
+
+    def case_inspection_import_source_and_identifier_edges_are_recoverable(self):
+        dialect, resolved_delimiter = self.service._csv_dialect_for_sample(
+            "header only\nvalue only\n"
+        )
+        self.assertEqual(resolved_delimiter, ",")
+        self.assertEqual(getattr(dialect, "delimiter", ","), ",")
+
+        cancel_events: list[str] = []
+        csv_path = self.data_root / "inspection-cancel.csv"
+        csv_path.write_text(
+            "track_title,artist_name,contract_number\n" "Orbit,Moonwake,CON-123\n",
+            encoding="utf-8",
+        )
+        inspection = self.service.inspect_csv(
+            csv_path,
+            cancel_callback=lambda: cancel_events.append("inspect-csv"),
+        )
+        self.assertEqual(cancel_events, ["inspect-csv"])
+        self.assertEqual(inspection.identifier_review_rows[0].target_field_name, "contract_number")
+
+        workbook_path = self.data_root / "inspection-cancel.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["track_title", "artist_name", "license_number"])
+        sheet.append(["Pulse", "Moonwake", "LIC-1"])
+        workbook.save(workbook_path)
+        workbook_inspection = self.service.inspect_xlsx(
+            workbook_path,
+            cancel_callback=lambda: cancel_events.append("inspect-xlsx"),
+        )
+        self.assertEqual(
+            workbook_inspection.headers, ["track_title", "artist_name", "license_number"]
+        )
+        self.assertEqual(workbook_inspection.preview_rows[0]["license_number"], "LIC-1")
+        self.assertEqual(cancel_events[-1], "inspect-xlsx")
+
+        package_path = self.data_root / "inspection-no-media.zip"
+        manifest = {
+            "schema_version": 1,
+            "columns": ["track_title", "artist_name", "registry_sha256_key"],
+            "rows": [
+                {
+                    "track_title": "Hash Track",
+                    "artist_name": "Moonwake",
+                    "registry_sha256_key": "abc123",
+                }
+            ],
+            "custom_field_defs": [],
+            "packaged_media": False,
+            "packaged_media_index": {},
+            "warnings": ["  source warning  ", ""],
+        }
+        with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+        package_inspection = self.service.inspect_package(
+            package_path,
+            cancel_callback=lambda: cancel_events.append("inspect-package"),
+        )
+        self.assertEqual(cancel_events[-1], "inspect-package")
+        self.assertIn("source warning", package_inspection.warnings)
+        self.assertIn("This ZIP does not advertise packaged media.", package_inspection.warnings)
+        self.assertEqual(
+            package_inspection.identifier_review_rows[0].target_field_name,
+            "registry_sha256_key",
+        )
+
+        review_rows = self.service._build_identifier_review_rows(
+            [
+                {
+                    "Contract No": "CON-1",
+                    "License No": "",
+                    "Title": "Ignored",
+                }
+            ],
+            {
+                "Contract No": "contract_number",
+                "License No": "license_number",
+                "Title": "track_title",
+            },
+        )
+        self.assertEqual(len(review_rows), 1)
+        self.assertEqual(review_rows[0].value, "CON-1")
+
+        with self.service._resolve_import_source_dir(
+            format_name="package",
+            source_path=None,
+        ) as package_repair_dir:
+            self.assertTrue(package_repair_dir.exists())
+        with self.service._resolve_import_source_dir(
+            format_name="package",
+            source_path=package_path,
+        ) as extracted_dir:
+            self.assertTrue((extracted_dir / "manifest.json").exists())
+        with self.service._resolve_import_source_dir(
+            format_name="csv",
+            source_path=csv_path,
+        ) as csv_source_dir:
+            self.assertEqual(csv_source_dir, csv_path.parent)
+        with self.service._resolve_import_source_dir(
+            format_name="json",
+            source_path=None,
+        ) as cwd_source_dir:
+            self.assertEqual(cwd_source_dir, Path.cwd())
+
+        csv_report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "contract_number": "contract_number",
+            },
+            options=ExchangeImportOptions(mode="dry_run"),
+            cancel_callback=lambda: cancel_events.append("import-csv"),
+        )
+        self.assertEqual(csv_report.passed, 1)
+        self.assertIn("import-csv", cancel_events)
+
+        xlsx_report = self.service.import_xlsx(
+            workbook_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "license_number": "license_number",
+            },
+            options=ExchangeImportOptions(mode="dry_run"),
+            cancel_callback=lambda: cancel_events.append("import-xlsx"),
+        )
+        self.assertEqual(xlsx_report.passed, 1)
+        self.assertIn("import-xlsx", cancel_events)
+
+        package_report = self.service.import_package(
+            package_path,
+            options=ExchangeImportOptions(mode="dry_run"),
+            cancel_callback=lambda: cancel_events.append("import-package"),
+        )
+        self.assertEqual(package_report.passed, 1)
+        self.assertGreaterEqual(cancel_events.count("import-package"), 3)
+
+        self.assertEqual(
+            self.service._normalize_additional_artists_target(" , JANE DOE,, Already Fine "),
+            "Jane Doe, Already Fine",
+        )
+        self.assertEqual(self.service._to_display_title_name_case(""), "")
+        self.assertEqual(
+            self.service._restore_compact_acronym_spans("ABC", "Ab"),
+            "Ab",
+        )
+        self.assertEqual(self.service._capitalize_title_name_token("rock''roll"), "Rock''roll")
+        self.assertEqual(self.service._capitalize_title_name_token("rockand'roll"), "Rockand'roll")
+        self.assertEqual(self.service._normalize_track_length_target(12.9), 12)
+        self.assertEqual(self.service._normalize_track_length_target(""), "")
+        self.assertEqual(self.service._normalize_track_length_target("01:2:03"), "01:2:03")
+        self.assertEqual(self.service._normalize_track_length_target("01:aa:03"), "01:aa:03")
+        self.assertEqual(self.service._normalize_track_length_target("01:60:00"), "01:60:00")
+
+        relative_media = self.data_root / "relative.wav"
+        relative_media.write_bytes(b"RIFFrelative")
+        self.assertEqual(
+            self.service._resolve_media_path(self.data_root, "relative.wav"),
+            str(relative_media),
+        )
+        self.assertIsNone(self.service._resolve_media_path(self.data_root, ""))
+        self.assertIsNone(self.service._resolve_media_path(self.data_root, "missing.wav"))
+
+        classification_conn = sqlite3.connect(":memory:")
+        try:
+            classification_service = object.__new__(ExchangeService)
+            classification_service.conn = classification_conn
+            self.assertIsNone(classification_service._code_registry_service())
+            totals: dict[str, dict[str, int]] = {}
+            outcomes = []
+            classification_service._increment_identifier_total(
+                totals,
+                category_system_key="",
+                bucket="external",
+            )
+            self.assertEqual(totals, {})
+            for outcome in (
+                "skipped_no_match",
+                "merged_retained_existing",
+                "conflicted_manual_review",
+            ):
+                classification_service._record_identifier_classification(
+                    row_index=1,
+                    field_name="catalog_number",
+                    category_system_key="catalog_number",
+                    value=f"CAT-{outcome}",
+                    outcomes=outcomes,
+                    totals=totals,
+                    outcome_override=outcome,
+                )
+            classification_service._store_unbound_external_identifier(
+                row_index=1,
+                source_header="Unknown",
+                field_name="unknown_identifier",
+                value="IGNORED",
+                options=ExchangeImportOptions(mode="dry_run"),
+                outcomes=outcomes,
+                totals=totals,
+                cursor=None,
+            )
+            classification_service._store_unbound_external_identifier(
+                row_index=1,
+                source_header="Contract No",
+                field_name="contract_number",
+                value="CON-DRY",
+                options=ExchangeImportOptions(mode="dry_run"),
+                outcomes=outcomes,
+                totals=totals,
+                cursor=None,
+            )
+        finally:
+            classification_conn.close()
+        self.assertEqual(totals["catalog_number"]["skipped"], 1)
+        self.assertEqual(totals["catalog_number"]["merged"], 1)
+        self.assertEqual(totals["catalog_number"]["conflicted"], 1)
+        self.assertEqual(totals["contract_number"]["external"], 1)
+        self.assertEqual(outcomes[-1].outcome, "stored_external")
 
     def case_import_csv_detects_pipe_delimiter(self):
         csv_path = self.data_root / "pipe-import.csv"

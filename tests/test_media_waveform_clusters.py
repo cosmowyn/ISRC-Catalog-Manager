@@ -3,15 +3,18 @@ from __future__ import annotations
 import math
 import sqlite3
 import struct
+import sys
+import types
 import wave
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QRectF, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
+from isrc_manager.media import waveform as waveform_module
 from isrc_manager.media import waveform_cache
 from isrc_manager.media.audio_visualization import (
     SpectrumGraphWidget,
@@ -34,6 +37,41 @@ def _write_stereo_wav(
         wav_file.setframerate(sample_rate)
         payload = b"".join(struct.pack("<hh", left, right) for left, right in frames)
         wav_file.writeframes(payload)
+
+
+def _pack_s24(value: int) -> bytes:
+    if value < 0:
+        value += 1 << 24
+    return bytes((value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF))
+
+
+def _write_pcm_wav(
+    path: Path,
+    samples: list[tuple[int, ...]],
+    *,
+    channels: int,
+    sample_width: int,
+    sample_rate: int = 22050,
+) -> None:
+    payload = bytearray()
+    for frame in samples:
+        values = list(frame)
+        if len(values) == 1 and channels > 1:
+            values *= channels
+        for value in values[:channels]:
+            if sample_width == 1:
+                payload.append(max(0, min(255, int(value))))
+            elif sample_width == 2:
+                payload.extend(struct.pack("<h", int(value)))
+            elif sample_width == 3:
+                payload.extend(_pack_s24(int(value)))
+            elif sample_width == 4:
+                payload.extend(struct.pack("<i", int(value)))
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(bytes(payload))
 
 
 def _tone_frames(
@@ -106,10 +144,18 @@ class _MouseLikeEvent:
 
 
 class _WheelLikeEvent:
-    def __init__(self, *, pixel_delta: int = 0, angle_delta: int = 0) -> None:
-        self._pixel_delta = _PointDelta(0, pixel_delta)
-        self._angle_delta = _PointDelta(0, angle_delta)
+    def __init__(
+        self,
+        *,
+        pixel_delta: int = 0,
+        angle_delta: int = 0,
+        pixel_x: int = 0,
+        angle_x: int = 0,
+    ) -> None:
+        self._pixel_delta = _PointDelta(pixel_x, pixel_delta)
+        self._angle_delta = _PointDelta(angle_x, angle_delta)
         self.accepted = False
+        self.ignored = False
 
     def pixelDelta(self) -> _PointDelta:
         return self._pixel_delta
@@ -119,6 +165,116 @@ class _WheelLikeEvent:
 
     def accept(self) -> None:
         self.accepted = True
+
+    def ignore(self) -> None:
+        self.ignored = True
+
+
+class _FakeSignal:
+    def __init__(self) -> None:
+        self._callbacks = []
+
+    def connect(self, callback) -> None:
+        self._callbacks.append(callback)
+
+    def emit(self, *args) -> None:
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class _FakeEventLoop:
+    def __init__(self) -> None:
+        self.quit_called = False
+
+    def exec(self) -> None:
+        return None
+
+    def quit(self) -> None:
+        self.quit_called = True
+
+
+class _FakeTimer:
+    def __init__(self, *_args) -> None:
+        self.timeout = _FakeSignal()
+        self.active = False
+
+    def setSingleShot(self, _value: bool) -> None:
+        return None
+
+    def start(self, *_args) -> None:
+        self.active = True
+
+    def stop(self) -> None:
+        self.active = False
+
+
+class _FakeAudioFormat:
+    def __init__(self, sample_format) -> None:
+        self._sample_format = sample_format
+
+    def bytesPerFrame(self) -> int:
+        return 4
+
+    def bytesPerSample(self) -> int:
+        return 2
+
+    def channelCount(self) -> int:
+        return 2
+
+    def sampleFormat(self):
+        return self._sample_format
+
+    def sampleRate(self) -> int:
+        return 8000
+
+
+class _FakeAudioBuffer:
+    def __init__(self, payload: bytes, sample_format) -> None:
+        self._payload = payload
+        self._format = _FakeAudioFormat(sample_format)
+
+    def isValid(self) -> bool:
+        return True
+
+    def format(self):
+        return self._format
+
+    def data(self) -> bytes:
+        return self._payload
+
+
+def _fake_decoder_class(sample_format, payload: bytes):
+    class _FakeDecoder:
+        def __init__(self) -> None:
+            self.bufferReady = _FakeSignal()
+            self.finished = _FakeSignal()
+            self.error = _FakeSignal()
+            self._buffer = _FakeAudioBuffer(payload, sample_format)
+            self.stopped = False
+
+        def isSupported(self) -> bool:
+            return True
+
+        def setSource(self, _source) -> None:
+            return None
+
+        def start(self) -> None:
+            self.bufferReady.emit()
+            self.finished.emit()
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def read(self):
+            return self._buffer
+
+        def duration(self) -> int:
+            return 1
+
+        def errorString(self) -> str:
+            return ""
+
+    return _FakeDecoder
 
 
 def _connect_int_signal(signal):
@@ -191,6 +347,77 @@ def test_waveform_widget_state_math_cached_images_and_events() -> None:
     )
 
 
+def test_waveform_widget_edge_events_and_render_paths() -> None:
+    require_qapplication()
+    widget = WaveformWidget()
+    widget.resize(96, 48)
+    widget.set_preferred_height(widget.sizeHint().height())
+    widget.set_cached_waveform(
+        [(-0.4, 0.7), (0.0, 0.0)],
+        light_preview_png=b"",
+        dark_preview_png=b"not a png",
+        cache_key="bad-preview",
+    )
+    assert widget._stored_waveform_pixmap() is None
+
+    widget.set_harmonic_frames([[0.5], object(), ["bad"], []])
+    assert widget._harmonic_frames == [[0.5]]
+    assert widget._harmonic_frame_position() == 0.0
+    assert widget._harmonic_frame_at_position(0) == [0.5]
+    widget.set_harmonic_frames(None)
+    assert widget._harmonic_frame_at_position(0) == []
+
+    widget.set_duration_ms(1000)
+    widget.resize(1, 24)
+    assert widget._position_from_x(99) == 0
+    assert widget._playhead_x_for_ms(500) == widget.rect().left()
+
+    widget.resize(96, 48)
+    widget.set_peaks([(-0.4, 0.7), (0.0, 0.0)])
+    widget.set_playhead_ms(250)
+    widget.set_bookmarks_ms([250, "250", "bad", 900])
+    widget.set_bookmarks_ms([250, 900])
+
+    scrub_values = _connect_int_signal(widget.scrubRequested)
+    horizontal_pixel = _WheelLikeEvent(pixel_x=80, pixel_delta=2)
+    widget.wheelEvent(horizontal_pixel)
+    assert horizontal_pixel.accepted is True
+    assert scrub_values[-1] == 2000
+
+    horizontal_angle = _WheelLikeEvent(angle_x=-120, angle_delta=1)
+    widget.wheelEvent(horizontal_angle)
+    assert horizontal_angle.accepted is True
+    assert scrub_values[-1] == -1000
+
+    no_delta = _WheelLikeEvent()
+    widget.wheelEvent(no_delta)
+    assert no_delta.ignored is True
+
+    rendered = QImage(96, 48, QImage.Format.Format_ARGB32)
+    rendered.fill(Qt.GlobalColor.transparent)
+    widget.render(rendered)
+
+    widget.set_cached_waveform(
+        [(-0.2, 0.5)],
+        dark_preview_png=_png_bytes(QColor("#101010")),
+        cache_key="dark-fallback",
+    )
+    assert widget._stored_waveform_pixmap() is not None
+    rendered_cached = QImage(96, 48, QImage.Format.Format_ARGB32)
+    rendered_cached.fill(Qt.GlobalColor.transparent)
+    widget.render(rendered_cached)
+    widget.changeEvent(QEvent(QEvent.Type.PaletteChange))
+
+    widget.set_harmonic_frames([[0.2, 0.7], [0.6, 0.1]])
+    live_image = QImage(96, 48, QImage.Format.Format_ARGB32)
+    live_image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(live_image)
+    try:
+        widget._draw_live_harmonics(painter, widget.rect(), light_mode=False)
+    finally:
+        painter.end()
+
+
 def test_waveform_widget_color_and_trace_helpers_cover_edge_branches() -> None:
     require_qapplication()
     widget = WaveformWidget()
@@ -253,6 +480,152 @@ def test_load_wav_peaks_handles_pcm_widths_and_invalid_files(tmp_path: Path) -> 
     assert load_wav_peaks(str(invalid), 10) in ([], [(-0.0, 0.0)])
 
 
+def test_load_wav_peaks_handles_24_32_bit_and_decoder_fallbacks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    wav_24 = tmp_path / "tone24.wav"
+    _write_pcm_wav(
+        wav_24,
+        [(0, 0), (3_000_000, -4_000_000), (-8_000_000, 7_000_000)],
+        channels=2,
+        sample_width=3,
+    )
+    peaks_24 = load_wav_peaks(str(wav_24), 2)
+    assert peaks_24
+    assert min(low for low, _high in peaks_24) < -0.4
+
+    wav_32 = tmp_path / "tone32.wav"
+    _write_pcm_wav(
+        wav_32,
+        [(0,), (1_200_000_000,), (-1_600_000_000,)],
+        channels=1,
+        sample_width=4,
+    )
+    peaks_32 = load_wav_peaks(str(wav_32), 2)
+    assert peaks_32
+    assert max(high for _low, high in peaks_32) > 0.5
+
+    raw_path = tmp_path / "compressed.bin"
+    raw_path.write_bytes(b"not-riff")
+
+    import shutil
+    import subprocess
+
+    pcm = b"".join(struct.pack("<hh", 12000, -6000) for _ in range(448))
+
+    class _FakeStdout:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+            self.closed = False
+
+        def read(self, _size: int) -> bytes:
+            payload, self._payload = self._payload, b""
+            return payload
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _FakeProcess:
+        def __init__(self, payload: bytes) -> None:
+            self.stdout = _FakeStdout(payload)
+            self.killed = False
+
+        def wait(self, *, timeout=None):
+            raise TimeoutError
+
+        def kill(self) -> None:
+            self.killed = True
+
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: f"/fake/{name}" if name in {"ffmpeg", "ffprobe"} else None,
+    )
+    monkeypatch.setattr(subprocess, "check_output", lambda *_args, **_kwargs: b"0.05")
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: _FakeProcess(pcm))
+    ffmpeg_peaks = load_wav_peaks(str(raw_path), 2)
+    assert ffmpeg_peaks
+    assert ffmpeg_peaks[0][0] < 0.0
+
+    import platform
+
+    class _UnsupportedDecoder:
+        def isSupported(self) -> bool:
+            return False
+
+    class _FakeAudioRead:
+        samplerate = 44100
+        duration = 0.05
+        channels = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def __iter__(self):
+            return iter([b"".join(struct.pack("<h", 9000) for _ in range(512))])
+
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(platform, "system", lambda: "plan9")
+    monkeypatch.setattr("isrc_manager.media.waveform.QAudioDecoder", _UnsupportedDecoder)
+    monkeypatch.setitem(
+        sys.modules,
+        "audioread",
+        types.SimpleNamespace(audio_open=lambda _path: _FakeAudioRead()),
+    )
+    audioread_peaks = load_wav_peaks(str(raw_path), 2)
+    assert audioread_peaks
+    assert audioread_peaks[0][1] > 0.0
+
+
+def test_qt_decoder_waveform_fallbacks_are_deterministic(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    require_qapplication()
+    raw_path = tmp_path / "decoder-source.bin"
+    raw_path.write_bytes(b"not-riff")
+    payload = b"".join(struct.pack("<hh", 12000, -8000) for _ in range(8))
+
+    import os
+    import platform
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(platform, "system", lambda: "plan9")
+    monkeypatch.setattr(os.path, "exists", lambda _path: False)
+    monkeypatch.setattr(waveform_module, "QEventLoop", _FakeEventLoop)
+    monkeypatch.setattr(waveform_module, "QTimer", _FakeTimer)
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _fake_decoder_class(waveform_module.QAudioFormat.SampleFormat.Int16, payload),
+    )
+    peaks = load_wav_peaks(str(raw_path), 2)
+    assert peaks
+    assert peaks[0][0] < 0.0
+    assert peaks[0][1] > 0.0
+
+    import PySide6.QtCore as qtcore
+    import PySide6.QtMultimedia as qtmultimedia
+
+    assert waveform_cache._qt_application_instance_available() is True
+    monkeypatch.setattr(qtcore, "QEventLoop", _FakeEventLoop)
+    monkeypatch.setattr(qtcore, "QTimer", _FakeTimer)
+    monkeypatch.setattr(
+        qtmultimedia,
+        "QAudioDecoder",
+        _fake_decoder_class(qtmultimedia.QAudioFormat.SampleFormat.Int16, payload),
+    )
+    cache_peaks = waveform_cache._load_qt_decoder_peaks(str(raw_path), 2)
+    assert cache_peaks
+    assert cache_peaks[0][0] < 0.0
+    assert cache_peaks[0][1] > 0.0
+
+
 def test_stereo_peak_meter_state_machine_and_formatting() -> None:
     require_qapplication()
     meter = StereoPeakMeterWidget()
@@ -285,6 +658,83 @@ def test_stereo_peak_meter_state_machine_and_formatting() -> None:
     left_rect, right_rect = meter._bar_rects()
     assert left_rect.width() == right_rect.width()
     assert meter._meter_gradient(left_rect).stops()
+
+
+def test_audio_visualization_widget_edge_states_and_rendering() -> None:
+    require_qapplication()
+    meter = StereoPeakMeterWidget()
+    meter.resize(64, 48)
+    meter.set_peak_frames([None, ("bad", 1), (-12,), (-12.0, -6.0)])
+    assert meter._frames == [(-12.0, -6.0)]
+    assert meter._frame_at_playhead() == pytest.approx((-12.0, -6.0))
+    meter.set_gain(0.0)
+    assert meter._frame_at_playhead() == (
+        StereoPeakMeterWidget.DB_FLOOR,
+        StereoPeakMeterWidget.DB_FLOOR,
+    )
+    meter.reset_signal_activity()
+    meter.set_playhead_ms(1)
+    meter.set_gain(1.0)
+    assert meter._current_db == (
+        StereoPeakMeterWidget.DB_FLOOR,
+        StereoPeakMeterWidget.DB_FLOOR,
+    )
+    meter.mark_signal_activity()
+    meter.reset_peak_hold()
+    meter.begin_release()
+    meter.begin_release()
+    meter.set_playhead_ms(1)
+    meter.set_gain(0.5)
+    meter._current_db = (-12.0, -6.0)
+    meter._hold_db = -6.0
+
+    image = QImage(64, 48, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    meter.render(image)
+
+    graph = SpectrumGraphWidget()
+    graph.resize(96, 40)
+    graph.set_equalizer_settings(None)
+    graph.set_equalizer_settings({"enabled": True, "gains": [3.0] * 8, "pan": 0.25})
+    menu = graph._create_frequency_scale_context_menu()
+    assert [action.text() for action in menu.actions()] == ["Linear view", "Log view"]
+    menu.actions()[1].trigger()
+    assert graph.frequency_scale() == SpectrumGraphWidget.SPECTRUM_SCALE_LOG
+
+    graph.start_fade_in()
+    assert graph._fade_opacity == 0.0
+    graph.set_gain(0.0)
+    graph.set_spectrum_frames([[0.2, 0.8, 0.4]])
+    graph.start_fade_in()
+    assert graph._fade_opacity == 0.0
+    graph.set_gain(1.0)
+    graph._fade_opacity = 1.0
+    graph.start_fade_in()
+    graph._fade_opacity = 0.0
+    graph.start_release()
+    assert graph.is_releasing() is False
+    assert graph.advance_release(1) is False
+    graph._fade_opacity = 0.8
+    graph.start_release()
+    graph.start_release()
+    graph._advance_fade_in()
+    assert graph.is_releasing() is True
+    graph.advance_release(SpectrumGraphWidget.SPECTRUM_RELEASE_MS * 2)
+
+    assert graph._log_scaled_spectrum_values([0.1, 0.2]) == [0.1, 0.2]
+    assert graph._spectrum_line_segments([], QRectF(0, 0, 10, 10)) == []
+    graph._release_active = False
+    graph.set_gain(1.0)
+    graph.set_spectrum_frames([[0.2, 0.8, 0.4, 1.0]])
+    graph._fade_opacity = 1.0
+    image = QImage(96, 40, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    try:
+        graph._draw_spectrum_graph(painter, graph.rect(), light_mode=True)
+    finally:
+        painter.end()
+    graph.render(image)
 
 
 def test_spectrum_graph_frequency_scale_fade_release_and_segments() -> None:
@@ -352,6 +802,101 @@ def test_audio_visualization_loaders_extract_frames_from_wav(tmp_path: Path) -> 
     assert load_audio_peak_meter_frames(str(missing_path)) == []
     assert load_audio_harmonic_frames(str(missing_path)) == []
     assert load_audio_spectrum_frames(str(missing_path)) == []
+
+
+def test_audio_visualization_loaders_cover_pcm_width_and_channel_variants(
+    tmp_path: Path,
+) -> None:
+    wav_8_mono = tmp_path / "mono8.wav"
+    _write_pcm_wav(
+        wav_8_mono,
+        [(128,), (255,), (0,), (200,), (40,)] * 120,
+        channels=1,
+        sample_width=1,
+        sample_rate=8000,
+    )
+    peak_frames = load_audio_peak_meter_frames(str(wav_8_mono), target_sr=8000)
+    assert peak_frames
+    assert all(left == right for left, right in peak_frames)
+
+    wav_24_stereo = tmp_path / "stereo24.wav"
+    samples_24 = [
+        (
+            int(math.sin(index / 12.0) * 6_000_000),
+            int(math.cos(index / 13.0) * 5_000_000),
+        )
+        for index in range(4096)
+    ]
+    _write_pcm_wav(
+        wav_24_stereo,
+        samples_24,
+        channels=2,
+        sample_width=3,
+        sample_rate=16000,
+    )
+    spectrum_frames = load_audio_spectrum_frames(str(wav_24_stereo), target_sr=16000, bin_count=4)
+    assert spectrum_frames
+    assert len(spectrum_frames[0]) == 48
+
+    wav_32_mono = tmp_path / "mono32.wav"
+    samples_32 = [
+        (int(math.sin((2.0 * math.pi * 440.0 * index) / 22050) * 1_200_000_000),)
+        for index in range(4096)
+    ]
+    _write_pcm_wav(
+        wav_32_mono,
+        samples_32,
+        channels=1,
+        sample_width=4,
+        sample_rate=22050,
+    )
+    harmonic_frames = load_audio_harmonic_frames(str(wav_32_mono), target_sr=11025)
+    assert harmonic_frames
+    assert all(len(frame) == 14 for frame in harmonic_frames)
+
+
+def test_audio_visualization_loaders_decode_ffmpeg_fallbacks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "compressed-source.m4a"
+    source.write_bytes(b"not-riff")
+
+    import os
+    import platform
+    import shutil
+    import subprocess
+
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(platform, "system", lambda: "windows")
+    monkeypatch.setattr(
+        os.path,
+        "exists",
+        lambda path: str(path).lower().endswith("ffmpeg.exe"),
+    )
+
+    def fake_check_output(args, **_kwargs):
+        channels = int(args[args.index("-ac") + 1])
+        sample_rate = int(args[args.index("-ar") + 1])
+        frame_count = 4096
+        frames = []
+        for index in range(frame_count):
+            sample = int(math.sin((2.0 * math.pi * 440.0 * index) / sample_rate) * 18000)
+            if channels == 2:
+                frames.append(struct.pack("<hh", sample, -sample // 2))
+            else:
+                frames.append(struct.pack("<h", sample))
+        return b"".join(frames)
+
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+
+    harmonic_frames = load_audio_harmonic_frames(str(source), target_sr=8000)
+    assert harmonic_frames
+    peak_frames = load_audio_peak_meter_frames(str(source), target_sr=8000)
+    assert peak_frames
+    spectrum_frames = load_audio_spectrum_frames(str(source), target_sr=8000, bin_count=4)
+    assert spectrum_frames
+    assert len(spectrum_frames[0]) == 48
 
 
 def _new_cache_connection() -> sqlite3.Connection:
@@ -479,6 +1024,175 @@ def test_waveform_cache_helpers_render_decode_resample_and_fingerprint(tmp_path:
         )
 
 
+def test_waveform_cache_schema_delete_decoder_and_color_edge_branches(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    plain_conn = sqlite3.connect(":memory:")
+    waveform_cache.ensure_audio_waveform_cache_schema(plain_conn)
+    assert waveform_cache.delete_audio_waveform_cache(plain_conn, 1) == 0
+    plain_conn.close()
+
+    conn = _new_cache_connection()
+    service = AudioWaveformCacheService(conn)
+    service.ensure_schema()
+    conn.execute(
+        "INSERT INTO Tracks(id, track_title, audio_file_path) VALUES (1, 'Delete me', 'a.wav')"
+    )
+    _insert_cache_row(conn, track_id=1)
+    assert waveform_cache.delete_audio_waveform_cache(conn, 1) == 1
+    _insert_cache_row(conn, track_id=1)
+    conn.execute("DELETE FROM Tracks WHERE id=1")
+    assert conn.execute("SELECT COUNT(*) FROM TrackAudioWaveformCache").fetchone()[0] == 0
+    conn.close()
+
+    not_riff = tmp_path / "not-riff.bin"
+    not_riff.write_bytes(b"nope")
+    assert waveform_cache._load_wave_peaks(str(not_riff), 2) is None
+    wrong_riff = tmp_path / "wrong-riff.bin"
+    wrong_riff.write_bytes(b"RIFF0000AIFF")
+    assert waveform_cache._load_wave_peaks(str(wrong_riff), 2) == []
+    corrupt_wav = tmp_path / "corrupt.wav"
+    corrupt_wav.write_bytes(b"RIFF0000WAVE")
+    assert waveform_cache._load_wave_peaks(str(corrupt_wav), 2) == []
+
+    wav_24 = tmp_path / "cache24.wav"
+    _write_pcm_wav(
+        wav_24,
+        [(0, 0), (4_000_000, -5_000_000), (-7_000_000, 3_000_000)],
+        channels=2,
+        sample_width=3,
+    )
+    assert waveform_cache._load_wave_peaks(str(wav_24), 2)
+    wav_32 = tmp_path / "cache32.wav"
+    _write_pcm_wav(
+        wav_32,
+        [(0,), (1_000_000_000,), (-1_500_000_000,)],
+        channels=1,
+        sample_width=4,
+    )
+    assert waveform_cache._load_wave_peaks(str(wav_32), 2)
+
+    mp3_missing = tmp_path / "missing.mp3"
+    assert waveform_cache._mp3_source_has_frame_sync(str(mp3_missing)) is False
+    mp3_empty = tmp_path / "empty.mp3"
+    mp3_empty.write_bytes(b"")
+    assert waveform_cache._mp3_source_has_frame_sync(str(mp3_empty)) is False
+    mp3_sync = tmp_path / "sync.mp3"
+    mp3_sync.write_bytes(b"\x00\xff\xe3\x00")
+    assert waveform_cache._mp3_source_has_frame_sync(str(mp3_sync)) is True
+
+    with monkeypatch.context() as which_patch:
+        which_patch.setattr(
+            waveform_cache.shutil,
+            "which",
+            lambda name: "/direct/bin/tool" if name == "direct" else None,
+        )
+        assert waveform_cache._which("direct") == "/direct/bin/tool"
+        which_patch.setattr(waveform_cache.shutil, "which", lambda _name: None)
+        which_patch.setattr(waveform_cache.platform, "system", lambda: "windows")
+        which_patch.setattr(
+            waveform_cache.os.path,
+            "exists",
+            lambda path: str(path).lower().endswith("ffmpeg.exe"),
+        )
+        assert waveform_cache._which("ffmpeg").lower().endswith("ffmpeg.exe")
+        which_patch.setattr(waveform_cache.platform, "system", lambda: "plan9")
+        assert waveform_cache._which("ffmpeg") is None
+
+    import subprocess
+
+    class _NoStdoutProcess:
+        stdout = None
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def kill(self) -> None:
+            self.killed = True
+
+    monkeypatch.setattr(
+        waveform_cache,
+        "_which",
+        lambda name: f"/fake/{name}" if name in {"ffmpeg", "ffprobe"} else None,
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: _NoStdoutProcess())
+    assert waveform_cache._load_ffmpeg_peaks(str(not_riff), 2) is None
+
+    class _FakeStdout:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def read(self, _size: int) -> bytes:
+            payload, self._payload = self._payload, b""
+            return payload
+
+        def close(self) -> None:
+            pass
+
+    class _FakeProcess:
+        def __init__(self, payload: bytes) -> None:
+            self.stdout = _FakeStdout(payload)
+            self.killed = False
+
+        def wait(self, *, timeout=None):
+            raise TimeoutError
+
+        def poll(self):
+            return None
+
+        def kill(self) -> None:
+            self.killed = True
+
+    pcm = b"".join(struct.pack("<hh", 16000, -4000) for _ in range(12))
+    monkeypatch.setattr(subprocess, "check_output", lambda *_args, **_kwargs: b"0.01")
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: _FakeProcess(pcm))
+    assert waveform_cache._load_ffmpeg_peaks(str(not_riff), 2)
+
+    monkeypatch.setattr(waveform_cache, "_load_wave_peaks", lambda *_args: None)
+    monkeypatch.setattr(waveform_cache, "_load_ffmpeg_peaks", lambda *_args: None)
+    assert waveform_cache.load_audio_waveform_peaks(str(tmp_path / "silent.wav"), 2) == []
+    monkeypatch.setattr(waveform_cache, "_mp3_source_has_frame_sync", lambda _path: False)
+    assert waveform_cache.load_audio_waveform_peaks(str(tmp_path / "silent.mp3"), 2) == []
+    monkeypatch.setattr(waveform_cache, "_mp3_source_has_frame_sync", lambda _path: True)
+    monkeypatch.setattr(waveform_cache, "_load_qt_decoder_peaks", lambda *_args: [(-0.1, 0.2)])
+    assert waveform_cache.load_audio_waveform_peaks(str(tmp_path / "qt.mp3"), 2) == [(-0.1, 0.2)]
+
+    import numpy as np
+
+    monkeypatch.setattr(
+        waveform_cache,
+        "_decode_mono_audio_for_waveform_colors",
+        lambda _path: (np.zeros(8, dtype=np.float32), 8000),
+    )
+    zero_colors = waveform_cache.load_audio_waveform_colors("silence.wav", 3)
+    assert len(zero_colors) == 3
+    monkeypatch.setattr(
+        waveform_cache,
+        "_decode_mono_audio_for_waveform_colors",
+        lambda _path: (None, 0),
+    )
+    assert waveform_cache.load_audio_waveform_colors("missing.wav", 3) == []
+
+    assert waveform_cache._build_waveform_path([], QRectF(0, 0, 10, 10)).isEmpty()
+    assert not waveform_cache._build_waveform_path([(-0.4, 0.7)], QRectF(0, 0, 10, 10)).isEmpty()
+    assert waveform_cache._resample_peaks_to_width(
+        [(-0.1, 0.1), (-0.8, 0.2), (-0.2, 0.9), (-0.3, 0.4)],
+        2,
+    ) == [(-0.8, 0.2), (-0.3, 0.9)]
+    fallback_png = waveform_cache.render_waveform_cache_png(
+        [(-0.2, 0.0), (0.0, 0.7)],
+        width_px=2,
+        height_px=6,
+        light_background=False,
+    )
+    assert fallback_png.startswith(b"\x89PNG")
+
+    assert waveform_cache._read_edge_bytes(not_riff, 0) == (b"", b"")
+    large_data = b"a" * (waveform_cache._FINGERPRINT_EDGE_BYTES + 2)
+    assert waveform_cache._bytes_edge_fingerprint(large_data, len(large_data))
+
+
 def test_waveform_cache_loaders_and_color_helpers_handle_wav_and_decode_failures(
     tmp_path: Path,
 ) -> None:
@@ -508,6 +1222,146 @@ def test_waveform_cache_loaders_and_color_helpers_handle_wav_and_decode_failures
         )[3]
         == 255
     )
+
+
+def test_waveform_cache_ffmpeg_color_decode_resampling_and_service_edges(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+
+    monkeypatch.setattr(waveform_cache, "_which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(
+        waveform_cache.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: struct.pack("<ff", 0.25, -0.5),
+    )
+    mono, sample_rate = waveform_cache._decode_mono_audio_with_ffmpeg("source.flac", target_sr=8)
+    assert sample_rate == 8
+    assert mono.tolist() == pytest.approx([0.25, -0.5])
+    monkeypatch.setattr(waveform_cache.subprocess, "check_output", lambda *_args, **_kwargs: b"")
+    assert waveform_cache._decode_mono_audio_with_ffmpeg("empty.flac", target_sr=8) == (None, 0)
+
+    resampled = waveform_cache._resample_mono_audio(
+        np.asarray([0.0, 1.0], dtype=np.float32),
+        2,
+        4,
+    )
+    assert len(resampled) >= 2
+    same = np.asarray([0.0, 0.5], dtype=np.float32)
+    assert waveform_cache._resample_mono_audio(same, 0, 4) is same
+
+    high_color = waveform_cache._frequency_color_from_bands(0.0, 0.0, 0.0, 10.0, 1.0)
+    low_color = waveform_cache._frequency_color_from_bands(10.0, 0.0, 0.0, 0.0, 0.5)
+    assert high_color != low_color
+
+    conn = _new_cache_connection()
+    service = AudioWaveformCacheService(conn)
+    service.ensure_schema()
+    assert service._row_to_cached_waveform(None) is None
+    tuple_cached = service._row_to_cached_waveform(
+        (
+            9,
+            "fp",
+            12,
+            "tuple.wav",
+            "file",
+            waveform_cache.WAVEFORM_CACHE_ANALYZER_VERSION,
+            waveform_cache.WAVEFORM_CACHE_WIDTH,
+            waveform_cache.WAVEFORM_CACHE_HEIGHT,
+            waveform_cache._peaks_to_json([(-0.1, 0.2)]),
+            b"light",
+            b"dark",
+            "now",
+        )
+    )
+    assert tuple_cached is not None
+    assert tuple_cached.track_id == 9
+    assert AudioWaveformCacheService._cached_waveform_is_complete(tuple_cached) is True
+    with pytest.raises(FileNotFoundError):
+        service._track_audio_metadata(404)
+    assert service._database_blob_fingerprint(404, 0)
+
+    blob = b"database audio bytes"
+    conn.execute(
+        """
+        INSERT INTO Tracks(id, track_title, audio_file_storage_mode, audio_file_size_bytes,
+                           audio_file_blob)
+        VALUES (1, 'Cached', ?, ?, ?)
+        """,
+        (waveform_cache.STORAGE_MODE_DATABASE, len(blob), blob),
+    )
+    fingerprint = service._database_blob_fingerprint(1, len(blob))
+    _insert_cache_row(conn, track_id=1, fingerprint=fingerprint)
+    cached = service.ensure_track_cache(_FakeTrackService(_FakeHandle()), 1)
+    assert cached is not None
+    assert cached.source_fingerprint == fingerprint
+    assert service.get_cached_waveform(1, validate_source=True) is None
+
+    source_path = tmp_path / "external.wav"
+    source_path.write_bytes(b"external audio bytes")
+
+    class _PathHandle:
+        def __init__(self, path: Path) -> None:
+            self.filename = "external.wav"
+            self.media_key = "audio_file"
+            self.mime_type = "audio/wav"
+            self.source_bytes = None
+            self.source_path = path
+            self.storage_mode = "file"
+            self.size_bytes = path.stat().st_size
+
+        @contextmanager
+        def materialize_path(self):
+            yield self.source_path
+
+    conn.execute(
+        """
+        INSERT INTO Tracks(id, track_title, audio_file_path, audio_file_size_bytes)
+        VALUES (2, 'External', ?, ?),
+               (3, 'Explodes', 'explodes.wav', 1)
+        """,
+        (str(source_path), source_path.stat().st_size),
+    )
+    fingerprint, metadata = service._source_fingerprint_for_track(
+        _FakeTrackService(_PathHandle(source_path)),
+        2,
+    )
+    assert fingerprint
+    assert metadata["filename"] == "external.wav"
+    _insert_cache_row(conn, track_id=2, fingerprint=fingerprint)
+    assert service.cleanup_invalid_caches(_FakeTrackService(_PathHandle(source_path))) == 0
+
+    monkeypatch.setattr(waveform_cache, "load_audio_waveform_peaks", lambda *_args: [(-0.1, 0.2)])
+    monkeypatch.setattr(waveform_cache, "load_audio_waveform_colors", lambda *_args: [])
+    monkeypatch.setattr(waveform_cache, "render_waveform_cache_png", lambda *_args, **_kwargs: b"")
+    assert (
+        service.ensure_track_cache(_FakeTrackService(_PathHandle(source_path)), 2, force=True)
+        is None
+    )
+
+    class _ExplodingTrackService:
+        def resolve_media_source(self, *_args, **_kwargs):
+            raise RuntimeError("resolver failed")
+
+    _insert_cache_row(conn, track_id=3, fingerprint="stale")
+    inspection = service.inspect_invalid_caches(_ExplodingTrackService())
+    assert inspection.stale_track_ids == (3,)
+    assert "could not verify source" in inspection.details[0]
+
+    empty_conn = _new_cache_connection()
+    empty_service = AudioWaveformCacheService(empty_conn)
+    progress: list[tuple[int, int, str]] = []
+    summary = empty_service.ensure_all_track_caches(
+        _FakeTrackService(_FakeHandle()),
+        progress_callback=lambda value, maximum, message: progress.append(
+            (value, maximum, message)
+        ),
+    )
+    assert summary.total_audio_tracks == 0
+    assert progress == [(1, 1, "No audio waveform cache work needed.")]
+    conn.close()
+    empty_conn.close()
 
 
 class _FakeTrackService:

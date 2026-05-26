@@ -1,10 +1,11 @@
+import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, QSettings
+from PySide6.QtCore import QByteArray, QPoint, QSettings
 
 from isrc_manager.history import HistoryManager, HistoryRecoveryError
 from isrc_manager.services import (
@@ -98,6 +99,14 @@ class HistoryManagerTestCase(unittest.TestCase):
         backup_path = self.backups_root / name
         backup_path.write_bytes(b"SQLite backup bytes")
         return backup_path
+
+    def _snapshot_create_entry(self, snapshot_id: int):
+        for entry in self.history.list_entries(limit=200, include_hidden=True):
+            if entry.action_type == "snapshot.create" and str(entry.entity_id or "") == str(
+                int(snapshot_id)
+            ):
+                return entry
+        self.fail(f"Could not find snapshot.create entry for snapshot {snapshot_id}")
 
     def case_setting_change_undo_and_redo_are_persistent(self):
         self.settings_mutations.set_isrc_prefix("NLABC")
@@ -310,6 +319,40 @@ class HistoryManagerTestCase(unittest.TestCase):
 
         self.history.redo()
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
+
+    def case_record_event_and_missing_track_recording_errors_are_explicit(self):
+        event_id = self.history.record_event(
+            label="Import Dry Run",
+            action_type="import.preview",
+            entity_type="Import",
+            entity_id="dry-run",
+            payload={"rows": 0},
+            visible_in_history=False,
+        )
+        event = self.history.fetch_entry(event_id)
+        self.assertIsNotNone(event)
+        self.assertFalse(event.reversible)
+        self.assertFalse(event.visible_in_history)
+        self.assertEqual(event.payload["rows"], 0)
+
+        with self.assertRaisesRegex(ValueError, "Track 999999 not found after create"):
+            self.history.record_track_create(
+                track_id=999999,
+                cleanup_artist_names=[],
+                cleanup_album_titles=[],
+            )
+
+        track_id = self._create_track(title="Missing Update Source")
+        before_update = self.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(before_update)
+        self.track_service.delete_track(track_id)
+
+        with self.assertRaisesRegex(ValueError, f"Track {track_id} not found after update"):
+            self.history.record_track_update(
+                before_snapshot=before_update,
+                cleanup_artist_names=[],
+                cleanup_album_titles=[],
+            )
 
     def case_track_update_and_snapshot_restore_round_trip(self):
         track_id = self._create_track()
@@ -709,6 +752,41 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertTrue(self.settings.value(hidden_key, False, bool))
         self.assertEqual(self.history.get_current_entry_id(), hidden_entry.entry_id)
 
+    def case_setting_entry_application_and_serialization_edges_round_trip(self):
+        self.settings.setValue("history/remove_me", "present")
+        self.settings.sync()
+
+        self.history.apply_setting_entries(
+            [
+                {
+                    "setting_key": "history/remove_me",
+                    "exists": False,
+                    "serialized": None,
+                }
+            ]
+        )
+
+        self.assertFalse(self.settings.contains("history/remove_me"))
+
+        qbyte_payload = self.history._serialize_setting_value(QByteArray(b"qt-state"))
+        bytes_payload = self.history._serialize_setting_value(b"raw-state")
+        list_payload = self.history._serialize_setting_value([QPoint(3, 4), b"nested"])
+        tuple_payload = self.history._serialize_setting_value((QPoint(5, 6), "tuple"))
+
+        self.assertEqual(
+            bytes(self.history._deserialize_setting_value(qbyte_payload)),
+            b"qt-state",
+        )
+        self.assertEqual(self.history._deserialize_setting_value(bytes_payload), b"raw-state")
+        self.assertEqual(
+            self.history._deserialize_setting_value(list_payload),
+            [QPoint(3, 4), b"nested"],
+        )
+        self.assertEqual(
+            self.history._deserialize_setting_value(tuple_payload),
+            (QPoint(5, 6), "tuple"),
+        )
+
     def case_snapshot_actions_restore_external_file_side_effects(self):
         before = self.history.capture_snapshot(
             kind="pre_file_side_effect", label="Before file side effect"
@@ -749,6 +827,58 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.history.redo()
         self.assertTrue(export_path.exists())
         self.assertEqual(export_path.read_text(encoding="utf-8"), "<catalog/>")
+
+    def case_snapshot_side_effect_failure_rolls_back_database_and_files(self):
+        before = self.history.capture_snapshot(
+            kind="pre_failed_side_effect", label="Before failed side effect"
+        )
+        track_id = self._create_track(title="Rollback Side Effect Track")
+        export_path = self.root / "exports" / "side-effect.txt"
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        export_path.write_text("after", encoding="utf-8")
+        after_state = self.history.capture_file_state(export_path)
+        after = self.history.capture_snapshot(
+            kind="post_failed_side_effect", label="After failed side effect"
+        )
+
+        self.history.record_snapshot_action(
+            label="Create Track With Failed File Effect",
+            action_type="track.create_with_file_effect",
+            entity_type="Track",
+            entity_id=str(track_id),
+            payload={
+                "file_effects": [
+                    {"target_path": ""},
+                    {
+                        "target_path": str(export_path),
+                        "before_state": {
+                            "target_path": str(export_path),
+                            "companion_suffixes": [],
+                            "exists": True,
+                            "files": [
+                                {
+                                    "suffix": "",
+                                    "artifact_path": str(self.root / "missing-before-artifact.bin"),
+                                }
+                            ],
+                        },
+                        "after_state": after_state,
+                    },
+                    {
+                        "target_path": str(export_path),
+                    },
+                ]
+            },
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        with self.assertRaises(HistoryRecoveryError):
+            self.history.undo()
+
+        self.assertIsNotNone(self.track_service.fetch_track_snapshot(track_id))
+        self.assertTrue(export_path.exists())
+        self.assertEqual(export_path.read_text(encoding="utf-8"), "after")
 
     def case_snapshot_actions_restore_legacy_license_migration_state(self):
         track_id = self._create_track(title="Migration History Song")
@@ -913,6 +1043,33 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertIsNone(self.history.get_default_redo_entry())
         self.assertEqual(self.history.fetch_entry(second.entry_id).status, "superseded")
 
+    def case_redo_and_corrupted_snapshot_boundaries_fail_explicitly(self):
+        self.assertIsNone(self.history.undo())
+        self.assertIsNone(self.history.redo(entry_id=999999))
+
+        self.settings_mutations.set_isrc_prefix("NLRED")
+        applied_entry = self.history.record_setting_change(
+            key="isrc_prefix",
+            label="Set ISRC Prefix: NLRED",
+            before_value="",
+            after_value="NLRED",
+        )
+        with self.assertRaisesRegex(HistoryRecoveryError, "not redoable"):
+            self.history.redo(applied_entry.entry_id)
+
+        snapshot_after = self.history.capture_snapshot(
+            kind="corrupted_boundary", label="Corrupted Boundary"
+        )
+        self.history.record_snapshot_action(
+            label="Corrupted Snapshot Boundary",
+            action_type="snapshot.corrupted_boundary",
+            snapshot_before_id=None,  # type: ignore[arg-type]
+            snapshot_after_id=snapshot_after.snapshot_id,
+        )
+
+        with self.assertRaisesRegex(HistoryRecoveryError, "missing its undo snapshot"):
+            self.history.undo()
+
     def case_missing_snapshot_file_raises_clear_error_without_creating_pre_restore_snapshot(self):
         snapshot = self.history.create_manual_snapshot("Missing Snapshot")
         snapshot_path = Path(snapshot.db_snapshot_path)
@@ -924,6 +1081,44 @@ class HistoryManagerTestCase(unittest.TestCase):
             self.history.restore_snapshot_as_action(snapshot.snapshot_id)
 
         self.assertEqual(len(self.history.list_snapshots(limit=100)), snapshot_count_before)
+
+    def case_snapshot_restore_action_rolls_back_when_history_recording_fails_after_apply(self):
+        track_id = self._create_track(title="Restore Rollback Source")
+        snapshot = self.history.create_manual_snapshot("Restore Rollback Target")
+
+        self.track_service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
+                isrc="NL-ABC-26-00101",
+                track_title="Changed Before Restore Action",
+                artist_name="Main Artist",
+                additional_artists=["Guest Artist"],
+                album_title="Debut Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre="Pop",
+            )
+        )
+
+        with patch.object(
+            self.history,
+            "record_snapshot_action",
+            side_effect=RuntimeError("history recording failed after restore"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "history recording failed after restore"):
+                self.history.restore_snapshot_as_action(snapshot.snapshot_id)
+
+        current = self.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.track_title, "Changed Before Restore Action")
+        self.assertFalse(
+            any(
+                record.label == "Before Snapshot Restore"
+                for record in self.history.list_snapshots(limit=50)
+            )
+        )
 
     def case_snapshot_restore_rolls_back_database_when_external_restore_fails(self):
         track_id = self._create_track(title="Rollback Song")
@@ -956,6 +1151,68 @@ class HistoryManagerTestCase(unittest.TestCase):
         current = self.track_service.fetch_track_snapshot(track_id)
         self.assertIsNotNone(current)
         self.assertEqual(current.track_title, "Changed After Snapshot")
+
+    def case_snapshot_missing_delete_and_restore_boundaries_are_explicit(self):
+        with self.assertRaisesRegex(ValueError, "Snapshot 999999 not found"):
+            self.history.restore_snapshot_as_action(999999)
+        with self.assertRaisesRegex(ValueError, "Snapshot 999999 not found"):
+            self.history.restore_snapshot(999999)
+        with self.assertRaisesRegex(ValueError, "Snapshot 999999 not found"):
+            self.history.delete_snapshot(999999)
+        with self.assertRaisesRegex(ValueError, "Snapshot 999999 not found"):
+            self.history.delete_snapshot_as_action(999999)
+
+        missing_snapshot = self.history.capture_snapshot(
+            kind="manual", label="Missing Delete Target"
+        )
+        Path(missing_snapshot.db_snapshot_path).unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.history.register_snapshot(missing_snapshot, kind="registered")
+
+        entry = self.history.delete_snapshot_as_action(missing_snapshot.snapshot_id)
+
+        self.assertEqual(entry.action_type, "snapshot.delete_missing")
+        self.assertFalse(entry.reversible)
+        self.assertIsNone(self.history.fetch_snapshot(missing_snapshot.snapshot_id))
+
+        asset_snapshot = self.history.capture_snapshot(kind="manual", label="Asset Snapshot")
+        asset_snapshot_path = Path(asset_snapshot.db_snapshot_path)
+        asset_dir = asset_snapshot_path.with_suffix(".assets") / "licenses"
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        (asset_dir / "asset.bin").write_bytes(b"asset")
+        with self.conn:
+            self.conn.execute(
+                "UPDATE HistorySnapshots SET manifest_json=? WHERE id=?",
+                (
+                    json.dumps(
+                        {
+                            "managed_directories": {
+                                "licenses": {
+                                    "exists": True,
+                                    "snapshot_path": str(asset_dir),
+                                }
+                            }
+                        }
+                    ),
+                    asset_snapshot.snapshot_id,
+                ),
+            )
+
+        self.history.delete_snapshot(asset_snapshot.snapshot_id)
+
+        self.assertFalse(asset_dir.exists())
+
+        before = self.history.capture_snapshot(kind="before_ref", label="Before Reference")
+        after = self.history.capture_snapshot(kind="after_ref", label="After Reference")
+        self.history.record_snapshot_action(
+            label="Referenced Snapshot Action",
+            action_type="snapshot.reference",
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        with self.assertRaisesRegex(ValueError, "referenced by history"):
+            self.history.delete_snapshot(before.snapshot_id)
 
     def case_repair_recovery_state_relinks_missing_snapshot_and_registers_orphan_backup(self):
         snapshot = self.history.create_manual_snapshot("Repairable Snapshot")
@@ -1138,6 +1395,223 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertFalse(repair_result.unresolved)
         self.assertIsNone(self.history.fetch_backup(backup_record.backup_id))
 
+    def case_repair_recovery_state_relinks_moved_backup_sidecar(self):
+        backup_path = self._write_backup_file("moved_backup.db")
+        backup_record = self.history.register_backup(
+            backup_path,
+            kind="manual",
+            label="Moved Backup",
+            source_db_path=self.db_path,
+        )
+        moved_path = self.backups_root / "relinked_moved_backup.db"
+        backup_path.replace(moved_path)
+        self.history._backup_sidecar_path(backup_path).replace(
+            self.history._backup_sidecar_path(moved_path)
+        )
+
+        issues = self.history.inspect_recovery_state()
+        self.assertTrue(
+            any(
+                issue.issue_type == "missing_backup_file"
+                and issue.backup_id == backup_record.backup_id
+                for issue in issues
+            )
+        )
+
+        repair_result = self.history.repair_recovery_state()
+
+        refreshed = self.history.fetch_backup(backup_record.backup_id)
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(refreshed.backup_path, str(moved_path))
+        self.assertTrue(any("Re-linked backup" in change for change in repair_result.changes))
+
+    def case_repair_recovery_state_recovers_removes_and_rebuilds_snapshot_archives(self):
+        recoverable = self.history.create_manual_snapshot("Recoverable Archive Snapshot")
+        recoverable_entry = self._snapshot_create_entry(recoverable.snapshot_id)
+        archived_path = Path(
+            recoverable_entry.redo_payload["archived_snapshot"]["db_snapshot_path"]
+        )
+        Path(recoverable.db_snapshot_path).unlink()
+
+        recover_result = self.history.repair_recovery_state()
+
+        recovered = self.history.fetch_snapshot(recoverable.snapshot_id)
+        self.assertIsNotNone(recovered)
+        self.assertEqual(Path(recovered.db_snapshot_path), archived_path)
+        self.assertTrue(archived_path.exists())
+        self.assertTrue(
+            any("Recovered missing artifacts" in change for change in recover_result.changes)
+        )
+
+        stale = self.history.capture_snapshot(kind="manual", label="Stale Loose Snapshot")
+        Path(stale.db_snapshot_path).unlink()
+
+        remove_result = self.history.repair_recovery_state()
+
+        self.assertIsNone(self.history.fetch_snapshot(stale.snapshot_id))
+        self.assertTrue(any("Removed stale snapshot" in change for change in remove_result.changes))
+
+        rebuild = self.history.create_manual_snapshot("Rebuild Archive Snapshot")
+        rebuild_entry = self._snapshot_create_entry(rebuild.snapshot_id)
+        old_archive_path = Path(rebuild_entry.redo_payload["archived_snapshot"]["db_snapshot_path"])
+        old_archive_path.unlink()
+
+        issues = self.history.inspect_recovery_state()
+        self.assertTrue(
+            any(
+                issue.issue_type == "missing_snapshot_archive"
+                and issue.entry_id == rebuild_entry.entry_id
+                for issue in issues
+            )
+        )
+
+        rebuild_result = self.history.repair_recovery_state()
+        refreshed_entry = self.history.fetch_entry(rebuild_entry.entry_id)
+        self.assertIsNotNone(refreshed_entry)
+        rebuilt_path = Path(refreshed_entry.redo_payload["archived_snapshot"]["db_snapshot_path"])
+        self.assertTrue(rebuilt_path.exists())
+        self.assertNotEqual(rebuilt_path, old_archive_path)
+        self.assertTrue(
+            any("Rebuilt archived snapshot" in change for change in rebuild_result.changes)
+        )
+
+        delete_target = self.history.create_manual_snapshot("Delete Archive Rebuild Target")
+        delete_entry = self.history.delete_snapshot_as_action(delete_target.snapshot_id)
+        self.history.undo()
+        refreshed_delete_entry = self.history.fetch_entry(delete_entry.entry_id)
+        self.assertIsNotNone(refreshed_delete_entry)
+        delete_archive_path = Path(
+            refreshed_delete_entry.inverse_payload["archived_snapshot"]["db_snapshot_path"]
+        )
+        delete_archive_path.unlink()
+
+        delete_rebuild_result = self.history.repair_recovery_state()
+        rebuilt_delete_entry = self.history.fetch_entry(delete_entry.entry_id)
+        self.assertIsNotNone(rebuilt_delete_entry)
+        rebuilt_delete_path = Path(
+            rebuilt_delete_entry.inverse_payload["archived_snapshot"]["db_snapshot_path"]
+        )
+        self.assertTrue(rebuilt_delete_path.exists())
+        self.assertNotEqual(rebuilt_delete_path, delete_archive_path)
+        self.assertTrue(
+            any("Rebuilt archived snapshot" in change for change in delete_rebuild_result.changes)
+        )
+
+        unresolved = self.history.create_manual_snapshot("Unresolved Archive Snapshot")
+        unresolved_entry = self._snapshot_create_entry(unresolved.snapshot_id)
+        unresolved_archive_path = Path(
+            unresolved_entry.redo_payload["archived_snapshot"]["db_snapshot_path"]
+        )
+        unresolved_archive_path.unlink()
+        self.history._update_entry_payloads(
+            unresolved_entry.entry_id,
+            payload={"snapshot_id": 987654, "label": unresolved.label},
+        )
+
+        unresolved_result = self.history.repair_recovery_state()
+
+        self.assertTrue(
+            any(
+                "missing archived snapshot artifacts" in item
+                for item in unresolved_result.unresolved
+            )
+        )
+
+    def case_inspect_recovery_state_reports_dangling_snapshot_references(self):
+        before = self.history.capture_snapshot(kind="before_dangling", label="Before Dangling")
+        after = self.history.capture_snapshot(kind="after_dangling", label="After Dangling")
+        entry = self.history.record_snapshot_action(
+            label="Dangling Snapshot Reference",
+            action_type="snapshot.dangling",
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+        with self.conn:
+            self.conn.execute("DELETE FROM HistorySnapshots WHERE id=?", (before.snapshot_id,))
+
+        issues = self.history.inspect_recovery_state()
+
+        self.assertTrue(
+            any(
+                issue.issue_type == "dangling_snapshot_reference"
+                and issue.entry_id == entry.entry_id
+                and issue.snapshot_id == before.snapshot_id
+                for issue in issues
+            )
+        )
+
+    def case_repair_recovery_state_handles_orphan_sidecar_conflicts(self):
+        live_snapshot = self.history.capture_snapshot(kind="manual", label="Live Snapshot")
+        orphan_snapshot = self.history.capture_snapshot(kind="manual", label="Snapshot Orphan")
+        orphan_snapshot_path = Path(orphan_snapshot.db_snapshot_path)
+        self.history._write_json_sidecar(
+            self.history._snapshot_sidecar_path(orphan_snapshot_path),
+            {
+                "snapshot_id": live_snapshot.snapshot_id,
+                "kind": "manual",
+                "label": "Snapshot Conflict Orphan",
+                "settings_state": {},
+                "manifest": {},
+            },
+        )
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM HistorySnapshots WHERE id=?",
+                (orphan_snapshot.snapshot_id,),
+            )
+
+        no_sidecar_snapshot = self.history.capture_snapshot(
+            kind="manual", label="No Sidecar Orphan"
+        )
+        no_sidecar_path = Path(no_sidecar_snapshot.db_snapshot_path)
+        self.history._snapshot_sidecar_path(no_sidecar_path).unlink()
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM HistorySnapshots WHERE id=?",
+                (no_sidecar_snapshot.snapshot_id,),
+            )
+
+        existing_backup_path = self._write_backup_file("existing_conflict_backup.db")
+        existing_backup = self.history.register_backup(
+            existing_backup_path,
+            kind="manual",
+            label="Existing Backup",
+            source_db_path=self.db_path,
+        )
+        orphan_backup_path = self._write_backup_file("orphan_conflict_backup.db")
+        self.history._write_json_sidecar(
+            self.history._backup_sidecar_path(orphan_backup_path),
+            {
+                "backup_id": existing_backup.backup_id,
+                "kind": "pre_restore",
+                "label": "Backup Conflict Orphan",
+                "source_db_path": str(self.db_path),
+                "metadata": {"method": "copy"},
+            },
+        )
+
+        repair_result = self.history.repair_recovery_state()
+
+        registered_snapshots = [
+            snapshot
+            for snapshot in self.history.list_snapshots(limit=50)
+            if snapshot.db_snapshot_path == str(orphan_snapshot_path)
+        ]
+        self.assertEqual(len(registered_snapshots), 1)
+        self.assertNotEqual(registered_snapshots[0].snapshot_id, live_snapshot.snapshot_id)
+        self.assertEqual(registered_snapshots[0].label, "Snapshot Conflict Orphan")
+        self.assertTrue(any("no sidecar metadata" in item for item in repair_result.unresolved))
+
+        registered_backups = [
+            backup
+            for backup in self.history.list_backups(limit=50)
+            if backup.backup_path == str(orphan_backup_path)
+        ]
+        self.assertEqual(len(registered_backups), 1)
+        self.assertNotEqual(registered_backups[0].backup_id, existing_backup.backup_id)
+        self.assertEqual(registered_backups[0].kind, "pre_restore")
+        self.assertEqual(registered_backups[0].source_db_path, str(self.db_path))
+
     def case_run_snapshot_history_action_rolls_back_when_history_recording_fails(self):
         with patch.object(
             self.history,
@@ -1251,6 +1725,65 @@ class HistoryManagerTestCase(unittest.TestCase):
             )
 
         self.assertFalse(mutation_called)
+
+    def case_file_state_rejects_directory_targets(self):
+        target_dir = self.root / "file-state-directory"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with self.assertRaisesRegex(ValueError, "capture requires a file path"):
+            self.history.capture_file_state(target_dir)
+        with self.assertRaisesRegex(ValueError, "restore requires a file path"):
+            self.history.restore_file_state(target_dir, {"companion_suffixes": [], "files": []})
+
+    def case_backup_registration_delete_and_file_restore_errors_are_explicit(self):
+        self.assertFalse(self.history.can_redo())
+        self.assertIsNone(self.history.describe_redo())
+        self.assertIsNone(self.history.fetch_backup(999999))
+        with self.assertRaises(FileNotFoundError):
+            self.history.register_backup(self.backups_root / "missing.db")
+        with self.assertRaisesRegex(ValueError, "Backup 999999 not found"):
+            self.history.delete_backup(999999)
+
+        backup_path = self._write_backup_file("delete_me_backup.db")
+        companions = [
+            Path(f"{backup_path}{suffix}")
+            for suffix in self.history.DATABASE_ARTIFACT_COMPANION_SUFFIXES
+        ]
+        for companion in companions:
+            companion.write_bytes(b"companion")
+        backup = self.history.register_backup(
+            backup_path,
+            kind="manual",
+            label="Delete Me Backup",
+            source_db_path=self.db_path,
+            metadata={"method": "file_copy"},
+        )
+        sidecar = self.history._backup_sidecar_path(backup_path)
+
+        self.assertEqual(self.history.fetch_backup(backup.backup_id), backup)
+        self.assertEqual(self.history.list_backups(limit=1), [backup])
+        self.assertTrue(sidecar.exists())
+
+        self.history.delete_backup(backup.backup_id)
+
+        self.assertIsNone(self.history.fetch_backup(backup.backup_id))
+        self.assertFalse(backup_path.exists())
+        self.assertFalse(sidecar.exists())
+        self.assertTrue(all(not companion.exists() for companion in companions))
+
+        with self.assertRaises(HistoryRecoveryError):
+            self.history.restore_file_state(
+                self.root / "restore-target.txt",
+                {"companion_suffixes": [], "files": [{}]},
+            )
+        with self.assertRaises(HistoryRecoveryError):
+            self.history.restore_file_state(
+                self.root / "restore-target.txt",
+                {
+                    "companion_suffixes": [],
+                    "files": [{"suffix": "", "artifact_path": str(self.root / "missing.bin")}],
+                },
+            )
 
     def case_repair_recovery_state_quarantines_referenced_missing_snapshot(self):
         before = self.history.capture_snapshot(kind="pre_quarantine", label="Before quarantine")

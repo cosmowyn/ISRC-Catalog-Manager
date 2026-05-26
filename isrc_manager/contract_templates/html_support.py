@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 from isrc_manager.file_storage import ManagedFileStorage
 
@@ -152,11 +152,14 @@ def build_html_bundle_from_zip_path(package_path: str | Path) -> HTMLTemplateBun
     package = Path(str(package_path or "").strip())
     if not package.exists():
         raise FileNotFoundError(package)
-    with ZipFile(package) as archive:
-        return build_html_bundle_from_zip_archive(
-            archive,
-            package_filename=package.name,
-        )
+    try:
+        with ZipFile(package) as archive:
+            return build_html_bundle_from_zip_archive(
+                archive,
+                package_filename=package.name,
+            )
+    except BadZipFile as exc:
+        raise _ingestion_error("The ZIP package is not a readable HTML template archive.") from exc
 
 
 def build_html_bundle_from_zip_bytes(
@@ -166,11 +169,14 @@ def build_html_bundle_from_zip_bytes(
 ) -> HTMLTemplateBundle:
     from io import BytesIO
 
-    with ZipFile(BytesIO(package_bytes)) as archive:
-        return build_html_bundle_from_zip_archive(
-            archive,
-            package_filename=package_filename,
-        )
+    try:
+        with ZipFile(BytesIO(package_bytes)) as archive:
+            return build_html_bundle_from_zip_archive(
+                archive,
+                package_filename=package_filename,
+            )
+    except BadZipFile as exc:
+        raise _ingestion_error("The ZIP package is not a readable HTML template archive.") from exc
 
 
 def build_html_bundle_from_zip_archive(

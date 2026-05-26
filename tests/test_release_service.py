@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
 
@@ -140,6 +141,27 @@ class ReleaseServiceTests(unittest.TestCase):
         placements = self.release_service.list_release_tracks(release_id)
         self.assertEqual([placement.track_number for placement in placements], [1, 2, 3])
 
+    def test_add_tracks_to_release_skips_duplicate_and_invalid_ids(self):
+        track_a = self._create_track(isrc="NL-ABC-26-00015", title="Track A", album="Release Album")
+        track_b = self._create_track(isrc="NL-ABC-26-00016", title="Track B", album="Release Album")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Album",
+                primary_artist="Release Artist",
+                placements=[ReleaseTrackPlacement(track_id=track_a)],
+            )
+        )
+
+        added = self.release_service.add_tracks_to_release(
+            release_id,
+            [track_a, 0, -1, track_b, track_b],
+        )
+
+        placements = self.release_service.list_release_tracks(release_id)
+        self.assertEqual(added, [track_b])
+        self.assertEqual([placement.track_id for placement in placements], [track_a, track_b])
+        self.assertEqual([placement.track_number for placement in placements], [1, 2])
+
     def test_delete_release_removes_release_links_and_unreferenced_artwork(self):
         track_id = self._create_track(
             isrc="NL-ABC-26-00014", title="Delete Release Track", album="Release Album"
@@ -177,6 +199,10 @@ class ReleaseServiceTests(unittest.TestCase):
         )
         self.assertFalse(managed_artwork.exists())
 
+    def test_delete_release_rejects_missing_release(self):
+        with self.assertRaisesRegex(ValueError, "Release 9999 not found"):
+            self.release_service.delete_release(9999)
+
     def test_replace_release_tracks_renumbers_conflicting_disc_track_positions(self):
         track_a = self._create_track(isrc="NL-ABC-26-00021", title="Track A", album="Release Album")
         track_b = self._create_track(isrc="NL-ABC-26-00022", title="Track B", album="Release Album")
@@ -201,6 +227,48 @@ class ReleaseServiceTests(unittest.TestCase):
         self.assertEqual([placement.disc_number for placement in placements], [1, 1])
         self.assertEqual([placement.track_number for placement in placements], [1, 2])
         self.assertEqual([placement.sequence_number for placement in placements], [1, 2])
+
+    def test_release_family_helpers_classify_explicit_remix_and_empty_cases(self):
+        self.assertEqual(
+            ReleaseService.infer_release_type(
+                title="Anything",
+                track_count=12,
+                release_type="EP",
+            ),
+            "ep",
+        )
+        self.assertEqual(
+            ReleaseService.infer_release_type(
+                title="Journeys Beyond the Finite (Remixes)",
+                track_count=6,
+            ),
+            "remix_package",
+        )
+        self.assertEqual(
+            ReleaseService.infer_release_type(title="", track_count=3),
+            "single",
+        )
+        self.assertFalse(ReleaseService.releases_share_upc_family(["", None]))
+        self.assertTrue(
+            ReleaseService.releases_share_upc_family(
+                [("Same Title", "album"), ("Same Title", "single")]
+            )
+        )
+        self.assertTrue(
+            ReleaseService.releases_share_upc_family(
+                [
+                    ("Journeys Beyond the Finite", "album"),
+                    ("Journeys Beyond the Finite - Remix Package", "remix_package"),
+                ]
+            )
+        )
+        self.assertEqual(
+            ReleaseService.normalized_release_family_title(
+                "Journeys Beyond the Finite [Official RMX]",
+                release_type="album",
+            ),
+            "journeys beyond the finite",
+        )
 
     def test_duplicate_upc_is_reported_as_warning_and_save_still_possible(self):
         first_release = self.release_service.create_release(
@@ -254,6 +322,85 @@ class ReleaseServiceTests(unittest.TestCase):
             any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
         )
 
+    def test_find_matching_release_id_uses_title_catalog_and_unique_upc_paths(self):
+        title_match = self.release_service.create_release(
+            ReleasePayload(
+                title="Catalog Matched",
+                primary_artist="Release Artist",
+                catalog_number="CAT-100",
+                upc="036000291452",
+            )
+        )
+        unique_upc_match = self.release_service.create_release(
+            ReleasePayload(
+                title="Unique UPC",
+                primary_artist="Other Artist",
+                upc="042100005264",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Duplicate UPC A",
+                primary_artist="Release Artist",
+                upc="012345678905",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Duplicate UPC B",
+                primary_artist="Release Artist",
+                upc="012345678905",
+            )
+        )
+
+        self.assertEqual(
+            self.release_service.find_matching_release_id(
+                title="Catalog Matched",
+                primary_artist="Release Artist",
+                catalog_number="CAT-100",
+            ),
+            title_match,
+        )
+        self.assertEqual(
+            self.release_service.find_matching_release_id(
+                title="No Title Match",
+                upc="042100005264",
+            ),
+            unique_upc_match,
+        )
+        self.assertIsNone(
+            self.release_service.find_matching_release_id(
+                title="No Title Match",
+                upc="012345678905",
+            )
+        )
+
+    def test_ensure_release_updates_existing_match_instead_of_duplicating(self):
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Existing Release",
+                primary_artist="Release Artist",
+                catalog_number="CAT-200",
+                notes="old notes",
+            )
+        )
+
+        ensured_id = self.release_service.ensure_release(
+            ReleasePayload(
+                title="Existing Release",
+                primary_artist="Release Artist",
+                catalog_number="CAT-200",
+                label="Updated Label",
+                notes="new notes",
+            )
+        )
+
+        row = self.conn.execute(
+            "SELECT COUNT(*), label, release_notes FROM Releases WHERE title='Existing Release'"
+        ).fetchone()
+        self.assertEqual(ensured_id, release_id)
+        self.assertEqual(row, (1, "Updated Label", "new notes"))
+
     def test_remix_family_duplicate_upc_is_not_reported_as_warning(self):
         self.release_service.create_release(
             ReleasePayload(
@@ -276,6 +423,96 @@ class ReleaseServiceTests(unittest.TestCase):
         self.assertFalse(
             any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
         )
+
+    def test_artwork_storage_conversion_round_trips_bytes_and_modes(self):
+        artwork_source = self.data_root / "cover.png"
+        artwork_source.write_bytes(b"cover-bytes")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Artwork Release",
+                primary_artist="Release Artist",
+                artwork_source_path=str(artwork_source),
+            )
+        )
+
+        managed_release = self.release_service.fetch_release(release_id)
+        self.assertIsNotNone(managed_release)
+        assert managed_release is not None
+        self.assertEqual(managed_release.artwork_storage_mode, STORAGE_MODE_MANAGED_FILE)
+        self.assertEqual(
+            self.release_service.fetch_artwork_bytes(release_id),
+            (b"cover-bytes", "image/png"),
+        )
+
+        database_release = self.release_service.convert_artwork_storage_mode(
+            release_id,
+            STORAGE_MODE_DATABASE,
+        )
+        self.assertEqual(database_release.artwork_storage_mode, STORAGE_MODE_DATABASE)
+        self.assertIsNone(database_release.artwork_path)
+        self.assertEqual(
+            self.release_service.fetch_artwork_bytes(release_id),
+            (b"cover-bytes", "image/png"),
+        )
+
+        unchanged = self.release_service.convert_artwork_storage_mode(
+            release_id,
+            STORAGE_MODE_DATABASE,
+        )
+        self.assertEqual(unchanged.artwork_storage_mode, STORAGE_MODE_DATABASE)
+
+        managed_again = self.release_service.convert_artwork_storage_mode(
+            release_id,
+            STORAGE_MODE_MANAGED_FILE,
+        )
+        self.assertEqual(managed_again.artwork_storage_mode, STORAGE_MODE_MANAGED_FILE)
+        self.assertIsNotNone(managed_again.artwork_path)
+        self.assertEqual(
+            self.release_service.fetch_artwork_bytes(release_id),
+            (b"cover-bytes", "image/png"),
+        )
+
+    def test_artwork_fetch_and_conversion_report_missing_data(self):
+        with self.assertRaisesRegex(ValueError, "Release 9999 not found"):
+            self.release_service.convert_artwork_storage_mode(9999, STORAGE_MODE_DATABASE)
+        with self.assertRaises(FileNotFoundError):
+            self.release_service.fetch_artwork_bytes(9999)
+
+        artwork_source = self.data_root / "blob-cover.png"
+        artwork_source.write_bytes(b"blob-cover")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Artwork Release",
+                primary_artist="Release Artist",
+                artwork_source_path=str(artwork_source),
+                artwork_storage_mode=STORAGE_MODE_DATABASE,
+            )
+        )
+        self.conn.execute("UPDATE Releases SET artwork_blob=NULL WHERE id=?", (release_id,))
+
+        with self.assertRaises(FileNotFoundError):
+            self.release_service.fetch_artwork_bytes(release_id)
+
+    def test_artwork_source_validation_rejects_missing_or_unsupported_files(self):
+        with self.assertRaises(FileNotFoundError):
+            self.release_service.create_release(
+                ReleasePayload(
+                    title="Missing Artwork",
+                    primary_artist="Release Artist",
+                    artwork_source_path=str(self.data_root / "missing.png"),
+                )
+            )
+
+        unsupported = self.data_root / "cover.txt"
+        unsupported.write_text("not an image", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "not a valid image"):
+            self.release_service.create_release(
+                ReleasePayload(
+                    title="Unsupported Artwork",
+                    primary_artist="Release Artist",
+                    artwork_source_path=str(unsupported),
+                )
+            )
 
     def test_schema_migration_allows_duplicate_upc_across_inferred_releases(self):
         conn = sqlite3.connect(":memory:")

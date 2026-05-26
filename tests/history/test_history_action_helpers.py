@@ -14,6 +14,9 @@ class HistoryActionHelperTests(HistoryManagerTestCase):
     test_file_helper_rejects_directory_target_before_mutation = (
         HistoryManagerTestCase.case_file_helper_rejects_directory_target_before_mutation
     )
+    test_file_state_rejects_directory_targets = (
+        HistoryManagerTestCase.case_file_state_rejects_directory_targets
+    )
 
 
 del HistoryManagerTestCase

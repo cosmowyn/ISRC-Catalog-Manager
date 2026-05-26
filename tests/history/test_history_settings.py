@@ -20,6 +20,9 @@ class HistorySettingsTests(HistoryManagerTestCase):
     test_hidden_internal_entries_are_skipped_by_visible_history_and_boundary_undo = (
         HistoryManagerTestCase.case_hidden_internal_entries_are_skipped_by_visible_history_and_boundary_undo
     )
+    test_setting_entry_application_and_serialization_edges_round_trip = (
+        HistoryManagerTestCase.case_setting_entry_application_and_serialization_edges_round_trip
+    )
     test_branching_after_undo_supersedes_old_redo = (
         HistoryManagerTestCase.case_branching_after_undo_supersedes_old_redo
     )

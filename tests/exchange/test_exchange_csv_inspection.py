@@ -14,6 +14,9 @@ class ExchangeCsvInspectionTests(ExchangeServiceTestCase):
     test_inspect_csv_detects_tab_delimiter = (
         ExchangeServiceTestCase.case_inspect_csv_detects_tab_delimiter
     )
+    test_inspection_import_source_and_identifier_edges_are_recoverable = (
+        ExchangeServiceTestCase.case_inspection_import_source_and_identifier_edges_are_recoverable
+    )
 
 
 del ExchangeServiceTestCase

@@ -1,8 +1,10 @@
+import hashlib
 import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
@@ -12,6 +14,9 @@ from isrc_manager.code_registry import (
     CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
+    CLASSIFICATION_INTERNAL,
+    CodeIdentifierClassification,
+    CodeIdentifierResolution,
     CodeRegistryCategoryPayload,
     CodeRegistryService,
 )
@@ -347,6 +352,212 @@ class CodeRegistryServiceTests(unittest.TestCase):
         self.assertEqual(len(usage), 1)
         self.assertEqual(usage[0].subject_kind, "track")
 
+    def test_assignment_targets_include_tracks_releases_and_contracts_with_search(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        catalog_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.targets",
+        ).entry
+        track_id = self._create_track(isrc="NL-TST-26-40031", title="Registry Target Track")
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO Releases(title, release_type, primary_artist, catalog_number)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Registry Target Release", "album", "Registry Artist", "CAT-REL"),
+            )
+        release_id = self.conn.execute("SELECT id FROM Releases").fetchone()[0]
+
+        all_targets = self.registry.list_assignment_targets_for_entry(
+            catalog_entry.id,
+            search_text="Registry Target",
+        )
+        track_targets = self.registry.list_assignment_targets_for_entry(
+            catalog_entry.id,
+            owner_kind="track",
+            search_text="40031",
+        )
+        release_targets = self.registry.list_assignment_targets_for_entry(
+            catalog_entry.id,
+            owner_kind="release",
+            search_text="Target Release",
+        )
+
+        self.assertEqual(
+            {(target.owner_kind, target.owner_id) for target in all_targets},
+            {("track", track_id), ("release", release_id)},
+        )
+        self.assertEqual(
+            [(target.owner_kind, target.owner_id) for target in track_targets],
+            [("track", track_id)],
+        )
+        self.assertEqual(
+            [(target.owner_kind, target.owner_id) for target in release_targets],
+            [("release", release_id)],
+        )
+
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        contract_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.targets",
+        ).entry
+        contract_id = self._create_contract(title="Registry Target Contract")
+        contract_targets = self.registry.list_assignment_targets_for_entry(
+            contract_entry.id,
+            search_text="Target Contract",
+        )
+
+        self.assertEqual(
+            [(target.owner_kind, target.owner_id) for target in contract_targets],
+            [("contract", contract_id)],
+        )
+        self.assertEqual(self.registry.list_assignment_targets_for_entry(999999), [])
+
+    def test_assign_entry_to_contract_rejects_missing_wrong_owner_and_busy_destination(self):
+        with self.assertRaisesRegex(ValueError, "Registry entry 999999 was not found"):
+            self.registry.assign_entry_to_owner(999999, owner_kind="contract", owner_id=1)
+
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        first_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.assign",
+        ).entry
+        second_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.assign",
+        ).entry
+        contract_id = self._create_contract(title="Contract Assignment Target")
+
+        with self.assertRaisesRegex(ValueError, "cannot be linked to that owner type"):
+            self.registry.assign_entry_to_owner(
+                first_entry.id,
+                owner_kind="track",
+                owner_id=contract_id,
+            )
+        with self.assertRaisesRegex(ValueError, "Contract #999999 was not found"):
+            self.registry.assign_entry_to_owner(
+                first_entry.id,
+                owner_kind="contract",
+                owner_id=999999,
+            )
+
+        self.registry.assign_entry_to_owner(
+            first_entry.id,
+            owner_kind="contract",
+            owner_id=contract_id,
+        )
+        with self.assertRaisesRegex(ValueError, "Use explicit realignment"):
+            self.registry.assign_entry_to_owner(
+                second_entry.id,
+                owner_kind="contract",
+                owner_id=contract_id,
+            )
+
+        contract = self.contract_service.fetch_contract(contract_id)
+        self.assertIsNotNone(contract)
+        assert contract is not None
+        self.assertEqual(contract.contract_registry_entry_id, first_entry.id)
+        self.assertEqual(contract.contract_number, first_entry.value)
+
+    def test_ensure_catalog_value_for_owner_generates_captures_and_preserves_external_values(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        track_id = self._create_track(isrc="NL-TST-26-40041", title="Needs Catalog")
+
+        self.assertIsNone(
+            self.registry.ensure_catalog_value_for_owner(
+                owner_kind="track",
+                owner_id=track_id,
+                generate_if_missing=False,
+            )
+        )
+        generated_value = self.registry.ensure_catalog_value_for_owner(
+            owner_kind="track",
+            owner_id=track_id,
+            created_via="test.ensure",
+        )
+        generated_row = self.conn.execute(
+            """
+            SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
+            FROM Tracks
+            WHERE id=?
+            """,
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(generated_row[0], generated_value)
+        self.assertIsNotNone(generated_row[1])
+        self.assertIsNone(generated_row[2])
+
+        self.conn.execute(
+            "UPDATE Tracks SET catalog_number='STALE-CATALOG' WHERE id=?", (track_id,)
+        )
+        self.assertEqual(
+            self.registry.ensure_catalog_value_for_owner(
+                owner_kind="track",
+                owner_id=track_id,
+                created_via="test.ensure",
+            ),
+            generated_value,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT catalog_number FROM Tracks WHERE id=?",
+                (track_id,),
+            ).fetchone()[0],
+            generated_value,
+        )
+
+        external_text_track = self._create_track(
+            isrc="NL-TST-26-40042",
+            title="External Text Catalog",
+        )
+        self.conn.execute(
+            "UPDATE Tracks SET catalog_number='IMPORT-CAT-42' WHERE id=?",
+            (external_text_track,),
+        )
+        self.assertEqual(
+            self.registry.ensure_catalog_value_for_owner(
+                owner_kind="track",
+                owner_id=external_text_track,
+                created_via="test.ensure",
+            ),
+            "IMPORT-CAT-42",
+        )
+
+        external_id_track = self._create_track(
+            isrc="NL-TST-26-40043",
+            title="External Identifier Catalog",
+        )
+        resolution = self.registry.resolve_catalog_input(
+            mode=CATALOG_MODE_EXTERNAL,
+            value="EXT-CAT-43",
+            created_via="test.ensure.external",
+        )
+        self.registry.assign_catalog_to_owner(
+            owner_kind="track",
+            owner_id=external_id_track,
+            resolution=resolution,
+            provenance_kind="manual",
+            source_label="test.ensure.external",
+        )
+        self.conn.execute(
+            "UPDATE Tracks SET catalog_number='' WHERE id=?",
+            (external_id_track,),
+        )
+        self.assertEqual(
+            self.registry.ensure_catalog_value_for_owner(
+                owner_kind="track",
+                owner_id=external_id_track,
+                created_via="test.ensure",
+            ),
+            "EXT-CAT-43",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unsupported catalog owner kind"):
+            self.registry.ensure_catalog_value_for_owner(owner_kind="contract", owner_id=1)
+        with self.assertRaisesRegex(ValueError, "Track #999999 was not found"):
+            self.registry.ensure_catalog_value_for_owner(owner_kind="track", owner_id=999999)
+
     def test_contract_service_generates_and_assigns_registry_values(self):
         self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
         self._set_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
@@ -680,6 +891,26 @@ class CodeRegistryServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.registry.update_category(999999, display_name="Missing")
 
+        manual_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Manual Batch",
+                subject_kind="generic",
+                generation_strategy="manual",
+                prefix=None,
+                active_flag=True,
+            )
+        )
+        self.assertIn(
+            "does not support automatic generation",
+            self.registry.generation_unavailable_reason(category_id=manual_id),
+        )
+        with self.assertRaisesRegex(ValueError, "does not use sequential generation"):
+            self.registry.generate_next_code(category_id=manual_id)
+        with self.assertRaisesRegex(ValueError, "does not generate SHA-256"):
+            self.registry.generate_sha256_key(system_key=BUILTIN_CATEGORY_CATALOG_NUMBER)
+        self.assertIsNone(self.registry.fetch_entry_by_value("   "))
+        self.assertEqual(self.registry.list_entries(include_unused=False), [])
+
     def test_external_identifier_resolution_assignment_and_suggestions_cover_contract_paths(self):
         contract_id = self._create_contract(title="External Contract Number")
         with self.conn:
@@ -746,6 +977,751 @@ class CodeRegistryServiceTests(unittest.TestCase):
                 value="bad",
                 registry_entry_id=999999,
             )
+
+    def test_schema_filters_transactions_and_listing_edges(self):
+        self.assertEqual(self.registry._table_columns("bad table name"), set())
+        self.assertIsNone(self.registry._catalog_external_column_name("MissingOwners"))
+        self.assertIsNone(
+            self.registry._owner_identifier_columns(
+                owner_kind="contract",
+                system_key="unsupported",
+            )
+        )
+        self.assertIsNone(
+            self.registry._owner_identifier_columns(
+                owner_kind="album",
+                system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            )
+        )
+        self.assertEqual(
+            self.registry._persisted_external_status("migration_conflict"),
+            "migration_conflict",
+        )
+        self.assertEqual(
+            self.registry._persisted_external_status("shadowed_by_internal"),
+            "shadowed_by_internal",
+        )
+        reason = self.registry._classification_reason_for_external_storage(
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            classification=CodeIdentifierClassification(
+                input_value="a" * 64,
+                normalized_value="a" * 64,
+                classification=CLASSIFICATION_INTERNAL,
+            ),
+        )
+        self.assertIn("Valid-looking external key", reason)
+
+        with self.assertRaisesRegex(RuntimeError, "rollback category"):
+            with self.registry._immediate_transaction() as cursor:
+                self.registry.create_category(
+                    CodeRegistryCategoryPayload(
+                        display_name="Rollback Category",
+                        subject_kind="generic",
+                        generation_strategy="manual",
+                    ),
+                    cursor=cursor,
+                )
+                raise RuntimeError("rollback category")
+        self.assertFalse(
+            any(
+                category.display_name == "Rollback Category"
+                for category in self.registry.list_categories()
+            )
+        )
+
+        active_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Active Generic",
+                subject_kind="generic",
+                generation_strategy="manual",
+                active_flag=True,
+                sort_order=51,
+            )
+        )
+        inactive_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Inactive Sequential",
+                subject_kind="generic",
+                generation_strategy="sequential",
+                prefix="INA",
+                active_flag=False,
+                sort_order=52,
+            )
+        )
+        active_generics = self.registry.list_categories(
+            subject_kind="generic",
+            active_only=True,
+        )
+        self.assertIn(active_id, {category.id for category in active_generics})
+        self.assertNotIn(inactive_id, {category.id for category in active_generics})
+        self.assertEqual(
+            self.registry.generation_unavailable_reason(category_id=999999),
+            "Code registry category was not found.",
+        )
+        with self.assertRaisesRegex(ValueError, "inactive"):
+            self.registry.generate_next_code(category_id=inactive_id)
+
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        catalog_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.listing",
+        ).entry
+        contract_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.listing",
+        ).entry
+        contract_entries = self.registry.list_entries(
+            subject_kind="contract",
+            search_text="CTR",
+        )
+        self.assertEqual([entry.id for entry in contract_entries], [contract_entry.id])
+        contract_choices = self.registry.list_choices_for_subject(subject_kind="contract")
+        catalog_choices = self.registry.list_choices_for_subject(
+            subject_kind="catalog",
+            category_id=catalog_entry.category_id,
+        )
+        self.assertEqual(contract_choices[0].label, contract_entry.value)
+        self.assertIn("Catalog Number:", catalog_choices[0].label)
+
+        with self.assertRaisesRegex(ValueError, "was not found"):
+            self.registry.delete_entry(999999)
+
+        blocked_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.delete.blocked",
+        ).entry
+        self.conn.execute(
+            """
+            CREATE TRIGGER block_registry_entry_delete
+            BEFORE DELETE ON CodeRegistryEntries
+            BEGIN
+                SELECT RAISE(ABORT, 'blocked registry delete');
+            END
+            """
+        )
+        try:
+            with self.assertRaisesRegex(ValueError, "could not be deleted"):
+                self.registry.delete_entry(blocked_entry.id)
+        finally:
+            self.conn.execute("DROP TRIGGER block_registry_entry_delete")
+
+    def test_identifier_resolution_assignment_and_minimal_schema_edges(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        catalog_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.resolve",
+        ).entry
+        contract_entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.resolve",
+        ).entry
+        contract_external = self.registry.store_external_code_identifier(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            value="EXT-CTR-200",
+            provenance_kind="manual",
+            source_label="test.resolve",
+            owner_kind="contract",
+            owner_id=0,
+        )
+
+        inferred_internal = self.registry.resolve_identifier_input(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            mode="",
+            value=None,
+            registry_entry_id=catalog_entry.id,
+        )
+        inferred_external = self.registry.resolve_identifier_input(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            mode="",
+            value=None,
+            external_identifier_id=contract_external.id,
+        )
+        self.assertEqual(inferred_internal.mode, CATALOG_MODE_INTERNAL)
+        self.assertEqual(inferred_external.mode, CATALOG_MODE_EXTERNAL)
+
+        with self.assertRaisesRegex(ValueError, "not found"):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                mode=CATALOG_MODE_INTERNAL,
+                value=None,
+                registry_entry_id=999999,
+            )
+        with self.assertRaisesRegex(ValueError, "different category"):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                mode=CATALOG_MODE_INTERNAL,
+                value=None,
+                registry_entry_id=catalog_entry.id,
+            )
+        with self.assertRaisesRegex(ValueError, "external identifier was not found"):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                mode=CATALOG_MODE_EXTERNAL,
+                value=None,
+                external_identifier_id=999999,
+            )
+        with self.assertRaisesRegex(ValueError, "different category"):
+            self.registry.resolve_identifier_input(
+                system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+                mode=CATALOG_MODE_EXTERNAL,
+                value=None,
+                external_identifier_id=contract_external.id,
+            )
+        with self.assertRaisesRegex(ValueError, "Unsupported identifier owner"):
+            self.registry.assign_identifier_to_owner(
+                owner_kind="contract",
+                owner_id=1,
+                system_key="unsupported",
+                resolution=CodeIdentifierResolution(
+                    mode=CATALOG_MODE_EMPTY,
+                    category_system_key="unsupported",
+                ),
+            )
+        with self.assertRaisesRegex(ValueError, "both internal and external"):
+            self.registry.assign_identifier_to_owner(
+                owner_kind="contract",
+                owner_id=1,
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                resolution=CodeIdentifierResolution(
+                    mode=CATALOG_MODE_INTERNAL,
+                    category_system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                    value=contract_entry.value,
+                    registry_entry_id=contract_entry.id,
+                    external_identifier_id=contract_external.id,
+                ),
+            )
+        with self.assertRaisesRegex(ValueError, "both internal and external"):
+            self.registry.assign_identifier_to_owner(
+                owner_kind="contract",
+                owner_id=1,
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                resolution=CodeIdentifierResolution(
+                    mode=CATALOG_MODE_EXTERNAL,
+                    category_system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                    value="EXT-CTR-201",
+                    registry_entry_id=contract_entry.id,
+                ),
+            )
+
+        minimal_conn = sqlite3.connect(":memory:")
+        try:
+            minimal_conn.execute(
+                """
+                CREATE TABLE Contracts (
+                    id INTEGER PRIMARY KEY,
+                    contract_number TEXT,
+                    contract_registry_entry_id INTEGER
+                )
+                """
+            )
+            minimal_conn.execute(
+                "INSERT INTO Contracts(id, contract_number, contract_registry_entry_id) VALUES(1, 'OLD', 7)"
+            )
+            minimal_registry = object.__new__(CodeRegistryService)
+            minimal_registry.conn = minimal_conn
+            external_resolution = CodeIdentifierResolution(
+                mode=CATALOG_MODE_EXTERNAL,
+                category_system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                value="EXT",
+            )
+            with self.assertRaisesRegex(ValueError, "does not support external"):
+                minimal_registry.assign_identifier_to_owner(
+                    owner_kind="contract",
+                    owner_id=1,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                    resolution=external_resolution,
+                )
+            cleared = minimal_registry.assign_identifier_to_owner(
+                owner_kind="contract",
+                owner_id=1,
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                resolution=CodeIdentifierResolution(
+                    mode=CATALOG_MODE_EMPTY,
+                    category_system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                ),
+            )
+            self.assertEqual(cleared, (None, None, None))
+            self.assertEqual(
+                minimal_conn.execute(
+                    "SELECT contract_number, contract_registry_entry_id FROM Contracts WHERE id=1"
+                ).fetchone(),
+                (None, None),
+            )
+            self.assertIsNone(minimal_registry.fetch_external_code_identifier(1))
+            self.assertEqual(minimal_registry.usage_for_external_identifier(1), [])
+
+            minimal_conn.execute(
+                """
+                CREATE TABLE Tracks (
+                    id INTEGER PRIMARY KEY,
+                    catalog_number TEXT,
+                    catalog_registry_entry_id INTEGER
+                )
+                """
+            )
+            minimal_conn.execute(
+                "INSERT INTO Tracks(id, catalog_number, catalog_registry_entry_id) VALUES(1, NULL, NULL)"
+            )
+            with self.assertRaisesRegex(ValueError, "External catalog identifier storage"):
+                minimal_registry.ensure_catalog_value_for_owner(owner_kind="track", owner_id=1)
+        finally:
+            minimal_conn.close()
+
+    def test_capture_generation_and_sequence_failure_edges(self):
+        with self.assertRaisesRegex(ValueError, "value is required"):
+            self.registry.capture_value_for_category(
+                system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                value="",
+            )
+        with self.assertRaisesRegex(ValueError, "64 lowercase hexadecimal"):
+            self.registry.capture_value_for_category(
+                system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                value="not-a-sha",
+            )
+
+        sha_value = "a" * 64
+        with self.conn:
+            cursor = self.conn.cursor()
+            captured_sha = self.registry.capture_value_for_category(
+                system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                value=sha_value,
+                created_via="test.capture.sha",
+                cursor=cursor,
+            )
+        self.assertEqual(captured_sha.value, sha_value)
+        original_fetch_by_value = self.registry.fetch_entry_by_value
+        self.registry.fetch_entry_by_value = lambda _value: captured_sha
+        try:
+            self.assertEqual(
+                self.registry.capture_value_for_category(
+                    system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                    value=sha_value,
+                ).id,
+                captured_sha.id,
+            )
+        finally:
+            self.registry.fetch_entry_by_value = original_fetch_by_value
+
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        yy = datetime.now().year % 100
+        with self.assertRaisesRegex(ValueError, "known internal prefix"):
+            self.registry.capture_value_for_category(
+                system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                value=f"ACR{yy:02d}ABCD",
+            )
+
+        generic_id = self.registry.create_category(
+            CodeRegistryCategoryPayload(
+                display_name="Generic Sequential",
+                subject_kind="generic",
+                generation_strategy="sequential",
+                prefix=None,
+                active_flag=True,
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "Set a prefix"):
+            self.registry.capture_value_for_category(category_id=generic_id, value="GEN260001")
+        self.registry.update_category(generic_id, prefix="GEN")
+        with self.assertRaisesRegex(ValueError, "canonical GEN"):
+            self.registry.capture_value_for_category(category_id=generic_id, value="BAD260001")
+        with self.assertRaisesRegex(ValueError, "outside the supported"):
+            self.registry.capture_value_for_category(category_id=generic_id, value="GEN260000")
+
+        self.registry.capture_value_for_category(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=f"ACR{yy:02d}9999",
+            created_via="test.overflow",
+        )
+        with self.assertRaisesRegex(ValueError, "No free internal sequence"):
+            self.registry.generate_next_code(system_key=BUILTIN_CATEGORY_CATALOG_NUMBER)
+
+        collision_value = hashlib.sha256(b"collision").hexdigest()
+        self.registry.capture_value_for_category(
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            value=collision_value,
+            created_via="test.collision",
+        )
+        original_fetch_by_value = self.registry.fetch_entry_by_value
+        collision_checks = 0
+
+        def fake_fetch_entry_by_value(value: str):
+            nonlocal collision_checks
+            collision_checks += 1
+            if collision_checks == 1:
+                return captured_sha
+            return original_fetch_by_value(value)
+
+        self.registry.fetch_entry_by_value = fake_fetch_entry_by_value
+        try:
+            with mock.patch(
+                "isrc_manager.code_registry.service.secrets.token_bytes",
+                side_effect=[b"collision", b"fresh"],
+            ):
+                generated = self.registry.generate_sha256_key(created_via="test.collision").entry
+        finally:
+            self.registry.fetch_entry_by_value = original_fetch_by_value
+        self.assertEqual(generated.value, hashlib.sha256(b"fresh").hexdigest())
+
+        original_fetch_entry = self.registry.fetch_entry
+        self.registry.fetch_entry = lambda _entry_id: None
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Generated Registry SHA-256"):
+                self.registry.generate_sha256_key(created_via="test.reload")
+        finally:
+            self.registry.fetch_entry = original_fetch_entry
+
+    def test_external_identifier_reclassification_and_legacy_update_edges(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        yy = datetime.now().year % 100
+        mismatch = self.registry.store_external_code_identifier(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value=f"ACR{yy:02d}ABCD",
+            provenance_kind="import",
+            source_label="test.reclassify",
+        )
+        retained = self.registry.store_external_code_identifier(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            value="IMPORT VALUE",
+            provenance_kind="import",
+            source_label="test.reclassify",
+        )
+
+        result = self.registry.reclassify_external_code_identifiers(
+            category_system_key=BUILTIN_CATEGORY_CATALOG_NUMBER
+        )
+        self.assertGreaterEqual(result["mismatched"], 1)
+        self.assertGreaterEqual(result["retained_external"], 1)
+        self.assertEqual(
+            self.registry.fetch_external_code_identifier(mismatch.id).classification_status,
+            "mismatch",
+        )
+        self.assertEqual(
+            self.registry.fetch_external_code_identifier(retained.id).classification_status,
+            "external",
+        )
+        with self.assertRaisesRegex(ValueError, "was not found"):
+            self.registry.promote_external_code_identifier(999999)
+
+        legacy_conn = sqlite3.connect(":memory:")
+        try:
+            legacy_conn.executescript(
+                """
+                CREATE TABLE CodeRegistryCategories (
+                    id INTEGER PRIMARY KEY,
+                    system_key TEXT UNIQUE,
+                    display_name TEXT,
+                    subject_kind TEXT,
+                    generation_strategy TEXT,
+                    prefix TEXT,
+                    normalized_prefix TEXT,
+                    active_flag INTEGER,
+                    sort_order INTEGER,
+                    is_system INTEGER,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE CodeRegistrySequences (
+                    category_id INTEGER,
+                    sequence_year INTEGER,
+                    last_sequence_number INTEGER,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    PRIMARY KEY(category_id, sequence_year)
+                );
+                CREATE TABLE CodeRegistryEntries (
+                    id INTEGER PRIMARY KEY,
+                    category_id INTEGER,
+                    value TEXT,
+                    normalized_value TEXT,
+                    entry_kind TEXT,
+                    prefix_snapshot TEXT,
+                    sequence_year INTEGER,
+                    sequence_number INTEGER,
+                    immutable_flag INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    created_via TEXT,
+                    notes TEXT
+                );
+                CREATE TABLE ExternalCatalogIdentifiers (
+                    id INTEGER PRIMARY KEY,
+                    subject_kind TEXT NOT NULL,
+                    subject_id INTEGER NOT NULL,
+                    value TEXT NOT NULL,
+                    normalized_value TEXT NOT NULL,
+                    provenance_kind TEXT NOT NULL DEFAULT 'manual',
+                    classification_status TEXT NOT NULL DEFAULT 'external',
+                    classification_reason TEXT,
+                    source_label TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE Tracks (
+                    id INTEGER PRIMARY KEY,
+                    track_title TEXT,
+                    catalog_number TEXT,
+                    catalog_registry_entry_id INTEGER,
+                    external_catalog_identifier_id INTEGER
+                );
+                CREATE TABLE Releases (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    primary_artist TEXT,
+                    catalog_number TEXT,
+                    catalog_registry_entry_id INTEGER,
+                    external_catalog_identifier_id INTEGER
+                );
+                CREATE TABLE Contracts (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    contract_number TEXT,
+                    contract_registry_entry_id INTEGER,
+                    license_number TEXT,
+                    license_registry_entry_id INTEGER,
+                    registry_sha256_key TEXT,
+                    registry_sha256_key_entry_id INTEGER
+                );
+                """
+            )
+            legacy_registry = CodeRegistryService(legacy_conn)
+            legacy_registry.update_category(
+                legacy_registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER).id,
+                prefix="LGC",
+            )
+            with legacy_conn:
+                cursor = legacy_conn.cursor()
+                first_external_id = legacy_registry._upsert_external_code_identifier(
+                    system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                    owner_kind="track",
+                    owner_id=1,
+                    value="LEGACY-CAT",
+                    provenance_kind="import",
+                    classification_status="external",
+                    classification_reason="first",
+                    source_label="legacy",
+                    cursor=cursor,
+                )
+                second_external_id = legacy_registry._upsert_external_code_identifier(
+                    system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                    owner_kind="track",
+                    owner_id=1,
+                    value="LEGACY-CAT",
+                    provenance_kind="manual",
+                    classification_status="external",
+                    classification_reason="updated",
+                    source_label="legacy-update",
+                    cursor=cursor,
+                )
+                with self.assertRaisesRegex(ValueError, "only supports catalog"):
+                    legacy_registry._upsert_external_code_identifier(
+                        system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+                        owner_kind="contract",
+                        owner_id=1,
+                        value="LIC-LEGACY",
+                        provenance_kind="manual",
+                        classification_status="external",
+                        classification_reason=None,
+                        source_label=None,
+                        cursor=cursor,
+                    )
+            self.assertEqual(first_external_id, second_external_id)
+            legacy_record = legacy_registry.fetch_external_catalog_identifier(first_external_id)
+            self.assertEqual(legacy_record.classification_reason, "updated")
+            self.assertEqual(legacy_record.source_label, "legacy-update")
+
+            canonical_value = f"LGC{yy:02d}0001"
+            with legacy_conn:
+                cursor = legacy_conn.cursor()
+                promotable_external_id = legacy_registry._upsert_external_code_identifier(
+                    system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                    owner_kind="track",
+                    owner_id=7,
+                    value=canonical_value,
+                    provenance_kind="import",
+                    classification_status="external",
+                    classification_reason="promotable",
+                    source_label="legacy-promote",
+                    cursor=cursor,
+                )
+                legacy_conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        id,
+                        track_title,
+                        catalog_number,
+                        catalog_registry_entry_id,
+                        external_catalog_identifier_id
+                    )
+                    VALUES(7, 'Legacy Promote', ?, NULL, ?)
+                    """,
+                    (canonical_value, promotable_external_id),
+                )
+            promoted = legacy_registry.promote_external_catalog_identifier(
+                promotable_external_id,
+                created_via="test.legacy.promote",
+            )
+            promoted_row = legacy_conn.execute(
+                """
+                SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+                FROM Tracks
+                WHERE id=7
+                """
+            ).fetchone()
+            shadowed = legacy_registry.fetch_external_catalog_identifier(promotable_external_id)
+
+            self.assertEqual(promoted.value, canonical_value)
+            self.assertEqual(promoted_row, (canonical_value, promoted.id, None))
+            self.assertEqual(shadowed.classification_status, "shadowed_by_internal")
+        finally:
+            legacy_conn.close()
+
+    def test_legacy_external_catalog_identifier_schema_remains_readable(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE CodeRegistryCategories (
+                    id INTEGER PRIMARY KEY,
+                    system_key TEXT UNIQUE,
+                    display_name TEXT,
+                    subject_kind TEXT,
+                    generation_strategy TEXT,
+                    prefix TEXT,
+                    normalized_prefix TEXT,
+                    active_flag INTEGER,
+                    sort_order INTEGER,
+                    is_system INTEGER,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE CodeRegistrySequences (
+                    category_id INTEGER,
+                    sequence_year INTEGER,
+                    next_sequence_number INTEGER,
+                    PRIMARY KEY(category_id, sequence_year)
+                );
+                CREATE TABLE CodeRegistryEntries (
+                    id INTEGER PRIMARY KEY,
+                    category_id INTEGER,
+                    value TEXT,
+                    normalized_value TEXT,
+                    entry_kind TEXT,
+                    prefix_snapshot TEXT,
+                    sequence_year INTEGER,
+                    sequence_number INTEGER,
+                    immutable_flag INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    created_via TEXT,
+                    notes TEXT
+                );
+                CREATE TABLE ExternalCatalogIdentifiers (
+                    id INTEGER PRIMARY KEY,
+                    subject_kind TEXT NOT NULL,
+                    subject_id INTEGER NOT NULL,
+                    value TEXT NOT NULL,
+                    normalized_value TEXT NOT NULL,
+                    provenance_kind TEXT NOT NULL DEFAULT 'manual',
+                    classification_status TEXT NOT NULL DEFAULT 'external',
+                    classification_reason TEXT,
+                    source_label TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE Tracks (
+                    id INTEGER PRIMARY KEY,
+                    track_title TEXT,
+                    catalog_number TEXT,
+                    catalog_registry_entry_id INTEGER,
+                    external_catalog_identifier_id INTEGER
+                );
+                CREATE TABLE Releases (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    primary_artist TEXT,
+                    catalog_number TEXT,
+                    catalog_registry_entry_id INTEGER,
+                    external_catalog_identifier_id INTEGER
+                );
+                CREATE TABLE Contracts (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    contract_number TEXT,
+                    contract_registry_entry_id INTEGER,
+                    license_number TEXT,
+                    license_registry_entry_id INTEGER,
+                    registry_sha256_key TEXT,
+                    registry_sha256_key_entry_id INTEGER
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO ExternalCatalogIdentifiers(
+                    id,
+                    subject_kind,
+                    subject_id,
+                    value,
+                    normalized_value,
+                    provenance_kind,
+                    classification_status,
+                    source_label
+                )
+                VALUES(1, 'track', 10, 'LEGACY-CAT-1', 'legacy-cat-1', 'imported', 'external', 'legacy import')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO Tracks(
+                    id,
+                    track_title,
+                    catalog_number,
+                    catalog_registry_entry_id,
+                    external_catalog_identifier_id
+                )
+                VALUES(10, 'Legacy Track', 'LEGACY-CAT-1', NULL, 1)
+                """
+            )
+            registry = CodeRegistryService(conn)
+
+            self.assertEqual(
+                registry._external_identifier_table_name(), "ExternalCatalogIdentifiers"
+            )
+            self.assertTrue(registry._using_legacy_external_catalog_schema())
+            self.assertEqual(
+                registry.list_external_code_identifiers(
+                    category_system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+                ),
+                [],
+            )
+            records = registry.list_external_code_identifiers(
+                search_text="LEGACY",
+                category_system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            )
+            suggestions = registry.external_identifier_suggestions(
+                system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            )
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].category_system_key, BUILTIN_CATEGORY_CATALOG_NUMBER)
+            self.assertEqual(records[0].value, "LEGACY-CAT-1")
+            self.assertEqual(records[0].origin_record_kind, "track")
+            self.assertEqual(records[0].origin_record_id, 10)
+            self.assertEqual(records[0].usage_count, 1)
+            self.assertTrue(records[0].linked_flag)
+            self.assertIn("LEGACY-CAT-1", suggestions)
+        finally:
+            conn.close()
+
+    def test_registry_initialization_is_noop_until_schema_exists(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            registry = CodeRegistryService(conn)
+
+            self.assertFalse(registry._registry_schema_ready())
+            self.assertEqual(registry._external_identifier_table_name(), None)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

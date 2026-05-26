@@ -38,6 +38,9 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_import_package_respects_mapping_when_skipping_custom_field = (
         ExchangeServiceTestCase.case_import_package_respects_mapping_when_skipping_custom_field
     )
+    test_package_helper_edges_cover_missing_media_and_schema_boundaries = (
+        ExchangeServiceTestCase.case_package_helper_edges_cover_missing_media_and_schema_boundaries
+    )
 
 
 del ExchangeServiceTestCase

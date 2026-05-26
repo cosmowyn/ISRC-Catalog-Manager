@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QPointF
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication
 
 from isrc_manager.media import equalizer
 
@@ -162,3 +165,199 @@ def test_response_db_enables_filter_contributions() -> None:
         },
     )
     assert value != 0.0
+
+
+def test_load_and_save_equalizer_settings_handle_typed_fallbacks_and_failures() -> None:
+    class FallbackSettings:
+        def __init__(self) -> None:
+            self.saved: dict[str, object] = {}
+            self.synced = False
+
+        def value(self, key, default=None, value_type=None):
+            if value_type is not None:
+                raise TypeError("typed values unsupported")
+            return {
+                equalizer.EQ_SETTINGS_ENABLED_KEY: "on",
+                equalizer.EQ_SETTINGS_GAINS_KEY: "[1, 2, 3]",
+                equalizer.EQ_SETTINGS_PAN_KEY: "-0.25",
+            }.get(key, default)
+
+        def setValue(self, key, value):
+            self.saved[key] = value
+
+        def sync(self):
+            self.synced = True
+
+    settings = FallbackSettings()
+    loaded = equalizer.load_equalizer_settings(settings)
+    assert loaded["enabled"] is True
+    assert loaded["gains"][:3] == [1.0, 2.0, 3.0]
+    assert loaded["pan"] == -0.25
+
+    saved = equalizer.save_equalizer_settings(
+        settings,
+        {"enabled": True, "gains": [12.0, "bad"], "pan": "bad"},
+    )
+    assert saved["gains"][0] == equalizer.EQ_GAIN_MAX_DB
+    assert saved["gains"][1] == 0.0
+    assert settings.saved[equalizer.EQ_SETTINGS_ENABLED_KEY] is True
+    assert settings.synced is True
+
+    class BrokenSettings:
+        def value(self, *_args, **_kwargs):
+            raise RuntimeError("cannot read")
+
+        def setValue(self, *_args, **_kwargs):
+            raise RuntimeError("cannot write")
+
+    assert (
+        equalizer.load_equalizer_settings(BrokenSettings())
+        == equalizer.default_equalizer_settings()
+    )
+    assert equalizer.save_equalizer_settings(BrokenSettings(), {"enabled": True})["enabled"] is True
+
+
+def test_equalizer_response_helpers_cover_disabled_log_linear_and_audible_gain() -> None:
+    assert equalizer.equalizer_is_enabled({"enabled": "true"}) is True
+    assert equalizer.equalizer_has_audible_gain({"enabled": True, "gains": [0.01]}) is False
+    assert equalizer.equalizer_has_audible_gain({"enabled": True, "gains": [0.5]}) is True
+    assert equalizer.equalizer_response_db_at_frequency(1000, {"enabled": False}) == 0.0
+
+    linear = equalizer.equalizer_response_for_bins(
+        3,
+        {"enabled": True, "gains": [1.0] * len(equalizer.EQUALIZER_BANDS), "pan": 0.0},
+        frequency_scale="linear",
+        min_hz=20,
+        max_hz=20000,
+    )
+    log = equalizer.equalizer_response_for_bins(
+        3,
+        {"enabled": True, "gains": [1.0] * len(equalizer.EQUALIZER_BANDS), "pan": 0.0},
+        frequency_scale="log",
+        min_hz=20,
+        max_hz=20000,
+    )
+    assert len(linear) == 3
+    assert len(log) == 3
+    assert linear != log
+
+
+def test_ffmpeg_and_soundfile_paths_report_missing_tools_and_runtime_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(equalizer.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(equalizer.platform, "system", lambda: "windows")
+    monkeypatch.setattr(
+        equalizer.os.path,
+        "exists",
+        lambda path: path.endswith("ffmpeg.exe"),
+    )
+    assert equalizer._which("ffmpeg") is not None
+
+    monkeypatch.setattr(equalizer, "_which", lambda _name: None)
+    assert (
+        equalizer._apply_equalizer_with_ffmpeg("source.wav", "target.wav", {"enabled": True})
+        is False
+    )
+
+    monkeypatch.setattr(equalizer, "_which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(equalizer, "_ffmpeg_filter_chain", lambda _value: "volume=1")
+    monkeypatch.setattr(
+        equalizer.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("ffmpeg failed")),
+    )
+    assert (
+        equalizer._apply_equalizer_with_ffmpeg("source.wav", "target.wav", {"enabled": True})
+        is False
+    )
+
+    source = tmp_path / "not-a-real.wav"
+    target = tmp_path / "target.wav"
+    source.write_bytes(b"not audio")
+    assert (
+        equalizer._apply_equalizer_with_soundfile(str(source), str(target), {"enabled": True})
+        is False
+    )
+
+
+def test_curve_widget_audio_spectrum_and_geometry_helpers() -> None:
+    app = QApplication.instance() or QApplication([])
+    del app
+    widget = equalizer.EqualizerCurveWidget()
+    try:
+        widget.set_settings(
+            {"enabled": True, "gains": [2.0] * len(equalizer.EQUALIZER_BANDS), "pan": 0.0}
+        )
+        widget.set_audio_spectrum([0.2, 0.8, 2.0])
+        assert widget._audio_spectrum_values == [0.2, 0.8, 1.24]
+        widget.set_audio_spectrum([0.8, 0.4, 1.0])
+        assert len(widget._audio_spectrum_values) == 3
+        assert widget._audio_spectrum_opacity > 0.0
+
+        rect = widget.rect().adjusted(0, 0, 120, 80)
+        x_low = widget._frequency_to_x(20, rect)
+        x_high = widget._frequency_to_x(20000, rect)
+        assert x_low < x_high
+        assert widget._db_to_y(equalizer.EQ_GAIN_MIN_DB, rect) > widget._db_to_y(
+            equalizer.EQ_GAIN_MAX_DB,
+            rect,
+        )
+        assert widget._relative_luminance(QColor("#ffffff")) > widget._relative_luminance(
+            QColor("#000000")
+        )
+        color = widget._audio_spectrum_color(0.8, light_mode=True)
+        assert color.isValid()
+
+        widget._last_audio_spectrum_update = equalizer.monotonic()
+        before_opacity = widget._audio_spectrum_opacity
+        widget._advance_audio_spectrum_fade()
+        assert widget._audio_spectrum_opacity == before_opacity
+
+        widget._last_audio_spectrum_update = 0.0
+        widget._audio_spectrum_opacity = 0.01
+        widget._audio_spectrum_values = [0.1, 0.2]
+        widget._advance_audio_spectrum_fade()
+        assert widget._audio_spectrum_opacity == 0.0
+        assert widget._audio_spectrum_values == []
+    finally:
+        widget.deleteLater()
+
+
+def test_panning_dial_widget_coerces_pan_and_falls_back_to_legacy_event_positions() -> None:
+    app = QApplication.instance() or QApplication([])
+    del app
+    widget = equalizer.PanningDialWidget()
+    emissions: list[float] = []
+    widget.panChanged.connect(emissions.append)
+    try:
+        widget.set_pan("0.004", emit=True)
+        assert widget.pan() == 0.0
+        assert emissions == []
+
+        widget.set_pan("1.5", emit=True)
+        assert widget.pan() == 1.0
+        assert emissions == [1.0]
+        widget.set_pan(-0.33)
+        assert widget.pan() == -0.33
+
+        center, radius = widget._arc_geometry()
+        left = equalizer.PanningDialWidget._point_from_pan(center, radius, -1.0)
+        right = equalizer.PanningDialWidget._point_from_pan(center, radius, 1.0)
+        assert left.x() < right.x()
+
+        class LegacyEvent:
+            def position(self):
+                raise AttributeError
+
+            def pos(self):
+                return QPoint(10, 20)
+
+        assert widget._event_position(LegacyEvent()) == QPointF(10, 20)
+        assert widget._pan_from_position(QPointF(center.x(), center.y())) == 0.0
+        assert widget._relative_luminance(QColor("#ffffff")) > widget._relative_luminance(
+            QColor("#000000")
+        )
+    finally:
+        widget.deleteLater()

@@ -6,6 +6,7 @@ import csv
 import json
 import sqlite3
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
@@ -1219,7 +1220,7 @@ class QualityDashboardService:
             )
             writer.writeheader()
             for issue in result.issues:
-                writer.writerow(issue.__dict__)
+                writer.writerow(asdict(issue))
 
     def export_json(self, result: QualityScanResult, path: str | Path) -> None:
         output_path = Path(path)
@@ -1228,7 +1229,7 @@ class QualityDashboardService:
             "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "counts_by_severity": result.counts_by_severity,
             "counts_by_type": result.counts_by_type,
-            "issues": [issue.__dict__ for issue in result.issues],
+            "issues": [asdict(issue) for issue in result.issues],
         }
         output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

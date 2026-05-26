@@ -6,8 +6,9 @@ from pathlib import Path
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
 from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
 from isrc_manager.parties import PartyPayload, PartyService
-from isrc_manager.quality import QualityDashboardService
+from isrc_manager.quality import QualityDashboardService, QualityIssue, QualityScanResult
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import (
@@ -164,6 +165,319 @@ class QualityDashboardServiceTests(unittest.TestCase):
             ).fetchone()[0],
             "2026-03-15",
         )
+
+    def test_export_writes_csv_and_json_issue_payloads(self):
+        issue = QualityIssue(
+            "missing_isrc",
+            "warning",
+            "Missing ISRC",
+            "This track needs an ISRC.",
+            "track",
+            17,
+            track_id=17,
+            fix_key="regenerate_derived",
+        )
+        result = QualityScanResult(
+            issues=[issue],
+            counts_by_severity={"warning": 1},
+            counts_by_type={"missing_isrc": 1},
+        )
+        csv_path = self.data_root / "reports" / "quality.csv"
+        json_path = self.data_root / "reports" / "quality.json"
+
+        self.service.export_csv(result, csv_path)
+        self.service.export_json(result, json_path)
+
+        csv_text = csv_path.read_text(encoding="utf-8")
+        json_payload = json.loads(json_path.read_text(encoding="utf-8"))
+        self.assertIn("issue_type,severity,title,details", csv_text)
+        self.assertIn("missing_isrc,warning,Missing ISRC", csv_text)
+        self.assertEqual(json_payload["counts_by_severity"], {"warning": 1})
+        self.assertEqual(json_payload["counts_by_type"], {"missing_isrc": 1})
+        self.assertEqual(json_payload["issues"][0]["track_id"], 17)
+
+    def test_regenerate_derived_can_scope_track_from_issue_entity(self):
+        first_track_id = self._create_track(isrc="NL-ABC-26-00301", title="First Derived")
+        second_track_id = self._create_track(isrc="NL-ABC-26-00302", title="Second Derived")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Derived Release",
+                primary_artist="Moonwake",
+                release_type="album",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=first_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET isrc_compact=CASE id WHEN ? THEN 'LEGACYA' ELSE 'LEGACYB' END
+            WHERE id IN (?, ?)
+            """,
+            (first_track_id, first_track_id, second_track_id),
+        )
+        self.conn.execute(
+            "UPDATE Releases SET barcode_validation_status='stale' WHERE id=?",
+            (release_id,),
+        )
+        issue = QualityIssue(
+            "derived_isrc_compact_out_of_sync",
+            "warning",
+            "Derived ISRC Out Of Sync",
+            "Regenerate the selected track value.",
+            "track",
+            first_track_id,
+            fix_key="regenerate_derived",
+        )
+
+        message = self.service.apply_fix("regenerate_derived", issue=issue)
+
+        rows = dict(
+            self.conn.execute(
+                "SELECT id, isrc_compact FROM Tracks WHERE id IN (?, ?)",
+                (first_track_id, second_track_id),
+            ).fetchall()
+        )
+        release_status = self.conn.execute(
+            "SELECT barcode_validation_status FROM Releases WHERE id=?",
+            (release_id,),
+        ).fetchone()[0]
+        self.assertEqual(message, "Regenerated derived values for 1 track(s) and 1 release(s).")
+        self.assertEqual(rows[first_track_id], to_compact_isrc("NL-ABC-26-00301"))
+        self.assertEqual(rows[second_track_id], "LEGACYB")
+        self.assertEqual(release_status, barcode_validation_status("036000291452"))
+
+    def test_regenerate_derived_can_scope_release_from_issue_entity(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00303", title="Release Scoped")
+        first_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Scoped A",
+                primary_artist="Moonwake",
+                release_type="album",
+                upc="036000291452",
+            )
+        )
+        second_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Scoped B",
+                primary_artist="Moonwake",
+                release_type="album",
+                upc="042100005264",
+            )
+        )
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
+        self.conn.execute("UPDATE Tracks SET isrc_compact='LEGACY' WHERE id=?", (track_id,))
+        self.conn.execute(
+            "UPDATE Releases SET barcode_validation_status='stale' WHERE id IN (?, ?)",
+            (first_release_id, second_release_id),
+        )
+        issue = QualityIssue(
+            "release_barcode_validation_out_of_sync",
+            "warning",
+            "Release Barcode Out Of Sync",
+            "Regenerate the selected release value.",
+            "release",
+            second_release_id,
+            fix_key="regenerate_derived",
+        )
+
+        message = self.service.apply_fix("regenerate_derived", issue=issue)
+
+        release_rows = dict(
+            self.conn.execute(
+                "SELECT id, barcode_validation_status FROM Releases WHERE id IN (?, ?)",
+                (first_release_id, second_release_id),
+            ).fetchall()
+        )
+        compact = self.conn.execute(
+            "SELECT isrc_compact FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()[0]
+        self.assertEqual(message, "Regenerated derived values for 1 track(s) and 1 release(s).")
+        self.assertEqual(compact, to_compact_isrc("NL-ABC-26-00303"))
+        self.assertEqual(release_rows[first_release_id], "stale")
+        self.assertEqual(release_rows[second_release_id], barcode_validation_status("042100005264"))
+
+    def test_normalize_dates_scopes_issue_and_ignores_unparseable_value(self):
+        first_track_id = self._create_track(isrc="NL-ABC-26-00304", title="Parseable Date")
+        second_track_id = self._create_track(isrc="NL-ABC-26-00305", title="Broken Date")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_upd")
+        self.conn.execute(
+            "UPDATE Tracks SET release_date='2026/03/15' WHERE id=?",
+            (first_track_id,),
+        )
+        self.conn.execute(
+            "UPDATE Tracks SET release_date='not-a-date' WHERE id=?",
+            (second_track_id,),
+        )
+        issue = QualityIssue(
+            "invalid_track_release_date",
+            "warning",
+            "Invalid Track Release Date",
+            "Only the selected row should be repaired.",
+            "track",
+            first_track_id,
+            fix_key="normalize_dates",
+        )
+
+        message = self.service.apply_fix("normalize_dates", issue=issue)
+
+        rows = dict(
+            self.conn.execute(
+                "SELECT id, release_date FROM Tracks WHERE id IN (?, ?)",
+                (first_track_id, second_track_id),
+            ).fetchall()
+        )
+        self.assertEqual(message, "Normalized 1 date value(s).")
+        self.assertEqual(rows[first_track_id], "2026-03-15")
+        self.assertEqual(rows[second_track_id], "not-a-date")
+
+    def test_normalize_date_handles_empty_and_unknown_formats(self):
+        self.assertIsNone(QualityDashboardService._normalize_date(""))
+        self.assertIsNone(QualityDashboardService._normalize_date(None))
+        self.assertIsNone(QualityDashboardService._normalize_date("March 15 2026"))
+        self.assertEqual(
+            QualityDashboardService._normalize_date("15-03-2026"),
+            "2026-03-15",
+        )
+
+    def test_relink_media_reports_unavailable_without_data_root(self):
+        service = QualityDashboardService(
+            self.conn,
+            track_service=self.track_service,
+            release_service=self.release_service,
+            data_root=None,
+        )
+
+        message = service.apply_fix("relink_media")
+
+        self.assertEqual(
+            message,
+            "No data root is configured, so media relinking is unavailable.",
+        )
+
+    def test_relink_media_repairs_scoped_audio_album_art_and_release_artwork(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00306", title="Relinked Track")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Relinked Release",
+                primary_artist="Moonwake",
+                release_type="single",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        recovered = self.data_root / "recovered"
+        recovered.mkdir()
+        (recovered / "audio.wav").write_bytes(b"audio")
+        (recovered / "cover.jpg").write_bytes(b"cover")
+        (recovered / "release.png").write_bytes(b"release")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET audio_file_path='missing/audio.wav', album_art_path='missing/cover.jpg'
+            WHERE id=?
+            """,
+            (track_id,),
+        )
+        self.conn.execute(
+            "UPDATE Releases SET artwork_path='missing/release.png' WHERE id=?",
+            (release_id,),
+        )
+
+        audio_message = self.service.apply_fix(
+            "relink_media",
+            issue=QualityIssue(
+                "broken_media_reference",
+                "error",
+                "Broken Audio Reference",
+                "Audio file moved.",
+                "track",
+                track_id,
+                track_id=track_id,
+                fix_key="relink_media",
+            ),
+        )
+        art_message = self.service.apply_fix(
+            "relink_media",
+            issue=QualityIssue(
+                "broken_album_art_reference",
+                "error",
+                "Broken Album Art Reference",
+                "Album art moved.",
+                "track",
+                track_id,
+                track_id=track_id,
+                fix_key="relink_media",
+            ),
+        )
+        release_message = self.service.apply_fix(
+            "relink_media",
+            issue=QualityIssue(
+                "broken_release_artwork_reference",
+                "error",
+                "Broken Release Artwork Reference",
+                "Release artwork moved.",
+                "release",
+                release_id,
+                release_id=release_id,
+                fix_key="relink_media",
+            ),
+        )
+
+        track_row = self.conn.execute(
+            "SELECT audio_file_path, album_art_path FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()
+        release_art = self.conn.execute(
+            "SELECT artwork_path FROM Releases WHERE id=?",
+            (release_id,),
+        ).fetchone()[0]
+        self.assertEqual(audio_message, "Relinked 1 media reference(s).")
+        self.assertEqual(art_message, "Relinked 1 media reference(s).")
+        self.assertEqual(release_message, "Relinked 1 media reference(s).")
+        self.assertEqual(track_row, ("recovered/audio.wav", "recovered/cover.jpg"))
+        self.assertEqual(release_art, "recovered/release.png")
+
+    def test_relink_media_all_skips_existing_and_unmatched_paths(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00307", title="Already Linked")
+        existing = self.data_root / "media" / "existing.wav"
+        existing.parent.mkdir()
+        existing.write_bytes(b"audio")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET audio_file_path='media/existing.wav', album_art_path='missing/no-match.jpg'
+            WHERE id=?
+            """,
+            (track_id,),
+        )
+
+        message = self.service.apply_fix("relink_media")
+
+        row = self.conn.execute(
+            "SELECT audio_file_path, album_art_path FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(message, "Relinked 0 media reference(s).")
+        self.assertEqual(row, ("media/existing.wav", "missing/no-match.jpg"))
 
     def test_fill_from_release_populates_blank_track_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00002")
@@ -542,6 +856,10 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.assertIn("rights_missing_source_contract", issue_types)
         self.assertIn("duplicate_party", issue_types)
         self.assertIn("missing_approved_master", issue_types)
+
+    def test_apply_fix_rejects_unknown_fix_key(self):
+        with self.assertRaisesRegex(ValueError, "Unknown quality fix: no_such_fix"):
+            self.service.apply_fix("no_such_fix")
 
 
 if __name__ == "__main__":
