@@ -1,7 +1,7 @@
 {
-  "version": "3.15.2",
+  "version": "3.16.0",
   "released_at": "2026-05-26",
-  "summary": "Fix CI test-group ownership for new modules",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.15.2.md",
+  "summary": "Support typed indexed manual placeholders",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.16.0.md",
   "minimum_supported_version": null
 }
