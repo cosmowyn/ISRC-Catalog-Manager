@@ -2970,19 +2970,47 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.manual_key_edit.setObjectName("contractTemplateManualKeyEdit")
         self.manual_key_edit.setPlaceholderText("Example: License Date")
         self.manual_key_edit.textChanged.connect(self._refresh_manual_symbol_preview)
+        self.manual_type_combo = QComboBox(manual_surface)
+        self.manual_type_combo.setObjectName("contractTemplateManualTypeCombo")
+        self.manual_type_combo.addItem("Plain text", "")
+        self.manual_type_combo.addItem("Boolean options: $bool[...]", "bool")
+        self.manual_type_combo.addItem("List options: $list[...]", "list")
+        self.manual_type_combo.currentIndexChanged.connect(self._refresh_manual_symbol_preview)
+        self.manual_options_edit = QLineEdit(manual_surface)
+        self.manual_options_edit.setObjectName("contractTemplateManualOptionsEdit")
+        self.manual_options_edit.setPlaceholderText("Example: yes;no;maybe")
+        self.manual_options_edit.textChanged.connect(self._refresh_manual_symbol_preview)
+        self.manual_indexed_check = QCheckBox("Indexed duplicate-block field", manual_surface)
+        self.manual_indexed_check.setObjectName("contractTemplateManualIndexedCheck")
+        self.manual_indexed_check.toggled.connect(self._refresh_manual_symbol_preview)
         self.manual_symbol_edit = QLineEdit(manual_surface)
         self.manual_symbol_edit.setObjectName("contractTemplateManualSymbolEdit")
         self.manual_symbol_edit.setReadOnly(True)
         manual_form.addRow("Human Label", self.manual_key_edit)
+        manual_form.addRow("Manual Type", self.manual_type_combo)
+        manual_form.addRow("Options", self.manual_options_edit)
+        manual_form.addRow("Indexed", self.manual_indexed_check)
         manual_form.addRow("Generated Symbol", self.manual_symbol_edit)
         manual_layout.addLayout(manual_form)
         self.manual_feedback_label = QLabel(
-            "Generated manual symbols use the canonical Phase 1 grammar: {{manual.your_field_name}}.",
+            "Generated manual symbols use the canonical Phase 1 grammar: {{manual.name}} for text, "
+            "{{manual.name$bool[yes;no;maybe]}} for fixed boolean-style choices, "
+            "{{manual.name$list[option1;option2]}} for lists, and add .indexed before "
+            "the closing braces for duplicate-block rows.",
             manual_surface,
         )
         self.manual_feedback_label.setWordWrap(True)
         self.manual_feedback_label.setProperty("role", "secondary")
         manual_layout.addWidget(self.manual_feedback_label)
+        manual_guidance = QLabel(
+            "Separate options with semicolons. Every value inside [] becomes an available "
+            "fill-form choice. Indexed manual symbols create one field per duplicate number, "
+            "matching indexed database symbols.",
+            manual_surface,
+        )
+        manual_guidance.setWordWrap(True)
+        manual_guidance.setProperty("role", "secondary")
+        manual_layout.addWidget(manual_guidance)
         copy_manual_button = QPushButton("Copy Manual Symbol", manual_surface)
         copy_manual_button.setObjectName("contractTemplateCopyManualButton")
         copy_manual_button.clicked.connect(self.copy_manual_symbol)
@@ -3929,6 +3957,26 @@ class ContractTemplateWorkspacePanel(QWidget):
         if self._fill_definition is not None and self._fill_definition.revision_id == revision_id:
             preserved_state = self.current_fill_state()
 
+        inventory_refresh_warnings: list[str] = []
+        selected_revision_record = next(
+            (revision for revision in revisions if int(revision.revision_id) == int(revision_id)),
+            None,
+        )
+        if (
+            selected_revision_record is not None
+            and str(selected_revision_record.source_format or "").strip().lower() == "html"
+        ):
+            try:
+                template_service.rescan_revision(
+                    revision_id,
+                    preserve_bindings=True,
+                    activate_if_ready=False,
+                )
+            except Exception as exc:
+                inventory_refresh_warnings.append(
+                    f"Unable to refresh HTML placeholder inventory: {exc}"
+                )
+
         try:
             form_definition = form_service.build_form_definition(revision_id)
         except Exception as exc:
@@ -3964,8 +4012,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"{'s' if len(form_definition.auto_fields) != 1 else ''}",
             f"{len(form_definition.selector_fields)} selector"
             f"{'s' if len(form_definition.selector_fields) != 1 else ''}",
-            f"{len(form_definition.manual_fields)} manual field"
-            f"{'s' if len(form_definition.manual_fields) != 1 else ''}",
+            f"{len(form_definition.manual_fields) + len(form_definition.indexed_manual_fields)} manual field"
+            f"{'s' if (len(form_definition.manual_fields) + len(form_definition.indexed_manual_fields)) != 1 else ''}",
         ]
         revision_label = _clean_text(form_definition.revision_label) or f"Revision #{revision_id}"
         self.fill_status_label.setText(
@@ -3973,6 +4021,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"Generated {', '.join(status_bits)}."
         )
         warning_lines = list(form_definition.warnings)
+        warning_lines.extend(inventory_refresh_warnings)
         warning_lines.extend(self._fill_generation_warnings)
         if form_definition.unresolved_placeholders:
             warning_lines.append(
@@ -3995,7 +4044,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             draft_count=int(self.fill_draft_combo.count()),
             auto_field_count=len(form_definition.auto_fields),
             selector_field_count=len(form_definition.selector_fields),
-            manual_field_count=len(form_definition.manual_fields),
+            manual_field_count=len(form_definition.manual_fields)
+            + len(form_definition.indexed_manual_fields),
         )
 
     def current_fill_state(self) -> dict[str, object]:
@@ -4311,10 +4361,17 @@ class ContractTemplateWorkspacePanel(QWidget):
         db_values = dict(payload_map.get("db_selections") or {})
         manual_values = dict(payload_map.get("manual_values") or {})
         manual_formats = dict(payload_map.get("manual_formats") or {})
-        if self._fill_definition is not None and self._fill_definition.indexed_selector_fields:
+        if self._fill_definition is not None and (
+            self._fill_definition.indexed_selector_fields
+            or self._fill_definition.indexed_manual_fields
+        ):
             indexed_count = self._indexed_selector_count_from_manual_values(manual_values)
             if indexed_count != self._fill_indexed_selector_count:
                 self._rebuild_selector_fields(
+                    self._fill_definition,
+                    indexed_count=indexed_count,
+                )
+                self._rebuild_manual_fields(
                     self._fill_definition,
                     indexed_count=indexed_count,
                 )
@@ -5692,7 +5749,10 @@ class ContractTemplateWorkspacePanel(QWidget):
         return self._indexed_selector_count_from_manual_values({"{{duplicate.number}}": value})
 
     def _sync_indexed_selector_fields_from_duplicate_number(self) -> None:
-        if self._fill_definition is None or not self._fill_definition.indexed_selector_fields:
+        if self._fill_definition is None or (
+            not self._fill_definition.indexed_selector_fields
+            and not getattr(self._fill_definition, "indexed_manual_fields", ())
+        ):
             return
         indexed_count = self._current_indexed_selector_count()
         if indexed_count == self._fill_indexed_selector_count:
@@ -5703,6 +5763,20 @@ class ContractTemplateWorkspacePanel(QWidget):
             for value in [self._read_widget_value(widget)]
             if value is not None
         }
+        preserved_values.update(
+            {
+                key: value
+                for key, widget in self.manual_widgets.items()
+                for value in [self._read_widget_value(widget)]
+                if value is not None
+            }
+        )
+        preserved_formats = {
+            key: str(widget.text() or "").strip()
+            for key, widget in self.manual_date_format_widgets.items()
+            for format_code in [str(widget.text() or "").strip()]
+            if key in self.manual_widgets and format_code
+        }
         previous_suspend = self._suspend_fill_updates
         self._suspend_fill_updates = True
         try:
@@ -5711,8 +5785,27 @@ class ContractTemplateWorkspacePanel(QWidget):
                 indexed_count=indexed_count,
                 preserved_values=preserved_values,
             )
+            if getattr(self._fill_definition, "manual_fields", None) is not None:
+                self._rebuild_manual_fields(
+                    self._fill_definition,
+                    indexed_count=indexed_count,
+                    preserved_values=preserved_values,
+                    preserved_formats=preserved_formats,
+                )
         finally:
             self._suspend_fill_updates = previous_suspend
+
+    def _queue_indexed_fields_sync_from_duplicate_number(self) -> None:
+        if getattr(self, "_indexed_fields_sync_pending", False):
+            return
+        self._indexed_fields_sync_pending = True
+        QTimer.singleShot(0, self._flush_indexed_fields_sync_from_duplicate_number)
+
+    def _flush_indexed_fields_sync_from_duplicate_number(self) -> None:
+        self._indexed_fields_sync_pending = False
+        if not _qt_object_is_valid(self):
+            return
+        self._sync_indexed_selector_fields_from_duplicate_number()
 
     def _write_widget_value(
         self,
@@ -5951,12 +6044,35 @@ class ContractTemplateWorkspacePanel(QWidget):
         if not raw_value.strip():
             self.manual_symbol_edit.clear()
             self.manual_feedback_label.setText(
-                "Generated manual symbols use the canonical Phase 1 grammar: "
-                "{{manual.your_field_name}}."
+                "Generated manual symbols use the canonical Phase 1 grammar: {{manual.name}} for text, "
+                "{{manual.name$bool[yes;no;maybe]}} for fixed boolean-style choices, "
+                "{{manual.name$list[option1;option2]}} for lists, and add .indexed before "
+                "the closing braces for duplicate-block rows."
             )
             return
         try:
-            symbol = service.build_manual_symbol(raw_value)
+            manual_type = (
+                str(self.manual_type_combo.currentData() or "")
+                if hasattr(self, "manual_type_combo")
+                else ""
+            )
+            options = (
+                self.manual_options_edit.text() if hasattr(self, "manual_options_edit") else ""
+            )
+            indexed = (
+                bool(self.manual_indexed_check.isChecked())
+                if hasattr(self, "manual_indexed_check")
+                else False
+            )
+            try:
+                symbol = service.build_manual_symbol(
+                    raw_value,
+                    manual_type=manual_type or None,
+                    options=options,
+                    indexed=indexed,
+                )
+            except TypeError:
+                symbol = service.build_manual_symbol(raw_value)
         except ValueError as exc:
             self.manual_symbol_edit.clear()
             self.manual_feedback_label.setText(str(exc))
@@ -5964,7 +6080,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.manual_symbol_edit.setText(symbol)
         self.manual_feedback_label.setText(
             "Manual symbols are parser-safe and remain outside the authoritative "
-            "DB-backed catalog."
+            "DB-backed catalog. Typed options inside [] become fill-form choices; "
+            ".indexed creates one manual field per duplicate number."
         )
 
     def _on_fill_template_changed(self) -> None:
@@ -6010,15 +6127,15 @@ class ContractTemplateWorkspacePanel(QWidget):
             form_definition,
             indexed_count=self._fill_indexed_selector_count,
         )
-        for field in form_definition.manual_fields:
-            widget = self._build_manual_widget(field)
-            value_widget = widget.property("manual_value_widget")
-            self.manual_widgets[field.canonical_symbol] = (
-                value_widget if isinstance(value_widget, QWidget) else widget
-            )
-            self.fill_manual_form.addRow(field.display_label, widget)
+        self._rebuild_manual_fields(
+            form_definition,
+            indexed_count=self._fill_indexed_selector_count,
+        )
         self.fill_auto_empty_label.setVisible(not bool(form_definition.auto_fields))
-        self.fill_manual_empty_label.setVisible(not bool(form_definition.manual_fields))
+        self.fill_manual_empty_label.setVisible(
+            not bool(form_definition.manual_fields)
+            and not bool(form_definition.indexed_manual_fields)
+        )
 
     def _rebuild_selector_fields(
         self,
@@ -6052,6 +6169,38 @@ class ContractTemplateWorkspacePanel(QWidget):
                 self._write_widget_value(widget, value, explicit=True)
         self.fill_selector_empty_label.setVisible(not bool(fields))
 
+    def _rebuild_manual_fields(
+        self,
+        form_definition: ContractTemplateFormDefinition,
+        *,
+        indexed_count: int,
+        preserved_values: dict[str, object] | None = None,
+        preserved_formats: dict[str, str] | None = None,
+    ) -> None:
+        self._clear_form_layout(self.fill_manual_form)
+        self.manual_widgets = {}
+        self.manual_date_format_widgets = {}
+        self.manual_date_format_combo_widgets = {}
+        self._fill_indexed_selector_count = max(0, min(200, int(indexed_count)))
+        fields: list[ContractTemplateFormManualField] = list(form_definition.manual_fields)
+        for template in form_definition.indexed_manual_fields:
+            for index in range(1, self._fill_indexed_selector_count + 1):
+                fields.append(self._indexed_manual_field(template, index))
+        for field in fields:
+            widget = self._build_manual_widget(field)
+            value_widget = widget.property("manual_value_widget")
+            self.manual_widgets[field.canonical_symbol] = (
+                value_widget if isinstance(value_widget, QWidget) else widget
+            )
+            self.fill_manual_form.addRow(field.display_label, widget)
+        for key, value in dict(preserved_values or {}).items():
+            widget = self.manual_widgets.get(str(key))
+            if widget is not None:
+                self._write_widget_value(widget, value, explicit=True)
+        for key, format_code in dict(preserved_formats or {}).items():
+            self._set_manual_date_format(str(key), str(format_code))
+        self.fill_manual_empty_label.setVisible(not bool(fields))
+
     @staticmethod
     def _indexed_selector_field(
         template: ContractTemplateFormSelectorField,
@@ -6076,6 +6225,27 @@ class ContractTemplateWorkspacePanel(QWidget):
             description=(
                 f"{template.description or ''} This selector is used for DB Index {index}."
             ).strip(),
+        )
+
+    @staticmethod
+    def _indexed_manual_field(
+        template: ContractTemplateFormManualField,
+        index: int,
+    ) -> ContractTemplateFormManualField:
+        return ContractTemplateFormManualField(
+            canonical_symbol=build_contract_template_indexed_selection_key(
+                template.canonical_symbol,
+                index,
+            ),
+            display_label=f"{template.display_label} {index}",
+            field_type=template.field_type,
+            widget_kind=template.widget_kind,
+            required=template.required,
+            placeholder_count=template.placeholder_count,
+            description=(
+                f"{template.description or ''} " f"This field is used for Duplicate Index {index}."
+            ).strip(),
+            options=template.options,
         )
 
     def _clear_fill_fields(self) -> None:
@@ -6300,7 +6470,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         return label
 
     def _build_manual_widget(self, field: ContractTemplateFormManualField) -> QWidget:
-        if field.field_type == "boolean":
+        if field.field_type == "boolean" and field.widget_kind != "boolean_options":
             checkbox = QCheckBox("Yes", self.fill_form_tab)
             checkbox.setObjectName("contractTemplateManualBooleanWidget")
             checkbox.setProperty("canonical_symbol", field.canonical_symbol)
@@ -6347,7 +6517,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                     widget.property("canonical_symbol") == "{{duplicate.number}}"
                     and not self._suspend_fill_updates
                 ):
-                    self._sync_indexed_selector_fields_from_duplicate_number()
+                    self._queue_indexed_fields_sync_from_duplicate_number()
                 self._mark_fill_dirty()
 
             spin.valueChanged.connect(_handle_number_change)

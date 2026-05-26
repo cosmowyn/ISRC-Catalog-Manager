@@ -849,13 +849,35 @@ class ContractTemplateCatalogService:
     ) -> list[ContractTemplateCatalogEntry]:
         return self.list_known_symbols(search_text=search_text, namespace=namespace)
 
-    def build_manual_symbol(self, value: str) -> str:
+    def build_manual_symbol(
+        self,
+        value: str,
+        *,
+        manual_type: str | None = None,
+        options: str | tuple[str, ...] = (),
+        indexed: bool = False,
+    ) -> str:
         normalized = _NORMALIZE_KEY_RE.sub("_", str(value or "").strip())
         normalized = normalized.lower().replace("-", "_")
         normalized = re.sub(r"_+", "_", normalized).strip("_")
         if not normalized:
             raise ValueError("Manual placeholder label must contain at least one letter or number.")
-        return parse_placeholder(f"{{{{manual.{normalized}}}}}").canonical_symbol
+        clean_type = str(manual_type or "").strip().lower()
+        type_suffix = ""
+        if clean_type:
+            if clean_type not in {"bool", "list"}:
+                raise ValueError("Manual symbol type must be bool or list.")
+            raw_options = options.split(";") if isinstance(options, str) else (options or ())
+            clean_options = tuple(
+                str(item or "").strip() for item in raw_options if str(item or "").strip()
+            )
+            if not clean_options:
+                raise ValueError("Manual typed symbols require at least one option.")
+            type_suffix = f"${clean_type}[{';'.join(clean_options)}]"
+        indexed_suffix = ".indexed" if indexed else ""
+        return parse_placeholder(
+            f"{{{{manual.{normalized}{type_suffix}{indexed_suffix}}}}}"
+        ).canonical_symbol
 
     def _static_entries(self) -> tuple[ContractTemplateCatalogEntry, ...]:
         return tuple(self._entry_from_seed(seed) for seed in (*_STATIC_SEEDS, *_CONTROL_SEEDS))

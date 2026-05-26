@@ -1335,6 +1335,42 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.assertIsInstance(text_widget, QLineEdit)
         self.assertIn("Note", text_widget.placeholderText())
 
+    def test_duplicate_number_widget_defers_indexed_field_sync(self):
+        duplicate_widget = self.panel._build_manual_widget(
+            ContractTemplateFormManualField(
+                canonical_symbol="{{duplicate.number}}",
+                display_label="Duplicate Count",
+                field_type="number",
+                widget_kind="spin",
+                required=False,
+                placeholder_count=1,
+            )
+        )
+        self.panel.manual_widgets["{{duplicate.number}}"] = duplicate_widget
+
+        with (
+            mock.patch.object(
+                self.panel,
+                "_sync_indexed_selector_fields_from_duplicate_number",
+            ) as sync,
+            mock.patch("isrc_manager.contract_templates.dialogs.QTimer.singleShot") as single_shot,
+        ):
+            duplicate_widget.setValue(2)
+
+        sync.assert_not_called()
+        single_shot.assert_called_once()
+        delay, callback = single_shot.call_args.args
+        self.assertEqual(delay, 0)
+
+        with mock.patch.object(
+            self.panel,
+            "_sync_indexed_selector_fields_from_duplicate_number",
+        ) as sync:
+            callback()
+
+        sync.assert_called_once_with()
+        self.assertFalse(getattr(self.panel, "_indexed_fields_sync_pending", False))
+
     def test_fill_draft_selection_export_and_preview_helper_edges(self):
         self._focus_fill()
         draft, snapshot, artifact = self._create_admin_draft_bundle(name="Fill Helper")
@@ -1617,7 +1653,10 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.panel._sync_indexed_selector_fields_from_duplicate_number()
             self.panel._fill_indexed_selector_count = 1
             self.panel._sync_indexed_selector_fields_from_duplicate_number()
-        self.assertEqual(rebuild_calls, [(2, {"{{db.track.track_title}}": "original"})])
+        self.assertEqual(len(rebuild_calls), 1)
+        self.assertEqual(rebuild_calls[0][0], 2)
+        self.assertEqual(rebuild_calls[0][1]["{{db.track.track_title}}"], "original")
+        self.assertIn("{{duplicate.number}}", rebuild_calls[0][1])
 
         form_definition = SimpleNamespace(
             selector_fields=(
@@ -2187,6 +2226,22 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.panel.copy_manual_symbol()
         self.assertEqual(self.app.clipboard().text(), "{{manual.license_date}}")
 
+        self.panel.manual_key_edit.setText("Explicit")
+        self.panel.manual_type_combo.setCurrentIndex(self.panel.manual_type_combo.findData("bool"))
+        self.panel.manual_options_edit.setText("yes;no;maybe")
+        self.panel.manual_indexed_check.setChecked(True)
+        pump_events(app=self.app, cycles=2)
+
+        self.assertEqual(
+            self.panel.manual_symbol_edit.text(),
+            "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+        )
+        self.panel.copy_manual_symbol()
+        self.assertEqual(
+            self.app.clipboard().text(),
+            "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+        )
+
     def test_panel_double_click_copies_symbol_to_clipboard(self):
         self._focus_symbols()
         self.panel.focus_namespace("contract")
@@ -2309,6 +2364,58 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
 
         self.assertIn(first_key, self.panel.selector_widgets)
         self.assertIn(second_key, self.panel.selector_widgets)
+
+    def test_fill_tab_expands_indexed_manual_fields_from_duplicate_number(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Indexed Manual Dialog Template",
+                description="Indexed manual dialog coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "indexed-manual-dialog-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Indexed ",
+                        "{{duplicate.start}}",
+                        "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+
+        self._focus_fill()
+        self.panel._select_revision_context(template.template_id, revision.revision_id)
+        pump_events(app=self.app, cycles=3)
+
+        explicit_symbol = "{{manual.explicit$bool[yes;no;maybe].indexed}}"
+        first_key = build_contract_template_indexed_selection_key(explicit_symbol, 1)
+        second_key = build_contract_template_indexed_selection_key(explicit_symbol, 2)
+        self.assertIn(first_key, self.panel.manual_widgets)
+        self.assertNotIn(second_key, self.panel.manual_widgets)
+
+        duplicate_widget = self.panel.manual_widgets["{{duplicate.number}}"]
+        duplicate_widget.setValue(2)
+        pump_events(app=self.app, cycles=3)
+
+        self.assertIn(first_key, self.panel.manual_widgets)
+        self.assertIn(second_key, self.panel.manual_widgets)
+        explicit_widget = self.panel.manual_widgets[first_key]
+        self.assertIsInstance(explicit_widget, QComboBox)
+        self.assertEqual(
+            [explicit_widget.itemData(index) for index in range(1, explicit_widget.count())],
+            ["yes", "no", "maybe"],
+        )
 
     def test_panel_exposes_fill_tab_and_focuses_requested_form_workspace(self):
         tab_texts = [

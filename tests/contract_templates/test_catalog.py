@@ -169,3 +169,20 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
             self.service.build_manual_symbol("  Counterparty Name  "),
             "{{manual.counterparty_name}}",
         )
+        self.assertEqual(
+            self.service.build_manual_symbol(
+                "Explicit",
+                manual_type="bool",
+                options="yes;no;maybe",
+                indexed=True,
+            ),
+            "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+        )
+        self.assertEqual(
+            self.service.build_manual_symbol(
+                "Contract Status",
+                manual_type="list",
+                options=("draft", "final", "signed"),
+            ),
+            "{{manual.contract_status$list[draft;final;signed]}}",
+        )

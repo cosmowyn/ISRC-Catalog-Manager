@@ -73,6 +73,49 @@ class ContractTemplateParserTests(unittest.TestCase):
                 with self.assertRaises(InvalidPlaceholderError):
                     parse_placeholder(raw)
 
+    def test_indexed_suffix_supported_for_multiple_symbol_kinds(self):
+        manual_indexed = parse_placeholder("{{manual.version.indexed}}")
+        typed_manual_indexed = parse_placeholder("{{manual.explicit$bool[yes;no;maybe].indexed}}")
+        current_indexed = parse_placeholder("{{current.year.indexed}}")
+        page_indexed = parse_placeholder("{{page.index.indexed}}")
+        custom_indexed = parse_placeholder("{{custom.index.indexed}}")
+        duplicate_indexed = parse_placeholder("{{duplicate.number.indexed}}")
+        db_indexed = parse_placeholder("{{db.track.track_title.indexed}}")
+
+        self.assertEqual(manual_indexed.binding_kind, "manual")
+        self.assertTrue(manual_indexed.indexed)
+        self.assertEqual(manual_indexed.canonical_symbol, "{{manual.version.indexed}}")
+
+        self.assertEqual(typed_manual_indexed.binding_kind, "manual")
+        self.assertEqual(typed_manual_indexed.key, "explicit")
+        self.assertTrue(typed_manual_indexed.indexed)
+        self.assertEqual(typed_manual_indexed.manual_type, "bool")
+        self.assertEqual(typed_manual_indexed.manual_options, ("yes", "no", "maybe"))
+        self.assertEqual(
+            typed_manual_indexed.canonical_symbol,
+            "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+        )
+
+        self.assertEqual(current_indexed.binding_kind, "current")
+        self.assertTrue(current_indexed.indexed)
+        self.assertEqual(current_indexed.canonical_symbol, "{{current.year.indexed}}")
+
+        self.assertEqual(page_indexed.binding_kind, "page")
+        self.assertTrue(page_indexed.indexed)
+        self.assertEqual(page_indexed.canonical_symbol, "{{page.index.indexed}}")
+
+        self.assertEqual(custom_indexed.binding_kind, "custom")
+        self.assertTrue(custom_indexed.indexed)
+        self.assertEqual(custom_indexed.canonical_symbol, "{{custom.index.indexed}}")
+
+        self.assertEqual(duplicate_indexed.binding_kind, "duplicate")
+        self.assertTrue(duplicate_indexed.indexed)
+        self.assertEqual(duplicate_indexed.canonical_symbol, "{{duplicate.number.indexed}}")
+
+        self.assertEqual(db_indexed.binding_kind, "db")
+        self.assertTrue(db_indexed.indexed)
+        self.assertEqual(db_indexed.canonical_symbol, "{{db.track.track_title.indexed}}")
+
 
 if __name__ == "__main__":
     unittest.main()

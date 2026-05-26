@@ -459,3 +459,64 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
             ),
         )
         self.assertGreaterEqual(len(indexed_selector.choices), 1)
+
+    def test_indexed_manual_symbols_build_indexed_manual_templates(self):
+        template = self._create_template()
+        source_path = self.root / "indexed-manual-form.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Indexed manual block ",
+                        "{{duplicate.start}}",
+                        "{{manual.version.indexed}}",
+                        "{{manual.explicit$bool[yes;no;maybe].indexed}}",
+                        "{{manual.status$list[draft;final;signed].indexed}}",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+        manual_fields = {item.canonical_symbol: item for item in definition.manual_fields}
+        indexed_manual_fields = {
+            item.canonical_symbol: item for item in definition.indexed_manual_fields
+        }
+
+        self.assertEqual(len(definition.selector_fields), 0)
+        self.assertEqual(len(definition.indexed_selector_fields), 0)
+        self.assertIn("{{manual.version.indexed}}", indexed_manual_fields)
+        self.assertIn("{{manual.explicit$bool[yes;no;maybe].indexed}}", indexed_manual_fields)
+        self.assertIn("{{manual.status$list[draft;final;signed].indexed}}", indexed_manual_fields)
+        self.assertIn("{{duplicate.number}}", manual_fields)
+        self.assertEqual(
+            indexed_manual_fields["{{manual.version.indexed}}"].field_type,
+            "text",
+        )
+        self.assertEqual(
+            indexed_manual_fields["{{manual.explicit$bool[yes;no;maybe].indexed}}"].field_type,
+            "boolean",
+        )
+        self.assertEqual(
+            indexed_manual_fields["{{manual.explicit$bool[yes;no;maybe].indexed}}"].widget_kind,
+            "boolean_options",
+        )
+        self.assertEqual(
+            indexed_manual_fields["{{manual.explicit$bool[yes;no;maybe].indexed}}"].options,
+            ("yes", "no", "maybe"),
+        )
+        self.assertEqual(
+            indexed_manual_fields["{{manual.status$list[draft;final;signed].indexed}}"].field_type,
+            "list",
+        )
+        self.assertEqual(
+            indexed_manual_fields["{{manual.status$list[draft;final;signed].indexed}}"].options,
+            ("draft", "final", "signed"),
+        )

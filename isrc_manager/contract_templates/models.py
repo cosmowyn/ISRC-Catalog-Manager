@@ -353,6 +353,7 @@ class ContractTemplateFormDefinition:
     selector_fields: tuple[ContractTemplateFormSelectorField, ...]
     manual_fields: tuple[ContractTemplateFormManualField, ...]
     indexed_selector_fields: tuple[ContractTemplateFormSelectorField, ...] = ()
+    indexed_manual_fields: tuple[ContractTemplateFormManualField, ...] = ()
     unresolved_placeholders: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -367,6 +368,7 @@ class ContractTemplateFormDefinition:
             "selector_fields": [item.to_dict() for item in self.selector_fields],
             "manual_fields": [item.to_dict() for item in self.manual_fields],
             "indexed_selector_fields": [item.to_dict() for item in self.indexed_selector_fields],
+            "indexed_manual_fields": [item.to_dict() for item in self.indexed_manual_fields],
             "unresolved_placeholders": list(self.unresolved_placeholders),
             "warnings": list(self.warnings),
         }

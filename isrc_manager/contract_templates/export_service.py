@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -375,6 +376,9 @@ class ContractTemplateExportService:
                 resolved[canonical] = ""
                 continue
             if token.binding_kind == "manual":
+                if token.indexed and canonical in iterated_symbols:
+                    resolved[canonical] = ""
+                    continue
                 if canonical not in manual_values:
                     if strict:
                         raise ContractTemplateExportError(
@@ -579,6 +583,15 @@ class ContractTemplateExportService:
             symbols.append(token.canonical_symbol)
         return tuple(dict.fromkeys(symbols))
 
+    def _indexed_manual_symbols_for_text(self, text: str) -> tuple[str, ...]:
+        symbols: list[str] = []
+        for occurrence in extract_placeholders(str(text or "")):
+            token = occurrence.token
+            if token.binding_kind != "manual" or not token.indexed:
+                continue
+            symbols.append(token.canonical_symbol)
+        return tuple(dict.fromkeys(symbols))
+
     def _duplicate_iterated_indexed_symbols(
         self,
         html_text: str,
@@ -586,11 +599,53 @@ class ContractTemplateExportService:
         block_symbols: set[str] = set()
         for match in _DUPLICATE_BLOCK_RE.finditer(str(html_text or "")):
             block_symbols.update(self._indexed_db_symbols_for_text(str(match.group(1) or "")))
+            block_symbols.update(self._indexed_manual_symbols_for_text(str(match.group(1) or "")))
         if not block_symbols:
             return set()
         outside_duplicate_blocks = _DUPLICATE_BLOCK_RE.sub("", str(html_text or ""))
         outside_symbols = set(self._indexed_db_symbols_for_text(outside_duplicate_blocks))
+        outside_symbols.update(self._indexed_manual_symbols_for_text(outside_duplicate_blocks))
         return block_symbols - outside_symbols
+
+    def _indexed_manual_replacements(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        index: int,
+        manual_values: dict[str, object],
+        manual_formats: dict[str, str],
+        strict: bool,
+        warnings: list[str],
+    ) -> dict[str, str]:
+        replacements: dict[str, str] = {}
+        for symbol in symbols:
+            token = parse_placeholder(symbol)
+            selection_key = build_contract_template_indexed_selection_key(symbol, index)
+            if selection_key not in manual_values:
+                message = (
+                    f"Indexed manual placeholder {symbol} at Duplicate Index {index} does not have "
+                    "a saved value."
+                )
+                if strict:
+                    raise ContractTemplateExportError(message)
+                warnings.append(message)
+                replacements[symbol] = ""
+                continue
+            value = manual_values.get(selection_key)
+            if self._is_manual_date_placeholder(
+                SimpleNamespace(
+                    inferred_field_type="",
+                    placeholder_key=token.key,
+                ),
+                binding=None,
+            ):
+                replacements[symbol] = format_manual_date_value(
+                    value,
+                    manual_formats.get(selection_key) or DEFAULT_MANUAL_DATE_FORMAT,
+                )
+            else:
+                replacements[symbol] = self._render_output_value(value)
+        return replacements
 
     def _indexed_db_replacements(
         self,
@@ -1214,6 +1269,7 @@ class ContractTemplateExportService:
             return rendered, ()
         manual_values = dict(editable_payload.get("manual_values") or {})
         db_selections = dict(editable_payload.get("db_selections") or {})
+        manual_formats = dict(editable_payload.get("manual_formats") or {})
         count = self._duplicate_copy_count(
             manual_values.get(_DUPLICATE_NUMBER_SYMBOL),
             strict=strict,
@@ -1227,6 +1283,7 @@ class ContractTemplateExportService:
             matched = True
             block = str(match.group(1) or "")
             indexed_symbols = self._indexed_db_symbols_for_text(block)
+            indexed_manual_symbols = self._indexed_manual_symbols_for_text(block)
             if count is None:
                 copy_count = 1
                 message = "Duplicate block preview uses one copy until Duplicate Number is set."
@@ -1235,7 +1292,7 @@ class ContractTemplateExportService:
                     missing_count_warning_added = True
             else:
                 copy_count = int(count)
-            if not (indexed_symbols or _DB_INDEX_SYMBOL in block):
+            if not (indexed_symbols or indexed_manual_symbols or _DB_INDEX_SYMBOL in block):
                 return block * copy_count
             rendered_blocks: list[str] = []
             for index in range(1, copy_count + 1):
@@ -1247,6 +1304,16 @@ class ContractTemplateExportService:
                         db_selections=db_selections,
                         draft_id=draft_id,
                         allow_registry_generation=allow_registry_generation,
+                        strict=strict,
+                        warnings=warnings,
+                    )
+                )
+                replacements.update(
+                    self._indexed_manual_replacements(
+                        symbols=indexed_manual_symbols,
+                        index=index,
+                        manual_values=manual_values,
+                        manual_formats=manual_formats,
                         strict=strict,
                         warnings=warnings,
                     )

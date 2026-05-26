@@ -1400,6 +1400,71 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         self.assertNotIn("{{db.index}}", rendered_html)
         self.assertNotIn("{{duplicate.number}}", rendered_html)
 
+    def test_html_duplicate_block_uses_indexed_manual_selections(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Indexed Manual Duplicate Template",
+                description="Duplicate block indexed manual coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        source_path = self.root / "indexed-manual-duplicate.html"
+        source_path.write_text(
+            "<html><body><h1>Manual Duplicates</h1>{{duplicate.start}}"
+            "<section><p>{{manual.version.indexed}}</p><p>{{manual.license_date.indexed}}</p></section>"
+            "{{duplicate.end}}{{duplicate.number}}</body></html>",
+            encoding="utf-8",
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        version_symbol = "{{manual.version.indexed}}"
+        date_symbol = "{{manual.license_date.indexed}}"
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Indexed Manual Duplicate Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {},
+                    "manual_values": {
+                        build_contract_template_indexed_selection_key(
+                            version_symbol, 1
+                        ): "Manual Alpha",
+                        build_contract_template_indexed_selection_key(
+                            version_symbol, 2
+                        ): "Manual Beta",
+                        build_contract_template_indexed_selection_key(date_symbol, 1): "2026-01-15",
+                        build_contract_template_indexed_selection_key(date_symbol, 2): "2026-02-28",
+                        "{{duplicate.number}}": 2,
+                    },
+                    "manual_formats": {
+                        build_contract_template_indexed_selection_key(
+                            date_symbol, 1
+                        ): "dd.mmm.yyyy",
+                        build_contract_template_indexed_selection_key(
+                            date_symbol, 2
+                        ): "dd.mmm.yyyy",
+                    },
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        rendered_html = Path(result.resolved_html_artifact.output_path).read_text(encoding="utf-8")
+
+        self.assertEqual(rendered_html.count("<section>"), 2)
+        self.assertIn("<p>Manual Alpha</p><p>15.Jan.2026</p>", rendered_html)
+        self.assertIn("<p>Manual Beta</p><p>28.Feb.2026</p>", rendered_html)
+        self.assertNotIn("{{manual.version.indexed}}", rendered_html)
+        self.assertNotIn("{{manual.license_date.indexed}}", rendered_html)
+        self.assertNotIn("{{duplicate.number}}", rendered_html)
+
     def test_html_preview_replaces_current_year_even_when_scan_inventory_is_stale(self):
         template = self.template_service.create_template(
             ContractTemplatePayload(

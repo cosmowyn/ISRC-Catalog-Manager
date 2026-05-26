@@ -41,7 +41,7 @@ class ContractTemplateFormService:
         re.IGNORECASE,
     )
     _BOOLEAN_HINT_RE = re.compile(
-        r"(^|_)(is|has|allow|approved|exclusive|perpetual|verified|enabled|disabled|signed|waived|consent|consented|confirmed|confirm)($|_)",
+        r"(^|_)(is|has|allow|approved|exclusive|explicit|perpetual|verified|enabled|disabled|signed|waived|consent|consented|confirmed|confirm)($|_)",
         re.IGNORECASE,
     )
     _SELECTOR_LABELS = {
@@ -120,6 +120,7 @@ class ContractTemplateFormService:
         indexed_selector_fields: list[ContractTemplateFormSelectorField] = []
         auto_fields: list[ContractTemplateFormAutoField] = []
         manual_fields: list[ContractTemplateFormManualField] = []
+        indexed_manual_fields: list[ContractTemplateFormManualField] = []
         unresolved: list[str] = []
         warnings: list[str] = []
         selector_groups: dict[
@@ -212,12 +213,20 @@ class ContractTemplateFormService:
                     auto_fields.append(self._duplicate_marker_auto_field(placeholder))
                 continue
             if token.binding_kind == "manual":
-                manual_fields.append(
-                    self._manual_field(
-                        placeholder,
-                        binding=binding,
+                if token.indexed:
+                    indexed_manual_fields.append(
+                        self._manual_field(
+                            placeholder,
+                            binding=binding,
+                        )
                     )
-                )
+                else:
+                    manual_fields.append(
+                        self._manual_field(
+                            placeholder,
+                            binding=binding,
+                        )
+                    )
                 continue
             unresolved.append(placeholder.canonical_symbol)
 
@@ -248,6 +257,7 @@ class ContractTemplateFormService:
             selector_fields=tuple(selector_fields),
             manual_fields=tuple(manual_fields),
             indexed_selector_fields=tuple(indexed_selector_fields),
+            indexed_manual_fields=tuple(indexed_manual_fields),
             unresolved_placeholders=tuple(sorted(unresolved)),
             warnings=tuple(dict.fromkeys(warnings)),
         )
@@ -373,12 +383,20 @@ class ContractTemplateFormService:
     def _manual_binding_payload(
         self, placeholder: ContractTemplatePlaceholderRecord
     ) -> ContractTemplatePlaceholderBindingPayload:
-        field_type, widget_hint = self._manual_field_type(
-            placeholder.placeholder_key,
-            placeholder.inferred_field_type,
-        )
+        token = parse_placeholder(placeholder.canonical_symbol)
+        if token.manual_type == "bool":
+            field_type, widget_hint = "boolean", "boolean_options"
+        elif token.manual_type == "list":
+            field_type, widget_hint = "list", "list_options"
+        else:
+            field_type, widget_hint = self._manual_field_type(
+                placeholder.placeholder_key,
+                placeholder.inferred_field_type,
+            )
         validation: dict[str, object] = {"field_type": field_type}
-        if field_type == "boolean":
+        if token.manual_options:
+            validation["options"] = list(token.manual_options)
+        elif field_type == "boolean":
             validation["options"] = ["false", "true"]
         return ContractTemplatePlaceholderBindingPayload(
             canonical_symbol=placeholder.canonical_symbol,
@@ -715,14 +733,19 @@ class ContractTemplateFormService:
         binding: ContractTemplatePlaceholderBindingRecord | None,
     ) -> ContractTemplateFormManualField:
         token = parse_placeholder(placeholder.canonical_symbol)
-        field_type, widget_hint = self._manual_field_type(
-            placeholder.placeholder_key,
-            placeholder.inferred_field_type,
-        )
+        if token.manual_type == "bool":
+            field_type, widget_hint = "boolean", "boolean_options"
+        elif token.manual_type == "list":
+            field_type, widget_hint = "list", "list_options"
+        else:
+            field_type, widget_hint = self._manual_field_type(
+                placeholder.placeholder_key,
+                placeholder.inferred_field_type,
+            )
         if token.binding_kind == "duplicate" and token.key == "number":
             field_type = "number"
             widget_hint = "number_input"
-        options: tuple[str, ...] = ()
+        options: tuple[str, ...] = token.manual_options
         if binding is not None and isinstance(binding.validation, dict):
             field_type = _clean_text(binding.validation.get("field_type")) or field_type
             if binding.validation.get("options"):
