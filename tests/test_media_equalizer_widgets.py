@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QDialog
 
 from tests.qt_test_helpers import require_qapplication
@@ -84,6 +84,27 @@ class MediaEqualizerWidgetTests(unittest.TestCase):
             widget._audio_spectrum_fade_timer.stop()
         widget.set_audio_spectrum([])
         self.assertTrue(widget._audio_spectrum_fade_timer.isActive())
+
+    def test_curve_and_pan_widgets_render_enabled_spectrum_paths(self):
+        curve = equalizer.EqualizerCurveWidget()
+        curve.resize(300, 120)
+        curve.set_settings(
+            {
+                "enabled": True,
+                "gains": [2.0, -1.5, 0.0, 1.0, 0.0, -0.5, 0.0, 1.5],
+                "pan": 0.0,
+            }
+        )
+        curve.set_audio_spectrum([0.2, 0.6, 1.0, 0.8])
+        curve_image = QPixmap(curve.size())
+        curve.render(curve_image)
+        self.assertFalse(curve_image.isNull())
+
+        pan = equalizer.PanningDialWidget()
+        pan.set_pan(0.5)
+        pan_image = QPixmap(pan.size())
+        pan.render(pan_image)
+        self.assertFalse(pan_image.isNull())
 
     def test_curve_widget_fade_halts_and_clears_when_below_threshold(self):
         widget = equalizer.EqualizerCurveWidget()

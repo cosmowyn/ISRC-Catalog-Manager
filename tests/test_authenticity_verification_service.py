@@ -6,12 +6,16 @@ from unittest import mock
 
 from isrc_manager.assets import AssetVersionPayload
 from isrc_manager.authenticity.models import (
+    DOCUMENT_TYPE_PROVENANCE_LINEAGE,
     VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
     VERIFICATION_STATUS_NO_WATERMARK,
     VERIFICATION_STATUS_SIGNATURE_INVALID,
     VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
     VERIFICATION_STATUS_VERIFIED,
     VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
+    WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+    WatermarkExtractionResult,
+    WatermarkToken,
 )
 from isrc_manager.releases import ReleasePayload, ReleaseTrackPlacement
 from tests._authenticity_support import AuthenticityWorkflowTestCase
@@ -32,6 +36,37 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         exported_path = Path(result.written_audio_paths[0])
         sidecar_path = Path(result.written_sidecar_paths[0])
         return track_id, audio_path, exported_path, sidecar_path, result
+
+    def _lineage_ready_track(self, *, stem: str, seed: int):
+        track_id, _master_audio, direct_result = self.export_direct_authenticity_fixture(seed=seed)
+        derivative_audio = self.write_audio_fixture(
+            f"{stem}.mp3",
+            duration_seconds=30,
+            seed=seed + 50,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="managed_file",
+        )
+        master_asset = self.write_audio_fixture(
+            f"{stem}-master.wav",
+            duration_seconds=30,
+            seed=seed,
+            suffix=".wav",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(master_asset),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+        return track_id, derivative_audio, direct_result
 
     def test_export_watermarked_audio_reports_real_progress_stages_before_terminal_completion(self):
         track_id, _audio_path = self.create_track_with_audio(
@@ -125,6 +160,71 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
         self.assertTrue(all("finished" not in message.lower() for message in messages))
 
+    def test_export_watermarked_audio_cancellation_and_embed_failure_cleanup(self):
+        track_id, _audio_path = self.create_track_with_audio(
+            title="Cancelled Authenticity Track",
+            duration_seconds=30,
+            seed=33,
+            suffix=".wav",
+        )
+
+        with self.assertRaisesRegex(InterruptedError, "cancelled"):
+            self.audio_service.export_watermarked_audio(
+                output_dir=self.root / "exports" / "cancelled",
+                track_ids=[track_id],
+                profile_name="Test Profile",
+                is_cancelled=lambda: True,
+            )
+
+        failing_output = self.root / "exports" / "embed_failure"
+        with mock.patch.object(
+            self.audio_service.watermark_service,
+            "embed_to_path",
+            side_effect=RuntimeError("embed failed"),
+        ):
+            result = self.audio_service.export_watermarked_audio(
+                output_dir=failing_output,
+                track_ids=[track_id],
+                profile_name="Test Profile",
+            )
+
+        self.assertEqual(result.exported, 0)
+        self.assertEqual(result.skipped, 1)
+        self.assertIn("embed failed", result.warnings[0])
+        self.assertFalse(any(path.is_file() for path in failing_output.rglob("*")))
+        self.assertIsNone(self.manifest_service.fetch_latest_manifest_for_track(track_id))
+
+    def test_export_provenance_audio_cancellation_and_sidecar_failure_cleanup(self):
+        track_id, _derivative_audio, _direct_result = self._lineage_ready_track(
+            stem="lineage-failure",
+            seed=34,
+        )
+
+        with self.assertRaisesRegex(InterruptedError, "cancelled"):
+            self.audio_service.export_provenance_audio(
+                output_dir=self.root / "exports" / "lineage_cancelled",
+                track_ids=[track_id],
+                profile_name="Test Profile",
+                is_cancelled=lambda: True,
+            )
+
+        failing_output = self.root / "exports" / "lineage_failure"
+        with mock.patch.object(
+            self.audio_service,
+            "_build_provenance_payload",
+            side_effect=RuntimeError("sidecar failed"),
+        ):
+            result = self.audio_service.export_provenance_audio(
+                output_dir=failing_output,
+                track_ids=[track_id],
+                profile_name="Test Profile",
+            )
+
+        self.assertEqual(result.exported, 0)
+        self.assertEqual(result.skipped, 1)
+        self.assertIn("sidecar failed", result.warnings[0])
+        self.assertFalse(any(path.is_file() for path in failing_output.rglob("*")))
+
     def test_verify_file_reports_verified_authentic_for_exported_copy(self):
         _track_id, _audio_path, exported_path, _sidecar_path, _result = self._export_fixture()
 
@@ -193,6 +293,111 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         report = self.audio_service.verify_file(target)
 
         self.assertEqual(report.status, VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT)
+
+    def test_verify_file_reports_no_key_unresolved_and_low_confidence_sidecar_paths(self):
+        _track_id, _audio_path, exported_path, sidecar_path, _result = self._export_fixture(seed=35)
+
+        corrupt_sidecar_audio = self.write_audio_fixture(
+            "corrupt-sidecar.wav",
+            duration_seconds=30,
+            seed=36,
+            suffix=".wav",
+        )
+        corrupt_sidecar_audio.with_suffix(".wav.authenticity.json").write_text(
+            "{not-json",
+            encoding="utf-8",
+        )
+        self.assertIsNone(self.audio_service._load_adjacent_sidecar(corrupt_sidecar_audio))
+
+        with mock.patch.object(self.key_service, "extraction_keys", return_value=[]):
+            no_key_report = self.audio_service.verify_file(exported_path)
+        self.assertEqual(no_key_report.status, VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT)
+        self.assertIn("no local extraction key", no_key_report.message.lower())
+        self.assertIn("Adjacent sidecar signature verified", " ".join(no_key_report.details))
+
+        unknown_token = WatermarkToken(
+            version=1,
+            watermark_id=987654321,
+            manifest_digest_prefix="1234567890abcdef",
+            nonce=42,
+        )
+        detected_without_manifest = WatermarkExtractionResult(
+            status="detected",
+            key_id=self.default_key.key_id,
+            token=unknown_token,
+            mean_confidence=0.91,
+            sync_score=0.92,
+            group_agreement=0.93,
+            repeat_groups=2,
+            crc_ok=True,
+        )
+        with (
+            mock.patch.object(self.key_service, "extraction_keys", return_value=[("fake", b"k")]),
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "extract_from_path",
+                return_value=detected_without_manifest,
+            ),
+        ):
+            unresolved_report = self.audio_service.verify_file(corrupt_sidecar_audio)
+        self.assertEqual(unresolved_report.status, VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT)
+        self.assertEqual(unresolved_report.watermark_id, unknown_token.watermark_id)
+        self.assertIn("no matching manifest", unresolved_report.message)
+
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        binding = sidecar["payload"]["watermark_binding"]
+        sidecar_token = WatermarkToken(
+            version=int(binding["watermark_version"]),
+            watermark_id=int(binding["watermark_id"]),
+            manifest_digest_prefix=str(binding["manifest_digest_prefix"]),
+            nonce=int(binding["watermark_nonce"]),
+        )
+        no_direct_detection = WatermarkExtractionResult(
+            status="none",
+            key_id=None,
+            token=None,
+            mean_confidence=0.0,
+            sync_score=0.0,
+            group_agreement=0.0,
+            repeat_groups=0,
+            crc_ok=False,
+        )
+        low_confidence_sidecar = WatermarkExtractionResult(
+            status="insufficient",
+            key_id=self.default_key.key_id,
+            token=sidecar_token,
+            mean_confidence=0.63,
+            sync_score=0.52,
+            group_agreement=0.58,
+            repeat_groups=1,
+            crc_ok=True,
+        )
+        with (
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "extract_from_path",
+                return_value=no_direct_detection,
+            ),
+            mock.patch.object(
+                self.manifest_service,
+                "resolve_reference_for_payload",
+                return_value=None,
+            ),
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "verify_expected_token",
+                return_value=low_confidence_sidecar,
+            ),
+        ):
+            low_confidence_report = self.audio_service.verify_file(exported_path)
+        self.assertEqual(
+            low_confidence_report.status,
+            VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+        )
+        self.assertIn(
+            "Adjacent sidecar signature verified",
+            " ".join(low_confidence_report.details),
+        )
 
     def test_export_provenance_audio_writes_signed_lineage_sidecar_for_lossy_copy(self):
         track_id, _master_audio, direct_result = self.export_direct_authenticity_fixture()
@@ -374,6 +579,72 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
 
         self.assertEqual(report.status, VERIFICATION_STATUS_SIGNATURE_INVALID)
         self.assertEqual(report.verification_basis, "provenance_lineage")
+
+    def test_verify_file_reports_provenance_sidecar_incomplete_hash_and_parent_mismatch(self):
+        incomplete_audio = self.write_audio_fixture(
+            "lineage-incomplete.mp3",
+            duration_seconds=30,
+            seed=37,
+            suffix=".mp3",
+        )
+        incomplete_audio.with_suffix(".mp3.authenticity.json").write_text(
+            json.dumps(
+                {
+                    "document_type": DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                    "workflow_kind": WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        incomplete_report = self.audio_service.verify_file(incomplete_audio)
+        self.assertEqual(
+            incomplete_report.status,
+            VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+        )
+        self.assertIn("incomplete", incomplete_report.message)
+
+        mismatch_track_id, _derivative_audio, _direct_result = self._lineage_ready_track(
+            stem="lineage-hash-mismatch",
+            seed=38,
+        )
+        mismatch_result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_hash_mismatch",
+            track_ids=[mismatch_track_id],
+            profile_name="Test Profile",
+        )
+        mismatch_path = Path(mismatch_result.written_audio_paths[0])
+        mismatch_path.write_bytes(mismatch_path.read_bytes() + b"tamper")
+
+        mismatch_report = self.audio_service.verify_file(mismatch_path)
+        self.assertEqual(
+            mismatch_report.status,
+            VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
+        )
+        self.assertFalse(mismatch_report.exact_hash_match)
+
+        parent_track_id, _derivative_audio, direct_result = self._lineage_ready_track(
+            stem="lineage-parent-mismatch",
+            seed=39,
+        )
+        parent_result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_parent_mismatch",
+            track_ids=[parent_track_id],
+            profile_name="Test Profile",
+        )
+        with self.conn:
+            self.conn.execute(
+                "UPDATE AuthenticityManifests SET payload_sha256=? WHERE manifest_id=?",
+                ("0" * 64, direct_result.manifest_ids[0]),
+            )
+
+        parent_report = self.audio_service.verify_file(parent_result.written_audio_paths[0])
+        self.assertEqual(
+            parent_report.status,
+            VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+        )
+        self.assertEqual(parent_report.resolution_source, "database")
+        self.assertIn("did not match", parent_report.message)
 
     def test_export_provenance_audio_skips_tracks_without_parent_direct_manifest(self):
         track_id, _audio_path = self.create_track_with_audio(

@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFont, QKeySequence
@@ -885,6 +886,369 @@ def test_main_window_key_and_drop_event_routing_cover_handled_paths(monkeypatch)
     assert app.eventFilter(app.table, space_event) is True
     assert space_event.accepted is True
     assert previews == [(4, 7)]
+
+
+def test_main_window_workspace_openers_and_controller_routing_seams(monkeypatch) -> None:
+    require_qapplication()
+    app = _app()
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main_window.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+
+    app._apply_add_data_panel_state = mock.Mock()
+    app._ensure_add_track_panel_initialized = mock.Mock()
+    app._show_add_track_details_tab = mock.Mock()
+    app.track_title_field = SimpleNamespace(setFocus=mock.Mock(side_effect=RuntimeError("focus")))
+    app.add_data_dock = object()
+    assert app.open_add_track_workspace() is app.add_data_dock
+    app._apply_add_data_panel_state.assert_called_once_with(True)
+    app._ensure_add_track_panel_initialized.assert_called_once_with()
+
+    class Tabs:
+        def __init__(self) -> None:
+            self.current_indexes: list[int] = []
+
+        def count(self) -> int:
+            return 2
+
+        def setCurrentIndex(self, index: int) -> None:
+            self.current_indexes.append(index)
+
+    tabs = Tabs()
+    app.add_data_tabs = tabs
+    app.add_data_track_tab_index = 1
+    App._show_add_track_details_tab(app)
+    assert tabs.current_indexes == [1]
+    app.add_data_tabs = None
+    App._show_add_track_details_tab(app)
+
+    app._apply_catalog_table_panel_state = mock.Mock()
+    app.table = SimpleNamespace(setFocus=mock.Mock(side_effect=RuntimeError("focus")))
+    app.catalog_table_dock = object()
+    assert app.open_catalog_workspace() is app.catalog_table_dock
+    app._apply_catalog_table_panel_state.assert_called_once_with(True)
+
+    app.code_registry_service = None
+    app.open_code_registry_workspace()
+    assert warnings[-1] == ("Code Registry Workspace", "Open a profile first.")
+    app.code_registry_service = object()
+    app._ensure_code_registry_workspace_dock = mock.Mock()
+    app._show_workspace_panel = mock.Mock(return_value="code-registry-panel")
+    assert app.open_code_registry_workspace() == "code-registry-panel"
+    app._show_workspace_panel.assert_called_with(
+        app._ensure_code_registry_workspace_dock,
+        panel_attr="code_registry_workspace_panel",
+    )
+
+    app.global_search_service = None
+    app.relationship_explorer_service = object()
+    app.open_global_search()
+    assert warnings[-1] == ("Global Search", "Open a profile first.")
+    app.global_search_service = object()
+    app._ensure_global_search_dock = mock.Mock()
+    app._show_workspace_panel = mock.Mock(return_value="global-search-panel")
+    assert app.open_global_search() == "global-search-panel"
+
+    routed: list[tuple[str, int]] = []
+    app.open_selected_editor = lambda entity_id: routed.append(("track", entity_id))
+    app.open_release_editor = lambda entity_id: routed.append(("release", entity_id))
+    app.open_work_manager = lambda **kwargs: routed.append(("work", kwargs["work_id"]))
+    app.open_contract_manager = lambda entity_id: routed.append(("contract", entity_id))
+    app.open_party_manager = lambda entity_id: routed.append(("party", entity_id))
+    app.open_rights_matrix = lambda entity_id: routed.append(("right", entity_id))
+    app.open_asset_registry = lambda entity_id: routed.append(("asset", entity_id))
+    for entity_type, entity_id in (
+        ("track", 1),
+        ("release", 2),
+        ("work", 3),
+        ("contract", 4),
+        ("party", 5),
+        ("right", 6),
+        ("asset", 7),
+        ("unknown", 8),
+    ):
+        app._open_entity_from_relationship_search(entity_type, entity_id)
+    assert routed == [
+        ("track", 1),
+        ("release", 2),
+        ("work", 3),
+        ("contract", 4),
+        ("party", 5),
+        ("right", 6),
+        ("asset", 7),
+    ]
+
+    for method_name in (
+        "open_release_editor",
+        "open_work_manager",
+        "open_contract_manager",
+        "open_party_manager",
+        "open_rights_matrix",
+        "open_asset_registry",
+    ):
+        setattr(app, method_name, getattr(App, method_name).__get__(app, App))
+
+    controller_calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def route(module, function_name: str, result: str | None = None) -> None:
+        monkeypatch.setattr(
+            module,
+            function_name,
+            lambda _self, *args, **kwargs: controller_calls.append((function_name, args, kwargs))
+            or (result or function_name),
+        )
+
+    routed_methods = [
+        (main_window.promo_code_controller, "open_promo_code_ledger", app.open_promo_code_ledger),
+        (
+            main_window.promo_code_controller,
+            "import_bandcamp_promo_codes",
+            app.import_bandcamp_promo_codes,
+        ),
+        (
+            main_window.promo_code_controller,
+            "update_promo_code_ledger",
+            app.update_promo_code_ledger,
+        ),
+        (
+            main_window.contract_controller,
+            "_create_contract_with_history",
+            app._create_contract_with_history,
+        ),
+        (
+            main_window.contract_controller,
+            "_update_contract_with_history",
+            app._update_contract_with_history,
+        ),
+        (
+            main_window.contract_controller,
+            "_delete_contract_with_history",
+            app._delete_contract_with_history,
+        ),
+        (
+            main_window.contract_template_controller,
+            "open_contract_template_workspace",
+            app.open_contract_template_workspace,
+        ),
+        (main_window.rights_controller, "open_rights_matrix", app.open_rights_matrix),
+        (main_window.asset_controller, "open_asset_registry", app.open_asset_registry),
+        (
+            main_window.audio_conversion_controller,
+            "open_derivative_ledger",
+            app.open_derivative_ledger,
+        ),
+        (
+            main_window.master_transfer_controller,
+            "export_master_transfer_package",
+            app.export_master_transfer_package,
+        ),
+        (
+            main_window.master_transfer_controller,
+            "import_master_transfer_package",
+            app.import_master_transfer_package,
+        ),
+        (
+            main_window.repertoire_controller,
+            "export_repertoire_exchange",
+            app.export_repertoire_exchange,
+        ),
+        (
+            main_window.repertoire_controller,
+            "import_repertoire_exchange",
+            app.import_repertoire_exchange,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "_track_import_repair_entries",
+            app._track_import_repair_entries,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "_track_import_repair_work_choices",
+            app._track_import_repair_work_choices,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "_refresh_track_import_repair_queue_dialog",
+            app._refresh_track_import_repair_queue_dialog,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "_delete_track_import_repair_entries",
+            app._delete_track_import_repair_entries,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "_repair_track_import_queue_entry",
+            app._repair_track_import_queue_entry,
+        ),
+        (
+            main_window.repair_queue_controller,
+            "open_track_import_repair_queue",
+            app.open_track_import_repair_queue,
+        ),
+        (
+            main_window.party_controller,
+            "_selected_party_manager_ids",
+            app._selected_party_manager_ids,
+        ),
+        (
+            main_window.exchange_controller,
+            "_open_import_review_dialog",
+            app._open_import_review_dialog,
+        ),
+        (
+            main_window.master_transfer_controller,
+            "_show_master_transfer_import_report",
+            app._show_master_transfer_import_report,
+        ),
+        (main_window.party_controller, "_show_party_import_report", app._show_party_import_report),
+        (
+            main_window.party_controller,
+            "import_party_exchange_file",
+            app.import_party_exchange_file,
+        ),
+        (
+            main_window.party_controller,
+            "export_party_exchange_file",
+            app.export_party_exchange_file,
+        ),
+        (main_window.release_controller, "open_release_editor", app.open_release_editor),
+        (
+            main_window.release_controller,
+            "create_release_from_selection",
+            app.create_release_from_selection,
+        ),
+        (
+            main_window.release_controller,
+            "_prompt_for_release_choice",
+            app._prompt_for_release_choice,
+        ),
+        (
+            main_window.release_controller,
+            "add_selected_tracks_to_release",
+            app.add_selected_tracks_to_release,
+        ),
+        (
+            main_window.release_controller,
+            "add_selected_tracks_to_specific_release",
+            app.add_selected_tracks_to_specific_release,
+        ),
+        (
+            main_window.release_controller,
+            "_refresh_release_browser_panel",
+            app._refresh_release_browser_panel,
+        ),
+        (
+            main_window.release_controller,
+            "_release_browser_task_owner",
+            app._release_browser_task_owner,
+        ),
+        (
+            main_window.work_controller,
+            "_refresh_work_manager_panel",
+            app._refresh_work_manager_panel,
+        ),
+        (
+            main_window.party_controller,
+            "_refresh_party_manager_panel",
+            app._refresh_party_manager_panel,
+        ),
+        (
+            main_window.promo_code_controller,
+            "_refresh_promo_code_ledger_panel",
+            app._refresh_promo_code_ledger_panel,
+        ),
+        (main_window.work_controller, "_work_manager_task_owner", app._work_manager_task_owner),
+        (
+            main_window.media_export_controller,
+            "export_catalog_audio_copies",
+            app.export_catalog_audio_copies,
+        ),
+        (
+            main_window.media_export_controller,
+            "write_tags_to_exported_audio",
+            app.write_tags_to_exported_audio,
+        ),
+        (
+            main_window.authenticity_controller,
+            "open_audio_authenticity_keys_dialog",
+            app.open_audio_authenticity_keys_dialog,
+        ),
+        (
+            main_window.authenticity_controller,
+            "export_authenticity_watermarked_audio",
+            app.export_authenticity_watermarked_audio,
+        ),
+        (
+            main_window.authenticity_controller,
+            "export_authenticity_provenance_audio",
+            app.export_authenticity_provenance_audio,
+        ),
+        (
+            main_window.authenticity_controller,
+            "_selected_track_audio_verification_option",
+            app._selected_track_audio_verification_option,
+        ),
+        (
+            main_window.authenticity_controller,
+            "_selected_track_audio_verification_candidate",
+            app._selected_track_audio_verification_candidate,
+        ),
+        (
+            main_window.authenticity_controller,
+            "_prompt_audio_authenticity_verification_source",
+            app._prompt_audio_authenticity_verification_source,
+        ),
+        (
+            main_window.authenticity_controller,
+            "_pick_audio_authenticity_verification_file",
+            app._pick_audio_authenticity_verification_file,
+        ),
+        (
+            main_window.authenticity_controller,
+            "verify_audio_authenticity",
+            app.verify_audio_authenticity,
+        ),
+        (main_window.exchange_controller, "import_exchange_file", app.import_exchange_file),
+        (
+            main_window.exchange_controller,
+            "reset_saved_exchange_import_choices",
+            app.reset_saved_exchange_import_choices,
+        ),
+        (
+            main_window.exchange_controller,
+            "_show_exchange_import_report",
+            app._show_exchange_import_report,
+        ),
+        (main_window.exchange_controller, "export_exchange_file", app.export_exchange_file),
+        (main_window.quality_controller, "open_quality_dashboard", app.open_quality_dashboard),
+        (
+            main_window.quality_controller,
+            "_scan_quality_dashboard_in_background",
+            app._scan_quality_dashboard_in_background,
+        ),
+        (main_window.quality_controller, "_apply_quality_fix", app._apply_quality_fix),
+        (
+            main_window.quality_controller,
+            "_open_issue_from_dashboard",
+            app._open_issue_from_dashboard,
+        ),
+    ]
+
+    for module, function_name, method in routed_methods:
+        route(module, function_name)
+        assert method("arg", option=True) == function_name
+
+    assert [name for name, _args, _kwargs in controller_calls] == [
+        function_name for _module, function_name, _method in routed_methods
+    ]
+    assert all(
+        args == ("arg",) and kwargs == {"option": True} for _name, args, kwargs in controller_calls
+    )
 
 
 def test_main_window_storage_conversion_blob_export_and_badge_workflows(

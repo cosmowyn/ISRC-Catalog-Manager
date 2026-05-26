@@ -58,21 +58,100 @@
 
 - repository CI and local recommendation now treat Qt UI tests as headless via `QT_QPA_PLATFORM=offscreen` for both direct `pytest` commands and grouped command paths.
 
-## 3) Baseline inventory and gap map
+## 2.2) Current validated coverage state
+
+This audit's current state is the latest validated branch-aware pytest progression, not the
+original bootstrap artifact. The `33.91%` result is preserved below only as the initial historical
+baseline from the first healthy coverage-gate attempt.
+
+Current validated progression:
+
+- Preserved baseline before the current risk-based pursuit:
+  - Full branch-aware coverage: approximately `84.6%` (`84.5768%`).
+  - Statement coverage: approximately `87.9%` (`87.8807%`).
+  - Branch coverage: approximately `73.6%` (`73.5986%`).
+- Previous checkpoint baseline before the latest local continuation:
+  - Full branch-aware coverage: `85.2983%`.
+  - Statement coverage: `88.4807%`.
+  - Branch coverage: `74.7234%`.
+- Latest full-suite continuation in this worktree:
+  - Full branch-aware coverage: `85.5058%`.
+  - Statement coverage: `88.6710%`.
+  - Branch coverage: `74.9884%`.
+  - Full pytest with `--cov-fail-under=0`: passed (`1983 passed`, `786 warnings`,
+    `86 subtests passed`).
+
+The strict `--cov-fail-under=95` gate still fails only because the repository has not yet reached
+the required branch-aware threshold. The test body passes under the same full-suite shape when the
+temporary fail-under is set to `0`.
+
+Coverage measurement must remain scoped to the lowercase package only:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest \
+  --cov=isrc_manager \
+  --cov-branch \
+  --cov-report=term-missing \
+  --cov-report=html \
+  --cov-report=json \
+  --cov-fail-under=0
+```
+
+Do not reintroduce `--cov=ISRC_manager`; that uppercase entry overlaps the same physical source tree
+and creates misleading duplicate 0% coverage entries.
+
+### Current high-value remaining-gap map
+
+The next phase should be risk-based production-readiness testing, not shallow pursuit of the global
+95% number. Prioritize service/data-safety/workflow behaviour, especially failure, cancellation,
+rollback, missing-data, invalid-input, cleanup, and fallback paths. Low-value GUI paint/visual
+defensive branches should be documented separately rather than chased for percentage alone.
+
+High-value remaining targets from the latest coverage evidence:
+
+1. `isrc_manager/main_window.py` - `91.5058%` (`303` missing lines, `203` missing branches).
+2. `isrc_manager/conversion/dialogs.py` - `88.3740%` (`79` missing lines, `64` missing branches).
+3. `isrc_manager/works/dialogs.py` - `92.9104%` (`40` missing lines, `36` missing branches).
+4. `isrc_manager/qss_autocomplete.py` - `83.5945%` (`103` missing lines, `75` missing branches).
+5. `isrc_manager/storage_admin.py` - `88.6508%` (`88` missing lines, `55` missing branches).
+6. `isrc_manager/services/tracks.py` - `87.5800%` (`98` missing lines, `96` missing branches).
+7. `isrc_manager/parties/controller.py` - `66.1602%` (`157` missing lines, `88` missing branches).
+8. `isrc_manager/exchange/master_transfer.py` - `89.9056%` (`72` missing lines, `67` missing branches).
+9. `isrc_manager/code_registry/workspace.py` - `73.0942%` (`180` missing lines, `60` missing branches).
+10. `isrc_manager/media/equalizer.py` - `74.3848%` (`171` missing lines, `58` missing branches).
+11. `isrc_manager/application_settings_dialog.py` - `79.2851%` (`150` missing lines, `76` missing branches).
+12. `isrc_manager/authenticity/service.py` - `92.2175%` (`40` missing lines, `33` missing branches).
+
+Recommended next production-readiness batches:
+
+- Service/data-safety: `services/tracks.py`, `authenticity/service.py`, `storage_admin.py`, and
+  `exchange/master_transfer.py` for rollback, cleanup, corrupted/missing-data, duplicate/conflict,
+  and filesystem hazard paths.
+- Workflow/controller: `main_window.py`, `parties/controller.py`, and `code_registry/workspace.py`
+  through narrow command-routing, prompt, worker, and error/no-op seams.
+- Headless dialog workflows: `conversion/dialogs.py`, `works/dialogs.py`,
+  `application_settings_dialog.py`, and `media/equalizer.py` with fake file pickers/prompts and
+  direct widget-state assertions.
+- Low-value GUI fallback gaps: paint-only, platform-defensive, WebEngine/media-device, and
+  impossible-layout defensive branches should be tracked separately when they are not meaningful
+  production-readiness tests.
+
+## 3) Initial historical baseline inventory and gap map
 
 ### Files and modules checked
 
 - `tests/ci_groups.py`:
   - `discovered_test_count()` baseline is `467` tests (hard-coded `BASELINE_TEST_COUNT`) and active grouped execution path currently validates membership.
-- Historic coverage artifact (existing `coverage.xml`) was used for a static gap signal only (not from a fully healthy current run).
+- Historic coverage artifact (existing `coverage.xml`) was used for the initial static gap signal
+  only. It is not the current coverage state.
 
-### Gap map
+### Initial historical gap map
 
 - Untested modules:
   - none detected in the available coverage run (line coverage present for all discovered covered files).
 - Undertested modules:
-  - `134` modules below `95%` line coverage in the latest full run.
-  - Representative low-coverage modules in the artifact:
+  - `134` modules below `95%` line coverage in the initial historical full run.
+  - Representative low-coverage modules in the initial artifact:
     - `app_bootstrap.py` (0.936)
     - `assets/service.py` (0.839)
     - `authenticity/__init__.py` (0.692)
@@ -89,7 +168,7 @@
   - none.
 - Legacy tests to migrate:
   - `tests/test_python_314_compatibility.py` (completed in this pass).
-- High-risk code paths without coverage (based on artifact):
+- High-risk code paths without coverage (based on the initial artifact):
   - `exchange/repair_dialogs.py` (~0.106)
   - `promo_codes/dialogs.py` (~0.107)
   - `forensics/dialogs.py` (~0.120)
@@ -98,9 +177,10 @@
   - `forensics/watermark.py` (~0.642)
   - `services/import_repair_queue.py` (~0.667)
 
-## 4) Validation execution log (environment-local)
+## 4) Initial historical validation execution log (environment-local)
 
-Executed in the current environment:
+Executed during the initial Python 3.14.4 bootstrap validation. This log is retained as historical
+evidence of the starting point; it is not the current coverage state.
 
 1. `python3 --version`
    - output: `Python 3.14.4`
@@ -116,7 +196,7 @@ Executed in the current environment:
 
 5. `QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95`
    - result: command completed execution and failed coverage gate.
-   - final coverage: `33.91%` (required `95%`)
+   - final coverage: `33.91%` (initial historical baseline; required `95%`)
    - test output: `1265 passed, 773 warnings, 45 subtests passed`.
 
 6. `python3 -m ruff check build.py isrc_manager scripts tests`
@@ -249,7 +329,10 @@ QT_QPA_PLATFORM=offscreen python3 -m tests.run_group catalog-services --module-t
 
 - **Current milestone status:**
   - Full local coverage gate remains In Progress.
-  - Blocker is a coverage-quality gap (`33.91%` vs `95%` target), not an environment/bootstrap/tooling issue.
+  - Current validated coverage is approximately `84.6%` branch-aware coverage and has progressed
+    further to `84.8639%` in the latest local continuation.
+  - The remaining issue is a production-readiness coverage gap against the strict `95%` target, not
+    an environment/bootstrap/tooling issue and not the old `33.91%` baseline.
 
 ## 4.2) Coverage implementation update - 2026-05-25 21:02:13 UTC
 
@@ -3904,3 +3987,980 @@ Recommended next session:
   service-level branch/error-path coverage that avoids broad GUI setup.
 - Batch AE3: target `main_window.py` only through narrow command-routing/controller seams and fake
   prompt/workers; it remains the single largest gap.
+
+## Checkpoint 4.31 - Risk-Based Service and Parser Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation targeted meaningful behavioural coverage in high-risk non-visual seams before
+returning to broader GUI modules. The batch focused on `authenticity/service.py`,
+`storage_admin.py`, and `qss_autocomplete.py`, which were among the largest remaining gaps called
+out in checkpoint 4.30 and could be exercised without brittle full-window flows. No production code
+changed.
+
+The requested 88-90% coverage target was not reached in this stop-point batch. The latest full
+coverage run improved the current validated baseline from `84.5768%` to `84.8639%`, with improved
+branch coverage and substantial gains in the targeted files. At the current denominator,
+approximately `2917` additional covered line/branch slots are still needed to reach `88%`, and
+`4777` are needed to reach `90%`.
+
+### Tests added
+
+Expanded `tests/test_authenticity_manifest_service.py` with behavioural coverage for:
+
+- key-service default, missing-key, and corrupt private-key paths;
+- reference selection for missing, unsupported, decoded, and source-byte inputs;
+- audio authenticity helper paths for release tagging, attached audio, payload watermarks,
+  lineage mismatch, and parent-key extraction;
+- export-plan invalid track, missing reference, unsupported reference, and reference decode
+  fallback paths.
+
+Expanded `tests/test_qss_autocomplete.py` with parser/completion coverage for:
+
+- comment, quote, partial object, subcontrol, pseudo-selector, invalid-role, and double-subcontrol
+  selector contexts;
+- rule/reference template branches for empty, unknown, handle, object, and role lookups;
+- malformed-document recovery for missing selectors, unexpected braces, nested selectors,
+  incomplete properties, missing braces, unclosed strings, and unclosed comments;
+- property/value/comment edit no-op paths.
+
+Expanded `tests/test_storage_admin_service.py` with storage-admin coverage for:
+
+- inspect progress/status callbacks and generated export/log classification;
+- stale cleanup key rejection and direct cleanup progress/status callbacks;
+- JSON sidecar missing/corrupt/list handling;
+- nested integer collection, path/root reference extraction, update-backup name parsing,
+  version-label fallbacks, and recoverability recommendation boundaries.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.30:
+
+- Full branch-aware coverage: `84.5768%`.
+- Statement coverage: `87.8807%`.
+- Branch coverage: `73.5986%`.
+- Covered/missing lines: `62825` covered, `8664` missing.
+- Covered/missing branches: `15834` covered, `5680` missing.
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `84.8639%` displayed as `85%`.
+- Statement coverage: `88.1129%` displayed as `88%`.
+- Branch coverage: `74.0680%` displayed as `74%`.
+- Covered/missing lines: `62991` covered, `8498` missing.
+- Covered/missing branches: `15935` covered, `5579` missing.
+- Aggregate delta from checkpoint 4.30: `+0.2871` coverage points, `166` fewer missing lines, and
+  `101` fewer missing branches across the measured package.
+
+Targeted module movement:
+
+- `isrc_manager/authenticity/service.py`: `71.9616%` to `86.3539%`
+  (`164` to `75` missing lines, `99` to `53` missing branches).
+- `isrc_manager/qss_autocomplete.py`: `76.4055%` to `83.5945%`
+  (`151` to `103` missing lines, `105` to `75` missing branches).
+- `isrc_manager/storage_admin.py`: `79.9206%` to `84.0476%`
+  (`149` to `120` missing lines, `104` to `81` missing branches).
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_authenticity_manifest_service.py -q --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_qss_autocomplete.py -q --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_storage_admin_service.py -q --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_authenticity_manifest_service.py tests/test_qss_autocomplete.py tests/test_storage_admin_service.py -q --no-cov
+python3 -m ruff check tests/test_authenticity_manifest_service.py tests/test_qss_autocomplete.py tests/test_storage_admin_service.py
+python3 -m black --check tests/test_storage_admin_service.py tests/test_qss_autocomplete.py tests/test_authenticity_manifest_service.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+python3 -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused authenticity service tests: passed (`9 passed`).
+- Focused QSS autocomplete tests: passed.
+- Focused storage-admin tests: passed (`10 passed`).
+- Combined touched-file tests: passed (`49 passed`).
+- Touched-file Ruff and Black checks: passed after formatting.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1953 passed`, `775 warnings`,
+  `86 subtests passed`; `84.86%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict 88-90% pursuit target remains incomplete at this stop point. This is not a global
+coverage blockade; it is evidence that the remaining lift is concentrated in larger GUI/workflow
+and branch-heavy modules.
+
+### Remaining named-target gaps
+
+Largest remaining line/branch gaps among the modules named for this pursuit:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/conversion/dialogs.py` - `177` missing lines, `94` missing branches.
+3. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+4. `isrc_manager/services/tracks.py` - `130` missing lines, `118` missing branches.
+5. `isrc_manager/storage_admin.py` - `120` missing lines, `81` missing branches.
+6. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+7. `isrc_manager/authenticity/service.py` - `75` missing lines, `53` missing branches.
+
+Recommended next batch:
+
+- Batch AF1: target `services/tracks.py` for rollback, invalid-input, duplicate/conflict,
+  filesystem hazard, and missing-data service tests; it has a large branch gap without requiring
+  full-window setup.
+- Batch AF2: target `conversion/dialogs.py` or `works/dialogs.py` through fake file pickers,
+  prompts, and direct widget/controller method calls.
+- Batch AF3: return to `main_window.py` only through valuable workflow seams such as command
+  routing, no-op/error action enablement, diagnostics/update/settings routing, delete/shutdown
+  workflows, and storage conversion callbacks.
+
+## Checkpoint 4.32 - Track Service Data-Safety Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation followed the risk-based target order and focused on `isrc_manager/services/tracks.py`
+before returning to GUI-heavy modules. The added tests exercise real SQLite-backed service behavior
+with temporary media files and mock only non-authoritative external seams such as waveform cache
+failures. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch improved a
+critical service/data-safety module and increased both line and branch coverage.
+
+### Tests added
+
+Expanded `tests/test_track_service.py` with behavioural coverage for:
+
+- transaction rollback when track creation fails during missing audio attachment;
+- transaction rollback when album-art attachment rejects an invalid source file;
+- managed-file storage hazards when no data root is configured, including preservation of existing
+  database-stored media after a failed conversion to managed storage;
+- missing media fetch/resolve failures and database media source materialization, cleanup, and hash
+  behavior through `TrackMediaSourceHandle`;
+- bulk media metadata map handling for invalid IDs, duplicate IDs, missing tracks, loose tracks, and
+  shared album-track fallback artwork;
+- album metadata no-op filtering, unsupported-field rejection, and rollback when a later target
+  track is missing;
+- duration parsing fallbacks and non-authoritative waveform scheduler/cache failures.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.31:
+
+- Full branch-aware coverage: `84.8639%`.
+- Statement coverage: `88.1129%`.
+- Branch coverage: `74.0680%`.
+- Covered/missing lines: `62991` covered, `8498` missing.
+- Covered/missing branches: `15935` covered, `5579` missing.
+- `isrc_manager/services/tracks.py`: `84.1229%`
+  (`130` missing lines, `118` missing branches).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `84.9231%` displayed as `85%`.
+- Statement coverage: `88.1590%` displayed as `88%`.
+- Branch coverage: `74.1703%` displayed as `74%`.
+- Covered/missing lines: `63024` covered, `8465` missing.
+- Covered/missing branches: `15957` covered, `5557` missing.
+- Aggregate delta from checkpoint 4.31: `+0.0591` coverage points, `33` fewer missing lines, and
+  `22` fewer missing branches across the measured package.
+- `isrc_manager/services/tracks.py`: `87.5800%`
+  (`130` to `98` missing lines, `118` to `96` missing branches).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2862`
+additional line/branch slots are needed to reach `88%`, `4722` to reach `90%`, and `9372` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_track_service.py -q --no-cov
+.venv/bin/python -m black --check tests/test_track_service.py
+.venv/bin/python -m ruff check tests/test_track_service.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused track-service tests: passed (`40 passed`).
+- Touched-file Ruff and Black checks: passed after import sorting.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1960 passed`, `784 warnings`,
+  `86 subtests passed`; `84.92%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`84.9231%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/conversion/dialogs.py` - `177` missing lines, `94` missing branches.
+3. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+4. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+5. `isrc_manager/exchange/master_transfer.py` - `135` missing lines, `110` missing branches.
+6. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+7. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+8. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+9. `isrc_manager/storage_admin.py` - `119` missing lines, `80` missing branches.
+10. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+11. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+12. `isrc_manager/authenticity/service.py` - `75` missing lines, `53` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AG1: target `authenticity/service.py`, `storage_admin.py`, or
+  `exchange/master_transfer.py` for verification failure, cleanup failure, corrupted/missing data,
+  and import/export edge paths.
+- Batch AG2: target `conversion/dialogs.py` or `works/dialogs.py` with fake file pickers and direct
+  dialog/controller state assertions.
+- Batch AG3: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams and user-decision branches.
+
+## Checkpoint 4.33 - Authenticity Verification and Export Failure Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation stayed on high-risk service/data-safety behavior and focused on
+`isrc_manager/authenticity/service.py`. The added tests exercise key reload guardrails, missing
+manifest source data, export cancellation, cleanup after embed/sidecar failures, and verification
+fallbacks for corrupt sidecars, unresolved watermarks, low-confidence extraction, incomplete
+lineage, derivative hash drift, and parent-manifest mismatch. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch substantially
+improved a critical authenticity module and increased branch coverage with behavioral failure-path
+tests.
+
+### Tests added
+
+Expanded `tests/test_authenticity_manifest_service.py` with behavioral coverage for:
+
+- default public-key lookup and generated private-key reload failure handling;
+- missing-track, missing-source, unreadable-reference, and explicit sample-rate manifest
+  preparation paths;
+- release-tag context fallback when a release reference cannot be fetched.
+
+Expanded `tests/test_authenticity_verification_service.py` with behavioral coverage for:
+
+- direct watermark export cancellation and embed-failure cleanup without persisting manifests;
+- provenance export cancellation and sidecar-build failure cleanup;
+- corrupt adjacent sidecar recovery, no extraction-key reporting, unresolved detected-token
+  reporting, and low-confidence sidecar-guided detection;
+- incomplete provenance sidecars, derivative hash mismatch detection, and parent-manifest payload
+  mismatch reporting.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.32:
+
+- Full branch-aware coverage: `84.9231%`.
+- Statement coverage: `88.1590%`.
+- Branch coverage: `74.1703%`.
+- Covered/missing lines: `63024` covered, `8465` missing.
+- Covered/missing branches: `15957` covered, `5557` missing.
+- `isrc_manager/authenticity/service.py`: `86.3539%`
+  (`75` missing lines, `53` missing branches).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `84.9801%` displayed as `85%`.
+- Statement coverage: `88.2066%` displayed as `88%`.
+- Branch coverage: `74.2586%` displayed as `74%`.
+- Covered/missing lines: `63058` covered, `8431` missing.
+- Covered/missing branches: `15976` covered, `5538` missing.
+- Aggregate delta from checkpoint 4.32: `+0.0570` coverage points, `34` fewer missing lines, and
+  `19` fewer missing branches across the measured package.
+- `isrc_manager/authenticity/service.py`: `92.2175%`
+  (`75` to `40` missing lines, `53` to `33` missing branches; branch coverage `84.4340%`).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2809`
+additional line/branch slots are needed to reach `88%`, `4669` to reach `90%`, and `9319` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_authenticity_manifest_service.py tests/test_authenticity_verification_service.py -q --no-cov
+.venv/bin/python -m black tests/test_authenticity_manifest_service.py tests/test_authenticity_verification_service.py
+.venv/bin/python -m ruff check tests/test_authenticity_manifest_service.py tests/test_authenticity_verification_service.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused authenticity manifest/verification tests: passed (`29 passed`).
+- Touched-file Ruff passed; Black reformatted `tests/test_authenticity_verification_service.py`.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1965 passed`, `785 warnings`,
+  `86 subtests passed`; `84.98%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`84.9801%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/conversion/dialogs.py` - `177` missing lines, `94` missing branches.
+3. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+4. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+5. `isrc_manager/exchange/master_transfer.py` - `135` missing lines, `110` missing branches.
+6. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+7. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+8. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+9. `isrc_manager/storage_admin.py` - `120` missing lines, `81` missing branches.
+10. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+11. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+12. `isrc_manager/authenticity/service.py` - `40` missing lines, `33` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AH1: target `storage_admin.py` or `exchange/master_transfer.py` for cleanup failure,
+  corrupted/missing data, import/export rollback, and filesystem hazard paths.
+- Batch AH2: target `conversion/dialogs.py` or `works/dialogs.py` with fake file pickers, prompts,
+  and direct dialog/controller state assertions.
+- Batch AH3: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams and user-decision branches.
+
+## Checkpoint 4.34 - Storage Admin Cleanup and Recovery Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation stayed on service/data-safety behavior and focused on
+`isrc_manager/storage_admin.py`. The added tests exercise explicit current-profile inclusion,
+legacy/minimal schema reference fallback, deleted-profile backup sidecar classification,
+file-state bundle quarantine and cleanup, ready/stale update rollback states, and update cache file
+cleanup. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch improved
+application storage cleanup confidence and raised both total and branch coverage.
+
+### Tests added
+
+Expanded `tests/test_storage_admin_service.py` with behavioral coverage for:
+
+- an explicit current profile outside the profile store, including managed-file references from a
+  legacy/minimal `Licenses` table whose display label column is missing;
+- orphan backup companion sidecars that point at a deleted profile database;
+- protected and unprotected file-state bundle audit states, warning-gated cleanup, history-entry
+  quarantine, payload scrubbing, and direct bundle removal;
+- update rollback backups in `ready_for_deletion` and stale `destroyed` handoff states;
+- update cache file classification and cleanup alongside a ready rollback backup.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.33:
+
+- Full branch-aware coverage: `84.9801%`.
+- Statement coverage: `88.2066%`.
+- Branch coverage: `74.2586%`.
+- Covered/missing lines: `63058` covered, `8431` missing.
+- Covered/missing branches: `15976` covered, `5538` missing.
+- `isrc_manager/storage_admin.py`: `84.0476%`
+  (`120` missing lines, `81` missing branches; branch coverage `77.1186%`).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `85.0467%` displayed as `85%`.
+- Statement coverage: `88.2555%` displayed as `88%`.
+- Branch coverage: `74.3841%` displayed as `74%`.
+- Covered/missing lines: `63093` covered, `8396` missing.
+- Covered/missing branches: `16003` covered, `5511` missing.
+- Aggregate delta from checkpoint 4.33: `+0.0667` coverage points, `35` fewer missing lines, and
+  `27` fewer missing branches across the measured package.
+- `isrc_manager/storage_admin.py`: `88.6508%`
+  (`120` to `88` missing lines, `81` to `55` missing branches; branch coverage `84.4633%`).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2747`
+additional line/branch slots are needed to reach `88%`, `4607` to reach `90%`, and `9257` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_storage_admin_service.py -q --no-cov
+.venv/bin/python -m black tests/test_storage_admin_service.py
+.venv/bin/python -m ruff check tests/test_storage_admin_service.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused storage-admin tests: passed (`13 passed`).
+- Touched-file Ruff passed; Black reformatted `tests/test_storage_admin_service.py`.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1968 passed`, `786 warnings`,
+  `86 subtests passed`; `85.05%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`85.0467%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/conversion/dialogs.py` - `177` missing lines, `94` missing branches.
+3. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+4. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+5. `isrc_manager/exchange/master_transfer.py` - `135` missing lines, `110` missing branches.
+6. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+7. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+8. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+9. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+10. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+11. `isrc_manager/storage_admin.py` - `88` missing lines, `55` missing branches.
+12. `isrc_manager/authenticity/service.py` - `40` missing lines, `33` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AI1: target `exchange/master_transfer.py` for import/export rollback, missing/corrupt
+  data, duplicate/conflict, and filesystem cleanup paths.
+- Batch AI2: target `conversion/dialogs.py` or `works/dialogs.py` with fake file pickers, prompts,
+  and direct dialog/controller state assertions.
+- Batch AI3: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams and user-decision branches.
+
+## Checkpoint 4.35 - Master Transfer Guardrail and Dependency Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation followed the documented Batch AI1 recommendation and targeted
+`isrc_manager/exchange/master_transfer.py`. The added tests exercise master-transfer selection
+validation, dependency warnings, optional-service omissions, import failure aborts, dependency-based
+section skips, malformed manifest rejection, unsafe archive member rejection, and license/template
+payload guardrails. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch closed a large
+data-safety gap in the exchange workflow and improved both total and branch coverage.
+
+### Tests added
+
+Expanded `tests/exchange/test_master_transfer.py` with behavioral coverage for:
+
+- exportable-section previews, selected-section normalization, duplicate issue suppression, and
+  dependency warnings for invalid or incomplete selections;
+- preflight/export handling when optional license and contract-template services are unavailable,
+  including omission logs and confirmed continuation;
+- catalog-section import failure aborts that preserve warning, failed, skipped, and repair-queue
+  context;
+- license-section skips when the catalog dependency is intentionally omitted from the package;
+- malformed manifests, unsupported document/package formats, future package versions, missing
+  payload metadata, unknown required/optional sections, missing files, and unsafe ZIP members;
+- license and contract-template payload guardrails for unsupported schema versions, missing source
+  identifiers, unavailable services, unsafe file paths, and missing referenced files.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.34:
+
+- Full branch-aware coverage: `85.0467%`.
+- Statement coverage: `88.2555%`.
+- Branch coverage: `74.3841%`.
+- Covered/missing lines: `63093` covered, `8396` missing.
+- Covered/missing branches: `16003` covered, `5511` missing.
+- `isrc_manager/exchange/master_transfer.py`: `82.2077%`
+  (`135` missing lines, `110` missing branches; branch coverage `69.2737%`).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `85.1607%` displayed as `85%`.
+- Statement coverage: `88.3437%` displayed as `88%`.
+- Branch coverage: `74.5840%` displayed as `75%`.
+- Covered/missing lines: `63156` covered, `8333` missing.
+- Covered/missing branches: `16046` covered, `5468` missing.
+- Aggregate delta from checkpoint 4.34: `+0.1140` coverage points, `63` fewer missing lines, and
+  `43` fewer missing branches across the measured package.
+- `isrc_manager/exchange/master_transfer.py`: `89.9056%`
+  (`135` to `72` missing lines, `110` to `67` missing branches; branch coverage `81.2849%`).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2641`
+additional line/branch slots are needed to reach `88%`, `4501` to reach `90%`, and `9151` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/exchange/test_master_transfer.py -q --no-cov
+.venv/bin/python -m black tests/exchange/test_master_transfer.py
+.venv/bin/python -m ruff check tests/exchange/test_master_transfer.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/exchange/test_master_transfer.py -q --no-cov
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused master-transfer tests: passed before and after formatting (`20 passed` each run).
+- Touched-file Ruff passed; Black reformatted `tests/exchange/test_master_transfer.py`.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1974 passed`, `786 warnings`,
+  `86 subtests passed`; `85.16%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`85.1607%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/conversion/dialogs.py` - `177` missing lines, `94` missing branches.
+3. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+4. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+5. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+6. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+7. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+8. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+9. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+10. `isrc_manager/exchange/master_transfer.py` - `72` missing lines, `67` missing branches.
+11. `isrc_manager/storage_admin.py` - `88` missing lines, `55` missing branches.
+12. `isrc_manager/authenticity/service.py` - `40` missing lines, `33` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AJ1: target `conversion/dialogs.py` or `works/dialogs.py` with fake file pickers, prompts,
+  direct dialog/controller state assertions, cancellation, invalid input, and no-op branches.
+- Batch AJ2: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams, user-decision branches, rollback, duplicate/conflict, and missing-data handling.
+- Batch AJ3: return to `main_window.py` only through valuable command-routing/controller seams; do
+  not chase low-value visual fallback or platform-defensive branches.
+
+## Checkpoint 4.36 - Conversion Dialog Workflow Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation followed the Batch AJ1 recommendation and targeted
+`isrc_manager/conversion/dialogs.py`, which had the safer headless dialog seams compared with the
+remaining work-manager dialog gaps. The added tests exercise file-picker cancellation, inspection
+failures, invalid CSV delimiter handling, database-source no-op/failure paths, saved-template
+load/save failures, export cancellation, and mapping-preset persistence. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch materially
+improved a high-risk user workflow and raised both total and branch coverage.
+
+### Tests added
+
+Expanded `tests/test_conversion_dialog.py` with behavioral coverage for:
+
+- template and source file-picker cancellation plus template/source inspection failures that keep
+  dialog state unchanged and report user-visible warnings;
+- successful template selection through the file-picker seam, including saved-template name
+  prefill and path tooltip updates;
+- invalid custom CSV delimiters, custom tab rejection, and recovery to a valid custom delimiter;
+- database-source defaults when the current selection provider fails, track-choice normalization,
+  database source service failure warnings, and rejected track chooser dialogs;
+- saved conversion-template library list failures, missing saved template bytes, no-template/no-name
+  save validation, and profile database save failures;
+- mapping preset invalid settings payloads, empty-name validation, preset save/load round-trips, and
+  export file-picker cancellation before the existing successful export path.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.35:
+
+- Full branch-aware coverage: `85.1607%`.
+- Statement coverage: `88.3437%`.
+- Branch coverage: `74.5840%`.
+- Covered/missing lines: `63156` covered, `8333` missing.
+- Covered/missing branches: `16046` covered, `5468` missing.
+- `isrc_manager/conversion/dialogs.py`: `77.9675%`
+  (`177` missing lines, `94` missing branches; branch coverage `56.0748%`).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `85.2983%` displayed as `85%`.
+- Statement coverage: `88.4807%` displayed as `88%`.
+- Branch coverage: `74.7234%` displayed as `75%`.
+- Covered/missing lines: `63254` covered, `8235` missing.
+- Covered/missing branches: `16076` covered, `5438` missing.
+- Aggregate delta from checkpoint 4.35: `+0.1376` coverage points, `98` fewer missing lines, and
+  `30` fewer missing branches across the measured package.
+- `isrc_manager/conversion/dialogs.py`: `88.3740%`
+  (`177` to `79` missing lines, `94` to `64` missing branches; branch coverage `70.0935%`).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2513`
+additional line/branch slots are needed to reach `88%`, `4373` to reach `90%`, and `9023` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_conversion_dialog.py -q --no-cov
+.venv/bin/python -m black tests/test_conversion_dialog.py
+.venv/bin/python -m ruff check tests/test_conversion_dialog.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_conversion_dialog.py -q --no-cov
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused conversion dialog tests: passed before and after formatting (`12 passed` each run).
+- Touched-file Ruff and Black passed with no reformat needed.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1979 passed`, `786 warnings`,
+  `86 subtests passed`; `85.30%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`85.2983%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/works/dialogs.py` - `175` missing lines, `91` missing branches.
+3. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+4. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+5. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+6. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+7. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+8. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+9. `isrc_manager/conversion/dialogs.py` - `79` missing lines, `64` missing branches.
+10. `isrc_manager/exchange/master_transfer.py` - `72` missing lines, `67` missing branches.
+11. `isrc_manager/storage_admin.py` - `88` missing lines, `55` missing branches.
+12. `isrc_manager/authenticity/service.py` - `40` missing lines, `33` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AK1: target `works/dialogs.py` with fake services, fake prompts, direct widget state, no-op
+  branches, missing-data handling, and create/edit/delete/link workflow failures.
+- Batch AK2: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams, user-decision branches, rollback, duplicate/conflict, and missing-data handling.
+- Batch AK3: return to `main_window.py` only through valuable command-routing/controller seams; do
+  not chase low-value visual fallback or platform-defensive branches.
+
+## Checkpoint 4.37 - Works Dialog Workflow Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation followed the Batch AK1 recommendation and targeted
+`isrc_manager/works/dialogs.py`. The added tests exercise Work Editor contributor payload
+construction, split normalization, linked-track handling, contributor Party creation/editing
+failure paths, Work Browser selection scopes, action routing, destructive confirmation rejection,
+service-missing guards, editor accept/reject routing, and filter/link/delete signal behaviour. No
+production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but the batch materially
+improved a high-risk composition governance workflow and raised both total and branch coverage.
+
+### Tests added
+
+Added `tests/test_work_dialogs.py` with behavioral coverage for:
+
+- Work Editor payload construction from direct widget state, including trimmed titles, alternate
+  titles, status/checklist fields, contributor split calculation, party-id fallback labels, duplicate
+  linked-track suppression, and linked-track removal;
+- contributor Party creation/editing workflows with rejected dialogs, successful creation, create
+  failures, unlinked-row information prompts, missing Party warnings, update failures, and successful
+  refresh/update paths;
+- Work Browser search refresh, selected-track override normalization, track-choice normalization,
+  chooser rejection/acceptance, clear-scope behaviour, and selection banner state;
+- create-child-track, create-album, duplicate, link, delete, and filter signal routing for selected
+  works, including delete confirmation rejection and missing-detail no-op handling;
+- no-profile warnings, no-selected-work information prompts, no-selected-track link guards, and
+  create/edit dialog accepted/rejected routing through fake editor dialogs.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.36:
+
+- Full branch-aware coverage: `85.2983%`.
+- Statement coverage: `88.4807%`.
+- Branch coverage: `74.7234%`.
+- Covered/missing lines: `63254` covered, `8235` missing.
+- Covered/missing branches: `16076` covered, `5438` missing.
+- `isrc_manager/works/dialogs.py`: `75.1866%`
+  (`175` missing lines, `91` missing branches; branch coverage `57.0755%`).
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `85.5058%` displayed as `86%`.
+- Statement coverage: `88.6710%` displayed as `89%`.
+- Branch coverage: `74.9884%` displayed as `75%`.
+- Covered/missing lines: `63390` covered, `8099` missing.
+- Covered/missing branches: `16133` covered, `5381` missing.
+- Aggregate delta from checkpoint 4.36: `+0.2075` coverage points, `136` fewer missing lines, and
+  `57` fewer missing branches across the measured package.
+- `isrc_manager/works/dialogs.py`: `92.9104%`
+  (`175` to `40` missing lines, `91` to `36` missing branches; branch coverage `83.0189%`).
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `2320`
+additional line/branch slots are needed to reach `88%`, `4180` to reach `90%`, and `8830` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_work_dialogs.py -q --no-cov -x
+.venv/bin/python -m black tests/test_work_dialogs.py
+.venv/bin/python -m ruff check tests/test_work_dialogs.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_work_dialogs.py -q --no-cov
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused works dialog tests: passed after removing one accidental modal test boundary (`4 passed`);
+  the final focused run also passed (`4 passed`).
+- Touched-file Ruff passed; Black reformatted `tests/test_work_dialogs.py`.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`1983 passed`, `786 warnings`,
+  `86 subtests passed`; `85.51%` total coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`85.5058%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `303` missing lines, `203` missing branches.
+2. `isrc_manager/parties/controller.py` - `157` missing lines, `88` missing branches.
+3. `isrc_manager/code_registry/workspace.py` - `180` missing lines, `60` missing branches.
+4. `isrc_manager/media/equalizer.py` - `171` missing lines, `58` missing branches.
+5. `isrc_manager/application_settings_dialog.py` - `150` missing lines, `76` missing branches.
+6. `isrc_manager/qss_autocomplete.py` - `103` missing lines, `75` missing branches.
+7. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+8. `isrc_manager/conversion/dialogs.py` - `79` missing lines, `64` missing branches.
+9. `isrc_manager/exchange/master_transfer.py` - `72` missing lines, `67` missing branches.
+10. `isrc_manager/storage_admin.py` - `88` missing lines, `55` missing branches.
+11. `isrc_manager/works/dialogs.py` - `40` missing lines, `36` missing branches.
+12. `isrc_manager/authenticity/service.py` - `40` missing lines, `33` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AL1: target `parties/controller.py` or `code_registry/workspace.py` through service-backed
+  workflow seams, user-decision branches, rollback, duplicate/conflict, and missing-data handling.
+- Batch AL2: target `media/equalizer.py` or `application_settings_dialog.py` only through
+  user-visible state/persistence/error branches, not paint-only or impossible-layout fallbacks.
+- Batch AL3: return to `main_window.py` only through valuable command-routing/controller seams; do
+  not chase low-value visual fallback or platform-defensive branches.
+
+## Checkpoint 4.38 - Registry, QSS, Parties, Settings, Storage, Conversion, Authenticity, and Equalizer Coverage Update
+
+Timestamp: `2026-05-26`
+
+This continuation followed the risk-based coverage plan and added behavioral tests across several
+high-risk workflow seams instead of opening another broad GUI flow. The batch covered code registry
+workspace recovery/failure paths, QSS autocomplete parsing and insertion paths, party import/export
+controller workflows, main-window command routing seams, authenticity manifest edge handling,
+application settings validation, conversion dialog source/mapping no-op paths, storage cleanup race
+tolerance, and equalizer audio-backend/rendering paths. No production code changed.
+
+The 88-90% global pursuit target remains incomplete at this stop point, but this is a clean natural
+handoff: the current full-suite coverage run passed, branch coverage rose materially, several
+critical modules now sit around or above 95%, and remaining gaps are documented below.
+
+### Tests added
+
+Expanded existing tests with behavioral coverage for:
+
+- `tests/test_code_registry_workspace.py`: owner-assignment dialog support/no-selection paths,
+  unavailable workspace services, category create/save/delete failure and cancellation, generation
+  and promotion failures, entry assignment/reassignment/delete cancellation, service failures, and
+  rollback/no-mutation expectations.
+- `tests/test_qss_autocomplete.py`: parser recovery after comments/quotes/invalid selectors,
+  typed completion candidates, template insertion helpers, prefix/suffix replacement, invalid
+  activation guards, empty-popup hiding, autoshow boundaries, and Ctrl+Space activation.
+- `tests/test_parties_controller.py`: legacy owner party migration, selected-panel refresh
+  fallbacks, import/export cancellation and unsupported-format handling, dry-run worker success,
+  inspection routing, and service/file failure paths.
+- `tests/test_main_window_helpers.py`: workspace opener focus exceptions/no-ops, missing service
+  warnings, relationship-search entity routing, and thin controller-routing seams for catalog,
+  media, authenticity, quality, exchange, rights, assets, repertoire, release, work, and party
+  workflows.
+- `tests/test_authenticity_manifest_service.py`: missing/invalid track warning aggregation,
+  rights-reference aggregation, reference sample-rate inference, payload-reference resolution
+  guards, direct manifest lineage hash recovery, and missing source byte failures.
+- `tests/test_application_settings_dialog_behaviors.py`: invalid registration, GS1 template/CSV,
+  blob-icon, theme-color, and QSS validation exits; focus-map behavior; tab wrapping; row helpers;
+  artist-party combo fallback/completer behavior; and party refresh guards.
+- `tests/test_conversion_dialog.py`: source-mode/scope no-ops, database unavailable paths,
+  delimiter labels, invalid mapping-table rows, preset/export no-ops, mapping feedback recovery,
+  suggested mapping refresh, and saved-template source-mode switching.
+- `tests/test_storage_admin_service.py`: cleanup of disappearing items, cleanup-context close
+  failures, active/deleted/orphaned session snapshot classification, missing backup roots, multiple
+  profile reference summaries, and profile ownership helper boundaries.
+- `tests/test_media_equalizer_coverage.py` and `tests/test_media_equalizer_widgets.py`: settings
+  null/default persistence, macOS binary search fallback, soundfile backend success/empty/write
+  failure paths, ffmpeg-to-soundfile fallback, and headless rendering of curve and pan widgets.
+
+### Coverage delta
+
+Authoritative before baseline from checkpoint 4.37:
+
+- Full branch-aware coverage: `85.5058%`.
+- Statement coverage: `88.6710%`.
+- Branch coverage: `74.9884%`.
+- Covered/missing lines: `63390` covered, `8099` missing.
+- Covered/missing branches: `16133` covered, `5381` missing.
+
+Authoritative after baseline from the latest passing full-suite coverage report:
+
+- Full branch-aware coverage: `86.5779%` displayed as `87%`.
+- Statement coverage: `89.6907%` displayed as `90%`.
+- Branch coverage: `76.2341%` displayed as `76%`.
+- Covered/missing lines: `64119` covered, `7370` missing.
+- Covered/missing branches: `16401` covered, `5113` missing.
+- Aggregate delta from checkpoint 4.37: `+1.0720` coverage points, `729` fewer missing lines, and
+  `268` fewer missing branches across the measured package.
+
+Module-level high-value deltas:
+
+- `isrc_manager/code_registry/workspace.py`: `73.0942%` to `96.9731%`.
+- `isrc_manager/qss_autocomplete.py`: `83.5945%` to `92.8111%`.
+- `isrc_manager/parties/controller.py`: `66.1602%` to `83.2873%`.
+- `isrc_manager/main_window.py`: `91.5058%` to `92.4794%`.
+- `isrc_manager/authenticity/service.py`: `92.2175%` to `94.9893%`.
+- `isrc_manager/application_settings_dialog.py`: `79.2851%` to `95.9670%`.
+- `isrc_manager/conversion/dialogs.py`: `88.3740%` to `94.3902%`.
+- `isrc_manager/storage_admin.py`: `88.4921%` to `90.3175%`.
+- `isrc_manager/media/equalizer.py`: `74.3848%` to `96.3087%`.
+
+At the current denominator (`71489` statements plus `21514` branches), approximately `1323`
+additional line/branch slots are needed to reach `88%`, `3183` to reach `90%`, and `7833` to reach
+the strict `95%` gate without adding production code.
+
+### Validation commands run in this continuation
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_code_registry_workspace.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_code_registry_workspace.py
+.venv/bin/python -m black --check tests/test_code_registry_workspace.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_qss_autocomplete.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_qss_autocomplete.py
+.venv/bin/python -m black --check tests/test_qss_autocomplete.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_parties_controller.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_parties_controller.py
+.venv/bin/python -m black --check tests/test_parties_controller.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_main_window_helpers.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_main_window_helpers.py
+.venv/bin/python -m black --check tests/test_main_window_helpers.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_authenticity_manifest_service.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_authenticity_manifest_service.py
+.venv/bin/python -m black --check tests/test_authenticity_manifest_service.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_application_settings_dialog_behaviors.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_application_settings_dialog_behaviors.py
+.venv/bin/python -m black --check tests/test_application_settings_dialog_behaviors.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_conversion_dialog.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_conversion_dialog.py
+.venv/bin/python -m black tests/test_conversion_dialog.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_storage_admin_service.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_storage_admin_service.py
+.venv/bin/python -m black tests/test_storage_admin_service.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_media_equalizer_coverage.py tests/test_media_equalizer_widgets.py -q --no-cov
+.venv/bin/python -m ruff check tests/test_media_equalizer_coverage.py tests/test_media_equalizer_widgets.py
+.venv/bin/python -m black tests/test_media_equalizer_coverage.py tests/test_media_equalizer_widgets.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+```
+
+Observed result:
+
+- Focused tests for the edited modules passed.
+- Touched-file Ruff and Black checks passed after formatting the edited files that needed it.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`2011 passed`, `785 warnings`,
+  `86 subtests passed`; `86.5779%` total branch-aware coverage).
+- Full compileall, Ruff, Black check, mypy, and whitespace diff checks: passed.
+
+The strict `--cov-fail-under=95` gate is still below target because total branch-aware coverage is
+`86.5779%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining high-risk gaps
+
+Highest-value remaining modules from the latest report:
+
+1. `isrc_manager/main_window.py` - `256` missing lines, `192` missing branches.
+2. `isrc_manager/services/tracks.py` - `98` missing lines, `96` missing branches.
+3. `isrc_manager/storage_migration.py` - `104` missing lines, `56` missing branches.
+4. `isrc_manager/releases/dialogs.py` - `155` missing lines, `18` missing branches.
+5. `isrc_manager/works/controller.py` - `141` missing lines, `35` missing branches.
+6. `isrc_manager/parties/controller.py` - `68` missing lines, `53` missing branches.
+7. `isrc_manager/storage_admin.py` - `72` missing lines, `48` missing branches.
+8. `isrc_manager/conversion/dialogs.py` - `33` missing lines, `36` missing branches.
+9. `isrc_manager/authenticity/service.py` - `25` missing lines, `22` missing branches.
+10. `isrc_manager/qss_autocomplete.py` - `41` missing lines, `37` missing branches.
+11. `isrc_manager/works/dialogs.py` - `40` missing lines, `30` missing branches.
+12. `isrc_manager/application_settings_dialog.py` - `23` missing lines, `21` missing branches.
+
+Low-value GUI/platform branches should still be kept out of the main production-readiness push when
+they only cover paint fallbacks, impossible layout guards, platform media-device quirks, or defensive
+branches that cannot be asserted as user-visible behavior.
+
+Recommended next batch:
+
+- Batch AM1: target `services/tracks.py` with service-backed tests around missing artist/album
+  authority columns, snapshot restore inserts versus updates, track-number conflict boundaries,
+  shared-art conversion edge cases, and rollback assertions around missing work IDs.
+- Batch AM2: target `storage_migration.py` or `storage_admin.py` only through data-safety,
+  recoverability, missing-file, stale-reference, and cleanup warning paths.
+- Batch AM3: return to `main_window.py` through valuable command-routing/controller seams; avoid
+  visual fallback or platform-defensive branches that do not alter user-visible workflow behavior.

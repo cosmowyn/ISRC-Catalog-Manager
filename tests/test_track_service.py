@@ -1,3 +1,4 @@
+import hashlib
 import io
 import sqlite3
 import tempfile
@@ -147,6 +148,22 @@ class TrackServiceTests(unittest.TestCase):
                 frames.extend(int(value // 2).to_bytes(2, "little", signed=True))
             handle.writeframes(bytes(frames))
         return self._create_media_file(name, buffer.getvalue())
+
+    def _track_payload(self, **overrides):
+        values = {
+            "isrc": "NL-ABC-26-90000",
+            "track_title": "Service Edge Song",
+            "artist_name": "Main Artist",
+            "additional_artists": [],
+            "album_title": "Service Edge Album",
+            "release_date": None,
+            "track_length_sec": 0,
+            "iswc": None,
+            "upc": None,
+            "genre": None,
+        }
+        values.update(overrides)
+        return TrackCreatePayload(**values)
 
     def test_create_track_persists_relations_and_metadata(self):
         track_id = self.service.create_track(
@@ -1508,6 +1525,251 @@ class TrackServiceTests(unittest.TestCase):
             (track_id,),
         ).fetchone()[0]
         self.assertEqual(stored_length, 321)
+
+    def test_create_track_rolls_back_when_audio_source_is_missing(self):
+        missing_audio = self.data_root / "missing-audio.wav"
+
+        with self.assertRaises(FileNotFoundError):
+            self.service.create_track(
+                self._track_payload(
+                    isrc="NL-ABC-26-90100",
+                    track_title="Missing Audio Rollback",
+                    album_title="Rollback Album",
+                    audio_file_source_path=str(missing_audio),
+                )
+            )
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Albums").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM AssetVersions").fetchone()[0], 0)
+
+    def test_create_track_rolls_back_when_album_art_source_is_invalid(self):
+        invalid_art = self._create_media_file("not-art.txt", b"this is not image data")
+
+        with self.assertRaisesRegex(ValueError, "valid album art"):
+            self.service.create_track(
+                self._track_payload(
+                    isrc="NL-ABC-26-90101",
+                    track_title="Invalid Art Rollback",
+                    album_title="Invalid Art Album",
+                    album_art_source_path=str(invalid_art),
+                )
+            )
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Albums").fetchone()[0], 0)
+
+    def test_managed_storage_requires_data_root_without_losing_database_media(self):
+        source_audio = self._create_media_file("database-only.wav", b"RIFFdatabaseonly")
+        service = TrackService(self.conn, None)
+        track_id = service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90102",
+                track_title="Database Safe Audio",
+                album_title=None,
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "media root is not configured"):
+            service.set_media_path(track_id, "audio_file", source_audio)
+
+        service.set_media_path(
+            track_id,
+            "audio_file",
+            source_audio,
+            storage_mode=STORAGE_MODE_DATABASE,
+            sync_track_length=False,
+        )
+        before_meta = service.get_media_meta(track_id, "audio_file")
+        before_bytes, _mime = service.fetch_media_bytes(track_id, "audio_file")
+
+        with self.assertRaisesRegex(ValueError, "media root is not configured"):
+            service.convert_media_storage_mode(
+                track_id,
+                "audio_file",
+                STORAGE_MODE_MANAGED_FILE,
+            )
+
+        after_meta = service.get_media_meta(track_id, "audio_file")
+        after_bytes, _mime = service.fetch_media_bytes(track_id, "audio_file")
+        self.assertEqual(before_meta["storage_mode"], STORAGE_MODE_DATABASE)
+        self.assertEqual(after_meta["storage_mode"], STORAGE_MODE_DATABASE)
+        self.assertEqual(before_bytes, b"RIFFdatabaseonly")
+        self.assertEqual(after_bytes, b"RIFFdatabaseonly")
+
+    def test_fetch_and_resolve_media_source_handles_missing_and_database_media(self):
+        track_id = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90103",
+                track_title="Resolvable Audio",
+                album_title=None,
+            )
+        )
+
+        with self.assertRaisesRegex(FileNotFoundError, "audio_file"):
+            self.service.fetch_media_bytes(track_id, "audio_file")
+        with self.assertRaisesRegex(FileNotFoundError, "audio_file"):
+            self.service.resolve_media_source(track_id, "audio_file")
+
+        source_audio = self._create_media_file("source-bytes.wav", b"RIFFsourcebytes")
+        self.service.set_media_path(
+            track_id,
+            "audio_file",
+            source_audio,
+            storage_mode=STORAGE_MODE_DATABASE,
+            sync_track_length=False,
+        )
+
+        handle = self.service.resolve_media_source(track_id, "audio_file")
+        self.assertIsNone(handle.source_path)
+        self.assertEqual(handle.source_bytes, b"RIFFsourcebytes")
+        self.assertEqual(handle.sha256_hex(), hashlib.sha256(b"RIFFsourcebytes").hexdigest())
+
+        with handle.materialize_path() as materialized_path:
+            self.assertTrue(materialized_path.exists())
+            self.assertEqual(materialized_path.read_bytes(), b"RIFFsourcebytes")
+        self.assertFalse(materialized_path.exists())
+
+    def test_media_meta_map_handles_invalid_duplicates_missing_tracks_and_shared_fallbacks(self):
+        owner_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90104",
+                track_title="Fallback Owner",
+                album_title="Bulk Meta Album",
+            )
+        )
+        peer_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90105",
+                track_title="Fallback Peer",
+                album_title="Bulk Meta Album",
+            )
+        )
+        loose_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90106",
+                track_title="Loose Bulk Track",
+                album_title=None,
+            )
+        )
+        stored_path = self.service.media_store.write_bytes(
+            b"legacy-map-art",
+            filename="legacy-map-art.png",
+            subdir="images",
+        )
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Tracks
+                SET album_art_path=?,
+                    album_art_storage_mode=?,
+                    album_art_filename=?,
+                    album_art_mime_type=?,
+                    album_art_size_bytes=?
+                WHERE id=?
+                """,
+                (
+                    stored_path,
+                    STORAGE_MODE_MANAGED_FILE,
+                    "legacy-map-art.png",
+                    "image/png",
+                    len(b"legacy-map-art"),
+                    owner_track,
+                ),
+            )
+
+        self.assertEqual(self.service.get_media_meta_map(["bad", None]), {})
+        self.assertEqual(self.service.get_media_meta_map([owner_track], media_keys=["bogus"]), {})
+
+        missing_track = max(owner_track, peer_track, loose_track) + 100
+        meta_map = self.service.get_media_meta_map(
+            [owner_track, str(peer_track), owner_track, missing_track, loose_track],
+            media_keys=["audio_file", "album_art", "unknown"],
+        )
+
+        self.assertFalse(meta_map[(missing_track, "audio_file")]["has_media"])
+        self.assertFalse(meta_map[(missing_track, "album_art")]["has_media"])
+        self.assertFalse(meta_map[(loose_track, "album_art")]["has_media"])
+        self.assertEqual(meta_map[(owner_track, "album_art")]["owner_scope"], "album_track")
+        self.assertEqual(meta_map[(owner_track, "album_art")]["owner_id"], owner_track)
+        self.assertEqual(meta_map[(peer_track, "album_art")]["owner_scope"], "album_track")
+        self.assertEqual(meta_map[(peer_track, "album_art")]["owner_id"], owner_track)
+        self.assertEqual(meta_map[(peer_track, "album_art")]["path"], stored_path)
+
+    def test_apply_album_metadata_rejects_invalid_fields_and_rolls_back_missing_track(self):
+        first_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90107",
+                track_title="Rollback Album One",
+                album_title="Rollback Album",
+                genre="Original",
+            )
+        )
+        second_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90108",
+                track_title="Rollback Album Two",
+                album_title="Rollback Album",
+                genre="Original",
+            )
+        )
+
+        self.assertEqual(
+            self.service.apply_album_metadata_to_tracks([0, -1], field_updates={"genre": "New"}),
+            [],
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported album metadata field"):
+            self.service.apply_album_metadata_to_tracks(
+                [first_track],
+                field_updates={"track_title": "Not a shared field"},
+            )
+
+        with self.assertRaisesRegex(ValueError, f"Track {second_track + 100} not found"):
+            self.service.apply_album_metadata_to_tracks(
+                [first_track, second_track + 100],
+                field_updates={"genre": "Changed"},
+            )
+
+        rows = self.conn.execute(
+            "SELECT id, genre FROM Tracks WHERE id IN (?, ?) ORDER BY id",
+            (first_track, second_track),
+        ).fetchall()
+        self.assertEqual(rows, [(first_track, "Original"), (second_track, "Original")])
+
+    def test_duration_and_waveform_failures_are_non_authoritative(self):
+        missing_audio = self.data_root / "no-duration.wav"
+        self.assertIsNone(self.service.derive_audio_duration_seconds(None))
+        self.assertIsNone(self.service.derive_audio_duration_seconds(""))
+        self.assertIsNone(self.service.derive_audio_duration_seconds(missing_audio))
+
+        audio_path = self._create_media_file("duration-edge.wav", b"RIFFdurationedge")
+        with mock.patch(
+            "isrc_manager.services.tracks.MutagenFile",
+            return_value=SimpleNamespace(info=SimpleNamespace(length=None)),
+        ):
+            self.assertIsNone(self.service.derive_audio_duration_seconds(audio_path))
+        with mock.patch(
+            "isrc_manager.services.tracks.MutagenFile",
+            return_value=SimpleNamespace(info=SimpleNamespace(length=float("nan"))),
+        ):
+            self.assertIsNone(self.service.derive_audio_duration_seconds(audio_path))
+        with mock.patch("isrc_manager.services.tracks.MutagenFile", side_effect=RuntimeError):
+            self.assertIsNone(self.service.derive_audio_duration_seconds(audio_path))
+
+        self.service.waveform_cache_scheduler = mock.Mock(side_effect=RuntimeError("queue down"))
+        self.service._ensure_audio_waveform_cache(123)
+        self.service.waveform_cache_scheduler.assert_called_once_with(123)
+
+        self.service.waveform_cache_scheduler = None
+        with mock.patch.object(
+            self.service.waveform_cache_service,
+            "ensure_track_cache",
+            side_effect=RuntimeError("cache down"),
+        ) as ensure_track_cache:
+            self.service._ensure_audio_waveform_cache(456)
+        ensure_track_cache.assert_called_once()
 
     def test_convert_audio_storage_mode_updates_linked_primary_asset_without_new_version(self):
         audio_path = self._create_media_file("mode-shift.wav", b"RIFFmodeshift")

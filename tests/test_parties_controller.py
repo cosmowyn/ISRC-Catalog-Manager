@@ -3,9 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest import mock
 
-from PySide6.QtWidgets import QComboBox
+import pytest
+from PySide6.QtWidgets import QComboBox, QDialog
 
-from isrc_manager.parties import PartyImportReport, PartyRecord
+from isrc_manager.parties import (
+    PartyExchangeInspection,
+    PartyImportOptions,
+    PartyImportReport,
+    PartyRecord,
+)
 from isrc_manager.parties import controller as party_controller
 from isrc_manager.services import OwnerPartySettings
 from tests.qt_test_helpers import require_qapplication
@@ -158,6 +164,100 @@ def test_assign_owner_party_records_history_refreshes_and_status() -> None:
     assert party_controller._assign_owner_party(app, 9) is None
 
 
+def test_legacy_owner_party_migration_updates_matches_and_creates_new_owner() -> None:
+    class FakeConn:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, statement):
+            self.statements.append(statement)
+
+    snapshot = OwnerPartySettings(
+        party_id=9,
+        legal_name="Legacy Legal",
+        display_name="Legacy Display",
+        first_name="Lyra",
+        email="legacy@example.test",
+    )
+    current_owner = _party_record(3, legal_name="Current Legal", display_name="Current Owner")
+    linked_owner = _party_record(9, legal_name="Linked Legal", display_name="Linked Owner")
+
+    party_service = mock.Mock()
+    settings_reads = mock.Mock(load_legacy_owner_party_snapshot=mock.Mock(return_value=snapshot))
+    settings_mutations = mock.Mock()
+    app = SimpleNamespace(
+        party_service=party_service,
+        settings_reads=settings_reads,
+        settings_mutations=settings_mutations,
+        conn=FakeConn(),
+        _current_owner_party_record=mock.Mock(return_value=current_owner),
+        _legacy_owner_snapshot_has_data=party_controller._legacy_owner_snapshot_has_data,
+        _merge_owner_snapshot_into_party=party_controller._merge_owner_snapshot_into_party,
+        _owner_snapshot_name_candidates=party_controller._owner_snapshot_name_candidates,
+        _owner_snapshot_to_party_payload=party_controller._owner_snapshot_to_party_payload,
+        _assign_owner_party=mock.Mock(),
+        _current_profile_name=mock.Mock(return_value="Profile.db"),
+    )
+
+    party_controller._migrate_legacy_owner_party_if_needed(app)
+
+    party_service.update_party.assert_called_once()
+    settings_mutations.set_owner_party_id.assert_called_once_with(3)
+    assert app.conn.statements == [
+        "DELETE FROM BTW WHERE id=1",
+        "DELETE FROM BUMA_STEMRA WHERE id=1",
+    ]
+
+    party_service.reset_mock()
+    party_service.update_party.side_effect = RuntimeError("update ignored")
+    app.conn = FakeConn()
+    party_controller._migrate_legacy_owner_party_if_needed(app)
+    settings_mutations.set_owner_party_id.assert_called_with(3)
+    assert app.conn.statements == [
+        "DELETE FROM BTW WHERE id=1",
+        "DELETE FROM BUMA_STEMRA WHERE id=1",
+    ]
+
+    party_service = mock.Mock(fetch_party=mock.Mock(return_value=linked_owner))
+    app = SimpleNamespace(
+        party_service=party_service,
+        settings_reads=settings_reads,
+        settings_mutations=settings_mutations,
+        conn=FakeConn(),
+        _current_owner_party_record=mock.Mock(return_value=None),
+        _legacy_owner_snapshot_has_data=party_controller._legacy_owner_snapshot_has_data,
+        _merge_owner_snapshot_into_party=party_controller._merge_owner_snapshot_into_party,
+        _owner_snapshot_name_candidates=party_controller._owner_snapshot_name_candidates,
+        _owner_snapshot_to_party_payload=party_controller._owner_snapshot_to_party_payload,
+        _assign_owner_party=mock.Mock(),
+        _current_profile_name=mock.Mock(return_value="Profile.db"),
+    )
+    party_controller._migrate_legacy_owner_party_if_needed(app)
+    party_service.update_party.assert_called_once()
+    app._assign_owner_party.assert_called_once_with(9, record_history=False)
+
+    create_service = mock.Mock(
+        fetch_party=mock.Mock(return_value=None),
+        find_party_id_by_name=mock.Mock(return_value=None),
+        create_party=mock.Mock(return_value=42),
+    )
+    app.party_service = create_service
+    app.conn = FakeConn()
+    app._assign_owner_party = mock.Mock()
+    party_controller._migrate_legacy_owner_party_if_needed(app)
+    create_service.create_party.assert_called_once()
+    payload = create_service.create_party.call_args.args[0]
+    assert payload.legal_name == "Legacy Legal"
+    assert payload.profile_name == "Profile.db"
+    app._assign_owner_party.assert_called_once_with(42, record_history=False)
+
+
 def test_artist_party_combo_resolution_and_party_backed_names() -> None:
     require_qapplication()
     artist = _party_record(
@@ -243,6 +343,93 @@ def test_artist_party_combo_resolution_and_party_backed_names() -> None:
         ["Alias Artist", "alias artist", "", "New Artist"],
     ) == ["Primary Artist", "Created Artist"]
 
+    no_service_app = SimpleNamespace(party_service=None)
+    assert party_controller._artist_party_records(no_service_app) == []
+    assert party_controller._resolve_party_backed_artist_name(no_service_app, "Raw") == (
+        "Raw",
+        None,
+    )
+
+    missing_record_service = mock.Mock(
+        find_artist_party_id_by_name=mock.Mock(return_value=None),
+        ensure_artist_party_by_name=mock.Mock(return_value=123),
+        fetch_party=mock.Mock(return_value=None),
+    )
+    missing_record_app = SimpleNamespace(
+        party_service=missing_record_service,
+        _artist_party_primary_label=party_controller._artist_party_primary_label,
+    )
+    assert party_controller._resolve_party_backed_artist_name(missing_record_app, "Ghost") == (
+        "Ghost",
+        123,
+    )
+
+
+def test_party_authority_refresh_and_selection_helpers_handle_panel_fallbacks(monkeypatch):
+    require_qapplication()
+
+    class FakePanel:
+        def __init__(self, visible=True, selected_ids=()):
+            self._visible = visible
+            self._selected_ids = list(selected_ids)
+            self.refresh = mock.Mock()
+
+        def isVisible(self):
+            return self._visible
+
+        def selected_party_ids(self):
+            return list(self._selected_ids)
+
+    monkeypatch.setattr(party_controller, "_party_manager_panel_class", lambda: FakePanel)
+
+    hidden_panel = FakePanel(visible=False, selected_ids=[3])
+    visible_panel = FakePanel(visible=True, selected_ids=[])
+    dock_panel = FakePanel(visible=True, selected_ids=[8])
+    app = SimpleNamespace(
+        party_manager_panel=hidden_panel,
+        party_manager_dialog=SimpleNamespace(panel=visible_panel),
+        party_manager_dock=SimpleNamespace(widget=lambda: dock_panel),
+    )
+    assert party_controller._selected_party_manager_ids(app) == [8]
+
+    app.party_manager_panel = FakePanel(visible=True, selected_ids=[2])
+    assert party_controller._selected_party_manager_ids(app) == [2]
+
+    artist_combo = QComboBox()
+    additional_combo = QComboBox()
+    party_controller._configure_artist_party_combo(
+        SimpleNamespace(
+            _artist_party_records=mock.Mock(return_value=[]),
+            _artist_party_choice_label=party_controller._artist_party_choice_label,
+            _artist_party_primary_label=party_controller._artist_party_primary_label,
+        ),
+        artist_combo,
+        current_text="Artist",
+    )
+    refresh_app = SimpleNamespace(
+        conn=object(),
+        artist_field=artist_combo,
+        additional_artist_field=additional_combo,
+        release_browser_dialog=SimpleNamespace(
+            isVisible=mock.Mock(return_value=True), refresh=mock.Mock()
+        ),
+        _configure_artist_party_combo=mock.Mock(side_effect=RuntimeError("combo refresh failed")),
+        populate_all_comboboxes=mock.Mock(side_effect=RuntimeError("combo failure")),
+        refresh_table_preserve_view=mock.Mock(side_effect=RuntimeError("table failure")),
+        _refresh_work_manager_panel=mock.Mock(side_effect=RuntimeError("work failure")),
+        _refresh_party_manager_panel=mock.Mock(side_effect=RuntimeError("party failure")),
+        _refresh_catalog_workspace_docks=mock.Mock(side_effect=RuntimeError("dock failure")),
+        _refresh_add_track_artist_party_choices=mock.Mock(
+            side_effect=RuntimeError("artist failure")
+        ),
+    )
+    refresh_app._resolve_artist_party_choice = (
+        lambda combo: party_controller._resolve_artist_party_choice(refresh_app, combo)
+    )
+    party_controller._on_party_authority_changed(refresh_app)
+    refresh_app.populate_all_comboboxes.assert_called_once()
+    refresh_app.release_browser_dialog.refresh.assert_called_once()
+
 
 def test_party_import_report_summary_and_message_box(monkeypatch) -> None:
     report = PartyImportReport(
@@ -278,6 +465,150 @@ def test_party_import_report_summary_and_message_box(monkeypatch) -> None:
     party_controller._show_party_import_report(SimpleNamespace(), "/tmp/source.csv", report)
     message_box.information.assert_called_once()
     assert "Dry run validation mode" in message_box.information.call_args.args[2]
+
+
+def test_import_party_exchange_file_inspection_cancel_and_dry_run_paths(monkeypatch, tmp_path):
+    message_box = mock.Mock()
+    monkeypatch.setattr(party_controller, "_message_box", lambda: message_box)
+
+    app = SimpleNamespace(party_exchange_service=None)
+    party_controller.import_party_exchange_file(app, "csv")
+    message_box.warning.assert_called_once_with(app, "Import Parties", "Open a profile first.")
+
+    submitted: dict[str, object] = {}
+    file_dialog = mock.Mock(getOpenFileName=mock.Mock(return_value=("", "")))
+    monkeypatch.setattr(party_controller, "_file_dialog", lambda: file_dialog)
+    app = SimpleNamespace(
+        party_exchange_service=object(),
+        _submit_background_bundle_task=mock.Mock(
+            side_effect=lambda **kwargs: submitted.update(kwargs)
+        ),
+    )
+    party_controller.import_party_exchange_file(app, "csv")
+    assert submitted == {}
+
+    source = tmp_path / "parties.xlsx"
+    file_dialog.getOpenFileName.return_value = (str(source), "")
+    exchange_service = mock.Mock(
+        inspect_xlsx=mock.Mock(return_value="xlsx-inspection"),
+        inspect_json=mock.Mock(return_value="json-inspection"),
+        supported_import_targets=mock.Mock(return_value=["legal_name"]),
+        import_csv=mock.Mock(),
+        import_xlsx=mock.Mock(),
+        import_json=mock.Mock(),
+    )
+    app = SimpleNamespace(
+        party_exchange_service=exchange_service,
+        settings=object(),
+        logger=mock.Mock(),
+        _scaled_progress_callback=mock.Mock(side_effect=lambda callback, start, end: callback),
+        _submit_background_bundle_task=mock.Mock(
+            side_effect=lambda **kwargs: submitted.update(kwargs)
+        ),
+        _show_background_task_error=mock.Mock(),
+        _open_import_review_dialog=mock.Mock(return_value=False),
+        _party_import_review_summary=party_controller._party_import_review_summary,
+        _advance_task_ui_progress=mock.Mock(),
+        populate_all_comboboxes=mock.Mock(),
+        _refresh_catalog_workspace_docks=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        _log_event=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _show_party_import_report=mock.Mock(),
+        conn=mock.Mock(commit=mock.Mock()),
+        party_manager_panel=None,
+    )
+
+    party_controller.import_party_exchange_file(app, "xlsx")
+    assert submitted["title"] == "Inspect Parties XLSX"
+    ctx = SimpleNamespace(report_progress=mock.Mock(), raise_if_cancelled=mock.Mock())
+    bundle = SimpleNamespace(party_exchange_service=exchange_service, history_manager=object())
+    assert submitted["task_fn"](bundle, ctx) == "xlsx-inspection"
+    exchange_service.inspect_xlsx.assert_called_once()
+
+    class RejectedImportDialog:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return QDialog.Rejected
+
+    monkeypatch.setattr(
+        party_controller, "_party_import_dialog_class", lambda: RejectedImportDialog
+    )
+    submitted["on_success_after_cleanup"](
+        PartyExchangeInspection(
+            file_path=str(source),
+            format_name="xlsx",
+            headers=["legal_name"],
+            preview_rows=[{"legal_name": "Rejected"}],
+            suggested_mapping={"legal_name": "legal_name"},
+        )
+    )
+    assert app._submit_background_bundle_task.call_count == 1
+
+    dry_report = PartyImportReport(
+        format_name="xlsx",
+        mode="dry_run",
+        passed=1,
+        failed=0,
+        skipped=0,
+        warnings=[],
+        duplicates=[],
+        unknown_fields=[],
+    )
+
+    class AcceptedDryRunDialog:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def mapping(self):
+            return {"legal_name": "legal_name"}
+
+        def import_options(self):
+            return PartyImportOptions(mode="dry_run")
+
+        def resolved_csv_delimiter(self):
+            return None
+
+    exchange_service.import_xlsx.return_value = dry_report
+    monkeypatch.setattr(
+        party_controller, "_party_import_dialog_class", lambda: AcceptedDryRunDialog
+    )
+    submitted.clear()
+    party_controller.import_party_exchange_file(app, "xlsx")
+    submitted["on_success_after_cleanup"](
+        PartyExchangeInspection(
+            file_path=str(source),
+            format_name="xlsx",
+            headers=["legal_name"],
+            preview_rows=[{"legal_name": "Accepted"}],
+            suggested_mapping={"legal_name": "legal_name"},
+        )
+    )
+    assert submitted["title"] == "Import Parties XLSX"
+    report = submitted["task_fn"](bundle, ctx)
+    assert report is dry_report
+    exchange_service.import_xlsx.assert_called_once()
+    submitted["on_success_before_cleanup"](dry_report, mock.Mock())
+    app._advance_task_ui_progress.assert_called_with(
+        mock.ANY,
+        value=100,
+        message="Party import validation complete.",
+    )
+    submitted["on_success_after_cleanup"](dry_report)
+    app._show_party_import_report.assert_called_once_with(str(source), dry_report)
+
+    submitted.clear()
+    source_json = tmp_path / "parties.json"
+    file_dialog.getOpenFileName.return_value = (str(source_json), "")
+    party_controller.import_party_exchange_file(app, "json")
+    assert submitted["task_fn"](bundle, ctx) == "json-inspection"
+    exchange_service.inspect_json.assert_called_once()
 
 
 def test_export_party_exchange_file_early_exits_and_background_worker(monkeypatch, tmp_path):
@@ -341,3 +672,76 @@ def test_export_party_exchange_file_early_exits_and_background_worker(monkeypatc
     app._audit.assert_called_once()
     app._audit_commit.assert_called_once_with()
     assert message_box.information.call_args.args[2].startswith("Exported 4 Parties")
+
+
+def test_export_party_exchange_file_cancel_resolve_and_format_worker_paths(monkeypatch, tmp_path):
+    message_box = mock.Mock()
+    monkeypatch.setattr(party_controller, "_message_box", lambda: message_box)
+    submitted: dict[str, object] = {}
+    file_dialog = mock.Mock(getSaveFileName=mock.Mock(return_value=("", "")))
+    monkeypatch.setattr(party_controller, "_file_dialog", lambda: file_dialog)
+    exchange_service = mock.Mock(
+        export_xlsx=mock.Mock(return_value=2),
+        export_json=mock.Mock(return_value=3),
+    )
+
+    app = SimpleNamespace(
+        party_exchange_service=exchange_service,
+        exports_dir=tmp_path,
+        _selected_party_manager_ids=mock.Mock(return_value=[4]),
+        _resolve_file_export_target=mock.Mock(return_value=tmp_path / "out.xlsx"),
+        _scaled_progress_callback=mock.Mock(side_effect=lambda callback, start, end: callback),
+        _submit_background_bundle_task=mock.Mock(
+            side_effect=lambda **kwargs: submitted.update(kwargs)
+        ),
+        _refresh_history_actions=mock.Mock(),
+        _log_event=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _show_background_task_error=mock.Mock(),
+        logger=mock.Mock(),
+    )
+
+    party_controller.export_party_exchange_file(app, "xlsx", selected_only=False)
+    assert submitted == {}
+
+    file_dialog.getSaveFileName.return_value = (str(tmp_path / "bad.xlsx"), "")
+    app._resolve_file_export_target.side_effect = ValueError("unsafe path")
+    party_controller.export_party_exchange_file(app, "xlsx", selected_only=False)
+    message_box.warning.assert_called_once_with(app, "Export Parties", "unsafe path")
+
+    def fake_history_action(**kwargs):
+        return kwargs["mutation"]()
+
+    monkeypatch.setattr(party_controller, "_run_file_history_action", fake_history_action)
+    app._resolve_file_export_target.side_effect = None
+    app._resolve_file_export_target.return_value = tmp_path / "selected.xlsx"
+    file_dialog.getSaveFileName.return_value = (str(tmp_path / "selected.xlsx"), "")
+    submitted.clear()
+    party_controller.export_party_exchange_file(app, "xlsx", selected_only=True, party_ids=[10, 11])
+    ctx = SimpleNamespace(report_progress=mock.Mock())
+    bundle = SimpleNamespace(party_exchange_service=exchange_service, history_manager=object())
+    assert submitted["task_fn"](bundle, ctx) == 2
+    exchange_service.export_xlsx.assert_called_once_with(
+        tmp_path / "selected.xlsx",
+        [10, 11],
+        progress_callback=ctx.report_progress,
+    )
+
+    app._resolve_file_export_target.return_value = tmp_path / "all.json"
+    file_dialog.getSaveFileName.return_value = (str(tmp_path / "all.json"), "")
+    submitted.clear()
+    party_controller.export_party_exchange_file(app, "json", selected_only=False)
+    assert submitted["task_fn"](bundle, ctx) == 3
+    exchange_service.export_json.assert_called_once_with(
+        tmp_path / "all.json",
+        None,
+        progress_callback=ctx.report_progress,
+    )
+
+    app._resolve_file_export_target.return_value = tmp_path / "unsupported"
+    file_dialog.getSaveFileName.return_value = (str(tmp_path / "unsupported"), "")
+    submitted.clear()
+    party_controller.export_party_exchange_file(app, "xml", selected_only=False)
+    with pytest.raises(ValueError, match="Unsupported Party exchange format"):
+        submitted["task_fn"](bundle, ctx)

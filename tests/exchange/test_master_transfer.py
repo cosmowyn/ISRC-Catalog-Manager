@@ -18,7 +18,13 @@ from isrc_manager.contracts import (
     ContractPayload,
     ContractService,
 )
-from isrc_manager.exchange import ExchangeService, MasterTransferService, RepertoireExchangeService
+from isrc_manager.exchange import (
+    ExchangeImportReport,
+    ExchangeService,
+    MasterTransferExportIssue,
+    MasterTransferService,
+    RepertoireExchangeService,
+)
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.rights import RightPayload, RightsService
@@ -337,6 +343,12 @@ class MasterTransferServiceTests(unittest.TestCase):
                     )
         return rewritten
 
+    def _mutate_manifest(self, extracted_root: Path, mutator) -> None:
+        manifest_path = extracted_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        mutator(manifest)
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
     def test_master_transfer_export_writes_versioned_manifest_and_sections(self):
         package_path = self.root / "master-transfer.zip"
         result = self.source["master_transfer_service"].export_package(package_path)
@@ -383,6 +395,7 @@ class MasterTransferServiceTests(unittest.TestCase):
 
     def test_master_transfer_exportable_sections_are_listed_for_preview(self):
         options = self.source["master_transfer_service"].exportable_sections()
+        preview = self.source["master_transfer_service"].preview_export()
 
         self.assertEqual(
             [option.section_id for option in options],
@@ -391,6 +404,61 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertTrue(all(option.default_selected for option in options))
         self.assertEqual(options[1].depends_on, ["catalog"])
         self.assertEqual(options[2].depends_on, ["catalog"])
+        self.assertEqual(
+            [section.section_id for section in preview.sections],
+            self.source["master_transfer_service"]._default_export_section_ids(),
+        )
+        self.assertTrue(preview.summary_lines)
+
+    def test_master_transfer_selection_validation_dedupes_and_rejects_dependency_gaps(self):
+        service = self.source["master_transfer_service"]
+
+        self.assertEqual(
+            service._normalize_selected_section_ids(
+                ["", "catalog", "catalog", "unknown", "contract_templates"]
+            ),
+            ["catalog", "contract_templates"],
+        )
+        self.assertEqual(
+            service.selection_dependency_warnings(["licenses"]),
+            [
+                "License Archive requires Catalog Exchange Package. Keep the dependency selected "
+                "or exclude License Archive."
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "Select at least one"):
+            service._normalize_selected_section_ids(["unknown", ""])
+        with self.assertRaisesRegex(ValueError, "Contracts and Rights Package requires"):
+            service.validate_export_section_selection(["repertoire"])
+
+        self.assertEqual(service._progress_ranges(0, start=4, end=95), [])
+        issues: list[MasterTransferExportIssue] = []
+        service._append_export_issue(
+            issues,
+            section_id="licenses",
+            item_type="",
+            item_id=1,
+            label="Ignored",
+            reason="missing type",
+        )
+        self.assertEqual(issues, [])
+        service._append_export_issue(
+            issues,
+            section_id="licenses",
+            item_type="license",
+            item_id=1,
+            label="Moonwake Rights",
+            reason="missing file",
+        )
+        service._append_export_issue(
+            issues,
+            section_id="licenses",
+            item_type="license",
+            item_id=1,
+            label="Moonwake Rights Duplicate",
+            reason="missing file",
+        )
+        self.assertEqual(len(issues), 1)
 
     def test_master_transfer_export_can_omit_deselected_sections_and_record_manifest(self):
         package_path = self.root / "master-transfer-selective.zip"
@@ -574,6 +642,61 @@ class MasterTransferServiceTests(unittest.TestCase):
         file_paths = {entry["path"] for entry in manifest["files"]}
         self.assertIn("export_omissions.log", file_paths)
 
+    def test_master_transfer_optional_service_gaps_are_reported_and_omitted_when_confirmed(self):
+        no_optional_service = MasterTransferService(
+            exchange_service=self.source["exchange_service"],
+            repertoire_exchange_service=self.source["repertoire_service"],
+            license_service=None,
+            contract_template_service=None,
+            app_version="9.9.9-no-optionals",
+        )
+        cancel_events: list[str] = []
+
+        issues = no_optional_service.preflight_export(
+            include_sections=["catalog", "licenses", "contract_templates"],
+            cancel_callback=lambda: cancel_events.append("cancel-check"),
+        )
+
+        self.assertGreaterEqual(len(cancel_events), 2)
+        self.assertEqual(
+            {(issue.section_id, issue.action) for issue in issues},
+            {("licenses", "section omitted"), ("contract_templates", "section omitted")},
+        )
+        with self.assertRaisesRegex(ValueError, "License service is unavailable"):
+            no_optional_service.export_package(
+                self.root / "master-transfer-no-license-service-fails.zip",
+                include_sections=["catalog", "licenses"],
+            )
+
+        package_path = self.root / "master-transfer-no-optionals.zip"
+        result = no_optional_service.export_package(
+            package_path,
+            include_sections=["catalog", "licenses", "contract_templates"],
+            continue_on_item_errors=True,
+        )
+
+        self.assertEqual(
+            {(issue.section_id, issue.action) for issue in result.omitted_items},
+            {("licenses", "section omitted"), ("contract_templates", "section omitted")},
+        )
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            licenses_payload = json.loads(
+                archive.read("sections/licenses/licenses.json").decode("utf-8")
+            )
+            template_payload = json.loads(
+                archive.read("sections/contract_templates/templates.json").decode("utf-8")
+            )
+            omission_log = archive.read("export_omissions.log").decode("utf-8")
+
+        self.assertEqual(licenses_payload["rows"], [])
+        self.assertEqual(template_payload["templates"], [])
+        self.assertTrue(
+            any(item.get("action") == "section omitted" for item in manifest["omitted_items"])
+        )
+        self.assertIn("License service is unavailable", omission_log)
+        self.assertIn("Contract template service is unavailable", omission_log)
+
     def test_master_transfer_omits_unreadable_repertoire_asset_and_logs_lineage_change(self):
         asset_service = self.source["asset_service"]
         master_asset_id = self.source_ids["master_asset_id"]
@@ -743,6 +866,36 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertEqual(result.imported_contract_templates, 1)
         self.assertEqual(result.imported_template_revisions, 1)
 
+    def test_master_transfer_import_stops_when_catalog_section_reports_failures(self):
+        package_path = self.root / "master-transfer-catalog-only.zip"
+        self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog"],
+        )
+        target = self._build_context(self.root / "catalog-failure-target")
+        failed_report = ExchangeImportReport(
+            format_name="package",
+            mode="create",
+            passed=0,
+            failed=1,
+            skipped=2,
+            warnings=["catalog row failed validation"],
+            duplicates=[],
+            unknown_fields=[],
+            repair_queue_entry_ids=[101],
+        )
+
+        with mock.patch.object(
+            target["exchange_service"],
+            "import_package",
+            return_value=failed_report,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "catalog section did not import cleanly.*catalog row failed validation",
+            ):
+                target["master_transfer_service"].import_package(package_path)
+
     def test_master_transfer_import_handles_selective_packages(self):
         package_path = self.root / "master-transfer-selective.zip"
         self.source["master_transfer_service"].export_package(
@@ -893,6 +1046,69 @@ class MasterTransferServiceTests(unittest.TestCase):
             )
         )
 
+    def test_master_transfer_skips_license_section_when_catalog_dependency_is_missing(self):
+        package_path = self.root / "master-transfer-license-without-catalog.zip"
+        self.source["master_transfer_service"].export_package(package_path)
+
+        def _strip_catalog_but_keep_license(extracted_root: Path) -> None:
+            def _mutate(manifest: dict[str, object]) -> None:
+                manifest["sections"] = [
+                    section
+                    for section in manifest["sections"]
+                    if section.get("section_id") == "licenses"
+                ]
+                manifest["export_selection"]["included_section_ids"] = ["licenses"]
+                manifest["export_selection"]["omitted_sections"] = [
+                    {
+                        "section_id": "catalog",
+                        "label": "Catalog Exchange Package",
+                        "depends_on": [],
+                        "reason": "Excluded by export selection.",
+                        "omission_kind": "user_excluded",
+                        "entity_counts": {},
+                    },
+                    {
+                        "section_id": "repertoire",
+                        "label": "Contracts and Rights Package",
+                        "depends_on": ["catalog"],
+                        "reason": "Excluded by export selection.",
+                        "omission_kind": "user_excluded",
+                        "entity_counts": {},
+                    },
+                    {
+                        "section_id": "contract_templates",
+                        "label": "Contract Templates",
+                        "depends_on": [],
+                        "reason": "Excluded by export selection.",
+                        "omission_kind": "user_excluded",
+                        "entity_counts": {},
+                    },
+                ]
+
+            self._mutate_manifest(extracted_root, _mutate)
+
+        broken_path = self._rewrite_package(
+            package_path,
+            mutate_root=_strip_catalog_but_keep_license,
+        )
+        target = self._build_context(self.root / "license-dependency-target")
+
+        inspection = target["master_transfer_service"].inspect_package(broken_path)
+        self.assertEqual(inspection.importable_section_ids, [])
+        self.assertIn("licenses", inspection.blocked_sections)
+        self.assertTrue(
+            any(
+                "license files stay previewable" in warning.lower()
+                for warning in inspection.warnings
+            )
+        )
+
+        result = target["master_transfer_service"].import_package(broken_path)
+
+        self.assertEqual(result.imported_licenses, 0)
+        self.assertIn("licenses", result.skipped_sections)
+        self.assertEqual(self._count(target, "Licenses"), 0)
+
     def test_master_transfer_detects_checksum_mismatch(self):
         package_path = self.root / "master-transfer.zip"
         self.source["master_transfer_service"].export_package(package_path)
@@ -908,6 +1124,265 @@ class MasterTransferServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Checksum mismatch"):
             self.source["master_transfer_service"].inspect_package(corrupted_path)
+
+    def test_master_transfer_rejects_malformed_manifests_and_unsafe_package_members(self):
+        package_path = self.root / "master-transfer-guardrails.zip"
+        self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog"],
+        )
+
+        unsupported_type = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest.update({"document_type": "not-master-transfer"}),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported master transfer package type"):
+            self.source["master_transfer_service"].inspect_package(unsupported_type)
+
+        unsupported_format = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest.update({"package_format": "wrong"}),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported master transfer package format"):
+            self.source["master_transfer_service"].inspect_package(unsupported_format)
+
+        future_version = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest.update({"package_format_version": 999}),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported master transfer package version 999"):
+            self.source["master_transfer_service"].inspect_package(future_version)
+
+        missing_path_entry = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest["files"].append({"path": "", "sha256": ""}),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "file entry without a path"):
+            self.source["master_transfer_service"].inspect_package(missing_path_entry)
+
+        missing_file = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest["files"].append(
+                    {"path": "sections/catalog/missing.zip", "sha256": ""}
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Master transfer file is missing"):
+            self.source["master_transfer_service"].inspect_package(missing_file)
+
+        undeclared_section = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest["export_selection"].update(
+                    {
+                        "included_section_ids": ["catalog", "licenses"],
+                        "omitted_sections": [
+                            section
+                            for section in manifest["export_selection"]["omitted_sections"]
+                            if section.get("section_id") != "licenses"
+                        ],
+                    }
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "included without payload metadata: licenses"):
+            self.source["master_transfer_service"].inspect_package(undeclared_section)
+
+        required_unknown = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest["sections"].append(
+                    {
+                        "section_id": "future_required",
+                        "label": "Future Required Section",
+                        "artifact_path": "sections/catalog/package.zip",
+                        "payload_kind": "zip",
+                        "section_format": "future",
+                        "schema_version": 1,
+                        "required": True,
+                        "depends_on": [],
+                        "entity_counts": {},
+                        "artifact_sha256": "",
+                        "artifact_size_bytes": 0,
+                    }
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported section 'future_required'"):
+            self.source["master_transfer_service"].inspect_package(required_unknown)
+
+        optional_unknown = self._rewrite_package(
+            package_path,
+            mutate_root=lambda extracted_root: self._mutate_manifest(
+                extracted_root,
+                lambda manifest: manifest["sections"].append(
+                    {
+                        "section_id": "future_optional",
+                        "label": "Future Optional Section",
+                        "artifact_path": "sections/catalog/package.zip",
+                        "payload_kind": "zip",
+                        "section_format": "future",
+                        "schema_version": 1,
+                        "required": False,
+                        "depends_on": [],
+                        "entity_counts": {},
+                        "artifact_sha256": "",
+                        "artifact_size_bytes": 0,
+                    }
+                ),
+            ),
+        )
+        inspection = self.source["master_transfer_service"].inspect_package(optional_unknown)
+        self.assertIn("Skipped unknown optional section: future_optional", inspection.warnings)
+
+        unsafe_zip = self.root / "master-transfer-unsafe-member.zip"
+        with ZipFile(unsafe_zip, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("../escape.txt", "bad")
+        with self.assertRaisesRegex(ValueError, "unsafe path"):
+            self.source["master_transfer_service"].inspect_package(unsafe_zip)
+
+    def test_master_transfer_section_payload_guardrails_reject_unsafe_and_missing_files(self):
+        service = self.source["master_transfer_service"]
+        payload_root = self.root / "section-guardrails"
+        payload_root.mkdir()
+        license_payload = payload_root / "licenses.json"
+
+        license_payload.write_text(
+            json.dumps({"schema_version": 999, "rows": []}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported license section schema version 999"):
+            service._read_license_rows(license_payload)
+
+        license_payload.write_text(
+            json.dumps({"schema_version": 1, "rows": [{"track_id": 0, "file_path": "x.pdf"}]}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Missing source identifier"):
+            service._import_license_section(license_payload, track_id_map={})
+
+        source_track_id = self.source_ids["track_id"]
+        license_payload.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [{"track_id": source_track_id, "file_path": "../outside.pdf"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unsafe file path"):
+            service._import_license_section(
+                license_payload,
+                track_id_map={source_track_id: source_track_id},
+            )
+
+        license_payload.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [{"track_id": source_track_id, "file_path": "files/missing.pdf"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "License file is missing"):
+            service._import_license_section(
+                license_payload,
+                track_id_map={source_track_id: source_track_id},
+            )
+
+        no_license_service = MasterTransferService(
+            exchange_service=self.source["exchange_service"],
+            repertoire_exchange_service=self.source["repertoire_service"],
+            license_service=None,
+            contract_template_service=self.source["contract_template_service"],
+            app_version="9.9.9-no-license-import",
+        )
+        with self.assertRaisesRegex(ValueError, "License service is unavailable"):
+            no_license_service._import_license_section(
+                license_payload,
+                track_id_map={source_track_id: source_track_id},
+            )
+
+        template_payload = payload_root / "templates.json"
+        template_payload.write_text(
+            json.dumps({"templates": [{"name": "Imported", "revisions": []}]}),
+            encoding="utf-8",
+        )
+        no_template_service = MasterTransferService(
+            exchange_service=self.source["exchange_service"],
+            repertoire_exchange_service=self.source["repertoire_service"],
+            license_service=self.source["license_service"],
+            contract_template_service=None,
+            app_version="9.9.9-no-template-import",
+        )
+        with self.assertRaisesRegex(ValueError, "Contract template service is unavailable"):
+            no_template_service._import_contract_template_section(template_payload)
+
+        template_payload.write_text(json.dumps({"templates": []}), encoding="utf-8")
+        self.assertEqual(
+            no_template_service._import_contract_template_section(template_payload),
+            {"templates": 0, "revisions": 0},
+        )
+
+        template_payload.write_text(
+            json.dumps(
+                {
+                    "templates": [
+                        {
+                            "name": "Unsafe",
+                            "revisions": [
+                                {
+                                    "revision_id": 1,
+                                    "file_path": "../outside.docx",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unsafe file path"):
+            service._import_contract_template_section(template_payload)
+
+        template_payload.write_text(
+            json.dumps(
+                {
+                    "templates": [
+                        {
+                            "name": "Missing",
+                            "revisions": [
+                                {
+                                    "revision_id": 2,
+                                    "file_path": "files/missing.docx",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "revision file is missing"):
+            service._import_contract_template_section(template_payload)
 
     def test_master_transfer_reports_staged_progress_to_completion(self):
         package_path = self.root / "master-transfer.zip"

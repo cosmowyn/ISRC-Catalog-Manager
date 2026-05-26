@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,12 +28,17 @@ def test_normalize_equalizer_settings_handles_gains_string_and_defaults() -> Non
     assert normalized["gains"][1] == 0.0
     assert normalized["gains"][7] == 0.0
 
+    from_mapping = equalizer.normalize_equalizer_settings({"enabled": True, "gains": {"bad": 1}})
+    assert from_mapping["gains"] == [0.0] * len(equalizer.EQUALIZER_BANDS)
+
 
 def test_normalize_equalizer_settings_non_dict_returns_default() -> None:
     normalized = equalizer.normalize_equalizer_settings(None)
     assert normalized["enabled"] is False
     assert normalized["pan"] == 0.0
     assert len(normalized["gains"]) == len(equalizer.EQUALIZER_BANDS)
+    assert equalizer.load_equalizer_settings(None) == equalizer.default_equalizer_settings()
+    assert equalizer.save_equalizer_settings(None, {"enabled": True})["enabled"] is True
 
 
 def test_ffmpeg_filter_chain_no_active_gains() -> None:
@@ -68,6 +75,15 @@ def test_which_uses_platform_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(equalizer.platform, "system", lambda: "linux")
     monkeypatch.setattr(equalizer.os.path, "exists", lambda path: path == "/usr/local/bin/ffmpeg")
     assert equalizer._which("ffmpeg") == "/usr/local/bin/ffmpeg"
+
+
+def test_which_uses_macos_search_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(equalizer.shutil, "which", lambda name: None)
+    monkeypatch.setattr(equalizer.platform, "system", lambda: "darwin")
+    monkeypatch.setattr(
+        equalizer.os.path, "exists", lambda path: path == "/opt/homebrew/bin/ffmpeg"
+    )
+    assert equalizer._which("ffmpeg") == "/opt/homebrew/bin/ffmpeg"
 
 
 def test_apply_equalizer_to_audio_short_circuits_without_gain(tmp_path: Path) -> None:
@@ -280,6 +296,80 @@ def test_ffmpeg_and_soundfile_paths_report_missing_tools_and_runtime_failures(
         equalizer._apply_equalizer_with_soundfile(str(source), str(target), {"enabled": True})
         is False
     )
+
+
+def test_soundfile_backend_success_empty_and_write_failure_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.wav"
+    target = tmp_path / "processed.wav"
+    source.write_bytes(b"RIFFsource")
+
+    soundfile_module = types.ModuleType("soundfile")
+    signal_module = types.ModuleType("scipy.signal")
+    scipy_module = types.ModuleType("scipy")
+
+    samples = np.array([[0.9, -0.9], [0.8, -0.8], [0.7, -0.7]], dtype=np.float32)
+    soundfile_module.read = lambda *_args, **_kwargs: (samples, 44100)
+
+    def fake_write(path, _processed, _sample_rate, **_kwargs):
+        Path(path).write_bytes(b"processed")
+
+    soundfile_module.write = fake_write
+    signal_module.sosfilt = lambda _sos, channel: channel * 1.4
+    scipy_module.signal = signal_module
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_module)
+    monkeypatch.setitem(sys.modules, "scipy", scipy_module)
+    monkeypatch.setitem(sys.modules, "scipy.signal", signal_module)
+
+    assert equalizer._apply_equalizer_with_soundfile(
+        str(source),
+        str(target),
+        {
+            "enabled": True,
+            "gains": [3.0] + [0.0] * (len(equalizer.EQUALIZER_BANDS) - 1),
+            "pan": 0.0,
+        },
+    )
+    assert target.read_bytes() == b"processed"
+
+    soundfile_module.read = lambda *_args, **_kwargs: (np.empty((0, 2), dtype=np.float32), 44100)
+    assert (
+        equalizer._apply_equalizer_with_soundfile(str(source), str(target), {"enabled": True})
+        is False
+    )
+
+    soundfile_module.read = lambda *_args, **_kwargs: (samples, 44100)
+    soundfile_module.write = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("write failed")
+    )
+    assert (
+        equalizer._apply_equalizer_with_soundfile(
+            str(source),
+            str(target),
+            {"enabled": True, "gains": [3.0]},
+        )
+        is False
+    )
+
+
+def test_apply_equalizer_to_audio_falls_back_to_soundfile_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.wav"
+    target = tmp_path / "nested" / "target.wav"
+    source.write_bytes(b"RIFFsource")
+    monkeypatch.setattr(equalizer, "_apply_equalizer_with_ffmpeg", lambda *_args: False)
+    monkeypatch.setattr(equalizer, "_apply_equalizer_with_soundfile", lambda *_args: True)
+
+    assert equalizer.apply_equalizer_to_audio(
+        str(source),
+        str(target),
+        {"enabled": True, "gains": [2.0]},
+    )
+    assert target.parent.exists()
 
 
 def test_curve_widget_audio_spectrum_and_geometry_helpers() -> None:

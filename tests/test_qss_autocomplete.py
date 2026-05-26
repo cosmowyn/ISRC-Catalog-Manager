@@ -3,18 +3,20 @@ import unittest
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtCore import qInstallMessageHandler
-    from PySide6.QtGui import QTextCursor
+    from PySide6.QtCore import QEvent, Qt, qInstallMessageHandler
+    from PySide6.QtGui import QKeyEvent, QTextCursor
     from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
     from isrc_manager.qss_autocomplete import (
         QssCodeEditor,
         QssCompletionEngine,
+        QssCompletionItem,
+        build_qss_reference_template,
         build_qss_rule_template,
         parse_qss_context,
         validate_qss_document,
     )
-    from isrc_manager.qss_reference import collect_qss_reference_entries
+    from isrc_manager.qss_reference import QssReferenceEntry, collect_qss_reference_entries
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     QSS_AUTOCOMPLETE_IMPORT_ERROR = exc
 else:
@@ -149,6 +151,61 @@ class QssAutocompleteTests(unittest.TestCase):
         self.assertEqual(context.current_property_name, "background-color")
         self.assertEqual(context.active_widget_class, "QPushButton")
 
+    def test_context_parser_handles_comments_quotes_and_partial_compound_selectors(self):
+        comment_text = "QWidget { color: red; }\n/* unfinished"
+        comment_context = parse_qss_context(comment_text, len(comment_text))
+        self.assertEqual(comment_context.mode, "comment")
+        self.assertEqual(self.engine.completion_items("/* unfinished", 13), [])
+
+        quoted_text = 'QWidget { image: "{ not a selector }";\n    color'
+        quoted_context = parse_qss_context(quoted_text, len(quoted_text))
+        self.assertEqual(quoted_context.mode, "property_name")
+        self.assertEqual(quoted_context.active_widget_class, "QWidget")
+
+        object_context = parse_qss_context("#", 1)
+        self.assertEqual(object_context.compound_parts.pending_part, "object_name")
+        self.assertTrue(object_context.compound_parts.valid)
+
+        subcontrol_context = parse_qss_context("QScrollBar::", len("QScrollBar::"))
+        self.assertEqual(subcontrol_context.compound_parts.pending_part, "subcontrol")
+        self.assertTrue(subcontrol_context.compound_parts.valid)
+
+        pseudo_context = parse_qss_context("QPushButton:", len("QPushButton:"))
+        self.assertEqual(pseudo_context.compound_parts.pending_part, "pseudo_state")
+        self.assertTrue(pseudo_context.compound_parts.valid)
+
+        invalid_context = parse_qss_context(
+            "QWidget::handle::again",
+            len("QWidget::handle::again"),
+        )
+        self.assertFalse(invalid_context.compound_parts.valid)
+        role_context = parse_qss_context("[role", len("[role"))
+        self.assertFalse(role_context.compound_parts.valid)
+
+    def test_context_parser_recovers_after_closed_comments_escapes_and_invalid_selectors(self):
+        closed_comment = "/* done */\nQPushButton"
+        closed_context = parse_qss_context(closed_comment, len(closed_comment))
+        self.assertEqual(closed_context.mode, "selector")
+        self.assertEqual(closed_context.fragment_text, "QPushButton")
+
+        escaped_quote = 'QWidget { image: "escaped \\" quote";\n    col'
+        escaped_context = parse_qss_context(escaped_quote, len(escaped_quote))
+        self.assertEqual(escaped_context.mode, "property_name")
+        self.assertEqual(escaped_context.fragment_text, "col")
+
+        empty_context = parse_qss_context("", 0)
+        self.assertEqual(empty_context.mode, "selector")
+        self.assertTrue(empty_context.compound_parts.valid)
+
+        invalid_start_context = parse_qss_context("@bad", len("@bad"))
+        self.assertFalse(invalid_start_context.compound_parts.valid)
+
+        empty_pseudo_context = parse_qss_context(
+            "QPushButton::handle::",
+            len("QPushButton::handle::"),
+        )
+        self.assertFalse(empty_pseudo_context.compound_parts.valid)
+
     def test_descendant_selector_object_name_keeps_leading_selector_intact(self):
         text = "#mainWindow QPushButton:hover"
         item = next(
@@ -209,6 +266,47 @@ class QssAutocompleteTests(unittest.TestCase):
         self.assertNotIn("background-color: ;", template_text)
         self.assertFalse(validate_qss_document(template_text))
 
+    def test_rule_and_reference_templates_cover_empty_unknown_subcontrol_and_role_paths(self):
+        default_text, default_cursor = build_qss_rule_template("")
+        self.assertEqual(default_text, "QWidget {\n    background-color: palette(window);\n}")
+        self.assertEqual(default_cursor, len("QWidget {\n    "))
+
+        unknown_text, _unknown_cursor = build_qss_rule_template("FancyWidget", "FancyWidget")
+        self.assertIn("/* FancyWidget styling */", unknown_text)
+        self.assertIn("FancyWidget {", unknown_text)
+
+        handle_text, _handle_cursor = build_qss_rule_template(
+            "QSplitter::handle",
+            "QSplitter",
+            "handle",
+        )
+        self.assertIn("min-height:", handle_text)
+        self.assertIn("QSplitter::handle {", handle_text)
+
+        object_text, _object_cursor = build_qss_reference_template(
+            QssReferenceEntry(
+                "Object",
+                "#save_button",
+                "Save button.",
+                selector_kind="object_name",
+                widget_class="QPushButton",
+                object_name="save_button",
+            )
+        )
+        self.assertTrue(object_text.startswith("/* Save button. */"))
+        self.assertIn("QPushButton#save_button {", object_text)
+
+        role_text, _role_cursor = build_qss_reference_template(
+            QssReferenceEntry(
+                "Role",
+                '[role="secondary"]',
+                "",
+                selector_kind="role_property",
+                role_name="secondary",
+            )
+        )
+        self.assertIn('[role="secondary"] {', role_text)
+
     def test_template_generated_qss_applies_without_qt_parser_warnings(self):
         template_text, _cursor_offset = build_qss_rule_template("QPushButton", "QPushButton")
         warnings = [
@@ -237,6 +335,143 @@ class QssAutocompleteTests(unittest.TestCase):
         issues = validate_qss_document("QPushButton {\n    color:\n}")
         self.assertEqual(len(issues), 1)
         self.assertIn("Incomplete property value", issues[0].message)
+
+    def test_validation_reports_recovery_edges_for_malformed_documents(self):
+        cases = {
+            "": [],
+            "{}": ["Selector block is missing a selector"],
+            "}": ["Unexpected closing brace"],
+            "QWidget { QPushButton { color: red; }": ["Nested selector text"],
+            "QWidget { color }": ["Incomplete property inside"],
+            "QWidget { color: red": ["Missing closing brace"],
+            'QWidget { image: "unterminated; }': ["Unclosed string literal"],
+            "/* unterminated": ["Unclosed QSS comment"],
+        }
+
+        for document, expected_fragments in cases.items():
+            with self.subTest(document=document):
+                messages = [issue.message for issue in validate_qss_document(document)]
+                for fragment in expected_fragments:
+                    self.assertTrue(
+                        any(fragment in message for message in messages),
+                        messages,
+                    )
+
+    def test_completion_edits_cover_property_value_and_comment_noop_modes(self):
+        property_text = "QWidget {\n    bac\n}"
+        property_item = next(
+            item
+            for item in self.engine.completion_items(property_text, property_text.index("bac") + 3)
+            if item.kind == "property_name" and item.property_name == "background-color"
+        )
+        property_edit = self.engine.completion_edit(
+            property_text,
+            property_text.index("bac") + 3,
+            property_item,
+        )
+        self.assertEqual(property_edit.text, "background-color: palette(window);")
+
+        value_text = "QWidget {\n    background-color: trans\n}"
+        value_item = next(
+            item
+            for item in self.engine.completion_items(value_text, value_text.index("trans") + 5)
+            if item.kind == "property_value" and item.value == "transparent"
+        )
+        value_edit = self.engine.completion_edit(
+            value_text,
+            value_text.index("trans") + 5,
+            value_item,
+        )
+        self.assertEqual(value_edit.text, "transparent")
+
+        self.assertIsNone(
+            self.engine.completion_edit("/* comment", len("/* comment"), property_item)
+        )
+
+    def test_completion_engine_covers_typed_role_example_and_invalid_composition_edges(self):
+        engine = QssCompletionEngine()
+        engine.set_reference_entries(
+            [
+                QssReferenceEntry(
+                    "Typed",
+                    "QPushButton#save_button",
+                    "Typed object selector.",
+                    selector_kind="typed_object",
+                    widget_class="QPushButton",
+                    object_name="save_button",
+                ),
+                QssReferenceEntry(
+                    "Object",
+                    "#save_button",
+                    "Object name.",
+                    selector_kind="object_name",
+                    widget_class="QPushButton",
+                    object_name="save_button",
+                ),
+                QssReferenceEntry(
+                    "Role",
+                    '[role="secondary"]',
+                    "Role selector.",
+                    selector_kind="role_property",
+                    role_name="secondary",
+                ),
+                QssReferenceEntry(
+                    "Example",
+                    "QWidget > QLabel",
+                    "Harvested example.",
+                    selector_kind="example",
+                    widget_class="QLabel",
+                ),
+            ]
+        )
+
+        empty_labels = [item.label for item in engine.completion_items("", 0)]
+        self.assertIn("QPushButton#save_button [typed object selector]", empty_labels)
+        self.assertIn('[role="secondary"] [role selector]', empty_labels)
+        self.assertIn("QWidget > QLabel [example]", empty_labels)
+
+        object_labels = [item.label for item in engine.completion_items("#", 1)]
+        self.assertIn("#save_button [object reference]", object_labels)
+
+        invalid_object_item = QssCompletionItem(
+            label="#save_button [object reference]",
+            detail="Object name.",
+            preview="#save_button",
+            kind="object_name",
+            insertion_mode="compose_selector",
+            value="#save_button",
+            widget_class="QPushButton",
+            object_name="#save_button",
+        )
+        invalid_edit = engine.completion_edit("@bad", len("@bad"), invalid_object_item)
+        self.assertIsNotNone(invalid_edit)
+        assert invalid_edit is not None
+        self.assertEqual(invalid_edit.text, "#save_button")
+
+        subcontrol_without_widget = QssCompletionItem(
+            label="::handle [subcontrol]",
+            detail="Subcontrol.",
+            preview="::handle",
+            kind="subcontrol",
+            insertion_mode="compose_selector",
+            value="handle",
+            subcontrol="handle",
+        )
+        self.assertIsNone(engine.completion_edit("#", 1, subcontrol_without_widget))
+
+        widget_item = QssCompletionItem(
+            label="QLabel [selector]",
+            detail="Widget.",
+            preview="QLabel",
+            kind="widget_selector",
+            insertion_mode="compose_selector",
+            value="QLabel",
+            widget_class="QLabel",
+        )
+        widget_edit = engine.completion_edit("", 0, widget_item)
+        self.assertIsNotNone(widget_edit)
+        assert widget_edit is not None
+        self.assertEqual(widget_edit.text, "QLabel")
 
     def test_role_selector_completion_offers_template_item(self):
         labels = self._completion_labels('[role="secondary"]')
@@ -324,6 +559,92 @@ class QssAutocompleteTests(unittest.TestCase):
             self.assertTrue(text.startswith("/* QPushButton named 'save_button'. */"))
             self.assertIn("QPushButton#save_button {", text)
             self.assertFalse(validate_qss_document(text))
+        finally:
+            editor.close()
+
+    def test_editor_tokens_templates_popup_and_autoshow_boundaries(self):
+        editor = QssCodeEditor()
+        try:
+            editor.set_completion_tokens(["QWidget#compatWidget", "[role='legacy']"])
+            labels = [item.label for item in editor._engine.completion_items("", 0)]
+            self.assertIn("QWidget#compatWidget [example]", labels)
+            self.assertIn("[role='legacy'] [example]", labels)
+
+            self.assertIn("QLabel {", editor.template_text_for_selector("QLabel"))
+            reference_entry = QssReferenceEntry(
+                "Object",
+                "#compatWidget",
+                "Compatibility widget.",
+                selector_kind="object_name",
+                widget_class="QWidget",
+                object_name="compatWidget",
+            )
+            self.assertTrue(
+                editor.template_text_for_reference_entry(reference_entry).startswith(
+                    "/* Compatibility widget. */"
+                )
+            )
+
+            editor.setPlainText("before after")
+            cursor = editor.textCursor()
+            cursor.setPosition(len("before"))
+            editor.setTextCursor(cursor)
+            editor.insert_template_for_selector("")
+            self.assertEqual(editor.toPlainText(), "before after")
+            editor.insert_template_for_selector("QLabel", widget_class="QLabel")
+            text = editor.toPlainText()
+            self.assertIn("before\n\n/* Full widget template.", text)
+            self.assertIn("}\n after", text)
+
+            editor.setPlainText("alpha omega")
+            cursor = editor.textCursor()
+            cursor.setPosition(len("alpha"))
+            editor.setTextCursor(cursor)
+            editor.insert_template_for_reference_entry(reference_entry)
+            text = editor.toPlainText()
+            self.assertIn("alpha\n\n/* Compatibility widget. */", text)
+            self.assertIn("}\n omega", text)
+
+            editor._apply_completion_from_index("missing label")
+
+            class InvalidIndex:
+                def isValid(self):
+                    return False
+
+            editor._apply_completion_from_index(InvalidIndex())
+
+            editor.setPlainText("/* comment")
+            cursor = editor.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            editor.setTextCursor(cursor)
+            editor._show_completion_popup(require_items=True)
+            self.assertFalse(editor._completer.popup().isVisible())
+
+            selector_context = parse_qss_context("QP", 2)
+            self.assertTrue(editor._should_autoshow(selector_context, "P"))
+            self.assertFalse(editor._should_autoshow(selector_context, " "))
+            property_context = parse_qss_context("QWidget {\n    co", len("QWidget {\n    co"))
+            self.assertTrue(editor._should_autoshow(property_context, "o"))
+            property_value_context = parse_qss_context(
+                "QWidget {\n    color: r",
+                len("QWidget {\n    color: r"),
+            )
+            self.assertTrue(editor._should_autoshow(property_value_context, "r"))
+            comment_context = parse_qss_context("/* no", len("/* no"))
+            self.assertFalse(editor._should_autoshow(comment_context, "o"))
+
+            editor.setPlainText("QPushButton")
+            cursor = editor.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            editor.setTextCursor(cursor)
+            ctrl_space = QKeyEvent(
+                QEvent.KeyPress,
+                Qt.Key_Space,
+                Qt.ControlModifier,
+                " ",
+            )
+            editor.keyPressEvent(ctrl_space)
+            self.assertGreaterEqual(editor._model.rowCount(), 1)
         finally:
             editor.close()
 
