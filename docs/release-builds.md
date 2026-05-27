@@ -28,7 +28,7 @@ version. The version-bump workflow updates that value first, then runs
 `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
-Current canonical source version: `3.16.5` (`v3.16.5`).
+Current canonical source version: `3.16.6` (`v3.16.6`).
 Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
 <!-- version:sync:end -->

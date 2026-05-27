@@ -507,7 +507,7 @@ The current public version block below is maintained by `scripts/sync_version_do
 run by the production version-bump workflow after the canonical version changes.
 
 <!-- version:sync:start -->
-Current source release: `3.16.5` (`v3.16.5`).
+Current source release: `3.16.6` (`v3.16.6`).
 Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->
