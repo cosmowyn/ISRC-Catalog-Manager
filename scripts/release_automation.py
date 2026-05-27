@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from isrc_manager.versioning import SemVer, bump_version  # noqa: E402
+from scripts.sync_version_docs import sync_version_docs  # noqa: E402
 
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 VERSION_MODULE_PATH = PROJECT_ROOT / "isrc_manager" / "version.py"
@@ -29,6 +30,8 @@ RELEASE_NOTES_URL_TEMPLATE = (
 GENERATED_PATH_PREFIXES = ("docs/releases/",)
 GENERATED_PATHS = {
     "RELEASE_NOTES.md",
+    "README.md",
+    "docs/release-builds.md",
     "isrc_manager/version.py",
     "pyproject.toml",
 }
@@ -297,6 +300,7 @@ def apply_release_plan(plan: ReleasePlan) -> None:
     write_project_version(plan.next_version)
     write_version_module(plan.next_version)
     write_release_metadata(plan)
+    sync_version_docs(PYPROJECT_PATH.parent)
 
 
 def git(args: list[str], *, cwd: Path = PROJECT_ROOT) -> str:

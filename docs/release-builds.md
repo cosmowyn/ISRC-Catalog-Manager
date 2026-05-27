@@ -20,6 +20,25 @@ This second trigger is important because GitHub does not start new workflows fro
 workflow using the repository `GITHUB_TOKEN`. In both paths, the resolved tag is validated as
 SemVer-style before packaging.
 
+## Canonical Version Sync
+
+`pyproject.toml` under `[project].version` is the single canonical source for the production app
+version. The version-bump workflow updates that value first, then runs
+`scripts/sync_version_docs.py` to align the current public markers, `RELEASE_NOTES.md`, and
+`docs/releases/latest.json`.
+
+<!-- version:sync:start -->
+Current canonical source version: `3.16.0` (`v3.16.0`).
+Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
+Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
+<!-- version:sync:end -->
+
+The sync script is intentionally conservative. Historical release files such as
+`docs/releases/vX.Y.Z.md`, old implementation handoffs, changelog history, and example package names
+remain historical records and are not rewritten unless a maintainer edits them directly.
+`python scripts/sync_version_docs.py --check` fails the workflow when any synced current-version
+surface drifts away from `pyproject.toml`.
+
 ## Platforms
 
 Each tag build runs natively on:
@@ -41,8 +60,8 @@ Each platform job installs the project with build and developer extras:
 python -m pip install -e ".[dev,build]"
 ```
 
-The build extra pins PyInstaller `6.19.0`, which keeps the packaging lane on a release with
-Python 3.14.4 fixes while release builds move to exact Python 3.14.4.
+The PyInstaller pin is kept aligned between `pyproject.toml` and `requirements.txt`, which keeps
+the packaging lane on the same release-build dependency set used by local bootstrap.
 
 Before `build.py` runs, the workflow executes:
 
@@ -51,7 +70,7 @@ python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager sc
 python -m ruff check build.py isrc_manager scripts tests
 python -m black --check build.py isrc_manager scripts tests
 python -m mypy
-python -m unittest tests.test_build_requirements tests.test_release_automation tests.test_python_314_compatibility -v
+python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release_automation.py tests/test_sync_version_docs.py tests/test_python_314_compatibility.py
 ```
 
 The broader CI workflow still runs its full grouped test matrix on repository pushes.
@@ -125,7 +144,7 @@ A maintainer can smoke-test the same package collection path locally:
 
 ```bash
 python -m pip install -e ".[dev,build]"
-python -m unittest tests.test_build_requirements tests.test_release_automation -v
+python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release_automation.py tests/test_sync_version_docs.py
 python build.py
 ```
 

@@ -46,6 +46,10 @@ jobs:
             --base-ref "${{ github.event.before }}" \
             --head-ref "${{ github.sha }}"
 
+      - name: Verify synced version docs
+        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        run: python scripts/sync_version_docs.py --check
+
       - name: Commit release metadata
         if: ${{ steps.freshness.outputs.fresh == 'true' }}
         run: |
@@ -56,7 +60,7 @@ jobs:
           VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml isrc_manager/version.py docs/releases RELEASE_NOTES.md
+          git add pyproject.toml isrc_manager/version.py docs/releases RELEASE_NOTES.md README.md docs/release-builds.md
           git commit -m "chore(release): v${VERSION} [skip version]"
           git tag "v${VERSION}"
           git push origin HEAD:main

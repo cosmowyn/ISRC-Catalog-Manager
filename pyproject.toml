@@ -110,19 +110,28 @@ select = ["E4", "E7", "E9", "F", "I"]
 [tool.mypy]
 python_version = "3.14"
 files = [
+  "isrc_manager/assets/models.py",
   "isrc_manager/constants.py",
+  "isrc_manager/contracts/models.py",
   "isrc_manager/domain/codes.py",
+  "isrc_manager/domain/repertoire.py",
   "isrc_manager/domain/standard_fields.py",
   "isrc_manager/domain/timecode.py",
   "isrc_manager/exchange/models.py",
+  "isrc_manager/forensics/models.py",
   "isrc_manager/isrc_registry.py",
+  "isrc_manager/parties/models.py",
+  "isrc_manager/promo_codes/models.py",
   "isrc_manager/quality/models.py",
   "isrc_manager/releases/models.py",
+  "isrc_manager/rights/models.py",
+  "isrc_manager/search/models.py",
   "isrc_manager/services/bulk_edit.py",
   "isrc_manager/services/catalog_admin.py",
   "isrc_manager/services/catalog_reads.py",
   "isrc_manager/services/database_admin.py",
   "isrc_manager/services/db_access.py",
+  "isrc_manager/services/gs1_models.py",
   "isrc_manager/services/gs1_repository.py",
   "isrc_manager/services/gs1_settings.py",
   "isrc_manager/services/gs1_validation.py",
@@ -131,6 +140,7 @@ files = [
   "isrc_manager/services/settings_mutations.py",
   "isrc_manager/services/settings_reads.py",
   "isrc_manager/services/sqlite_utils.py",
+  "isrc_manager/services/track_artist_sql.py",
   "isrc_manager/services/update_preferences.py",
   "isrc_manager/tags/models.py",
   "isrc_manager/tasks/models.py",
@@ -139,6 +149,7 @@ files = [
   "isrc_manager/updater_helper.py",
   "isrc_manager/version.py",
   "isrc_manager/versioning.py",
+  "isrc_manager/works/models.py",
 ]
 follow_imports = "skip"
 check_untyped_defs = true

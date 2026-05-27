@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import release_automation as automation
+from scripts import sync_version_docs as version_sync
 
 
 class ReleaseAutomationTests(unittest.TestCase):
@@ -43,7 +44,12 @@ class ReleaseAutomationTests(unittest.TestCase):
             automation.CommitInfo(
                 sha="2",
                 subject="docs: update release metadata",
-                files=("docs/releases/latest.json", "RELEASE_NOTES.md"),
+                files=(
+                    "docs/releases/latest.json",
+                    "RELEASE_NOTES.md",
+                    "README.md",
+                    "docs/release-builds.md",
+                ),
             ),
         ]
 
@@ -74,11 +80,20 @@ class ReleaseAutomationTests(unittest.TestCase):
             version_module = root / "version.py"
             releases_dir = root / "docs" / "releases"
             notes_path = root / "RELEASE_NOTES.md"
+            (root / "docs").mkdir(parents=True)
             pyproject.write_text(
                 '[project]\nname = "isrc-catalog-manager"\nversion = "3.2.0"\n',
                 encoding="utf-8",
             )
             version_module.write_text('__version__ = "3.2.0"\n', encoding="utf-8")
+            (root / "README.md").write_text(
+                f"{version_sync.SYNC_START}\nstale\n{version_sync.SYNC_END}\n",
+                encoding="utf-8",
+            )
+            (root / "docs" / "release-builds.md").write_text(
+                f"{version_sync.SYNC_START}\nstale\n{version_sync.SYNC_END}\n",
+                encoding="utf-8",
+            )
             plan = automation.ReleasePlan(
                 current_version="3.2.0",
                 next_version="3.2.1",
@@ -100,6 +115,11 @@ class ReleaseAutomationTests(unittest.TestCase):
             self.assertTrue((releases_dir / "latest.json").is_file())
             self.assertTrue((releases_dir / "v3.2.1.md").is_file())
             self.assertTrue(notes_path.is_file())
+            self.assertIn("Current source release: `3.2.1`", (root / "README.md").read_text())
+            self.assertIn(
+                "Current canonical source version: `3.2.1`",
+                (root / "docs" / "release-builds.md").read_text(),
+            )
 
     def test_write_project_version_only_updates_project_section(self):
         with tempfile.TemporaryDirectory() as tmpdir:

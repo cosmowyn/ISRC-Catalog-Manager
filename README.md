@@ -503,12 +503,26 @@ The test suite includes service-level coverage, dialog/controller tests, app-she
 ## Versioning and Update Checks
 
 The canonical application version lives in `pyproject.toml` under `[project].version`.
+The current public version block below is maintained by `scripts/sync_version_docs.py`, which is
+run by the production version-bump workflow after the canonical version changes.
+
+<!-- version:sync:start -->
+Current source release: `3.16.0` (`v3.16.0`).
+Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
+Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+<!-- version:sync:end -->
+
 Pushes to `main` run an automated SemVer bump workflow that updates the runtime fallback in
 `isrc_manager/version.py`, writes concise release notes under `docs/releases/`, updates
 `RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` as repository release metadata. The
 generated `vX.Y.Z` tag is resolved by the cross-platform release-build workflow after version
 bumping completes, so public GitHub Release assets and the app-facing `latest.json` update manifest
 are produced online instead of relying on a local maintainer machine.
+
+Version-specific files such as `docs/releases/vX.Y.Z.md`, older implementation handoffs, and
+historical changelog examples are intentionally not rewritten by the sync script. Only the explicit
+marker blocks, `RELEASE_NOTES.md`, and structured latest-release metadata are treated as current
+public version surfaces.
 
 The desktop app checks that manifest after startup without blocking the UI. `Help > Check for
 Updates…` runs the same check manually. Users can ignore a specific available version; that
