@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from unittest import mock
 
 from isrc_manager.services import DatabaseSchemaService, GS1MetadataRecord, GS1MetadataRepository
 
@@ -118,6 +119,55 @@ class GS1MetadataRepositoryTests(unittest.TestCase):
         self.assertEqual(updated.subbrand, "Series B")
         self.assertFalse(updated.consumer_unit_flag)
         self.assertFalse(updated.export_enabled)
+
+    def test_list_by_track_ids_handles_empty_and_returns_saved_records(self):
+        saved = self.repository.save(
+            GS1MetadataRecord(
+                track_id=1,
+                contract_number="10070050",
+                status="Active",
+                product_classification="Audio",
+                consumer_unit_flag=True,
+                packaging_type="Digital file",
+                target_market="Worldwide",
+                language="English",
+                product_description="Listed title",
+                brand="Orbit Label",
+                subbrand="",
+                quantity="1",
+                unit="Each",
+                image_url="",
+                notes="",
+                export_enabled=True,
+            )
+        )
+
+        self.assertEqual(self.repository.list_by_track_ids([]), {})
+        self.assertEqual(self.repository.list_by_track_ids([1, 999]), {1: saved})
+
+    def test_save_reports_failed_round_trip_after_database_write(self):
+        with mock.patch.object(self.repository, "fetch_by_track_id", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Failed to save GS1 metadata"):
+                self.repository.save(
+                    GS1MetadataRecord(
+                        track_id=1,
+                        contract_number="10070050",
+                        status="Active",
+                        product_classification="Audio",
+                        consumer_unit_flag=True,
+                        packaging_type="Digital file",
+                        target_market="Worldwide",
+                        language="English",
+                        product_description="Missing after write",
+                        brand="Orbit Label",
+                        subbrand="",
+                        quantity="1",
+                        unit="Each",
+                        image_url="",
+                        notes="",
+                        export_enabled=True,
+                    )
+                )
 
 
 if __name__ == "__main__":

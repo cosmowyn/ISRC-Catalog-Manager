@@ -62,6 +62,138 @@ class _ProfileKv:
         self.set_calls.append((key, value))
 
 
+def test_main_window_selection_scope_gs1_and_audio_helper_edges(monkeypatch) -> None:
+    app = _app()
+    app.current_db_path = "/profiles/catalog.db"
+
+    assert app._current_profile_name() == "catalog.db"
+    app.current_db_path = ""
+    assert app._current_profile_name() is None
+    assert App._normalize_track_ids([None, "bad", 0, 4, "4", 5]) == [4, 5]
+    assert App._first_non_blank("", "  ", [], {"x": 1}) == {"x": 1}
+    assert App._first_non_blank("  value  ") == "value"
+    assert App._first_non_blank("", None) is None
+    assert App._media_file_filter("audio_file").startswith("Audio")
+    assert App._media_file_filter("artwork").startswith("Images")
+
+    class Controller:
+        def __init__(self, selected=(), visible=()):
+            self._selected = tuple(selected)
+            self._visible = tuple(visible)
+
+        def selected_track_ids(self):
+            return self._selected
+
+        def visible_track_ids(self):
+            return self._visible
+
+    app._catalog_table_controller = lambda: Controller(selected=[1, 2], visible=[3])
+    app._all_catalog_track_choices = lambda: [TrackChoice(9, "Nine"), TrackChoice(10, "Ten")]
+    assert app._bulk_audio_attach_scope_track_ids([7, "bad", 7]) == ([7], "selected tracks")
+    assert app._bulk_audio_attach_scope_track_ids() == ([1, 2], "current selection")
+
+    app._catalog_table_controller = lambda: Controller(selected=[], visible=[3, 4])
+    assert app._bulk_audio_attach_scope_track_ids() == ([3, 4], "visible catalog rows")
+
+    app._catalog_table_controller = lambda: Controller(selected=[], visible=[])
+    assert app._bulk_audio_attach_scope_track_ids() == ([9, 10], "entire catalog")
+
+    class Index:
+        def __init__(self, row: int, column: int):
+            self._row = row
+            self._column = column
+
+        def row(self):
+            return self._row
+
+        def column(self):
+            return self._column
+
+    class Model:
+        rows = [
+            {0: "", 1: "Model Title", 2: "Artist", 3: "Album"},
+            {0: "", 1: "", 2: "", 3: "Album Only"},
+        ]
+
+        def rowCount(self):
+            return len(self.rows)
+
+        def index(self, row, column):
+            return Index(row, column)
+
+        def data(self, index, role):
+            if role != Qt.DisplayRole:
+                return None
+            return self.rows[index.row()].get(index.column(), "")
+
+    class TableController:
+        def active_model(self):
+            return Model()
+
+        def column_for_key(self, key):
+            return {"base:track_title": 1, "base:artist_name": 2, "base:album_title": 3}.get(key)
+
+        def track_id_for_index(self, index):
+            return index.row() + 21
+
+    app._catalog_table_controller = lambda: TableController()
+    app._get_track_title = lambda track_id: f"Fallback {track_id}"
+
+    choices = app._catalog_track_choices()
+
+    assert choices == [
+        TrackChoice(track_id=21, title="Model Title", subtitle="Artist / Album"),
+        TrackChoice(track_id=22, title="Fallback 22", subtitle="Album Only"),
+    ]
+
+    messages: list[tuple[str, str]] = []
+
+    class MessageBox:
+        @classmethod
+        def information(cls, _parent, title, message):
+            messages.append((title, message))
+
+        @classmethod
+        def warning(cls, _parent, title, message):
+            messages.append((title, message))
+
+    dialog_calls: list[tuple[int, list[int]]] = []
+
+    class Dialog:
+        def __init__(self, *, app, track_id, batch_track_ids, parent):
+            del app, parent
+            if track_id == 13:
+                raise ValueError("bad track")
+            self.track_id = int(track_id)
+            self.batch_track_ids = list(batch_track_ids)
+
+        def exec(self):
+            dialog_calls.append((self.track_id, self.batch_track_ids))
+
+    monkeypatch.setattr(main_window, "QMessageBox", MessageBox)
+    monkeypatch.setattr(main_window, "GS1MetadataDialog", Dialog)
+
+    app._catalog_table_controller = lambda: Controller(selected=[])
+    app.open_gs1_dialog()
+    assert messages[-1][0] == "GS1 Metadata"
+    assert "Select a catalog row" in messages[-1][1]
+
+    app._catalog_table_controller = lambda: Controller(selected=[5, 6])
+    app.open_gs1_dialog(True)
+    assert dialog_calls[-1] == (5, [5, 6])
+
+    app._catalog_table_controller = lambda: Controller(selected=[])
+    app.open_gs1_dialog("bad")
+    assert "Could not determine the selected track" in messages[-1][1]
+
+    app._catalog_table_controller = lambda: Controller(selected=[10])
+    app.open_gs1_dialog(9)
+    assert dialog_calls[-1] == (9, [9, 10])
+
+    app.open_gs1_dialog(13)
+    assert messages[-1] == ("GS1 Metadata", "bad track")
+
+
 def test_help_file_and_log_viewer_helpers_cover_refresh_jsonl_and_error_paths(
     tmp_path: Path,
 ) -> None:

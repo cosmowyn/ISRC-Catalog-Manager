@@ -19,6 +19,9 @@ from isrc_manager.tags import (
     catalog_metadata_to_tags,
     merge_imported_tags,
 )
+from isrc_manager.tags import (
+    service as tag_service_module,
+)
 from isrc_manager.tags.models import TaggedAudioExportItem
 from isrc_manager.tags.service import (
     AudioTagService,
@@ -78,7 +81,10 @@ class _StubAudioTagReader:
         self.payloads = dict(payloads or {})
 
     def read_tags(self, file_path):
-        return self.payloads.get(Path(file_path).name, AudioTagData())
+        payload = self.payloads.get(Path(file_path).name, AudioTagData())
+        if isinstance(payload, Exception):
+            raise payload
+        return payload
 
 
 @unittest.skipIf(ID3 is None or MP4Cover is None, "mutagen is not installed")
@@ -392,6 +398,64 @@ class AudioTagServiceTests(unittest.TestCase):
                 any("metadata embedding skipped" in warning for warning in result.warnings)
             )
 
+    def test_service_helper_edges_cover_backend_and_mp4_family_guardrails(self):
+        self.assertIsNone(tag_service_module._first(None))
+        self.assertEqual(tag_service_module._first(["first", "second"]), "first")
+        self.assertEqual(tag_service_module._first([], default="fallback"), "fallback")
+        self.assertIsNone(tag_service_module._parse_slashed_number("bad/value"))
+        self.assertIsNone(tag_service_module._clean_filename_title_token("   "))
+        self.assertEqual(tag_service_module._clean_filename_title_token("01 - Orbit"), "Orbit")
+        self.assertEqual(TaggedAudioExportService._normalize_suffix("wav"), ".wav")
+        self.assertEqual(TaggedAudioExportService._normalize_suffix(".flac"), ".flac")
+
+        tuple_item = TaggedAudioExportService._coerce_export_item(
+            ("/tmp/source.wav", "Source Name", AudioTagData(title="Tuple Title"))
+        )
+        self.assertEqual(tuple_item.source_suffix, ".wav")
+        self.assertEqual(tuple_item.tag_data.title, "Tuple Title")
+
+        service = AudioTagService()
+        with mock.patch.object(tag_service_module, "MutagenFile", return_value=object()):
+            with self.assertRaisesRegex(ValueError, "Raw AAC"):
+                service._load_mp4_family_audio(Path("raw.aac"))
+            with self.assertRaisesRegex(ValueError, "Unsupported MP4-family"):
+                service._load_mp4_family_audio(Path("raw.m4a"))
+
+        self.assertIsNone(AudioTagService._decode_base64_bytes(None))
+        self.assertIsNone(AudioTagService._decode_base64_bytes(""))
+        with mock.patch.object(tag_service_module.base64, "b64decode", side_effect=ValueError):
+            self.assertIsNone(AudioTagService._decode_base64_bytes("Y292ZXI="))
+
+    def test_vorbis_artwork_fallbacks_and_mp4_freeform_cleanup(self):
+        class PicturePayload:
+            data = b"picture"
+            mime = ""
+            desc = "front"
+
+        audio = _DummyVorbis()
+        audio.pictures = [PicturePayload()]
+        artwork = AudioTagService._read_vorbis_like_artwork(audio)
+
+        self.assertEqual(artwork.data, b"picture")
+        self.assertEqual(artwork.mime_type, "image/jpeg")
+        self.assertEqual(artwork.description, "front")
+
+        coverart_audio = _DummyVorbis()
+        coverart_audio["metadata_block_picture"] = ["not-valid-base64-picture"]
+        coverart_audio["coverart"] = ["Y292ZXI="]
+        coverart_audio["coverartmime"] = ["image/png"]
+        coverart = AudioTagService._read_vorbis_like_artwork(coverart_audio)
+
+        self.assertEqual(coverart.data, b"cover")
+        self.assertEqual(coverart.mime_type, "image/png")
+
+        tags = {"----:com.apple.iTunes:ISRC": [b"NL-ABC-26-00001"]}
+        self.assertEqual(
+            AudioTagService._decode_mp4_freeform(_DummyMp4WithTags(tags), "ISRC"), "NL-ABC-26-00001"
+        )
+        AudioTagService._set_mp4_freeform(tags, "ISRC", "")
+        self.assertNotIn("----:com.apple.iTunes:ISRC", tags)
+
 
 class BulkAudioAttachServiceTests(unittest.TestCase):
     def test_bulk_audio_attach_service_matches_by_filename_and_suggests_artist(self):
@@ -483,6 +547,95 @@ class BulkAudioAttachServiceTests(unittest.TestCase):
         self.assertEqual(plan.items[1].artist, "Artist Two")
         self.assertIsNone(plan.items[1].artwork)
         self.assertEqual(plan.suggested_artist, None)
+
+    def test_bulk_audio_attach_service_reports_tag_read_warnings_and_progress(self):
+        service = BulkAudioAttachService(
+            _StubAudioTagReader(
+                {
+                    "Broken.wav": RuntimeError("cannot read tags"),
+                    "Tagged.wav": AudioTagData(
+                        title="Tagged",
+                        artist="Artist One",
+                        album_artist="Album Artist",
+                        warnings=["embedded art skipped"],
+                    ),
+                }
+            )
+        )
+        progress: list[tuple[int, int, str]] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            broken_path = Path(tmpdir) / "Broken.wav"
+            tagged_path = Path(tmpdir) / "Tagged.wav"
+            broken_path.write_bytes(b"")
+            tagged_path.write_bytes(b"")
+
+            plan = service.build_import_plan(
+                file_paths=[broken_path, tagged_path],
+                progress_callback=lambda value, maximum, message: progress.append(
+                    (value, maximum, message)
+                ),
+            )
+
+        self.assertEqual(plan.items[0].title, "Broken")
+        self.assertIn("Broken.wav: cannot read tags", plan.warnings[0])
+        self.assertIn("embedded art skipped", plan.warnings[1])
+        self.assertEqual(plan.suggested_artist, "Artist One")
+        self.assertEqual(progress[-1], (2, 2, "Audio metadata import preview is ready."))
+
+    def test_bulk_audio_attach_service_clears_equal_duplicate_matches(self):
+        service = BulkAudioAttachService(_StubAudioTagReader())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first_path = Path(tmpdir) / "Orbit.wav"
+            second_path = Path(tmpdir) / "01 - Orbit.wav"
+            first_path.write_bytes(b"")
+            second_path.write_bytes(b"")
+
+            plan = service.build_plan(
+                file_paths=[first_path, second_path],
+                tracks=[BulkAudioAttachTrackCandidate(track_id=11, title="Orbit")],
+            )
+
+        self.assertEqual([item.status for item in plan.items], ["ambiguous", "ambiguous"])
+        self.assertEqual([item.matched_track_id for item in plan.items], [None, None])
+        self.assertTrue(
+            all("Multiple files matched" in str(item.match_basis) for item in plan.items)
+        )
+
+    def test_bulk_audio_attach_service_scores_isrc_artist_and_empty_candidates(self):
+        track = BulkAudioAttachTrackCandidate(
+            track_id=42,
+            title="Orbit",
+            artist="Moonwake",
+            isrc="NL-ABC-26-00042",
+        )
+
+        self.assertEqual(
+            BulkAudioAttachService._score_match(
+                track,
+                title_candidates=[],
+                detected_artist=None,
+                tag_data=AudioTagData(isrc="NLABC2600042"),
+            ),
+            (420, "ISRC tag"),
+        )
+        self.assertEqual(
+            BulkAudioAttachService._score_match(
+                track,
+                title_candidates=[("Orbit", "Title tag"), ("", "Filename")],
+                detected_artist="Moonwake",
+                tag_data=AudioTagData(),
+            ),
+            (285, "Title tag + artist"),
+        )
+        self.assertEqual(
+            BulkAudioAttachService._suggest_artist(["One", "Two"]),
+            None,
+        )
+
+
+class _DummyMp4WithTags:
+    def __init__(self, tags):
+        self.tags = tags
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.services import CustomFieldDefinitionService, CustomFieldValueService
 
 
@@ -101,6 +102,45 @@ class CustomFieldDefinitionServiceTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertIn('"emoji": "\\ud83d\\udcf7"', row[0])
         self.assertEqual(fields[0]["blob_icon_payload"]["emoji"], "📷")
+
+    def test_ensure_fields_deduplicates_reactivates_and_rejects_type_conflicts(self):
+        with self.conn:
+            self.conn.execute("UPDATE CustomFieldDefs SET active=0 WHERE id=1")
+
+        ensured = self.service.ensure_fields(
+            [
+                {"name": " Mood ", "field_type": "dropdown", "options": '["Calm"]'},
+                {"name": "Mood", "field_type": "dropdown", "options": '["Ignored"]'},
+                {"name": "", "field_type": "text"},
+                {
+                    "name": "Waveform",
+                    "field_type": "blob_audio",
+                    "blob_icon_payload": {"mode": "emoji", "emoji": "🎧"},
+                },
+            ]
+        )
+
+        self.assertEqual([field["name"] for field in ensured], ["Mood", "Waveform"])
+        self.assertFalse(ensured[0]["created"])
+        self.assertTrue(ensured[1]["created"])
+        self.assertEqual(ensured[1]["blob_icon_payload"]["emoji"], "🎧")
+        self.assertEqual(
+            self.conn.execute("SELECT active FROM CustomFieldDefs WHERE id=1").fetchone(),
+            (1,),
+        )
+
+        with self.assertRaisesRegex(ValueError, "already exists as type"):
+            self.service.ensure_fields([{"name": "Mood", "field_type": "text"}])
+
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor_result = self.service.ensure_fields(
+                [{"name": "Session Notes", "field_type": "text"}],
+                cursor=cursor,
+            )
+        self.assertEqual(cursor_result[0]["name"], "Session Notes")
+        self.assertEqual(self.service.get_field_type(999), "text")
+        self.assertEqual(self.service.get_field_name(999), "file")
 
 
 class CustomFieldValueServiceTests(unittest.TestCase):
@@ -201,6 +241,101 @@ class CustomFieldValueServiceTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.service.save_value(12, 2, blob_path=str(blob_path))
+
+    def test_managed_blob_round_trip_conversion_filtering_and_cleanup(self):
+        data_root = Path(self.tmpdir.name) / "data"
+        service = CustomFieldValueService(self.conn, self.definitions, data_root=data_root)
+        blob_path = Path(self.tmpdir.name) / "cover-managed.png"
+        blob_path.write_bytes(b"\x89PNG\r\n\x1a\nmanaged")
+
+        service.save_value(
+            20,
+            2,
+            blob_path=str(blob_path),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+        )
+        managed_meta = service.get_value_meta(20, 2, include_storage_details=True)
+        managed_path = service._resolve_managed_path(
+            service._fetch_blob_row(20, 2)[2],
+        )
+
+        self.assertEqual(managed_meta["storage_mode"], STORAGE_MODE_MANAGED_FILE)
+        self.assertEqual(managed_meta["filename"], "cover-managed.png")
+        self.assertIsNotNone(managed_path)
+        assert managed_path is not None
+        self.assertTrue(managed_path.exists())
+        self.assertEqual(service.fetch_blob(20, 2)[0], b"\x89PNG\r\n\x1a\nmanaged")
+
+        meta_map = service.get_value_meta_map(
+            [2, "bad", 2],
+            track_ids=[20, "bad", 20],
+            include_storage_details=True,
+        )
+        self.assertEqual(list(meta_map), [(20, 2)])
+        self.assertEqual(meta_map[(20, 2)]["storage_mode"], STORAGE_MODE_MANAGED_FILE)
+        self.assertEqual(service.get_value_meta_map([], track_ids=[20]), {})
+        self.assertEqual(service.get_value_meta_map([2], track_ids=["bad"]), {})
+
+        service.convert_storage_mode(20, 2, STORAGE_MODE_DATABASE)
+        database_meta = service.get_value_meta(20, 2, include_storage_details=True)
+        self.assertEqual(database_meta["storage_mode"], STORAGE_MODE_DATABASE)
+        self.assertFalse(managed_path.exists())
+        self.assertEqual(service.fetch_blob(20, 2)[0], b"\x89PNG\r\n\x1a\nmanaged")
+
+        same_mode_meta = service.convert_storage_mode(20, 2, STORAGE_MODE_DATABASE)
+        self.assertEqual(same_mode_meta["has_blob"], True)
+
+        service.convert_storage_mode(20, 2, STORAGE_MODE_MANAGED_FILE)
+        restored_meta = service.get_value_meta(20, 2, include_storage_details=True)
+        self.assertEqual(restored_meta["storage_mode"], STORAGE_MODE_MANAGED_FILE)
+        restored_path = service._resolve_managed_path(service._fetch_blob_row(20, 2)[2])
+        self.assertIsNotNone(restored_path)
+        assert restored_path is not None
+        self.assertTrue(restored_path.exists())
+
+        service.delete_blob(20, 2)
+        self.assertFalse(restored_path.exists())
+        with self.assertRaises(FileNotFoundError):
+            service.convert_storage_mode(20, 2, STORAGE_MODE_DATABASE)
+
+    def test_blob_value_service_handles_missing_sources_and_unconfigured_managed_storage(self):
+        blob_path = Path(self.tmpdir.name) / "cover-unconfigured.png"
+        blob_path.write_bytes(b"\x89PNG\r\n\x1a\nunconfigured")
+
+        with self.assertRaisesRegex(ValueError, "Managed custom-field storage"):
+            self.service.save_value(
+                30,
+                2,
+                blob_path=str(blob_path),
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+            )
+
+        self.service.save_value(30, 2, blob_path=str(blob_path))
+        self.conn.execute(
+            """
+            UPDATE CustomFieldValues
+            SET blob_value=NULL, managed_file_path='missing/path.png', storage_mode='managed_file'
+            WHERE track_id=? AND field_def_id=?
+            """,
+            (30, 2),
+        )
+        self.conn.commit()
+        with self.assertRaises(FileNotFoundError):
+            self.service.fetch_blob(30, 2)
+
+        self.conn.execute(
+            """
+            UPDATE CustomFieldValues
+            SET managed_file_path='', storage_mode='', filename='', mime_type='', size_bytes=0
+            WHERE track_id=? AND field_def_id=?
+            """,
+            (30, 2),
+        )
+        self.conn.commit()
+        with self.assertRaises(FileNotFoundError):
+            self.service.fetch_blob(30, 2)
+
+        self.service.delete_blob(999, 2)
 
 
 if __name__ == "__main__":

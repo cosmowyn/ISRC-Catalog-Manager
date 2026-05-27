@@ -704,3 +704,203 @@ def test_panel_refresh_and_owner_registration_redirect_branches(monkeypatch) -> 
 
     redirect_app.open_party_manager.assert_called_once_with(123)
     assert message_box.information.call_args.args[1] == "IPI number"
+
+
+def test_party_controller_root_wrappers_owner_id_and_selected_panel_fallbacks(
+    monkeypatch,
+) -> None:
+    sentinels = {
+        "QMessageBox": object(),
+        "QFileDialog": object(),
+        "QTimer": object(),
+    }
+    history_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def fake_root_attr(name, fallback):
+        if name in sentinels:
+            return sentinels[name]
+        if name in {"run_snapshot_history_action", "run_file_history_action"}:
+            return lambda *args, **kwargs: history_calls.append((name, args, kwargs)) or name
+        return fallback
+
+    monkeypatch.setattr(party_controller, "_root_attr", fake_root_attr)
+
+    assert party_controller._message_box() is sentinels["QMessageBox"]
+    assert party_controller._file_dialog() is sentinels["QFileDialog"]
+    assert party_controller._timer() is sentinels["QTimer"]
+    assert party_controller._run_snapshot_history_action(entity_id=1) == (
+        "run_snapshot_history_action"
+    )
+    assert party_controller._run_file_history_action(entity_id=2) == ("run_file_history_action")
+    assert history_calls == [
+        ("run_snapshot_history_action", (), {"entity_id": 1}),
+        ("run_file_history_action", (), {"entity_id": 2}),
+    ]
+    assert party_controller._current_owner_party_id(SimpleNamespace()) is None
+
+    class FakePanel:
+        def __init__(self, *, visible: bool, ids: list[int]) -> None:
+            self._visible = visible
+            self._ids = ids
+
+        def isVisible(self):
+            return self._visible
+
+        def selected_party_ids(self):
+            return list(self._ids)
+
+    monkeypatch.setattr(party_controller, "_party_manager_panel_class", lambda: FakePanel)
+    hidden_selected = FakePanel(visible=False, ids=[7])
+    visible_empty = FakePanel(visible=True, ids=[])
+    app = SimpleNamespace(
+        party_manager_panel=hidden_selected,
+        party_manager_dialog=SimpleNamespace(panel=visible_empty),
+        party_manager_dock=SimpleNamespace(widget=lambda: hidden_selected),
+    )
+
+    assert party_controller._selected_party_manager_ids(app) == [7]
+    assert party_controller._selected_party_manager_ids(SimpleNamespace()) == []
+
+
+def test_party_import_report_copy_includes_dry_run_mutation_and_warning_details(
+    monkeypatch,
+) -> None:
+    message_box = mock.Mock()
+    monkeypatch.setattr(party_controller, "_message_box", lambda: message_box)
+    report = PartyImportReport(
+        format_name="csv",
+        mode="dry_run",
+        passed=4,
+        failed=1,
+        skipped=2,
+        warnings=[f"warning {index}" for index in range(14)],
+        duplicates=["duplicate legal name"],
+        unknown_fields=[f"field_{index}" for index in range(10)],
+        evaluated_mode="upsert",
+        would_create_parties=3,
+        would_update_parties=2,
+        would_set_owner=True,
+        created_parties=[21],
+        updated_parties=[22],
+        owner_party_id=21,
+    )
+
+    party_controller._show_party_import_report(SimpleNamespace(), "/tmp/parties.csv", report)
+
+    body = message_box.information.call_args.args[2]
+    assert "No database changes were made" in body
+    assert "Would create: 3" in body
+    assert "Would update: 2" in body
+    assert "Would update the current Owner Party binding." in body
+    assert "Created: 1" in body
+    assert "Updated: 1" in body
+    assert "Owner Party: 21" in body
+    assert "Duplicates: 1" in body
+    assert "Unmapped fields: field_0, field_1" in body
+    assert "- warning 11" in body
+    assert "warning 12" not in body
+
+
+def test_import_party_exchange_xlsx_preflight_and_apply_paths(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    source = tmp_path / "parties.xlsx"
+    file_dialog = mock.Mock(getOpenFileName=mock.Mock(return_value=(str(source), "")))
+    monkeypatch.setattr(party_controller, "_file_dialog", lambda: file_dialog)
+    monkeypatch.setattr(
+        party_controller,
+        "_run_snapshot_history_action",
+        lambda **kwargs: kwargs["mutation"](),
+    )
+
+    inspection = _inspection(source, format_name="xlsx")
+    preview_report = _report(
+        format_name="xlsx",
+        evaluated_mode="upsert",
+        would_create_parties=1,
+    )
+    apply_report = _report(
+        format_name="xlsx",
+        mode="upsert",
+        created_parties=[61],
+        updated_parties=[],
+    )
+    exchange_service = mock.Mock(
+        inspect_xlsx=mock.Mock(return_value=inspection),
+        supported_import_targets=mock.Mock(return_value=["legal_name", "email"]),
+        import_xlsx=mock.Mock(side_effect=[preview_report, apply_report]),
+    )
+    submissions: list[dict[str, Any]] = []
+
+    class AcceptedImportDialog:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def mapping(self):
+            return {"legal_name": "legal_name", "email": "email"}
+
+        def import_options(self):
+            return PartyImportOptions(mode="upsert")
+
+        def resolved_csv_delimiter(self):
+            return None
+
+    monkeypatch.setattr(
+        party_controller,
+        "_party_import_dialog_class",
+        lambda: AcceptedImportDialog,
+    )
+    app = SimpleNamespace(
+        party_exchange_service=exchange_service,
+        settings=object(),
+        logger=mock.Mock(),
+        _scaled_progress_callback=mock.Mock(side_effect=lambda callback, start, end: callback),
+        _submit_background_bundle_task=mock.Mock(
+            side_effect=lambda **kwargs: submissions.append(kwargs)
+        ),
+        _show_background_task_error=mock.Mock(),
+        _open_import_review_dialog=mock.Mock(return_value=True),
+        _party_import_review_summary=party_controller._party_import_review_summary,
+        _advance_task_ui_progress=mock.Mock(),
+        populate_all_comboboxes=mock.Mock(),
+        _refresh_catalog_workspace_docks=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        _log_event=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _show_party_import_report=mock.Mock(),
+        conn=_FakeConn(commit_error=RuntimeError("commit failed")),
+        party_manager_panel=object(),
+    )
+
+    party_controller.import_party_exchange_file(app, "xlsx")
+
+    ctx = SimpleNamespace(report_progress=mock.Mock(), raise_if_cancelled=mock.Mock())
+    bundle = SimpleNamespace(party_exchange_service=exchange_service, history_manager=object())
+    assert submissions[0]["task_fn"](bundle, ctx) is inspection
+    exchange_service.inspect_xlsx.assert_called_once()
+
+    submissions[0]["on_success_after_cleanup"](inspection)
+    assert submissions[1]["title"] == "Review Parties XLSX"
+    assert submissions[1]["task_fn"](bundle, ctx) is preview_report
+    preview_options = exchange_service.import_xlsx.call_args_list[0].kwargs["options"]
+    assert preview_options.mode == "dry_run"
+    assert preview_options.preview_apply_mode == "upsert"
+
+    submissions[1]["on_success_after_cleanup"](preview_report)
+    assert submissions[2]["title"] == "Import Parties XLSX"
+    assert submissions[2]["task_fn"](bundle, ctx) is apply_report
+    apply_options = exchange_service.import_xlsx.call_args_list[-1].kwargs["options"]
+    assert apply_options.mode == "upsert"
+
+    ui_progress = mock.Mock()
+    submissions[2]["on_success_before_cleanup"](apply_report, ui_progress)
+    app.populate_all_comboboxes.assert_called_once_with()
+    app._refresh_catalog_workspace_docks.assert_called_once_with()
+    app._refresh_history_actions.assert_called_once_with()
+    submissions[2]["on_success_after_cleanup"](apply_report)
+    app._show_party_import_report.assert_called_once_with(str(source), apply_report)

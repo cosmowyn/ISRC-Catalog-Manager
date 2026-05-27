@@ -256,6 +256,74 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
             [asset.package_rel_path for asset in duplicated_assets], ["assets/seal.png"]
         )
 
+    def test_managed_artifact_and_source_cleanup_helpers_guard_boundaries(self):
+        artifact_rel = self.service.artifact_store.write_bytes(
+            b"artifact",
+            filename="contract.pdf",
+        )
+        artifact_path = self.service.artifact_store.resolve(artifact_rel)
+        self.assertIsNotNone(artifact_path)
+        assert artifact_path is not None
+        self.assertTrue(artifact_path.exists())
+
+        self.service._delete_artifact_file("")
+        self.service._delete_artifact_file(artifact_rel)
+        self.assertFalse(artifact_path.exists())
+
+        outside_path = self.root / "outside-artifact.pdf"
+        outside_path.write_bytes(b"outside")
+        with self.assertRaisesRegex(ValueError, "managed contract template artifacts"):
+            self.service._delete_artifact_file(str(outside_path))
+        self.assertTrue(outside_path.exists())
+
+        tree_rel = self.service.source_store.write_bytes(
+            b"<html></html>",
+            filename="index.html",
+            subdir="bundle-a",
+        )
+        tree_root = self.service.source_store.root_path / "bundle-a"
+        self.assertTrue(tree_root.exists())
+        self.service._delete_managed_tree_for_path(self.service.source_store, tree_rel)
+        self.assertFalse(tree_root.exists())
+
+        template = self._create_template()
+        source_path = self.root / "referenced.docx"
+        source_path.write_bytes(make_docx_bytes(document_paragraphs=(("A", "{{manual.a}}"),)))
+        imported = self.service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(storage_mode="managed_file"),
+        )
+        referenced_path = imported.revision.managed_file_path
+        resolved_referenced = self.service.source_store.resolve(referenced_path)
+        self.assertIsNotNone(resolved_referenced)
+        assert resolved_referenced is not None
+        with self.conn:
+            cursor = self.conn.cursor()
+            self.service._delete_unreferenced_managed_file(
+                table_name="ContractTemplateRevisions",
+                path_column="managed_file_path",
+                stored_path=referenced_path,
+                file_store=self.service.source_store,
+                cursor=cursor,
+            )
+        self.assertTrue(resolved_referenced.exists())
+
+        orphan_rel = self.service.source_store.write_bytes(b"orphan", filename="orphan.docx")
+        orphan_path = self.service.source_store.resolve(orphan_rel)
+        self.assertIsNotNone(orphan_path)
+        assert orphan_path is not None
+        with self.conn:
+            cursor = self.conn.cursor()
+            self.service._delete_unreferenced_managed_file(
+                table_name="ContractTemplateRevisions",
+                path_column="managed_file_path",
+                stored_path=orphan_rel,
+                file_store=self.service.source_store,
+                cursor=cursor,
+            )
+        self.assertFalse(orphan_path.exists())
+
     def test_rescan_html_revision_preserves_bundle_metadata_and_assets(self):
         template = self.service.create_template(
             ContractTemplatePayload(

@@ -33,7 +33,12 @@ try:
         PartyEditorDialog,
         PartyManagerPanel,
     )
-    from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
+    from isrc_manager.releases import dialogs as release_dialogs
+    from isrc_manager.releases.dialogs import (
+        ReleaseBrowserDialog,
+        ReleaseBrowserPanel,
+        ReleaseEditorDialog,
+    )
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
     from isrc_manager.selection_scope import SelectionScopeBanner
@@ -816,6 +821,558 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     dialog.close()
             finally:
                 conn.close()
+
+    def test_release_editor_handles_artwork_track_row_and_validation_branches(self):
+        class FakePartyService:
+            def __init__(self):
+                self.records = {
+                    1: type(
+                        "Party",
+                        (),
+                        {
+                            "id": 1,
+                            "artist_name": "Canonical Primary",
+                            "display_name": "Primary Alias",
+                            "company_name": "",
+                            "legal_name": "Primary Legal",
+                            "artist_aliases": ["Primary Alias", "", "Primary Alias"],
+                        },
+                    )(),
+                    2: type(
+                        "Party",
+                        (),
+                        {
+                            "id": 2,
+                            "artist_name": "Canonical Album",
+                            "display_name": "Album Alias",
+                            "company_name": "",
+                            "legal_name": "Album Legal",
+                            "artist_aliases": ["Album Alias"],
+                        },
+                    )(),
+                }
+
+            def list_artist_parties(self):
+                return list(self.records.values())
+
+            def ensure_artist_party_by_name(self, name):
+                return 1 if "Primary" in str(name) else 2
+
+            def fetch_party(self, party_id):
+                return self.records.get(int(party_id))
+
+        class FakeReleaseService:
+            conn = None
+
+            def __init__(self):
+                self.invalid = True
+
+            def resolve_artwork_path(self, path):
+                return Path(path) if path else None
+
+            def validate_release(self, _payload, *, release_id=None):
+                if self.invalid:
+                    return [type("Issue", (), {"severity": "error", "message": "Title required"})()]
+                return []
+
+        service = FakeReleaseService()
+        party_service = FakePartyService()
+        dialog = ReleaseEditorDialog(
+            release_service=service,
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [2, 2, 0, 3],
+            party_service=party_service,
+        )
+        try:
+            self.assertEqual(dialog.tracks_table.rowCount(), 2)
+            dialog.primary_artist_edit.setCurrentText("Primary Alias")
+            dialog.album_artist_edit.setCurrentText("Album Alias")
+            dialog.title_edit.setText("Validation Branches")
+
+            with mock.patch.object(
+                release_dialogs.QFileDialog,
+                "getOpenFileName",
+                return_value=("", ""),
+            ):
+                dialog._pick_artwork()
+            self.assertEqual(dialog.artwork_path_edit.text(), "")
+
+            with mock.patch.object(
+                release_dialogs.QFileDialog,
+                "getOpenFileName",
+                return_value=("/tmp/cover.png", ""),
+            ):
+                dialog._pick_artwork()
+            self.assertEqual(dialog.artwork_path_edit.text(), "/tmp/cover.png")
+            dialog._clear_artwork()
+            self.assertTrue(dialog._clear_artwork_requested)
+
+            dialog.tracks_table.selectRow(0)
+            dialog._move_selected_row(-1)
+            self.assertEqual(dialog.tracks_table.item(0, 0).text(), "2")
+            dialog._move_selected_row(1)
+            self.assertEqual(dialog.tracks_table.item(0, 0).text(), "3")
+
+            row = dialog.tracks_table.rowCount()
+            dialog.tracks_table.insertRow(row)
+            dialog.tracks_table.setItem(row, 0, type(dialog.tracks_table.item(0, 0))("invalid"))
+            dialog.tracks_table.setItem(row, 2, type(dialog.tracks_table.item(0, 0))("1"))
+            dialog.tracks_table.setItem(row, 3, type(dialog.tracks_table.item(0, 0))(""))
+            dialog.tracks_table.setItem(row, 4, type(dialog.tracks_table.item(0, 0))(""))
+            row = dialog.tracks_table.rowCount()
+            dialog.tracks_table.insertRow(row)
+            dialog.tracks_table.setItem(row, 0, type(dialog.tracks_table.item(0, 0))("3"))
+            dialog.tracks_table.setItem(row, 2, type(dialog.tracks_table.item(0, 0))("0"))
+            dialog.tracks_table.setItem(row, 3, type(dialog.tracks_table.item(0, 0))(""))
+            dialog.tracks_table.setItem(row, 4, type(dialog.tracks_table.item(0, 0))(""))
+            placements = dialog.placements()
+            self.assertEqual([placement.track_id for placement in placements], [3, 2])
+            self.assertEqual([placement.sequence_number for placement in placements], [1, 2])
+
+            payload = dialog.payload()
+            self.assertEqual(payload.primary_artist, "Canonical Primary")
+            self.assertEqual(payload.album_artist, "Canonical Album")
+            self.assertTrue(payload.clear_artwork)
+            self.assertIsNone(payload.artwork_storage_mode)
+
+            with mock.patch.object(release_dialogs.QMessageBox, "warning") as warning:
+                dialog.accept()
+            warning.assert_called_once()
+            self.assertEqual(dialog.result(), 0)
+
+            service.invalid = False
+            dialog.tracks_table.setRowCount(0)
+            with mock.patch.object(release_dialogs.QMessageBox, "warning") as warning:
+                dialog.accept()
+            self.assertEqual(warning.call_args.args[2], "Attach at least one track to the release.")
+        finally:
+            dialog.close()
+
+    def test_release_editor_loads_existing_release_and_database_backed_choices(self):
+        class FakeRows:
+            def fetchall(self):
+                return [
+                    ("Catalog Value",),
+                    ("",),
+                    ("Catalog Value",),
+                    ("Warehouse Echo",),
+                ]
+
+        class FakeConn:
+            def __init__(self):
+                self.queries = []
+
+            def execute(self, query):
+                self.queries.append(query)
+                return FakeRows()
+
+        class FakeReleaseService:
+            def __init__(self):
+                self.conn = FakeConn()
+
+            def resolve_artwork_path(self, path):
+                return Path("/resolved") / str(path)
+
+            def validate_release(self, _payload, *, release_id=None):
+                return []
+
+        release = release_dialogs.ReleaseRecord(
+            id=31,
+            title="Existing Release",
+            version_subtitle="Deluxe",
+            primary_artist="Warehouse Echo",
+            album_artist="Warehouse Echo Ensemble",
+            release_type="ep",
+            release_date="2026-03-05",
+            original_release_date="2026-02-01",
+            label="Catalog Value",
+            sublabel="Sub imprint",
+            catalog_number="CAT-031",
+            catalog_number_mode="external",
+            catalog_registry_entry_id=12,
+            catalog_external_code_identifier_id=None,
+            external_catalog_identifier_id=99,
+            upc="8712345678901",
+            barcode_validation_status="valid",
+            territory="EU",
+            explicit_flag=True,
+            repertoire_status="rights_verified",
+            metadata_complete=True,
+            contract_signed=True,
+            rights_verified=False,
+            notes="Loaded from service.",
+            artwork_path="covers/existing.png",
+            artwork_storage_mode=release_dialogs.STORAGE_MODE_DATABASE,
+            profile_name="QA Profile",
+            track_count=1,
+        )
+        service = FakeReleaseService()
+        dialog = ReleaseEditorDialog(
+            release_service=service,
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [99],
+            release=release,
+            placements=[ReleaseTrackPlacement(track_id=8, disc_number=2, track_number=4)],
+        )
+        try:
+            self.assertGreaterEqual(len(service.conn.queries), 1)
+            self.assertEqual(dialog.windowTitle(), "Edit Release")
+            self.assertEqual(dialog.title_edit.text(), "Existing Release")
+            self.assertEqual(dialog.subtitle_edit.text(), "Deluxe")
+            self.assertEqual(dialog.release_type_combo.currentText(), "Ep")
+            self.assertEqual(dialog.release_date_edit.text(), "2026-03-05")
+            self.assertEqual(dialog.original_release_date_edit.text(), "2026-02-01")
+            self.assertEqual(dialog.label_edit.currentText(), "Catalog Value")
+            self.assertEqual(dialog.status_combo.currentText(), "Rights Verified")
+            self.assertTrue(dialog.explicit_checkbox.isChecked())
+            self.assertTrue(dialog.metadata_checkbox.isChecked())
+            self.assertTrue(dialog.contract_checkbox.isChecked())
+            self.assertFalse(dialog.rights_checkbox.isChecked())
+            self.assertEqual(dialog.artwork_path_edit.text(), "/resolved/covers/existing.png")
+            self.assertEqual(
+                dialog.artwork_storage_mode_combo.currentData(),
+                release_dialogs.STORAGE_MODE_DATABASE,
+            )
+            self.assertEqual(dialog.tracks_table.rowCount(), 1)
+
+            payload = dialog.payload()
+            self.assertEqual(payload.title, "Existing Release")
+            self.assertEqual(payload.catalog_external_code_identifier_id, 99)
+            self.assertEqual(payload.external_catalog_identifier_id, 99)
+            self.assertIsNone(payload.artwork_source_path)
+            self.assertFalse(payload.clear_artwork)
+            self.assertEqual([placement.track_id for placement in payload.placements], [8])
+        finally:
+            dialog.close()
+
+    def test_release_editor_refresh_noops_failures_and_track_order_controls(self):
+        no_party_dialog = ReleaseEditorDialog(
+            release_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            no_party_dialog._refresh_artist_choice_combos()
+            self.assertEqual(no_party_dialog.primary_artist_edit.count(), 1)
+        finally:
+            no_party_dialog.close()
+
+        class TogglePartyService:
+            def __init__(self):
+                self.fail = False
+
+            def list_artist_parties(self):
+                if self.fail:
+                    raise RuntimeError("party authority unavailable")
+                return []
+
+        class FakeReleaseService:
+            conn = None
+
+            def validate_release(self, _payload, *, release_id=None):
+                return []
+
+        party_service = TogglePartyService()
+        dialog = ReleaseEditorDialog(
+            release_service=FakeReleaseService(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [2, 3],
+            party_service=party_service,
+        )
+        try:
+            dialog.primary_artist_edit.setCurrentText("Typed Artist")
+            party_service.fail = True
+            dialog._refresh_artist_choice_combos()
+            self.assertEqual(dialog.primary_artist_edit.currentText(), "Typed Artist")
+
+            dialog.tracks_table.clearSelection()
+            dialog._remove_selected_rows()
+            self.assertEqual(dialog.tracks_table.rowCount(), 2)
+
+            dialog.tracks_table.selectRow(1)
+            dialog._remove_selected_rows()
+            self.assertEqual(dialog.tracks_table.rowCount(), 1)
+            self.assertEqual(dialog.tracks_table.item(0, 0).text(), "2")
+
+            dialog.tracks_table.clearSelection()
+            dialog.tracks_table.setCurrentCell(-1, -1)
+            dialog._move_selected_row(1)
+            self.assertEqual(dialog.tracks_table.item(0, 0).text(), "2")
+
+            dialog.tracks_table.item(0, 3).setText("")
+            dialog.tracks_table.item(0, 4).setText("")
+            dialog._renumber_rows()
+            self.assertEqual(dialog.tracks_table.item(0, 3).text(), "1")
+            self.assertEqual(dialog.tracks_table.item(0, 4).text(), "1")
+        finally:
+            dialog.close()
+
+    def test_release_browser_panel_handles_empty_service_scope_and_emit_branches(self):
+        class FakeReleaseService:
+            def __init__(self):
+                self.releases = [
+                    type(
+                        "Release",
+                        (),
+                        {
+                            "id": 11,
+                            "title": "Demo Release",
+                            "primary_artist": "Artist",
+                            "album_artist": "Album Artist",
+                            "release_type": "album",
+                            "release_date": "2026-05-27",
+                            "original_release_date": "2026-05-01",
+                            "label": "Label",
+                            "sublabel": "Sub",
+                            "catalog_number": "CAT-1",
+                            "upc": "123",
+                            "barcode_validation_status": "valid",
+                            "territory": "Worldwide",
+                            "repertoire_status": "metadata_complete",
+                            "explicit_flag": True,
+                            "metadata_complete": True,
+                            "contract_signed": False,
+                            "rights_verified": True,
+                            "artwork_path": "cover.png",
+                            "track_count": 2,
+                        },
+                    )()
+                ]
+                self.summary = type(
+                    "Summary",
+                    (),
+                    {
+                        "release": self.releases[0],
+                        "tracks": [
+                            ReleaseTrackPlacement(track_id=5, disc_number=1, track_number=1),
+                            ReleaseTrackPlacement(track_id=6, disc_number=1, track_number=2),
+                        ],
+                    },
+                )()
+
+            def list_releases(self, search_text=""):
+                return self.releases if not search_text else []
+
+            def fetch_release_summary(self, release_id):
+                return self.summary if int(release_id) == 11 else None
+
+        empty_panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: None,
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [1],
+            track_choice_provider=lambda: [],
+        )
+        try:
+            self.assertEqual(
+                empty_panel.release_count_label.text(),
+                "Open a profile first to browse releases.",
+            )
+            self.assertEqual(empty_panel.selected_track_ids(), [1])
+            with mock.patch.object(release_dialogs.QMessageBox, "warning"):
+                empty_panel._emit_delete_current()
+        finally:
+            empty_panel.close()
+
+        service = FakeReleaseService()
+        panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: service,
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: (_ for _ in ()).throw(
+                RuntimeError("selection lost")
+            ),
+            track_choice_provider=lambda: [
+                {"track_id": "5", "title": "", "subtitle": "Single"},
+                {"track_id": "5", "title": "Duplicate", "subtitle": ""},
+                {"track_id": "bad", "title": "Bad", "subtitle": ""},
+                {"track_id": 6, "title": "Manual Track", "subtitle": ""},
+            ],
+        )
+        try:
+            self.assertEqual(panel.release_count_label.text(), "1 release shown.")
+            self.assertEqual(panel.selected_track_ids(), [])
+            self.assertEqual(
+                [choice.track_id for choice in panel._available_track_choices()], [5, 6]
+            )
+
+            emitted = {
+                "edit": [],
+                "duplicate": [],
+                "add": [],
+                "create": [],
+                "filter": [],
+                "open": [],
+                "delete": [],
+            }
+            panel.edit_release_requested.connect(emitted["edit"].append)
+            panel.duplicate_release_requested.connect(emitted["duplicate"].append)
+            panel.add_selected_tracks_requested.connect(
+                lambda release_id, track_ids: emitted["add"].append((release_id, track_ids))
+            )
+            panel.create_release_requested.connect(emitted["create"].append)
+            panel.filter_requested.connect(emitted["filter"].append)
+            panel.open_track_requested.connect(emitted["open"].append)
+            panel.delete_release_requested.connect(emitted["delete"].append)
+
+            panel._emit_edit_current()
+            panel._emit_duplicate_current()
+            panel._emit_add_selected_current()
+            panel._emit_create_release_current()
+            panel._emit_filter_current()
+            panel.track_table.selectRow(0)
+            panel._emit_open_track_current()
+            self.assertEqual(emitted["edit"], [11])
+            self.assertEqual(emitted["duplicate"], [11])
+            self.assertEqual(emitted["add"], [(11, [])])
+            self.assertEqual(emitted["create"], [[]])
+            self.assertEqual(emitted["filter"], [[5, 6]])
+            self.assertEqual(emitted["open"], [5])
+
+            with mock.patch.object(
+                release_dialogs, "_confirm_destructive_action", return_value=False
+            ):
+                panel._emit_delete_current()
+            self.assertEqual(emitted["delete"], [])
+            with mock.patch.object(
+                release_dialogs, "_confirm_destructive_action", return_value=True
+            ):
+                panel._emit_delete_current()
+            self.assertEqual(emitted["delete"], [11])
+
+            panel.search_edit.setText("missing")
+            panel.refresh()
+            self.assertEqual(panel.release_count_label.text(), "0 releases shown.")
+            panel._emit_filter_current()
+            self.assertEqual(emitted["filter"], [[5, 6]])
+        finally:
+            panel.close()
+
+    def test_release_browser_scope_chooser_and_empty_selection_edges(self):
+        class EmptyReleaseService:
+            def list_releases(self, search_text=""):
+                return []
+
+            def fetch_release_summary(self, release_id):
+                return None
+
+        empty_panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: EmptyReleaseService(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [4],
+            track_choice_provider=lambda: (_ for _ in ()).throw(RuntimeError("choices failed")),
+        )
+        try:
+            self.assertEqual(empty_panel._available_track_choices(), [])
+            self.assertEqual(empty_panel.selected_track_ids(), [4])
+            with mock.patch.object(release_dialogs.QMessageBox, "information") as information:
+                empty_panel._emit_delete_current()
+            self.assertEqual(information.call_args.args[2], "Select a release first.")
+
+            opened = []
+            empty_panel.open_track_requested.connect(opened.append)
+            empty_panel._emit_open_track_current()
+            self.assertEqual(opened, [])
+            empty_panel.track_table.setRowCount(1)
+            empty_panel.track_table.setItem(0, 0, release_dialogs.QTableWidgetItem("bad"))
+            empty_panel.track_table.selectRow(0)
+            empty_panel._emit_open_track_current()
+            self.assertEqual(opened, [])
+        finally:
+            empty_panel.close()
+
+        class MissingSummaryService:
+            def __init__(self):
+                self.release = release_dialogs.ReleaseRecord(
+                    id=44,
+                    title="Summary Missing",
+                    version_subtitle=None,
+                    primary_artist=None,
+                    album_artist=None,
+                    release_type="album",
+                    release_date=None,
+                    original_release_date=None,
+                    label=None,
+                    sublabel=None,
+                    catalog_number=None,
+                    catalog_number_mode=None,
+                    catalog_registry_entry_id=None,
+                    catalog_external_code_identifier_id=None,
+                    external_catalog_identifier_id=None,
+                    upc=None,
+                    barcode_validation_status="",
+                    territory=None,
+                    explicit_flag=False,
+                    repertoire_status=None,
+                    metadata_complete=False,
+                    contract_signed=False,
+                    rights_verified=False,
+                    notes=None,
+                    track_count=0,
+                )
+
+            def list_releases(self, search_text=""):
+                return [self.release]
+
+            def fetch_release_summary(self, release_id):
+                return None
+
+        panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: MissingSummaryService(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [5],
+            track_choice_provider=lambda: [
+                release_dialogs.TrackChoice(7, "Explicit Choice", "Chosen"),
+                {"track_id": "8", "title": "", "subtitle": "Fallback title"},
+                {"track_id": "0", "title": "Invalid", "subtitle": ""},
+            ],
+        )
+        try:
+            self.assertIsNone(panel._current_summary)
+            self.assertEqual(
+                [(choice.track_id, choice.title) for choice in panel._available_track_choices()],
+                [(7, "Explicit Choice"), (8, "Track 8")],
+            )
+            panel._selection_override_track_ids = [7, 8]
+            self.assertEqual(panel.selection_scope_state().source_label, "Pinned chooser override")
+            panel._use_current_selection()
+            self.assertEqual(panel.selected_track_ids(), [5])
+            panel._selection_override_track_ids = [9]
+            panel._clear_selection_override()
+            self.assertEqual(panel.selected_track_ids(), [5])
+
+            class RejectedChooser:
+                def __init__(self, **_kwargs):
+                    pass
+
+                def exec(self):
+                    return release_dialogs.QDialog.Rejected
+
+            with mock.patch.object(
+                release_dialogs,
+                "TrackSelectionChooserDialog",
+                RejectedChooser,
+            ):
+                panel._choose_tracks()
+            self.assertEqual(panel.selected_track_ids(), [5])
+
+            class AcceptedChooser:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+                def exec(self):
+                    return release_dialogs.QDialog.Accepted
+
+                def selected_track_ids(self):
+                    return [7, 8]
+
+            with mock.patch.object(
+                release_dialogs,
+                "TrackSelectionChooserDialog",
+                AcceptedChooser,
+            ):
+                panel._choose_tracks()
+            self.assertEqual(panel.selected_track_ids(), [7, 8])
+        finally:
+            panel.close()
 
     def test_work_editor_refreshes_contributor_party_choices_when_party_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

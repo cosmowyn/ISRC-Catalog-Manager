@@ -2,9 +2,14 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
+from isrc_manager.contract_templates.models import (
+    ContractTemplateCatalogEntry,
+    ContractTemplatePlaceholderRecord,
+)
 from isrc_manager.services import (
     ContractPayload,
     ContractService,
@@ -519,4 +524,197 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(
             indexed_manual_fields["{{manual.status$list[draft;final;signed].indexed}}"].options,
             ("draft", "final", "signed"),
+        )
+
+    def test_form_service_edge_helpers_cover_warnings_labels_and_missing_records(self):
+        missing_revision_service = ContractTemplateFormService(
+            template_service=SimpleNamespace(fetch_revision=lambda _revision_id: None),
+            catalog_service=SimpleNamespace(list_known_symbols=lambda: []),
+        )
+        with self.assertRaisesRegex(ValueError, "revision 404 not found"):
+            missing_revision_service.build_form_definition(404)
+
+        missing_template_service = ContractTemplateFormService(
+            template_service=SimpleNamespace(
+                fetch_revision=lambda _revision_id: SimpleNamespace(
+                    revision_id=9,
+                    template_id=77,
+                ),
+                fetch_template=lambda _template_id: None,
+            ),
+            catalog_service=SimpleNamespace(list_known_symbols=lambda: []),
+        )
+        with self.assertRaisesRegex(ValueError, "template 77 not found"):
+            missing_template_service.build_form_definition(9)
+
+        placeholder = ContractTemplatePlaceholderRecord(
+            placeholder_id=1,
+            revision_id=2,
+            canonical_symbol="{{db.owner.phone}}",
+            binding_kind="db",
+            namespace="owner",
+            placeholder_key="phone",
+            display_label="Owner Phone",
+            inferred_field_type=None,
+            required=True,
+            source_occurrence_count=1,
+            metadata=None,
+        )
+        catalog_entry = ContractTemplateCatalogEntry(
+            binding_kind="db",
+            namespace="owner",
+            key="phone",
+            canonical_symbol="{{db.owner.phone}}",
+            display_label="Owner Phone",
+            field_type="text",
+            description=None,
+            scope_entity_type="owner",
+            scope_policy="owner_settings_context",
+            source_table=None,
+            source_column=None,
+        )
+
+        no_settings_service = ContractTemplateFormService(
+            template_service=SimpleNamespace(conn=self.conn),
+            catalog_service=self.catalog_service,
+            settings_reads=None,
+        )
+        self.assertIn(
+            "owner-party reads are unavailable",
+            no_settings_service._auto_field_warning(
+                placeholder,
+                binding=None,
+                catalog_entry=catalog_entry,
+            ),
+        )
+        self.assertEqual(
+            self.form_service._auto_field_warning(
+                placeholder,
+                binding=None,
+                catalog_entry=catalog_entry,
+            ),
+            "Owner Phone is currently blank in Current Owner Party.",
+        )
+        non_owner = ContractTemplatePlaceholderRecord(
+            placeholder_id=2,
+            revision_id=2,
+            canonical_symbol="{{db.track.track_title}}",
+            binding_kind="db",
+            namespace="track",
+            placeholder_key="track_title",
+            display_label="Track Title",
+            inferred_field_type=None,
+            required=True,
+            source_occurrence_count=1,
+            metadata=None,
+        )
+        self.assertIsNone(
+            self.form_service._auto_field_warning(
+                non_owner,
+                binding=None,
+                catalog_entry=None,
+            )
+        )
+
+        self.assertEqual(
+            self.form_service._manual_field_type("signed_date", None), ("date", "date_input")
+        )
+        self.assertEqual(
+            self.form_service._manual_field_type("has_consent", None), ("boolean", "checkbox")
+        )
+        self.assertEqual(
+            self.form_service._manual_field_type("royalty_amount", None), ("number", "number_input")
+        )
+        self.assertEqual(
+            self.form_service._manual_field_type("anything", "decimal"), ("number", "number_input")
+        )
+        self.assertEqual(self.form_service._selector_widget_hint(""), "entity_selector")
+        self.assertIsNone(self.form_service._default_scope_entity_type("unknown"))
+        self.assertIsNone(self.form_service._default_scope_policy("unknown"))
+        self.assertEqual(self.form_service._choices_for_entity_type("unknown"), ())
+
+        unresolved_selector = self.form_service._selector_field(
+            [
+                (
+                    ContractTemplatePlaceholderRecord(
+                        placeholder_id=3,
+                        revision_id=2,
+                        canonical_symbol="{{db.unknown.value}}",
+                        binding_kind="db",
+                        namespace="unknown",
+                        placeholder_key="value",
+                        display_label=None,
+                        inferred_field_type=None,
+                        required=False,
+                        source_occurrence_count=1,
+                        metadata=None,
+                    ),
+                    None,
+                    None,
+                )
+            ]
+        )
+        self.assertIsNone(unresolved_selector)
+
+        indexed_asset_selector = self.form_service._selector_field(
+            [
+                (
+                    ContractTemplatePlaceholderRecord(
+                        placeholder_id=4,
+                        revision_id=2,
+                        canonical_symbol="{{db.asset.filename.indexed}}",
+                        binding_kind="db",
+                        namespace="asset",
+                        placeholder_key="filename",
+                        display_label=None,
+                        inferred_field_type=None,
+                        required=True,
+                        source_occurrence_count=2,
+                        metadata=None,
+                    ),
+                    None,
+                    None,
+                )
+            ],
+            indexed=True,
+        )
+        self.assertEqual(indexed_asset_selector.display_label, "Indexed Asset Selection")
+        self.assertEqual(indexed_asset_selector.choices, ())
+
+        self.assertEqual(
+            self.form_service._release_label(
+                SimpleNamespace(id=5, title="", primary_artist="", album_artist="")
+            ),
+            "Release #5",
+        )
+        self.assertEqual(
+            self.form_service._work_label(SimpleNamespace(id=6, title="", iswc="")),
+            "Work #6",
+        )
+        self.assertEqual(
+            self.form_service._contract_label(SimpleNamespace(id=7, title="", status="")),
+            "Contract #7",
+        )
+        self.assertEqual(
+            self.form_service._party_label(
+                SimpleNamespace(
+                    id=8,
+                    display_name="",
+                    artist_name="",
+                    company_name="",
+                    legal_name="",
+                    party_type="",
+                )
+            ),
+            "Party #8",
+        )
+        self.assertEqual(
+            self.form_service._right_label(
+                SimpleNamespace(id=9, title="", right_type="", territory="")
+            ),
+            "Right #9",
+        )
+        self.assertEqual(
+            self.form_service._asset_label(SimpleNamespace(id=10, filename="", asset_type="")),
+            "Asset #10",
         )

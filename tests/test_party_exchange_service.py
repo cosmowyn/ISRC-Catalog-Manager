@@ -14,6 +14,7 @@ from isrc_manager.parties import (
     PartyPayload,
     PartyService,
 )
+from isrc_manager.parties import exchange_service as party_exchange_module
 from isrc_manager.services import (
     DatabaseSchemaService,
     SettingsMutationService,
@@ -388,3 +389,189 @@ class PartyExchangeServiceTests(unittest.TestCase):
         self.assertTrue(
             any("Serializing Party JSON payload" in message for *_rest, message in progress_events)
         )
+
+    def test_party_exchange_mapping_json_alias_and_csv_edge_helpers(self):
+        normalized_rows, unknown_fields = self.exchange_service._normalize_source_rows(
+            [
+                {
+                    "Legal Name": "Mapped Party",
+                    "Artist Aliases": '["Mapped", "Mapped", ""]',
+                    "Mystery": "ignored",
+                }
+            ],
+            mapping=None,
+        )
+
+        self.assertEqual(unknown_fields, ["Mystery"])
+        self.assertEqual(normalized_rows[0]["legal_name"], "Mapped Party")
+        self.assertEqual(normalized_rows[0]["artist_aliases"], ["Mapped", "Mapped", ""])
+        self.assertEqual(self.exchange_service._decode_value(""), "")
+        self.assertEqual(self.exchange_service._decode_value("{bad json"), "{bad json")
+        self.assertEqual(
+            self.exchange_service._parse_artist_aliases("One | one | Two"),
+            ["One", "Two"],
+        )
+        self.assertEqual(
+            self.exchange_service._parse_artist_aliases("Three; Four; three"),
+            ["Three", "Four"],
+        )
+        self.assertEqual(self.exchange_service._parse_artist_aliases(None), [])
+        self.assertEqual(self.exchange_service._joined_name(None, None, None), None)
+        self.assertEqual(self.exchange_service._coerce_int("bad"), None)
+        self.assertTrue(party_exchange_module._parse_boolean("current owner"))
+        self.assertTrue(party_exchange_module._is_blank_like({}))
+
+        list_json = self.data_root / "party-list.json"
+        list_json.write_text('[{"legal_name": "List Party"}]', encoding="utf-8")
+        self.assertEqual(self.exchange_service._load_json_rows(list_json)[0], ["legal_name"])
+
+        parties_json = self.data_root / "party-wrapper.json"
+        parties_json.write_text(
+            json.dumps({"schema_version": 1, "parties": [{"legal_name": "Wrapped"}]}),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            self.exchange_service._load_json_rows(parties_json)[1][0]["legal_name"], "Wrapped"
+        )
+
+        bad_json = self.data_root / "party-bad.json"
+        bad_json.write_text('"not rows"', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "rows array"):
+            self.exchange_service._load_json_rows(bad_json)
+
+        bad_schema = self.data_root / "party-bad-schema.json"
+        bad_schema.write_text(
+            json.dumps({"schema_version": 999, "rows": []}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported Party JSON schema"):
+            self.exchange_service._load_json_rows(bad_schema)
+
+        with self.assertRaisesRegex(ValueError, "single non-newline"):
+            self.exchange_service._validate_csv_delimiter("\n")
+        self.assertEqual(self.exchange_service._csv_dialect_for_sample("", delimiter=";")[1], ";")
+        self.assertEqual(self.exchange_service._csv_dialect_for_sample("not,csv?")[1], ",")
+
+    def test_party_import_row_actions_cover_empty_create_update_merge_and_savepoint_failure(self):
+        empty_report = self.exchange_service._import_rows(
+            [],
+            mapping=None,
+            options=PartyImportOptions(mode="dry_run"),
+            format_name="json",
+        )
+        self.assertEqual(
+            empty_report.warnings, ["The selected file did not contain any importable Party rows."]
+        )
+
+        existing_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Merge Target B.V.",
+                display_name="Existing Display",
+                company_name=None,
+                email="merge@test.example",
+                artist_aliases=["Existing Alias"],
+            )
+        )
+
+        create_duplicate = self.exchange_service._import_rows(
+            [{"legal_name": "Merge Target B.V."}],
+            mapping={"legal_name": "legal_name"},
+            options=PartyImportOptions(mode="create"),
+            format_name="json",
+        )
+        self.assertEqual(create_duplicate.skipped, 1)
+        self.assertIn("matched existing party", create_duplicate.duplicates[0])
+
+        update_missing = self.exchange_service._import_rows(
+            [{"legal_name": "Missing Target B.V."}],
+            mapping={"legal_name": "legal_name"},
+            options=PartyImportOptions(mode="update"),
+            format_name="json",
+        )
+        self.assertEqual(update_missing.skipped, 1)
+        self.assertIn("no safe existing Party match", update_missing.warnings[0])
+
+        merge_report = self.exchange_service._import_rows(
+            [
+                {
+                    "legal_name": "Merge Target B.V.",
+                    "display_name": "",
+                    "company_name": "Merged Company",
+                    "artist_aliases": "Existing Alias|New Alias",
+                }
+            ],
+            mapping={
+                "legal_name": "legal_name",
+                "display_name": "display_name",
+                "company_name": "company_name",
+                "artist_aliases": "artist_aliases",
+            },
+            options=PartyImportOptions(mode="merge"),
+            format_name="json",
+        )
+        self.assertEqual(merge_report.updated_parties, [existing_id])
+        merged = self.party_service.fetch_party(existing_id)
+        assert merged is not None
+        self.assertEqual(merged.display_name, "Existing Display")
+        self.assertEqual(merged.company_name, "Merged Company")
+        self.assertEqual(list(merged.artist_aliases), ["Existing Alias", "New Alias"])
+
+        with unittest.mock.patch.object(
+            self.party_service,
+            "create_party",
+            side_effect=RuntimeError("write failed"),
+        ):
+            failed = self.exchange_service._import_rows(
+                [{"legal_name": "Exploding Party"}],
+                mapping={"legal_name": "legal_name"},
+                options=PartyImportOptions(mode="upsert"),
+                format_name="json",
+            )
+        self.assertEqual(failed.failed, 1)
+        self.assertIn("write failed", failed.warnings[0])
+
+    def test_party_matching_uses_identity_name_alias_and_conflict_guards(self):
+        alias_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Alias Holder",
+                artist_name="Alias Stage",
+                artist_aliases=["Alias One"],
+            )
+        )
+        person_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Person Holder",
+                first_name="Ada",
+                middle_name="L.",
+                last_name="Writer",
+            )
+        )
+
+        self.assertEqual(
+            self.exchange_service._resolve_matching_party_id(
+                {"artist_aliases": "Alias One"},
+                options=PartyImportOptions(match_by_legal_name=False),
+            ),
+            alias_party_id,
+        )
+        self.assertEqual(
+            self.exchange_service._resolve_matching_party_id(
+                {"first_name": "Ada", "middle_name": "L.", "last_name": "Writer"},
+                options=PartyImportOptions(match_by_legal_name=False),
+            ),
+            person_party_id,
+        )
+
+        with self.assertRaisesRegex(ValueError, "multiple existing Parties"):
+            self.exchange_service._resolve_matching_party_id(
+                {
+                    "id": alias_party_id,
+                    "legal_name": "Person Holder",
+                },
+                options=PartyImportOptions(
+                    match_by_internal_id=True,
+                    match_by_legal_name=True,
+                    match_by_identity_keys=False,
+                    match_by_name_fields=False,
+                ),
+            )

@@ -1,7 +1,8 @@
 import unittest
+from unittest import mock
 
 from isrc_manager.version import __version__, current_app_version
-from isrc_manager.versioning import SemVerError, bump_version, parse_semver
+from isrc_manager.versioning import SemVerError, bump_version, is_valid_semver, parse_semver
 
 
 class SemVerTests(unittest.TestCase):
@@ -33,6 +34,16 @@ class SemVerTests(unittest.TestCase):
         self.assertLess(parse_semver("1.0.0+build.1"), parse_semver("1.0.1"))
         self.assertEqual(parse_semver("1.0.0+build.1"), parse_semver("1.0.0+build.2"))
 
+    def test_comparison_handles_semver_precedence_edges(self):
+        alpha = parse_semver("1.0.0-alpha")
+
+        self.assertIs(alpha.__lt__("1.0.0"), NotImplemented)
+        self.assertNotEqual(alpha, "1.0.0-alpha")
+        self.assertLess(parse_semver("1.0.0-alpha"), parse_semver("1.0.0"))
+        self.assertLess(parse_semver("1.0.0-alpha.1"), parse_semver("1.0.0-alpha.2"))
+        self.assertLess(parse_semver("1.0.0-alpha.1"), parse_semver("1.0.0-alpha.beta"))
+        self.assertFalse(parse_semver("1.0.0-alpha") < parse_semver("1.0.0-alpha"))
+
     def test_hash_matches_semver_equality_when_only_build_metadata_differs(self):
         left = parse_semver("1.0.0+build.1")
         right = parse_semver("1.0.0+build.2")
@@ -51,12 +62,26 @@ class SemVerTests(unittest.TestCase):
         self.assertEqual(bump_version("1.2.3", "minor"), "1.3.0")
         self.assertEqual(bump_version("1.2.3", "major"), "2.0.0")
 
+        with self.assertRaises(ValueError):
+            bump_version("1.2.3", "release")
+
+    def test_validity_helper_reports_parse_result_without_raising(self):
+        self.assertTrue(is_valid_semver("1.2.3"))
+        self.assertFalse(is_valid_semver("1.2"))
+
 
 class RuntimeVersionTests(unittest.TestCase):
     def test_current_app_version_uses_fallback_when_package_metadata_is_unavailable(self):
         self.assertEqual(
             current_app_version(package_names=("definitely-not-installed",)), __version__
         )
+
+    def test_current_app_version_falls_back_after_unexpected_metadata_error(self):
+        with mock.patch(
+            "isrc_manager.version.metadata.version",
+            side_effect=RuntimeError("metadata backend unavailable"),
+        ):
+            self.assertEqual(current_app_version(package_names=("broken-package",)), __version__)
 
 
 if __name__ == "__main__":

@@ -270,6 +270,64 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.assertEqual(values, sorted(values))
         self.assertTrue(all(maximum == 100 for _value, maximum, _message in progress_updates))
 
+    def test_preferred_root_noise_conflicts_and_json_rewrite_helpers(self):
+        service = self._build_service()
+        safe_root = self.root / "safe-target"
+        (safe_root / "logs").mkdir(parents=True)
+        (safe_root / "logs" / "startup.log").write_text("log", encoding="utf-8")
+        (safe_root / "help").mkdir()
+        (safe_root / "help" / "isrc_catalog_manager_help.html").write_text(
+            "help",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(service._preferred_root_conflicts(safe_root), ())
+        service._clear_safe_target_noise(safe_root)
+        self.assertFalse(safe_root.exists())
+
+        conflict_root = self.root / "conflict-target"
+        conflict_root.mkdir()
+        (conflict_root / "keep.db").write_bytes(b"db")
+        self.assertEqual(service._preferred_root_conflicts(conflict_root), ("keep.db",))
+        with self.assertRaisesRegex(RuntimeError, "conflicting content"):
+            service._clear_safe_target_noise(conflict_root)
+
+        rewritten = service._rewrite_json_value(
+            {
+                "db": str(self.source_root / "Database" / "library.db"),
+                "items": [
+                    str(self.source_root / "exports" / "catalog.csv"),
+                    "relative/path",
+                    3,
+                ],
+            },
+            self.source_root,
+            self.target_root,
+        )
+        self.assertEqual(
+            rewritten["db"],
+            str((self.target_root / "Database" / "library.db").resolve()),
+        )
+        self.assertEqual(
+            rewritten["items"][0],
+            str((self.target_root / "exports" / "catalog.csv").resolve()),
+        )
+        self.assertEqual(rewritten["items"][1:], ["relative/path", 3])
+
+        json_path = self.root / "paths.json"
+        json_path.write_text('{"path": "relative"}', encoding="utf-8")
+        self.assertFalse(service._rewrite_json_file(json_path, self.source_root, self.target_root))
+        json_path.write_text(
+            '{"path": "' + str(self.source_root / "history" / "state.json") + '"}',
+            encoding="utf-8",
+        )
+        self.assertTrue(service._rewrite_json_file(json_path, self.source_root, self.target_root))
+        self.assertIn(str(self.target_root.resolve()), json_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(service._loads("not-json"), {})
+        self.assertIsNone(service._journal_path_value(""))
+        self.assertIsNotNone(service._journal_path_value(str(self.source_root)))
+
     def test_preferred_root_startup_validation_reports_lightweight_sqlite_commands(self):
         initial_service = self._build_service()
         initial_service.migrate()
@@ -451,6 +509,148 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.assertEqual(
             self.settings.value("storage/active_data_root", "", str),
             "",
+        )
+
+    def test_storage_layout_inspection_properties_and_settings_noop_branches(self):
+        service = StorageMigrationService(self._build_layout(), settings=None)
+        inspection = service.inspect()
+
+        self.assertEqual(inspection.target_items, inspection.preferred_items)
+        self.assertFalse(inspection.target_ready)
+        self.assertFalse(inspection.adopt_needed)
+        self.assertFalse(inspection.resume_needed)
+
+        service.defer()
+        service.mark_complete()
+        service.mark_failed()
+
+        self.assertEqual(StorageMigrationService._journal_path_value(""), None)
+        self.assertIn(
+            "- (unknown)",
+            StorageMigrationService._format_conflict_error(self.target_root, ()),
+        )
+
+    def test_storage_helper_branches_for_inventory_json_rewrites_and_safe_noise(self):
+        service = self._build_service()
+        missing_root = self.root / "missing"
+        self.assertEqual(
+            service._collect_inventory(missing_root, progress_value=1, label="missing"),
+            (),
+        )
+
+        inventory_root = self.root / "inventory"
+        inventory_root.mkdir()
+        (inventory_root / "library.db").write_text("database", encoding="utf-8")
+        (inventory_root / "library.db-wal").write_text("wal", encoding="utf-8")
+        self.assertEqual(
+            service._collect_inventory(inventory_root, progress_value=1, label="inventory"),
+            ("library.db",),
+        )
+
+        source_root = self.root / "source-json"
+        target_root = self.root / "target-json"
+        source_root.mkdir()
+        target_root.mkdir()
+        inside_path = source_root / "Database" / "library.db"
+        inside_path.parent.mkdir()
+        inside_path.write_text("db", encoding="utf-8")
+        payload = {
+            "inside": str(inside_path),
+            "list": [str(inside_path), str(self.root / "outside.txt"), "relative/path"],
+            "number": 5,
+        }
+        self.assertTrue(service._value_contains_legacy_reference(payload, source_root))
+        self.assertFalse(service._value_contains_legacy_reference("relative/path", source_root))
+        self.assertEqual(
+            service._rewrite_path_string(str(inside_path), source_root, target_root),
+            str((target_root / "Database" / "library.db").resolve()),
+        )
+        self.assertEqual(
+            service._rewrite_path_string("relative/path", source_root, target_root),
+            "relative/path",
+        )
+
+        invalid_json = self.root / "invalid.json"
+        invalid_json.write_text("{", encoding="utf-8")
+        self.assertFalse(service._rewrite_json_file(invalid_json, source_root, target_root))
+        unchanged_json = self.root / "unchanged.json"
+        unchanged_json.write_text('{"path": "relative/path"}', encoding="utf-8")
+        self.assertFalse(service._rewrite_json_file(unchanged_json, source_root, target_root))
+        changed_json = self.root / "changed.json"
+        changed_json.write_text(
+            '{"path": "%s"}' % str(inside_path).replace("\\", "\\\\"),
+            encoding="utf-8",
+        )
+        self.assertTrue(service._rewrite_json_file(changed_json, source_root, target_root))
+        self.assertIn(str(target_root.resolve()), changed_json.read_text(encoding="utf-8"))
+
+        safe_root = self.root / "safe-noise"
+        (safe_root / "logs").mkdir(parents=True)
+        (safe_root / "logs" / "startup.log").write_text("ok", encoding="utf-8")
+        (safe_root / "help").mkdir()
+        (safe_root / "help" / "isrc_catalog_manager_help.html").write_text(
+            "help",
+            encoding="utf-8",
+        )
+        service._clear_safe_target_noise(safe_root)
+        self.assertFalse(safe_root.exists())
+
+        conflict_root = self.root / "conflict-noise"
+        conflict_root.mkdir()
+        (conflict_root / "foreign.txt").write_text("conflict", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "foreign.txt"):
+            service._clear_safe_target_noise(conflict_root)
+
+    def test_storage_stage_and_progress_helpers_report_failures_without_side_effects(self):
+        stage_root = self.root / "stage"
+        stage_root.mkdir()
+        (stage_root / "present.txt").write_text("present", encoding="utf-8")
+
+        StorageMigrationService._validate_stage_inventory(stage_root, ("present.txt",))
+        with self.assertRaisesRegex(RuntimeError, "missing.txt"):
+            StorageMigrationService._validate_stage_inventory(
+                stage_root,
+                ("present.txt", "missing.txt"),
+            )
+
+        target_root = self.root / "occupied-target"
+        target_root.mkdir()
+        (target_root / "file.txt").write_text("occupied", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "contains data"):
+            StorageMigrationService._promote_stage_root(stage_root, target_root)
+
+        empty_container = self.root / "empty-container"
+        empty_container.mkdir()
+        StorageMigrationService._remove_empty_stage_container(empty_container)
+        self.assertFalse(empty_container.exists())
+
+        non_empty_container = self.root / "non-empty-container"
+        non_empty_container.mkdir()
+        (non_empty_container / "child").write_text("child", encoding="utf-8")
+        StorageMigrationService._remove_empty_stage_container(non_empty_container)
+        self.assertTrue(non_empty_container.exists())
+
+        self.assertEqual(
+            StorageMigrationService._database_verify_progress_value(
+                10,
+                20,
+                database_index=1,
+                database_total=0,
+                step=1,
+                steps_per_database=4,
+            ),
+            10,
+        )
+        self.assertEqual(
+            StorageMigrationService._database_verify_progress_value(
+                10,
+                10,
+                database_index=1,
+                database_total=1,
+                step=1,
+                steps_per_database=4,
+            ),
+            10,
         )
 
 

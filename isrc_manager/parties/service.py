@@ -84,7 +84,7 @@ class PartyService:
             and current_primary
             and current_primary.casefold() != clean_artist_name.casefold()
         ):
-            alias_values.append(clean_artist_name)
+            alias_values.append(current_primary)
         payload = PartyPayload(
             legal_name=record.legal_name,
             display_name=record.display_name,

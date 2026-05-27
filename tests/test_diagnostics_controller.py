@@ -453,3 +453,315 @@ class DiagnosticsControllerTests(unittest.TestCase):
         self.assertEqual(result, "bundle-run")
         self.assertEqual(app._run_bundle_diagnostics_repair.call_count, 1)
         on_success.assert_called_once_with("ok")
+
+    def test_async_task_functions_execute_storage_cleanup_and_report_payloads(self):
+        submitted = []
+        audit_payload = {"summary": {"ok": True}, "items": []}
+        cleanup_result = SimpleNamespace(
+            removed_item_keys=("a", "b"),
+            removed_bytes=2048,
+            removed_history_entry_ids=(1,),
+            removed_session_entry_ids=(2, 3),
+            skipped_item_keys=("c",),
+        )
+        app = SimpleNamespace(
+            current_db_path="/tmp/catalog.db",
+            data_root=Path("/tmp/data"),
+            logs_dir=Path("/tmp/logs"),
+            settings=mock.Mock(),
+            storage_layout=SimpleNamespace(preferred_data_root=Path("/preferred")),
+            _app_version_text=mock.Mock(return_value="3.16.3"),
+            _human_size=lambda value: f"{int(value)} B",
+            _build_application_storage_audit_payload=mock.Mock(return_value=audit_payload),
+            _build_diagnostics_report=mock.Mock(return_value={"_diagnostics_progress_total": 5}),
+            _application_storage_admin_service=mock.Mock(
+                return_value=SimpleNamespace(
+                    cleanup_selected=mock.Mock(return_value=cleanup_result),
+                )
+            ),
+            _submit_background_task=lambda **kwargs: submitted.append(("task", kwargs)) or kwargs,
+            _submit_background_bundle_task=lambda **kwargs: submitted.append(("bundle", kwargs))
+            or kwargs,
+        )
+
+        audit_task = _load_application_storage_audit_async(app)
+        audit_ctx = _TaskContext()
+        self.assertEqual(audit_task["task_fn"](audit_ctx), audit_payload)
+        app._build_application_storage_audit_payload.assert_called_once()
+        self.assertIn("Inspecting application-wide storage", audit_ctx.statuses[0])
+
+        cleanup_task = _run_application_storage_cleanup_async(
+            app,
+            ["a", "b"],
+            allow_warning_deletes=True,
+        )
+        cleanup_ctx = _TaskContext()
+        cleanup_payload = cleanup_task["task_fn"](cleanup_ctx)
+        self.assertEqual(cleanup_payload["removed_count"], 2)
+        self.assertEqual(cleanup_payload["removed_text"], "2048 B")
+        self.assertEqual(cleanup_payload["removed_session_entry_count"], 2)
+        app._application_storage_admin_service.return_value.cleanup_selected.assert_called_once()
+
+        app.current_db_path = ""
+        report_task = _load_diagnostics_report_async(app)
+        report_ctx = _TaskContext()
+        self.assertEqual(report_task["task_fn"](report_ctx), {"_diagnostics_progress_total": 5})
+        ui_progress = _TaskContext()
+        seen = []
+        report_task["on_success_before_cleanup"]({"_diagnostics_progress_total": 5}, ui_progress)
+        self.assertEqual(ui_progress.progress[-1], (5, 5, "Diagnostics ready."))
+
+        app.current_db_path = "/tmp/catalog.db"
+        app.conn = mock.Mock()
+        app.track_service = mock.Mock()
+        app.license_service = mock.Mock()
+        app.history_manager = mock.Mock()
+        app.database_maintenance = mock.Mock()
+        with (
+            mock.patch(
+                "isrc_manager.diagnostics.controller.StorageMigrationService",
+                return_value="storage-service",
+            ) as migration_service,
+            mock.patch(
+                "isrc_manager.diagnostics.controller.DatabaseSchemaService",
+                return_value="schema-service",
+            ) as schema_service,
+        ):
+            bundled_task = _load_diagnostics_report_async(app, on_success=seen.append)
+            bundle_ctx = _TaskContext()
+            bundle = SimpleNamespace(
+                settings="settings",
+                conn="conn",
+                track_service="tracks",
+                license_service="licenses",
+                history_manager="history",
+                database_maintenance="maintenance",
+            )
+            self.assertEqual(
+                bundled_task["task_fn"](bundle, bundle_ctx),
+                {"_diagnostics_progress_total": 5},
+            )
+
+        migration_service.assert_called()
+        schema_service.assert_called_once_with("conn", data_root=Path("/tmp/data"))
+        bundled_task["on_success_before_cleanup"]({"_diagnostics_progress_total": 3}, ui_progress)
+        self.assertEqual(seen, [{"_diagnostics_progress_total": 3}])
+
+    def test_run_diagnostics_repair_guard_and_legacy_noop_branches(self):
+        app = SimpleNamespace(
+            conn=mock.Mock(),
+            track_service=mock.Mock(),
+            history_manager=mock.Mock(),
+            current_db_path="/tmp/catalog.db",
+            _custom_value_field_column_name=mock.Mock(return_value=None),
+            _count_orphaned_custom_values=mock.Mock(),
+            load_active_custom_fields=mock.Mock(return_value=("fields",)),
+            refresh_table_preserve_view=mock.Mock(),
+            populate_all_comboboxes=mock.Mock(),
+            _refresh_history_actions=mock.Mock(),
+            _audit=mock.Mock(),
+            _audit_commit=mock.Mock(),
+            _log_event=mock.Mock(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "custom field reference column"):
+            _run_diagnostics_repair(app, "custom_value_cleanup")
+
+        app.conn = None
+        with self.assertRaisesRegex(RuntimeError, "Open a profile"):
+            _run_diagnostics_repair(app, "legacy_promoted_field_repair")
+
+        app.conn = mock.Mock()
+        app.track_service = None
+        with self.assertRaisesRegex(RuntimeError, "Open a profile"):
+            _run_diagnostics_repair(app, "waveform_cache_cleanup")
+
+        app.track_service = mock.Mock()
+        app.history_manager = None
+        with self.assertRaisesRegex(RuntimeError, "Open a profile"):
+            _run_diagnostics_repair(app, "history_reconcile")
+
+        app.history_manager = SimpleNamespace(
+            repair_recovery_state=mock.Mock(return_value=_RepairResult(changes=(), unresolved=()))
+        )
+        self.assertIn(
+            "No registry changes were needed.",
+            _run_diagnostics_repair(app, "history_reconcile"),
+        )
+
+        app.conn = mock.Mock()
+        repair_result = _RepairResult(
+            repaired_field_names=(),
+            skipped_field_names=(),
+            merged_value_count=0,
+            removed_value_count=0,
+            removed_field_count=0,
+        )
+        with mock.patch(
+            "isrc_manager.diagnostics.controller.LegacyPromotedFieldRepairService"
+        ) as service:
+            service.return_value.repair_candidates.return_value = repair_result
+            result = _run_diagnostics_repair(app, "legacy_promoted_field_repair")
+
+        self.assertIn("No safe legacy default-column custom fields", result)
+        app.load_active_custom_fields.assert_called()
+        app.populate_all_comboboxes.assert_called()
+
+        with self.assertRaises(ValueError):
+            _run_diagnostics_repair(app, "not-a-repair")
+
+    def test_bundle_diagnostics_repair_covers_schema_waveform_legacy_and_history_edges(self):
+        statuses: list[str] = []
+        bundle = _Bundle(
+            conn=mock.MagicMock(),
+            track_service=mock.Mock(),
+            history_manager=None,
+            database_maintenance=mock.Mock(),
+            license_service=mock.Mock(),
+        )
+        app = SimpleNamespace(
+            _custom_value_field_column_name=mock.Mock(return_value=None),
+            _count_orphaned_custom_values=mock.Mock(),
+        )
+
+        with mock.patch(
+            "isrc_manager.diagnostics.controller.DatabaseSchemaService"
+        ) as schema_service:
+            result = _run_bundle_diagnostics_repair(
+                app,
+                "schema_migrate",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+                status_callback=statuses.append,
+            )
+        schema_service.return_value.init_db.assert_called_once()
+        schema_service.return_value.migrate_schema.assert_called_once()
+        self.assertEqual(result["post_action"], "refresh_schema")
+        self.assertEqual(statuses[-1], "Applying schema migration...")
+
+        with self.assertRaisesRegex(RuntimeError, "custom field reference column"):
+            _run_bundle_diagnostics_repair(
+                app,
+                "custom_value_cleanup",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+            )
+
+        with mock.patch(
+            "isrc_manager.diagnostics.controller.AudioWaveformCacheService"
+        ) as cache_service:
+            cache_service.return_value.cleanup_invalid_caches.return_value = 3
+            result = _run_bundle_diagnostics_repair(
+                app,
+                "waveform_cache_cleanup",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+                status_callback=statuses.append,
+            )
+        self.assertEqual(result["audit_details"], "removed=3")
+        self.assertEqual(statuses[-1], "Deleting stale cached waveforms...")
+
+        repair_result = _RepairResult(
+            repaired_field_names=("Artist",),
+            skipped_field_names=("Title",),
+            merged_value_count=2,
+            removed_value_count=3,
+            removed_field_count=1,
+        )
+        with mock.patch(
+            "isrc_manager.diagnostics.controller.LegacyPromotedFieldRepairService"
+        ) as service:
+            service.return_value.repair_candidates.return_value = repair_result
+            result = _run_bundle_diagnostics_repair(
+                app,
+                "legacy_promoted_field_repair",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+                status_callback=statuses.append,
+            )
+        self.assertIn("Repaired fields:", result["result_text"])
+        self.assertIn("Skipped because conflicting", result["result_text"])
+        self.assertEqual(statuses[-1], "Merging legacy custom fields into default columns...")
+
+        with self.assertRaisesRegex(RuntimeError, "Open a profile"):
+            _run_bundle_diagnostics_repair(
+                app,
+                "history_reconcile",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+            )
+
+        bundle.history_manager = SimpleNamespace(
+            repair_recovery_state=mock.Mock(return_value=_RepairResult(changes=(), unresolved=()))
+        )
+        result = _run_bundle_diagnostics_repair(
+            app,
+            "history_reconcile",
+            bundle=bundle,
+            current_db_path="/tmp/catalog.db",
+            data_root=Path("/tmp/data"),
+        )
+        self.assertIn("No registry changes were needed.", result["result_text"])
+
+        with self.assertRaises(ValueError):
+            _run_bundle_diagnostics_repair(
+                app,
+                "not-a-repair",
+                bundle=bundle,
+                current_db_path="/tmp/catalog.db",
+                data_root=Path("/tmp/data"),
+            )
+
+    def test_apply_diagnostics_repair_result_handles_commit_failure_and_hidden_history(self):
+        conn = mock.Mock()
+        conn.commit.side_effect = RuntimeError("already closed")
+        history_dialog = SimpleNamespace(
+            isVisible=mock.Mock(return_value=False),
+            refresh_data=mock.Mock(),
+        )
+        app = SimpleNamespace(
+            conn=conn,
+            history_dialog=history_dialog,
+            load_active_custom_fields=mock.Mock(return_value=("fields",)),
+            refresh_table_preserve_view=mock.Mock(),
+            populate_all_comboboxes=mock.Mock(),
+            _refresh_history_actions=mock.Mock(),
+            _audit=mock.Mock(),
+            _audit_commit=mock.Mock(),
+            _log_event=mock.Mock(),
+        )
+
+        self.assertEqual(
+            _apply_diagnostics_repair_result(
+                app,
+                "schema_migrate",
+                {
+                    "post_action": "refresh_schema",
+                    "result_text": "schema done",
+                },
+            ),
+            "schema done",
+        )
+        app.refresh_table_preserve_view.assert_called_once()
+        conn.commit.assert_called_once()
+
+        self.assertEqual(
+            _apply_diagnostics_repair_result(
+                app,
+                "history_reconcile",
+                {
+                    "post_action": "refresh_history",
+                    "audit_entity": "",
+                    "log_event": "",
+                    "result_text": "",
+                },
+            ),
+            "",
+        )
+        app._refresh_history_actions.assert_called_once()
+        history_dialog.refresh_data.assert_not_called()

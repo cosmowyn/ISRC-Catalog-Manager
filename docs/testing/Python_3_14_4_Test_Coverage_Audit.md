@@ -93,6 +93,48 @@ Current validated progression:
     `92.91044776119404%` to `94.68283582089552%`, parties controller from
     `83.28729281767956%` to `93.78453038674033%`, and main window from
     `92.47943595769682%` to `92.96625818364949%`.
+- Latest risk-based service/controller coverage batch toward the 88-90% milestone:
+  - Starting full branch-aware coverage: `87.31731377531872%`.
+  - Final full branch-aware coverage: `88.26948027578516%` displayed as `88%`.
+  - Statement coverage: `91.15556330728919%`.
+  - Branch coverage: `78.68525896414343%`.
+  - Full pytest with `--cov-fail-under=0`: passed (`2104 passed`, `728 warnings`,
+    `86 subtests passed in 415.36s`).
+  - The batch achieved the next `>=88.0%` global milestone. It did not reach `90%`; the remaining
+    gap is still concentrated in meaningful service, controller, storage, import, and workflow
+    branches rather than only low-value visual fallbacks.
+  - Modules targeted with meaningful behavioural tests included:
+    `isrc_manager/releases/controller.py` (`93.4010152284264%`),
+    `isrc_manager/works/controller.py` (`88.3969465648855%`),
+    `isrc_manager/diagnostics/controller.py` (`90.72463768115942%`),
+    `isrc_manager/exchange/controller.py` (`85.75129533678756%`),
+    `isrc_manager/services/custom_fields.py` (`90.13035381750466%`),
+    `isrc_manager/services/tracks.py` (`91.0371318822023%`),
+    `isrc_manager/parties/exchange_service.py` (`90.03783102143758%`),
+    `isrc_manager/contracts/service.py` (`82.10161662817552%`),
+    `isrc_manager/assets/service.py` (`81.50807899461401%`),
+    `isrc_manager/catalog_table/workflow.py` (`86.47642679900744%`),
+    `isrc_manager/storage_migration.py` (`87.11711711711712%`),
+    `isrc_manager/history/cleanup.py` (`90.59139784946237%`),
+    `isrc_manager/services/gs1_settings.py` (`80.98591549295774%`),
+    `isrc_manager/blob_icons.py` (`84.92597577388963%`), and
+    `isrc_manager/external_launch.py` (`83.36221837088388%`).
+  - Tests added or expanded in this batch:
+    `tests/test_release_controller.py`, `tests/test_catalog_table_workflow.py`,
+    `tests/test_works_dialogs_coverage.py`, `tests/test_diagnostics_controller.py`,
+    `tests/test_exchange_controller.py`, `tests/test_custom_field_services.py`,
+    `tests/test_storage_migration_service.py`, `tests/test_track_service.py`,
+    `tests/test_party_exchange_service.py`, `tests/catalog/test_contract_service.py`,
+    `tests/test_external_launch_clusters.py`, `tests/test_gs1_settings_service.py`,
+    `tests/test_history_cleanup_service.py`, `tests/test_blob_icons.py`, and
+    `tests/test_assets_service.py`.
+  - A narrow production fix was made in `isrc_manager/works/controller.py` after the new controller
+    tests exposed that work-scoped child-track creation seeded a pending context but did not route
+    through the app's child-track creation callback.
+  - Validation for this checkpoint:
+    focused touched-test run passed (`194 passed in 3.59s`); compileall, Ruff, Black check, mypy,
+    and `git diff --check` all passed; full pytest/coverage passed with coverage scoped only to
+    `--cov=isrc_manager`.
 
 The strict `--cov-fail-under=95` gate still fails only because the repository has not yet reached
 the required branch-aware threshold. The test body passes under the same full-suite shape when the
@@ -122,30 +164,41 @@ defensive branches should be documented separately rather than chased for percen
 
 Named remaining targets from the latest milestone evidence:
 
-1. `isrc_manager/main_window.py` - now `92.96625818364949%` displayed as `93%`, with
-   `237` missing lines and `182` missing branches after Milestone 4.
-2. `isrc_manager/application_settings_dialog.py` - `95.96700274977086%` displayed as `96%`,
-   with `23` missing lines and `21` missing branches.
-3. `isrc_manager/media/equalizer.py` - `96.30872483221476%` displayed as `96%`, with
-   `15` missing lines and `18` missing branches.
+1. `isrc_manager/main_window.py` - `92.96625818364949%`, with `237` missing lines and
+   `182` missing branches. Continue only on command-routing, cleanup, update/recovery,
+   diagnostics, and storage conversion seams; avoid brittle whole-window automation.
+2. `isrc_manager/main_window_layout.py` - `80.31634446397189%`, with `127` missing lines and
+   `97` missing branches. Valuable paths are state restoration, layout persistence, and recovery
+   guardrails, not pure visual resizing.
+3. `isrc_manager/contracts/service.py` - `82.10161662817552%`, with `87` missing lines and
+   `68` missing branches. Remaining useful work is validation, document storage, identifier
+   registry fallback, associations, and rollback/error handling.
+4. `isrc_manager/assets/service.py` - `81.50807899461401%`, with `55` missing lines and
+   `48` missing branches. Remaining useful work is missing-source, conversion, primary-selection,
+   checksum, and storage cleanup behavior.
+5. `isrc_manager/storage_migration.py` - `87.11711711711712%`, with `86` missing lines and
+   `57` missing branches. Continue with recovery, resumable migration, stale references, conflict
+   cleanup, and rollback behavior.
+6. `isrc_manager/catalog_table/workflow.py` - `86.47642679900744%`, with `70` missing lines and
+   `39` missing branches. Remaining work should stay on dataset refresh, search/filter state,
+   and background refresh callbacks rather than repaint-only branches.
+7. `isrc_manager/tags/metadata_controller.py`, `isrc_manager/services/gs1_template.py`, and
+   `isrc_manager/services/imports.py` remain larger non-visual follow-up targets below `80%`.
 
-The strict `95%` coverage gate is still not met; the current full-suite total remains
-`86.73722134654358%`. Follow-up should continue risk-based targets rather than paint-only/visual
-fallback or impossible-layout branches. Remaining `main_window.py` work should stay on valuable
-command-routing/controller seams and avoid full-window brittle UI automation.
+The strict `95%` coverage gate is still not met; the current full-suite total is
+`88.26948027578516%`. Follow-up should continue risk-based targets rather than paint-only/visual
+fallback or impossible-layout branches.
 
 Recommended next production-readiness batches:
 
-- Service/data-safety: `services/tracks.py`, `authenticity/service.py`, `storage_admin.py`, and
-  `exchange/master_transfer.py` for rollback, cleanup, corrupted/missing-data, duplicate/conflict,
-  and filesystem hazard paths.
-- Workflow/controller: remaining `main_window.py` branches only where they represent meaningful
-  user-decision, guardrail, error/no-op, cleanup, and state-transition behavior.
-- Next recommended milestone per user: target `application_settings_dialog.py` and
-  `media/equalizer.py` together only if the work remains headless-safe with direct widget-state
-  assertions and fake prompts/file pickers.
-- `conversion/dialogs.py`, `works/dialogs.py`, and `parties/controller.py` have already received
-  the Milestone 1, Milestone 2, and Milestone 3 passes.
+- Contract/asset/storage services: rollback, missing-file, conversion, checksum, duplicate, and
+  cleanup paths.
+- Import/tag metadata workflows: malformed input, unavailable services, worker failure, and
+  user-reject/cancel paths.
+- Main-window and catalog workflow: command-routing/controller seams, recovery/update handoffs,
+  filter/search state, and background callback handling.
+- GS1 template/settings services: invalid template bytes, missing assets, malformed JSON,
+  contract/template export failure, and safe no-op branches.
 - Low-value GUI fallback gaps: paint-only, platform-defensive, WebEngine/media-device, and
   impossible-layout defensive branches should be tracked separately when they are not meaningful
   production-readiness tests.
@@ -5318,3 +5371,203 @@ Remaining gaps after Milestone 4:
   displayed as `96%`, with `23` missing lines and `21` missing branches.
 - Current `isrc_manager/media/equalizer.py` evidence: `96.30872483221476%` displayed as
   `96%`, with `15` missing lines and `18` missing branches.
+
+## Checkpoint 4.43 - Milestone 5 Controller and Workflow Coverage Handoff
+
+Timestamp: `2026-05-27`
+
+Milestone 5 targeted the next global `88.0%` branch-aware coverage checkpoint. The batch stayed
+on meaningful headless-safe controller, dialog, report, and export workflow seams, and avoided
+paint-only branches, brittle full-window automation, visual fallback paths, broad skips/xfails,
+new omissions, or `pragma: no cover`.
+
+### Coverage delta
+
+Authoritative starting baseline from the current `coverage.json` inspected before writing tests:
+
+- Full branch-aware coverage: `86.73507682739837%` displayed as `87%`.
+- Statement coverage: `89.8207185211022%` displayed as `90%`.
+- Branch coverage: `76.48939127212081%` displayed as `76%`.
+
+Authoritative final baseline from the full-suite coverage report after both batches:
+
+- Full branch-aware coverage: `87.31731377531872%` displayed as `87%`.
+- Statement coverage: `90.36902685734216%` displayed as `90%`.
+- Branch coverage: `77.18428611136848%` displayed as `77%`.
+
+The `88.0%` milestone was not reached. The batch covered roughly `543` additional line/branch
+opportunities, leaving about `637` more covered opportunities needed for `88.0%`. Reaching that
+remaining gap in this pass would require a broader follow-up across larger service/controller
+surfaces, not low-value visual or impossible-layout branches.
+
+Modules targeted and final measured coverage:
+
+- `isrc_manager/media/export_controller.py`: `84.06676783004552%`.
+- `isrc_manager/diagnostics/report.py`: `90.23354564755839%`.
+- `isrc_manager/works/controller.py`: `76.03053435114504%`.
+- `isrc_manager/releases/dialogs.py`: `89.23913043478261%`.
+- `isrc_manager/promo_codes/controller.py`: `88.4297520661157%`.
+- `isrc_manager/diagnostics/controller.py`: `62.31884057971015%`.
+- `isrc_manager/exchange/controller.py`: `67.87564766839378%`.
+
+Tests added or expanded:
+
+- `tests/test_media_export_controller.py`: picker cancellation/validation, byte coercion,
+  background audio export callbacks, bulk audio column export success/skip/cancel paths, standard
+  media export routing, focused media-column export helpers, and image/custom-blob writes.
+- `tests/test_diagnostics_report.py`: warning-rich and unavailable-service diagnostics report
+  assembly with storage layout, schema, integrity, managed-file, history, cache, and app-storage
+  branches.
+- `tests/test_works_dialogs_coverage.py`: direct Works controller create/update/delete callback
+  flows plus duplicate/link/missing-input handling.
+- `tests/test_repertoire_dialogs.py`: release editor artwork/track-row/validation paths and
+  release browser service/scope/signal branches.
+- `tests/test_promo_codes_dialogs.py`: promo-code ledger open/import/update/refresh controller
+  paths and background callbacks.
+- `tests/test_diagnostics_controller.py`: diagnostics async task functions for application
+  storage audit, cleanup, profileless report, and bundled report payloads.
+- `tests/test_exchange_controller.py`: CSV exchange import inspection, dry-run import, preflight
+  review, and apply workflow routing.
+
+### Validation results recorded for this milestone
+
+Focused tests:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_media_export_controller.py tests/test_diagnostics_report.py tests/test_works_dialogs_coverage.py tests/test_repertoire_dialogs.py --no-cov
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_promo_codes_dialogs.py tests/test_diagnostics_controller.py tests/test_exchange_controller.py --no-cov
+```
+
+- First focused batch: `63 passed in 0.96s` after fixing test-assumption issues.
+- Second focused batch: `36 passed in 0.42s` after formatting.
+
+Full validation:
+
+```bash
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+```
+
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed.
+- mypy: passed; `Success: no issues found in 40 source files`.
+- Whitespace diff check: passed.
+- Full pytest/coverage: passed (`2054 passed`, `780 warnings`, `86 subtests passed in 408.47s`;
+  `87.31731377531872%` total branch-aware coverage displayed as `87%`).
+
+ResourceWarning noise for unclosed SQLite connections was observed in unrelated app shell catalog
+tests during the full coverage run. The warnings did not represent a Milestone 5 failure.
+
+Coverage measurement remains scoped to `--cov=isrc_manager` only; no uppercase
+`--cov=ISRC_manager` target was added. The strict 95% gate was not weakened.
+
+### Final batch handoff
+
+Remaining high-value gaps after Milestone 5:
+
+- `isrc_manager/releases/controller.py`: currently `68%`; meaningful release create/update,
+  add-track, delete, and duplicate background callbacks remain.
+- `isrc_manager/works/controller.py`: currently `76%`; remaining add-track context and manager
+  selection branches are meaningful but need careful fake widget/controller state.
+- `isrc_manager/storage_migration.py`: currently `85%`; recovery, resumable migration, stale
+  references, and conflict cleanup branches remain useful.
+- `isrc_manager/services/tracks.py`: currently `88%`; remaining data-safety and filesystem
+  hazard branches should be tested through service fixtures.
+- `isrc_manager/services/custom_fields.py`, GS1 service modules, and
+  `isrc_manager/tags/metadata_controller.py` remain significant non-visual follow-up targets.
+
+## Checkpoint 4.44 - Milestone 6 Exact 90% Coverage Handoff
+
+Timestamp: `2026-05-27`
+
+Milestone 6 targeted the next global branch-aware coverage checkpoint: exact total coverage at or
+above `90.0%`, not only terminal-rounded `90%`. The batch stayed scoped to meaningful
+headless-safe service, controller, dialog, and helper behavior. It did not add skips, xfails, new
+coverage omissions, `pragma: no cover`, visual fallback tests, or uppercase
+`--cov=ISRC_manager` coverage.
+
+### Coverage delta
+
+Starting point for this campaign:
+
+- User-provided baseline before the milestone work: about `86.7372%`.
+- Intermediate exact coverage before the final mini-batch: `89.969122566258%`, `29` combined
+  line/branch points short of exact `90.0%`.
+
+Final authoritative result from `coverage.json` after the final full-suite run:
+
+- Full branch-aware coverage: `90.039883351917%` displayed as `90%`.
+- Statement coverage: `92.73039256717168%` displayed as `93%`.
+- Branch coverage: `81.10699397869384%` displayed as `81%`.
+- Combined line/branch points: `83982 / 93272`, `37` points over exact `90.0%`.
+
+### Tests and fixes added
+
+Major coverage targets:
+
+- Application sound routing, startup scheduling, message classification, playback throttling, and
+  disabled/missing/failure paths.
+- Catalog XML and master-transfer import/export controller flows, including cancellation,
+  preflight failure, omission confirmation, worker payload construction, reports, and history
+  callbacks.
+- Repertoire, works, parties, release, tags, catalog-table, authenticity, media, diagnostics, and
+  settings/controller seams through fake services, fake prompts, and direct state assertions.
+- License archive storage/migration, GS1 settings/template/repository behavior, catalog
+  admin/read services, session close safety, SemVer/version fallback behavior, workspace debug
+  summaries, repair queue commit/delete edges, and exchange repair/import workflows.
+
+Production code changes were limited to confirmed narrow fixes:
+
+- `isrc_manager/parties/service.py`: party promotion now preserves the previous primary artist
+  label as an alias only when it differs from the new canonical label.
+- `isrc_manager/catalog_table/controller.py`: malformed custom-field column identifiers are skipped
+  instead of raising during catalog-table target resolution.
+
+### Validation results recorded for this milestone
+
+Focused changed-test run after formatting:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest $(git diff --name-only -- tests) $(git ls-files --others --exclude-standard tests) --no-cov
+```
+
+- Passed: `628 passed`, `7 subtests passed in 6.99s`.
+
+Full validation:
+
+```bash
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests scripts
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+```
+
+- Compileall: passed.
+- Ruff: passed after removing one unused local in a GS1 settings test.
+- Black check: passed after formatting six touched test modules.
+- mypy: passed; `Success: no issues found in 40 source files`.
+- Full pytest/coverage: passed (`2244 passed`, `785 warnings`, `87 subtests passed in 415.49s`).
+
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail the milestone and was not hidden.
+
+The strict `95%` gate remains unmet and was not weakened; milestone validation continues to use
+`--cov-fail-under=0` only for measuring progress while the campaign is below the strict gate.
+
+### Remaining high-value gaps
+
+- `isrc_manager/storage_migration.py`, `storage_admin.py`, and managed-file storage recovery paths:
+  stale references, cleanup warnings, resume/recovery decisions, and filesystem hazards.
+- `isrc_manager/services/tracks.py` and `isrc_manager/parties/service.py`: remaining data-safety,
+  duplicate/conflict, rollback, and authority migration branches.
+- `isrc_manager/profile_session.py`, `settings_controller.py`, and update/recovery modules:
+  profile guardrails, failure recovery, and user-decision branches that can be tested through fake
+  prompts/services.
+- Lower-value visual-only or platform-defensive branches should remain out of the main campaign
+  unless they become tied to a real bug or user workflow.

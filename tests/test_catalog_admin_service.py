@@ -102,6 +102,19 @@ class CatalogAdminServiceTests(unittest.TestCase):
         self.assertIsNone(self.conn.execute("SELECT id FROM Artists WHERE id=3").fetchone())
         self.assertIsNone(self.conn.execute("SELECT id FROM Albums WHERE id=2").fetchone())
 
+    def test_noop_deletes_and_purge_paths_only_remove_unused_rows(self):
+        self.service.delete_artists([0, -1])
+        self.service.delete_albums([0])
+
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM Artists").fetchone(),
+            (3,),
+        )
+        self.assertEqual(self.service.purge_unused_artists(), [3])
+        self.assertEqual(self.service.purge_unused_albums(), [2])
+        self.assertIsNotNone(self.conn.execute("SELECT id FROM Artists WHERE id=1").fetchone())
+        self.assertIsNotNone(self.conn.execute("SELECT id FROM Albums WHERE id=1").fetchone())
+
     def test_delete_used_artists_and_albums_is_blocked(self):
         with self.assertRaises(ValueError):
             self.service.delete_artists([1])
@@ -126,6 +139,23 @@ class CatalogAdminServiceTests(unittest.TestCase):
 
         self.service.delete_licensee(2)
         self.assertIsNone(self.conn.execute("SELECT id FROM Licensees WHERE id=2").fetchone())
+
+    def test_licensee_validation_and_cursor_paths(self):
+        with self.assertRaises(ValueError):
+            self.service.ensure_licensee(" ")
+
+        with self.assertRaises(ValueError):
+            self.service.rename_licensee(1, " ")
+
+        cursor = self.conn.cursor()
+        created_id = self.service.ensure_licensee("Cursor Licensee", cursor=cursor)
+        same_id = self.service.ensure_licensee("Cursor Licensee", cursor=cursor)
+
+        self.assertEqual(created_id, same_id)
+        self.assertEqual(
+            self.conn.execute("SELECT name FROM Licensees WHERE id=?", (created_id,)).fetchone(),
+            ("Cursor Licensee",),
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 from PySide6.QtCore import QSettings
 
@@ -51,6 +52,28 @@ class DatabaseSessionServiceTests(unittest.TestCase):
         self.service.remember_last_path(self.settings, str(self.db_path))
 
         self.assertEqual(self.settings.value("db/last_path", "", str), str(self.db_path))
+
+    def test_close_ignores_missing_and_already_broken_connections(self):
+        class BrokenConnection:
+            def __init__(self):
+                self.commit_attempted = False
+                self.close_attempted = False
+
+            def commit(self):
+                self.commit_attempted = True
+                raise RuntimeError("commit failed")
+
+            def close(self):
+                self.close_attempted = True
+                raise RuntimeError("close failed")
+
+        broken = BrokenConnection()
+
+        self.service.close(None)
+        self.service.close(cast(Any, broken))
+
+        self.assertTrue(broken.commit_attempted)
+        self.assertTrue(broken.close_attempted)
 
 
 if __name__ == "__main__":

@@ -234,6 +234,66 @@ class CatalogReadServiceTests(unittest.TestCase):
             ("2026-03-14", "123456789012", "Pop"),
         )
 
+    def test_read_helpers_filter_invalid_media_inputs_and_report_progress(self):
+        self.assertEqual(self.service._table_columns("MissingTable"), set())
+
+        row_progress = []
+        _, custom_map = self.service.fetch_rows_with_customs(
+            [{"id": 10, "name": "Mood"}],
+            progress_callback=lambda *args: row_progress.append(args),
+        )
+
+        self.assertEqual(custom_map, {(1, 10): "Calm"})
+        self.assertEqual(row_progress[0], (1, 4, "Inspected Work schema columns for catalog rows."))
+        self.assertIn((3, 4, "Loaded 1 active custom-field values."), row_progress)
+
+        class TrackMedia:
+            def __init__(self):
+                self.calls = []
+
+            def get_media_meta_map(self, track_ids, *, media_keys):
+                self.calls.append((list(track_ids), media_keys))
+                return {track_ids[0]: {"audio_file": {"filename": "demo.wav"}}}
+
+        class CustomMedia:
+            def __init__(self):
+                self.calls = []
+
+            def get_value_meta_map(
+                self,
+                field_ids,
+                *,
+                track_ids,
+                include_storage_details,
+            ):
+                self.calls.append((list(field_ids), list(track_ids), include_storage_details))
+                return {(track_ids[0], field_ids[0]): {"filename": "cover.png"}}
+
+        track_media = TrackMedia()
+        custom_media = CustomMedia()
+        badge_progress = []
+
+        payload = self.service.fetch_blob_badge_payload(
+            [1, "bad-id", 1, 2],
+            [
+                {"field_type": "text", "id": 99},
+                {"field_type": "blob_audio", "id": None},
+                {"field_type": "blob_image", "id": " "},
+                {"field_type": "blob_image", "id": "bad-field"},
+                {"field_type": "blob_image", "id": "10"},
+            ],
+            track_service=track_media,
+            custom_field_values=custom_media,
+            progress_callback=lambda *args: badge_progress.append(args),
+        )
+
+        self.assertEqual(track_media.calls, [([1, 2], ("audio_file", "album_art"))])
+        self.assertEqual(custom_media.calls, [([10], [1, 2], True)])
+        self.assertEqual(payload["standard_media"], {1: {"audio_file": {"filename": "demo.wav"}}})
+        self.assertEqual(payload["custom_fields"], {(1, 10): {"filename": "cover.png"}})
+        self.assertEqual(badge_progress[-1], (4, 4, "Prepared catalog media badge payload."))
+        self.assertIsNone(self.service.find_album_metadata("  "))
+
     def test_list_tracks_returns_title_sorted_choices(self):
         self.assertEqual(
             self.service.list_tracks(),

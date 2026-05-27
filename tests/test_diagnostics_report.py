@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -231,3 +232,261 @@ def test_legacy_promoted_candidates_and_repair_helpers_handle_missing_connection
     monkeypatch.setattr(report, "LegacyPromotedFieldRepairService", FakeRepairService)
     assert report._legacy_promoted_field_repair_candidates(SimpleNamespace(conn=conn)) == candidates
     conn.close()
+
+
+def _checks_by_title(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {str(check["title"]): check for check in payload["checks"]}
+
+
+def _diagnostics_connection(tmp_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute(
+        """
+        CREATE TABLE Tracks(
+            id INTEGER PRIMARY KEY,
+            track_title TEXT,
+            audio_file_path TEXT
+        )
+        """
+    )
+    conn.execute("CREATE TABLE Albums(id INTEGER PRIMARY KEY, title TEXT, album_art_path TEXT)")
+    conn.execute("CREATE TABLE Licenses(id INTEGER PRIMARY KEY, filename TEXT, file_path TEXT)")
+    conn.execute(
+        "CREATE TABLE HistorySnapshots(id INTEGER PRIMARY KEY, label TEXT, created_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO Tracks(id, track_title, audio_file_path) VALUES (1, 'Song', ?)",
+        ("missing.wav",),
+    )
+    conn.execute(
+        "INSERT INTO Albums(id, title, album_art_path) VALUES (1, 'Album', ?)", ("cover.png",)
+    )
+    conn.execute(
+        "INSERT INTO Licenses(id, filename, file_path) VALUES (1, 'Deal.pdf', ?)", ("deal.pdf",)
+    )
+    conn.execute(
+        "INSERT INTO HistorySnapshots(label, created_at) VALUES ('Before import', '2026-05-26')"
+    )
+    conn.execute("CREATE TABLE Parent(id INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TABLE Child(parent_id INTEGER REFERENCES Parent(id))")
+    conn.execute("INSERT INTO Child(parent_id) VALUES (99)")
+    return conn
+
+
+def test_build_diagnostics_report_surfaces_warning_and_repair_paths(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    conn = _diagnostics_connection(tmp_path)
+
+    class _FakeWaveformCacheService:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        def inspect_invalid_caches(self, track_service):
+            assert track_service is not None
+            return SimpleNamespace(
+                issue_count=2,
+                valid_rows=1,
+                total_rows=3,
+                details=["orphan waveform row", "stale source fingerprint"],
+            )
+
+    class _FakeCleanupService:
+        def __init__(self, history_manager) -> None:
+            self.history_manager = history_manager
+
+        def preview_storage_budget(self, retention_settings):
+            assert retention_settings.auto_cleanup_enabled is True
+            return SimpleNamespace(
+                total_bytes=8192,
+                budget_bytes=1024,
+                over_budget_bytes=4096,
+                candidate_items=[SimpleNamespace(bytes_on_disk=512)],
+                protected_over_budget_items=[],
+                auto_cleanup_enabled=True,
+            )
+
+    class _FakeSettingsReadService:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        def load_history_retention_settings(self) -> HistoryRetentionSettings:
+            return HistoryRetentionSettings(
+                retention_mode="balanced",
+                auto_cleanup_enabled=True,
+                storage_budget_mb=1,
+                auto_snapshot_keep_latest=2,
+                prune_pre_restore_copies_after_days=0,
+            )
+
+    monkeypatch.setattr(report, "AudioWaveformCacheService", _FakeWaveformCacheService)
+    monkeypatch.setattr(report, "HistoryStorageCleanupService", _FakeCleanupService)
+    monkeypatch.setattr(report, "SettingsReadService", _FakeSettingsReadService)
+
+    history_issues = [
+        SimpleNamespace(
+            issue_type="missing_snapshot_artifact",
+            message="Snapshot artifact missing",
+            path=tmp_path / "snapshot.zip",
+            details="registered but absent",
+        ),
+        SimpleNamespace(
+            issue_type="missing_backup_file",
+            message="Backup file missing",
+            path=tmp_path / "backup.sqlite",
+            details="",
+        ),
+        SimpleNamespace(
+            issue_type="stale_current_head",
+            message="History head points to a removed entry",
+            path=None,
+            details="",
+        ),
+    ]
+    history_manager = SimpleNamespace(
+        inspect_recovery_state=lambda: history_issues,
+        list_snapshots=lambda limit=0: [object(), object()],
+        list_backups=lambda limit=0: [object()],
+    )
+    storage_service = SimpleNamespace(
+        layout=SimpleNamespace(
+            portable=False,
+            active_data_root=tmp_path / "legacy",
+            preferred_data_root=tmp_path / "preferred",
+        ),
+        inspect=lambda: SimpleNamespace(
+            legacy_root=tmp_path / "legacy",
+            legacy_items=["profiles", "history"],
+            preferred_items=["profiles"],
+            preferred_state=report.PREFERRED_STATE_CONFLICT,
+            conflict_items=["profiles/demo.sqlite"],
+        ),
+    )
+    app_storage_service = SimpleNamespace(
+        inspect=lambda **_kwargs: SimpleNamespace(summary=SimpleNamespace(total_app_bytes=1))
+    )
+    candidate = SimpleNamespace(
+        eligible=True,
+        field_name="Legacy ISWC",
+        custom_field_type="text",
+        default_field_type="text",
+        non_empty_value_count=3,
+        blank_target_count=2,
+        conflicting_track_ids=[],
+    )
+    app = SimpleNamespace(
+        conn=conn,
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        track_service=SimpleNamespace(resolve_media_path=lambda value: tmp_path / str(value)),
+        license_service=SimpleNamespace(resolve_path=lambda value: tmp_path / str(value)),
+        history_manager=history_manager,
+        database_maintenance=SimpleNamespace(
+            verify_integrity=lambda _path: "database disk image is malformed"
+        ),
+        storage_migration_service=storage_service,
+        _app_version_text=lambda: "test-version",
+        _history_snapshot_summary=lambda **kwargs: report._history_snapshot_summary(app, **kwargs),
+        _count_orphaned_custom_values=lambda **_kwargs: 4,
+        _legacy_promoted_field_repair_candidates=lambda **_kwargs: [candidate],
+        _application_storage_admin_service=lambda: app_storage_service,
+        _application_storage_summary_payload=lambda _audit, **_kwargs: {
+            "available": True,
+            "summary": "Application storage checked",
+        },
+        _human_size=lambda value: f"{int(value)} B",
+        _build_diagnostics_progress_plan=lambda **_kwargs: {
+            "overall_total_units": 24,
+            "managed_file_units": 3,
+            "application_storage_units": 2,
+            "history_units": 5,
+        },
+    )
+    progress_messages: list[str] = []
+
+    payload = report._build_diagnostics_report(
+        app,
+        current_db_path=tmp_path / "profile.sqlite",
+        status_callback=progress_messages.append,
+        progress_callback=lambda *_args: None,
+    )
+
+    checks = _checks_by_title(payload)
+    assert payload["environment"]["Restore points"].startswith("1 snapshot(s)")
+    assert checks["Storage layout"]["status"] == "error"
+    assert checks["Schema version"]["status"] == "warning"
+    assert checks["Schema layout"]["status"] == "error"
+    assert checks["SQLite integrity"]["status"] == "error"
+    assert checks["Foreign-key consistency"]["status"] == "error"
+    assert checks["Custom-value integrity"]["orphan_count"] == 4
+    assert checks["Audio waveform cache"]["issue_count"] == 2
+    assert checks["Legacy default-column custom fields"]["safe_candidate_count"] == 1
+    assert checks["Managed files"]["summary"] == "3 missing managed file(s) detected."
+    assert checks["History snapshots"]["orphan_count"] == 1
+    assert checks["Backup artifacts"]["orphan_count"] == 1
+    assert checks["History invariants"]["orphan_count"] == 1
+    assert checks["History storage budget"]["status"] == "warning"
+    assert payload["history_storage_budget"]["available"] is True
+    assert payload["history_storage_budget"]["within_budget"] is False
+    assert payload["application_storage"]["summary"] == "Application storage checked"
+    assert any(message.startswith("Inspecting storage layout") for message in progress_messages)
+    conn.close()
+
+
+def test_build_diagnostics_report_records_unavailable_service_errors(tmp_path: Path) -> None:
+    app = SimpleNamespace(
+        conn=None,
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        track_service=None,
+        license_service=None,
+        history_manager=None,
+        database_maintenance=None,
+        storage_migration_service=SimpleNamespace(
+            inspect=lambda: (_ for _ in ()).throw(RuntimeError("layout unavailable")),
+        ),
+        _app_version_text=lambda: "test-version",
+        _history_snapshot_summary=lambda **_kwargs: "History unavailable",
+        _count_orphaned_custom_values=lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("custom values unavailable")
+        ),
+        _legacy_promoted_field_repair_candidates=lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("legacy field inspection unavailable")
+        ),
+        _application_storage_admin_service=lambda: (_ for _ in ()).throw(
+            RuntimeError("app storage unavailable")
+        ),
+        _human_size=lambda value: f"{int(value)} B",
+        _build_diagnostics_progress_plan=lambda **_kwargs: {
+            "overall_total_units": 16,
+            "managed_file_units": 0,
+            "application_storage_units": 1,
+            "history_units": 5,
+        },
+    )
+    schema_service = SimpleNamespace(
+        get_db_version=lambda: (_ for _ in ()).throw(RuntimeError("schema unavailable"))
+    )
+
+    payload = report._build_diagnostics_report(
+        app,
+        schema_service=schema_service,
+        current_db_path="",
+        progress_callback=lambda *_args: None,
+    )
+
+    checks = _checks_by_title(payload)
+    assert checks["Storage layout"]["summary"] == "Storage layout could not be inspected."
+    assert checks["Schema version"]["summary"].startswith(f"Expected schema {report.SCHEMA_TARGET}")
+    assert checks["SQLite integrity"]["summary"] == "Integrity check failed to run."
+    assert checks["Audio waveform cache"]["summary"] == "Cached waveform validation failed to run."
+    assert checks["Custom-value integrity"]["summary"] == "Custom-value validation failed to run."
+    assert checks["Legacy default-column custom fields"]["summary"] == (
+        "Legacy custom/default overlap inspection failed."
+    )
+    assert checks["Managed files"]["status"] == "ok"
+    assert checks["History snapshots"]["status"] == "error"
+    assert payload["history_storage_budget"]["available"] is False
+    assert payload["application_storage"]["available"] is False

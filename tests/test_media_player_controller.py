@@ -359,6 +359,90 @@ def test_open_image_and_audio_preview_dialogs_use_root_dialogs_and_error_message
     app.logger.exception.assert_called_once()
 
 
+def test_media_player_default_track_and_track_payload_helpers_cover_fallbacks():
+    controller = SimpleNamespace(
+        selected_track_ids=mock.Mock(return_value=[4, 2]),
+        current_track_id=mock.Mock(return_value=3),
+        visible_track_ids=mock.Mock(return_value=[5, 6]),
+    )
+    app = SimpleNamespace(
+        _audio_preview_source_spec_for_standard_media=mock.Mock(return_value={"kind": "standard"}),
+        _audio_preview_navigation_track_ids=mock.Mock(return_value=[1, 2, 3]),
+        _catalog_table_controller=mock.Mock(return_value=controller),
+        _normalize_track_ids=lambda values: list(dict.fromkeys(int(value) for value in values)),
+        track_has_media=mock.Mock(return_value=True),
+        cf_has_blob=mock.Mock(
+            side_effect=lambda track_id, field_id: track_id == 8 and field_id == 9
+        ),
+    )
+
+    assert player_controller._media_player_default_track_id(app) == 2
+    app._audio_preview_navigation_track_ids.return_value = []
+    controller.current_track_id.return_value = None
+    app.track_has_media.side_effect = [RuntimeError("stale"), False, True]
+    assert player_controller._media_player_default_track_id(app) == 5
+
+    assert player_controller._audio_preview_track_has_source_payload(
+        app,
+        8,
+        {"kind": "custom", "field_id": 9},
+    )
+    assert not player_controller._audio_preview_track_has_source_payload(
+        app,
+        8,
+        {"kind": "custom", "field_id": "bad"},
+    )
+    assert player_controller._audio_preview_track_has_source_payload(app, 5, None)
+
+
+def test_open_audio_preview_for_track_handles_success_and_failure(monkeypatch):
+    fronts = []
+    messages = []
+
+    class FakeAudioDialog:
+        def __init__(self, app, parent=None):
+            self.opened = []
+
+        def open_track_preview(self, *args, **kwargs):
+            self.opened.append((args, kwargs))
+
+    class FailingAudioDialog(FakeAudioDialog):
+        def open_track_preview(self, *args, **kwargs):
+            raise RuntimeError("cannot open")
+
+    class FakeMessageBox:
+        @classmethod
+        def critical(cls, *args):
+            messages.append(args)
+
+    def fake_root_attr(name, fallback):
+        if name == "_AudioPreviewDialog":
+            return FakeAudioDialog
+        return fallback
+
+    app = SimpleNamespace(
+        audio_preview_dialog=None,
+        _bring_media_window_to_front=lambda dialog: fronts.append(dialog),
+        logger=mock.Mock(),
+    )
+    monkeypatch.setattr(player_controller, "_root_attr", fake_root_attr)
+    monkeypatch.setattr(player_controller, "_message_box", lambda: FakeMessageBox)
+
+    player_controller._open_audio_preview_for_track(app, 7, {"kind": "standard"}, autoplay=False)
+    assert app.audio_preview_dialog.opened == [((7, {"kind": "standard"}), {"autoplay": False})]
+    assert fronts == [app.audio_preview_dialog]
+
+    app.audio_preview_dialog = None
+    monkeypatch.setattr(
+        player_controller,
+        "_root_attr",
+        lambda name, fallback: FailingAudioDialog if name == "_AudioPreviewDialog" else fallback,
+    )
+    player_controller._open_audio_preview_for_track(app, 8, {"kind": "standard"})
+    assert "Could not open the audio player" in messages[-1][2]
+    app.logger.exception.assert_called_once()
+
+
 def test_bring_media_window_to_front_handles_window_state_and_activation():
     calls = []
     handle = SimpleNamespace(requestActivate=lambda: calls.append("requestActivate"))

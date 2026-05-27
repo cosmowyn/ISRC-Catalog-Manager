@@ -3,6 +3,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from isrc_manager.parties import PartyService
 from isrc_manager.services import (
@@ -372,6 +373,195 @@ class XMLImportServiceTests(unittest.TestCase):
             """
         ).fetchall()
         self.assertEqual(queued_rows, [("pending", "xml")])
+
+    def test_inspect_file_supports_full_schema_xml(self):
+        file_path = self._write_xml(
+            "full.xml",
+            """
+            <DeclarationOfSoundRecordingRightsClaimMessage>
+              <SoundRecording>
+                <isrc>NL-ABC-26-02000</isrc>
+                <track_title>Full Track</track_title>
+                <artist_name>Lead Artist</artist_name>
+                <additional_artists>Guest</additional_artists>
+                <album_title>Full Album</album_title>
+                <release_date>2026-05-20</release_date>
+                <iswc>T-123.456.789-0</iswc>
+                <upc>123456789012</upc>
+                <genre>Rock</genre>
+                <tracklength>00:04:00</tracklength>
+                <catalog_number>CAT-FULL</catalog_number>
+                <buma_work_number>BUMA-FULL</buma_work_number>
+                <CustomFields>
+                  <Field name="Mood" type="dropdown">
+                    <Value>Calm</Value>
+                  </Field>
+                </CustomFields>
+              </SoundRecording>
+            </DeclarationOfSoundRecordingRightsClaimMessage>
+            """,
+        )
+
+        inspection = self.service.inspect_file(file_path)
+
+        self.assertEqual(inspection.schema, "full")
+        self.assertEqual(len(inspection.records), 1)
+        record = inspection.records[0]
+        self.assertEqual(record.iso_isrc, "NL-ABC-26-02000")
+        self.assertEqual(record.comp_isrc, "NLABC2602000")
+        self.assertEqual(record.title, "Full Track")
+        self.assertEqual(record.artist, "Lead Artist")
+        self.assertEqual(record.additional_artists, "Guest")
+        self.assertEqual(record.catalog_number, "CAT-FULL")
+        self.assertEqual(record.track_length_sec, 240)
+        self.assertEqual(
+            record.custom_fields,
+            [{"name": "Mood", "type": "dropdown", "value": "Calm", "mime": None, "size": None}],
+        )
+
+    def test_parse_file_raises_when_root_is_unrecognized(self):
+        file_path = self._write_xml(
+            "unsupported-root.xml",
+            """
+            <UnknownFormat>
+              <SomethingElse>no import rows</SomethingElse>
+            </UnknownFormat>
+            """,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Unexpected XML root element: <UnknownFormat> or no importable records found\.",
+        ):
+            self.service.inspect_file(file_path)
+
+    def test_parse_file_raises_for_invalid_xml(self):
+        file_path = self._write_xml(
+            "invalid.xml",
+            "<ISRCExport><Tracks><Track></ISRCExport>",
+        )
+
+        with self.assertRaisesRegex(ValueError, r"Could not read XML:"):
+            self.service.inspect_file(file_path)
+
+    def test_exchange_headers_from_rows_prioritizes_supported_then_custom_then_other_fields(self):
+        rows = [
+            {
+                "isrc": "NL-ABC-26-03000",
+                "artist_name": "A",
+                "custom::Energy": "High",
+                "zeta": "tail",
+            },
+            {
+                "track_title": "Song",
+                "custom::Mood": "Calm",
+                "alpha": "first",
+            },
+        ]
+
+        headers = self.service._exchange_headers_from_rows(rows)
+
+        self.assertEqual(
+            headers,
+            [
+                "isrc",
+                "track_title",
+                "artist_name",
+                "custom::Energy",
+                "custom::Mood",
+                "zeta",
+                "alpha",
+            ],
+        )
+
+    def test_execute_import_raises_conflicts_and_queues_each_record(self):
+        file_path = self._write_xml(
+            "conflict-import.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-04000</ISRC>
+                  <Title>Conflict Song</Title>
+                  <MainArtist>Conflict Artist</MainArtist>
+                  <TrackLength>00:03:15</TrackLength>
+                  <CustomFields>
+                    <Field name="Mood" type="text">
+                      <Value>High</Value>
+                    </Field>
+                  </CustomFields>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Custom column type conflicts:"):
+            self.service.execute_import(file_path)
+
+        rows = self.conn.execute(
+            """
+            SELECT status, source_format, row_index, failure_category, failure_message
+            FROM TrackImportRepairQueue
+            ORDER BY id
+            """
+        ).fetchall()
+        self.assertEqual(
+            rows,
+            [
+                (
+                    "pending",
+                    "xml",
+                    1,
+                    "validation",
+                    "Custom column type conflicts: [('Mood', 'text', 'dropdown')]",
+                )
+            ],
+        )
+
+    def test_execute_import_continues_after_row_mutation_failure(self):
+        file_path = self._write_xml(
+            "mutate-failure.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-05001</ISRC>
+                  <Title>Good Track</Title>
+                  <MainArtist>First Artist</MainArtist>
+                  <TrackLength>00:03:15</TrackLength>
+                </Track>
+                <Track>
+                  <ISRC>NL-ABC-26-05002</ISRC>
+                  <Title>Broken Track</Title>
+                  <MainArtist>Second Artist</MainArtist>
+                  <TrackLength>00:04:00</TrackLength>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        create_governed_track = self.service.governed_tracks.create_governed_track
+
+        def create_or_fail(*args, **kwargs):
+            if self.service.governed_tracks.create_governed_track.call_count == 1:
+                return create_governed_track(*args, **kwargs)
+            raise RuntimeError("boom")
+
+        self.service.governed_tracks.create_governed_track = mock.Mock(side_effect=create_or_fail)
+
+        result = self.service.execute_import(file_path)
+
+        self.assertEqual(
+            (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
+            (1, 0, 0, 1),
+        )
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 2)
+        queue_rows = self.conn.execute(
+            "SELECT source_format, row_index, failure_category, failure_message FROM TrackImportRepairQueue"
+        ).fetchall()
+        self.assertEqual(queue_rows, [("xml", 2, "validation", "boom")])
 
 
 if __name__ == "__main__":

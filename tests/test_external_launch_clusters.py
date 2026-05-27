@@ -192,3 +192,70 @@ def test_patched_webbrowser_open_variants_record_and_respect_blocking(monkeypatc
     external_launch.set_external_launch_blocking(False)
     monkeypatch.setattr(external_launch, "_ORIGINAL_WEBBROWSER_OPEN", lambda *args, **kwargs: True)
     assert external_launch._patched_webbrowser_open("https://example.test") is True
+
+
+def test_external_launch_fallbacks_and_url_dialog_shims(monkeypatch, tmp_path):
+    external_launch.set_external_launch_blocking(True, blocked_return_value=True)
+    monkeypatch.delenv(external_launch.TEST_BLOCK_ENV_VAR, raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+    monkeypatch.setattr(external_launch.sys, "argv", [])
+
+    assert external_launch._looks_like_test_process([]) is False
+    assert external_launch._command_tokens("open 'unterminated", shell=True) == [
+        "open",
+        "'unterminated",
+    ]
+    assert external_launch._launch_target_from_command([], shell=False) == ""
+    assert (
+        external_launch._looks_like_external_launch_command(
+            ["osascript"],
+            shell=False,
+            input_payload=b'display dialog "Choose wisely"',
+        )
+        is True
+    )
+
+    assert external_launch._patched_qfiledialog_get_existing_directory_url("parent", "Folder")
+    open_url_result = external_launch._patched_qfiledialog_get_open_file_url(
+        "parent",
+        "Open URL",
+    )
+    assert isinstance(open_url_result, tuple)
+    assert external_launch._patched_qfiledialog_get_open_file_urls("parent", "Open URLs") == (
+        [],
+        "",
+    )
+    save_url_result = external_launch._patched_qfiledialog_get_save_file_url(
+        "parent",
+        "Save URL",
+    )
+    assert isinstance(save_url_result, tuple)
+    assert [launch.via for launch in external_launch.external_launch_history()[-4:]] == [
+        "QFileDialog.getExistingDirectoryUrl",
+        "QFileDialog.getOpenFileUrl",
+        "QFileDialog.getOpenFileUrls",
+        "QFileDialog.getSaveFileUrl",
+    ]
+
+    with external_launch.temporary_external_launch_blocking(False):
+        monkeypatch.setattr(external_launch, "_ORIGINAL_QDESKTOPSERVICES_OPENURL", None)
+        assert external_launch.open_external_url("https://example.test/fallback") is False
+
+        called = []
+        monkeypatch.setattr(
+            external_launch,
+            "_ORIGINAL_SUBPROCESS_RUN",
+            lambda *args, **kwargs: called.append((args, kwargs))
+            or subprocess.CompletedProcess(args[0], 7, stdout="ok", stderr=""),
+        )
+        result = external_launch.run_external_launcher_subprocess(
+            ["python", "-V"],
+            text=True,
+            source="unblocked-test",
+            metadata={"fixture": str(tmp_path)},
+        )
+        assert result.returncode == 7
+        assert called
+
+    assert external_launch.external_launch_history()[-1].source == "unblocked-test"

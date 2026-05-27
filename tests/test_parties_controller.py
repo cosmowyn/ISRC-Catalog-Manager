@@ -745,3 +745,127 @@ def test_export_party_exchange_file_cancel_resolve_and_format_worker_paths(monke
     party_controller.export_party_exchange_file(app, "xml", selected_only=False)
     with pytest.raises(ValueError, match="Unsupported Party exchange format"):
         submitted["task_fn"](bundle, ctx)
+
+
+def test_open_party_manager_requires_profile_and_routes_to_panel(monkeypatch) -> None:
+    message_box = mock.Mock()
+    monkeypatch.setattr(party_controller, "_message_box", lambda: message_box)
+
+    no_service = SimpleNamespace(party_service=None)
+    party_controller.open_party_manager(no_service)
+    message_box.warning.assert_called_once_with(
+        no_service,
+        "Party Manager",
+        "Open a profile first.",
+    )
+    message_box.reset_mock()
+
+    class _FakePanel:
+        def __init__(self) -> None:
+            self.focus_calls: list[int | None] = []
+
+        def focus_party(self, party_id: int | None) -> None:
+            self.focus_calls.append(int(party_id) if party_id is not None else None)
+
+    def _show_workspace_panel(_ensure_dock, panel_attr, legacy_attr, configure):
+        assert panel_attr == "party_manager_panel"
+        assert legacy_attr == "party_manager_dialog"
+        panel = _FakePanel()
+        configure(panel)
+        return panel
+
+    app = SimpleNamespace(
+        party_service=object(),
+        _ensure_party_manager_dock=lambda: object(),
+        _show_workspace_panel=_show_workspace_panel,
+    )
+    panel = party_controller.open_party_manager(app, 7)
+    assert isinstance(panel, _FakePanel)
+    assert panel.focus_calls == [7]
+
+
+def test_redirect_owner_registration_edit_to_party_manager(monkeypatch) -> None:
+    message_box = mock.Mock()
+    monkeypatch.setattr(party_controller, "_message_box", lambda: message_box)
+    owner_calls: list[int | None] = []
+
+    app = SimpleNamespace(
+        party_service=object(),
+        _current_owner_party_id=lambda: 11,
+        open_party_manager=lambda party_id=None: owner_calls.append(party_id),
+    )
+    party_controller._redirect_owner_registration_edit_to_party_manager(app, "Owner Name")
+    assert owner_calls == [11]
+    message_box.information.assert_called_once()
+    assert "Owner Name" in message_box.information.call_args.args[2]
+
+    app._current_owner_party_id = lambda: None
+    party_controller._redirect_owner_registration_edit_to_party_manager(app, "Owner Email")
+    assert owner_calls == [11, None]
+    assert len(message_box.information.call_args_list) == 2
+
+
+def test_owner_party_bootstrap_scheduler_and_loop_assigns_once(monkeypatch) -> None:
+    timer_calls: list[tuple[int, object]] = []
+    dialog_invocations: list[int] = []
+
+    class _FakeDialog:
+        def __init__(self, **_kwargs) -> None:
+            self.seq = _FakeDialog.seq
+            _FakeDialog.seq += 1
+
+        seq = 0
+
+        def exec(self):
+            if self.seq == 0:
+                return QDialog.Rejected
+            if self.seq == 1:
+                return QDialog.Accepted
+            return QDialog.Accepted
+
+        def selected_party_id(self):
+            return (None, None, 77)[self.seq]
+
+    class _FakeTimer:
+        def singleShot(self, ms, callback):
+            timer_calls.append((ms, callback))
+
+    assignments: list[int] = []
+    current_owner_id = [None]
+
+    def assign_owner_party(owner_party_id: int, record_history: bool = False) -> None:
+        assignments.append(int(owner_party_id))
+        current_owner_id[0] = int(owner_party_id)
+
+    app = SimpleNamespace(
+        party_service=object(),
+        _current_owner_party_id=lambda: current_owner_id[0],
+        _assign_owner_party=assign_owner_party,
+        _owner_party_bootstrap_scheduled=False,
+    )
+    app._owner_bootstrap_required = lambda: party_controller._owner_bootstrap_required(app)
+
+    def current_owner_record():
+        owner_id = current_owner_id[0]
+        return _party_record(owner_id) if owner_id is not None else None
+
+    app._current_owner_party_record = current_owner_record
+
+    monkeypatch.setattr(party_controller, "_timer", lambda: _FakeTimer())
+    monkeypatch.setattr(party_controller, "_owner_bootstrap_dialog_class", lambda: _FakeDialog)
+
+    party_controller._schedule_owner_party_bootstrap(app)
+    party_controller._schedule_owner_party_bootstrap(app)
+    assert app._owner_party_bootstrap_scheduled is True
+    assert len(timer_calls) == 1
+
+    dialog_invocations.clear()
+    _FakeDialog.seq = 0
+    app._owner_party_bootstrap_scheduled = False
+    _FakeDialog.seq = 0
+    party_controller._ensure_owner_party_bootstrap(app)
+    assert assignments == [77]
+
+    app._owner_party_bootstrap_scheduled = False
+    party_controller._ensure_owner_party_bootstrap(app)
+    assert assignments == [77]

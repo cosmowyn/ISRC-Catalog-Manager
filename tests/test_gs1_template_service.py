@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from isrc_manager.services import GS1TemplateVerificationError, GS1TemplateVerificationService
@@ -149,6 +149,15 @@ class GS1TemplateVerificationServiceTests(unittest.TestCase):
         with self.assertRaises(GS1TemplateVerificationError):
             self.service.verify(workbook_path)
 
+    def test_verify_rejects_missing_and_unsupported_paths_before_loading_workbook(self):
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "was not found"):
+            self.service.verify(self.root / "missing.xlsx")
+
+        unsupported = self.root / "template.csv"
+        unsupported.write_text("not an excel workbook", encoding="utf-8")
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "supported Excel workbook"):
+            self.service.verify(unsupported)
+
     def test_verify_rejects_workbook_with_missing_required_headers(self):
         workbook_path = self.root / "missing_headers.xlsx"
         workbook = Workbook()
@@ -171,6 +180,96 @@ class GS1TemplateVerificationServiceTests(unittest.TestCase):
 
         with self.assertRaises(GS1TemplateVerificationError):
             self.service.verify(workbook_path)
+
+    def test_helper_scoring_formula_resolution_and_column_value_fallbacks(self):
+        loaded = Workbook()
+        loaded.remove(loaded.active)
+        ref = loaded.create_sheet("Reference Data")
+        ref["A1"] = "One"
+        ref["A2"] = "Two"
+        sheet = loaded.create_sheet("Product Upload")
+        sheet.append(HEADERS)
+        sheet["I2"] = "Brand A"
+        sheet["I3"] = "Brand B"
+
+        self.assertEqual(self.service._sheet_name_priority("Instructions"), -2.0)
+        self.assertEqual(self.service._sheet_name_priority("{ContractNr}"), -1.0)
+        self.assertGreater(self.service._sheet_name_priority("Product Upload"), 0)
+        self.assertEqual(self.service._field_name_for_sqref("$I$2:$I$200", {9: "brand"}), "brand")
+        self.assertEqual(self.service._field_name_for_sqref("not-a-cell", {9: "brand"}), "")
+        self.assertEqual(
+            self.service._resolve_validation_formula_values(loaded, '"A, B, A"'),
+            ["A", "B"],
+        )
+        self.assertEqual(
+            self.service._resolve_validation_formula_values(
+                loaded,
+                "'Reference Data'!$A$1:$A$2",
+            ),
+            ["One", "Two"],
+        )
+        self.assertEqual(
+            self.service._resolve_validation_formula_values(loaded, "MissingName"),
+            [],
+        )
+        self.assertEqual(
+            self.service._read_cell_range_values(loaded, "Missing", "$A$1:$A$2"),
+            [],
+        )
+        self.assertEqual(
+            self.service._read_cell_range_values(loaded, "Reference Data", "not-a-range"),
+            [],
+        )
+        self.assertEqual(
+            self.service._collect_existing_column_values(sheet, 9, start_row=2),
+            ["Brand A", "Brand B"],
+        )
+        self.assertEqual(
+            self.service._dedupe_preserve_order([" One ", "", "Two", "One"]),
+            ["One", "Two"],
+        )
+
+    def test_xml_validation_helpers_extract_sheet_options(self):
+        workbook_path = self.root / "validation-options.xlsx"
+        build_verified_workbook(workbook_path)
+        workbook = load_workbook(
+            workbook_path,
+            read_only=True,
+            data_only=False,
+        )
+        self.addCleanup(workbook.close)
+
+        worksheet_xml_path = self.service._resolve_sheet_xml_path(workbook_path, "10070050")
+        entries = self.service._read_validation_entries(workbook_path, worksheet_xml_path)
+        options = self.service._validation_options_from_sheet_xml(
+            workbook_path,
+            workbook,
+            {
+                "status": 2,
+                "product_classification": 3,
+                "consumer_unit_flag": 4,
+                "packaging_type": 5,
+                "target_market": 6,
+                "language": 8,
+                "unit": 12,
+            },
+            "10070050",
+        )
+
+        self.assertTrue(worksheet_xml_path.endswith(".xml"))
+        self.assertTrue(any("B2:B200" in sqref for sqref, _formula in entries))
+        self.assertEqual(options["status"], ["Concept", "Active"])
+        self.assertEqual(options["packaging_type"], ["Ampul", "Bag-In-Box"])
+        self.assertEqual(
+            self.service._validation_options_from_sheet_xml(
+                workbook_path / "missing",
+                workbook,
+                {"status": 2},
+                "10070050",
+            ),
+            {},
+        )
+        self.assertEqual(self.service._resolve_sheet_xml_path(workbook_path, "Missing"), "")
 
 
 if __name__ == "__main__":

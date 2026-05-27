@@ -2,6 +2,8 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from isrc_manager.services import (
     CatalogAdminService,
@@ -174,6 +176,113 @@ class LegacyLicenseMigrationServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(self.license_service.fetch_license(legacy_record_id))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
+
+    def test_migrate_all_noops_when_legacy_archive_is_empty(self):
+        result = self.migration_service.migrate_all()
+
+        self.assertEqual(result.migrated_license_count, 0)
+        self.assertEqual(result.migrated_licensee_count, 0)
+        self.assertEqual(result.contract_ids, [])
+
+    def test_inspect_reports_missing_track_and_unmanaged_file_with_minimal_tables(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(
+            """
+            CREATE TABLE Tracks(id INTEGER PRIMARY KEY, track_title TEXT);
+            CREATE TABLE Licensees(id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE Licenses(
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER,
+                licensee_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                uploaded_at TEXT
+            );
+            INSERT INTO Licensees(id, name) VALUES (1, 'Missing Track'), (2, 'External');
+            INSERT INTO Licenses(id, track_id, licensee_id, file_path, filename, uploaded_at)
+            VALUES
+                (10, NULL, 1, 'missing.pdf', 'missing.pdf', '2026-04-01T12:34:00'),
+                (11, 99, 2, 'external.pdf', 'external.pdf', 'short');
+            """
+        )
+        external_pdf = self.data_root / "outside.pdf"
+        external_pdf.write_bytes(b"external")
+        license_service = SimpleNamespace(
+            resolve_path=mock.Mock(
+                side_effect=lambda stored_path: (
+                    external_pdf if stored_path == "external.pdf" else self.data_root / stored_path
+                )
+            ),
+            is_managed_license_path=mock.Mock(return_value=False),
+        )
+        service = LegacyLicenseMigrationService(
+            conn,
+            license_service=license_service,
+            party_service=mock.Mock(),
+            contract_service=mock.Mock(),
+        )
+
+        summary = service.inspect()
+
+        self.assertFalse(summary.ready)
+        self.assertEqual(summary.legacy_license_count, 2)
+        self.assertEqual(summary.missing_track_count, 1)
+        self.assertEqual(summary.missing_file_count, 1)
+        self.assertEqual(summary.unmanaged_file_count, 1)
+        self.assertEqual(
+            {issue.code for issue in summary.issues},
+            {"missing_track", "missing_file", "unmanaged_file"},
+        )
+        conn.close()
+
+    def test_helper_cleanup_and_restore_paths_are_idempotent(self):
+        legacy_path = self.data_root / "licenses" / "restored.pdf"
+        migrated_doc = self.data_root / "contract_documents" / "migrated.pdf"
+        migrated_doc.parent.mkdir(parents=True, exist_ok=True)
+        migrated_doc.write_bytes(b"restored bytes")
+        cleanup_doc = self.data_root / "contract_documents" / "cleanup.pdf"
+        cleanup_doc.write_bytes(b"cleanup bytes")
+
+        contract_service = mock.Mock()
+        contract_service.resolve_document_path.side_effect = lambda stored_path: {
+            "cleanup.pdf": cleanup_doc,
+            "migrated.pdf": migrated_doc,
+            "missing.pdf": self.data_root / "contract_documents" / "missing.pdf",
+            "none": None,
+            "bad-unlink": mock.Mock(unlink=mock.Mock(side_effect=OSError("locked"))),
+        }.get(stored_path)
+        license_service = mock.Mock(
+            resolve_path=mock.Mock(
+                side_effect=lambda stored_path: {
+                    "restored.pdf": legacy_path,
+                    "already.pdf": migrated_doc,
+                }[stored_path]
+            )
+        )
+        service = LegacyLicenseMigrationService(
+            self.conn,
+            license_service=license_service,
+            party_service=self.party_service,
+            contract_service=contract_service,
+        )
+
+        self.assertEqual(service._legacy_received_date("2026-04-05T10:11:12"), "2026-04-05")
+        self.assertIsNone(service._legacy_received_date("short"))
+        self.assertEqual(service._work_ids_for_track(None), [])
+        self.assertEqual(service._release_ids_for_track(None), [])
+
+        service._cleanup_new_documents(["cleanup.pdf", "cleanup.pdf", "", "none", "bad-unlink"])
+        self.assertFalse(cleanup_doc.exists())
+
+        service._restore_legacy_files(
+            [
+                ("restored.pdf", "migrated.pdf"),
+                ("already.pdf", "migrated.pdf"),
+                ("restored.pdf", "missing.pdf"),
+                ("restored.pdf", "none"),
+            ]
+        )
+        self.assertEqual(legacy_path.read_bytes(), b"restored bytes")
 
 
 if __name__ == "__main__":

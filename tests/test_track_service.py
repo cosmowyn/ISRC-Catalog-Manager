@@ -14,6 +14,7 @@ from isrc_manager.media import waveform_cache
 from isrc_manager.media.waveform_cache import AudioWaveformCacheService
 from isrc_manager.media.waveform_cache_worker import AudioWaveformCacheWorker
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
+from isrc_manager.services.tracks import TrackMediaSourceHandle
 
 
 def make_track_conn(path: str | Path | None = None):
@@ -1881,6 +1882,167 @@ class TrackServiceTests(unittest.TestCase):
         self.assertIsNone(
             self.conn.execute("SELECT 1 FROM TrackArtists WHERE track_id=?", (track_id,)).fetchone()
         )
+
+    def test_media_source_hash_materializes_bytes_and_reports_missing_source(self):
+        media = TrackMediaSourceHandle(
+            track_id=1,
+            media_key="audio_file",
+            filename="inline.wav",
+            suffix=".wav",
+            mime_type="audio/wav",
+            size_bytes=4,
+            storage_mode=STORAGE_MODE_DATABASE,
+            source_path=None,
+            source_bytes=b"RIFF",
+            owner_scope="track",
+            owner_id=1,
+        )
+
+        self.assertEqual(media.sha256_hex(), hashlib.sha256(b"RIFF").hexdigest())
+        with media.materialize_path() as temp_path:
+            self.assertTrue(temp_path.exists())
+            self.assertEqual(temp_path.read_bytes(), b"RIFF")
+            materialized_path = temp_path
+        self.assertFalse(materialized_path.exists())
+
+        missing = TrackMediaSourceHandle(
+            track_id=1,
+            media_key="album_art",
+            filename="missing.png",
+            suffix=".png",
+            mime_type="image/png",
+            size_bytes=0,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            source_path=self.data_root / "missing.png",
+            source_bytes=None,
+            owner_scope="track",
+            owner_id=1,
+        )
+        with self.assertRaises(FileNotFoundError):
+            missing.sha256_hex()
+
+    def test_track_lookup_and_relationship_helpers_handle_blank_missing_and_bad_rows(self):
+        self.assertIsNone(self.service.get_or_create_album(""))
+        self.assertFalse(self.service.album_exists(""))
+        self.assertFalse(self.service.artist_exists(""))
+        self.assertEqual(self.service._artist_display_name(None), "")
+        self.assertEqual(self.service._artist_display_name(999), "")
+        self.assertEqual(
+            self.service._current_track_governance(999, cursor=self.conn.cursor()),
+            (None, None, "original"),
+        )
+        self.assertEqual(
+            self.service._normalize_relationship_type("Alternate Master"), "alternate_master"
+        )
+        self.assertEqual(self.service._normalize_relationship_type("nonsense"), "original")
+
+        track_id = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90100",
+                track_title="Additional Artist Guard",
+            )
+        )
+        original_get_or_create = self.service.get_or_create_artist
+
+        def get_or_create_artist(name, *, cursor=None):
+            if name == "Broken Guest":
+                raise ValueError("bad guest")
+            return original_get_or_create(name, cursor=cursor)
+
+        with mock.patch.object(self.service, "get_or_create_artist", get_or_create_artist):
+            self.service.replace_additional_artists(
+                track_id,
+                ["Valid Guest", "Broken Guest"],
+            )
+
+        rows = self.conn.execute(
+            """
+            SELECT a.name
+            FROM TrackArtists ta
+            JOIN Artists a ON a.id = ta.artist_id
+            WHERE ta.track_id=? AND ta.role='additional'
+            """,
+            (track_id,),
+        ).fetchall()
+        self.assertEqual(rows, [("Valid Guest",)])
+
+    def test_album_group_snapshots_sort_and_conflict_helpers_filter_invalid_values(self):
+        track_a = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90200",
+                track_title="Track Three",
+                album_title="Numbered Album",
+                track_number=3,
+            )
+        )
+        track_b = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90201",
+                track_title="Track One",
+                album_title="Numbered Album",
+                track_number=1,
+            )
+        )
+        track_c = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90202",
+                track_title="Track Blank",
+                album_title="Numbered Album",
+                track_number=None,
+            )
+        )
+
+        snapshots = self.service.list_album_group_snapshots(track_a)
+        self.assertEqual([snapshot.track_id for snapshot in snapshots], [track_b, track_a, track_c])
+
+        self.assertEqual(self.service.list_album_track_number_conflicts("", 1), [])
+        self.assertEqual(self.service.list_album_track_number_conflicts("Single", 1), [])
+        self.assertEqual(self.service.list_album_track_number_conflicts("Numbered Album", None), [])
+        conflicts = self.service.list_album_track_number_conflicts(
+            "Numbered Album",
+            1,
+            exclude_track_ids=["bad", 0, track_a],
+        )
+        self.assertEqual(conflicts, [(track_b, "Track One")])
+
+    def test_convert_media_storage_mode_handles_missing_and_same_mode_without_mutation(self):
+        track_id = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-90300",
+                track_title="Mode Noop",
+            )
+        )
+        with self.assertRaises(FileNotFoundError):
+            self.service.convert_media_storage_mode(track_id, "audio_file", STORAGE_MODE_DATABASE)
+
+        audio_path = self._create_media_file("mode-noop.wav", b"RIFFnoop")
+        self.service.set_media_path(
+            track_id,
+            "audio_file",
+            audio_path,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        before = self.service.get_media_meta(track_id, "audio_file")
+        after = self.service.convert_media_storage_mode(
+            track_id,
+            "audio_file",
+            STORAGE_MODE_DATABASE,
+        )
+        self.assertEqual(after, before)
+
+    def test_track_service_early_schema_guards_are_noops_on_minimal_database(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = TrackService(conn)
+            self.assertEqual(service._track_columns(), set())
+            self.assertIsNone(service._track_artist_columns())
+            self.assertFalse(service._creation_requires_governed_work())
+            self.assertEqual(
+                service._current_track_governance(1, cursor=conn.cursor()), (None, None, "original")
+            )
+            service.replace_additional_artists(1, ["Ignored"])
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

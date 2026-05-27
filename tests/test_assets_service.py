@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -337,4 +338,330 @@ def test_ensure_storage_columns_adds_missing_columns(tmp_path: Path) -> None:
     cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(AssetVersions)").fetchall()}
     assert "storage_mode" in cols
     assert "file_blob" in cols
+    conn.close()
+
+
+def test_asset_failure_and_noop_edges(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    empty_conn = sqlite3.connect(":memory:")
+    try:
+        assert (
+            AssetService(empty_conn).sync_track_audio_attachment(
+                track_id=1,
+                source_path=tmp_path / "missing.wav",
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+            )
+            is None
+        )
+    finally:
+        empty_conn.close()
+
+    with pytest.raises(ValueError, match="either a track or a release"):
+        service.create_asset(AssetVersionPayload(asset_type="other", filename="loose.txt"))
+
+    source = tmp_path / "asset.bin"
+    source.write_bytes(b"asset-bytes")
+    unconfigured = AssetService(conn, data_root=None)
+    with pytest.raises(ValueError, match="not configured"):
+        unconfigured._build_asset_payload(
+            data=b"payload",
+            filename="payload.bin",
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+        )
+
+    with pytest.raises(FileNotFoundError):
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="other",
+                filename="missing.bin",
+                stored_path="asset_registry/files/missing.bin",
+                storage_mode=STORAGE_MODE_DATABASE,
+                track_id=1,
+            )
+        )
+
+    conn.execute(
+        """
+        INSERT INTO AssetVersions(asset_type, filename, storage_mode, file_blob, track_id)
+        VALUES ('other', 'missing.bin', 'database', NULL, 1)
+        """
+    )
+    missing_blob_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    with pytest.raises(FileNotFoundError, match="no database blob"):
+        service.fetch_asset_bytes(missing_blob_id)
+
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_DATABASE,
+            track_id=2,
+        )
+    )
+    before = service.fetch_asset(asset_id)
+    assert before is not None
+    assert service.convert_asset_storage_mode(asset_id, STORAGE_MODE_DATABASE) == before
+    with pytest.raises(ValueError, match="Asset not found"):
+        service.convert_asset_storage_mode(999, STORAGE_MODE_DATABASE)
+
+    conn.close()
+
+
+def test_delete_unreferenced_asset_file_paths(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    referenced = service.asset_store.write_bytes(
+        b"referenced",
+        filename="keep.bin",
+        subdir="files",
+    )
+    orphaned = service.asset_store.write_bytes(
+        b"orphaned",
+        filename="remove.bin",
+        subdir="files",
+    )
+
+    referenced_path = service.resolve_asset_path(referenced)
+    orphaned_path = service.resolve_asset_path(orphaned)
+    assert referenced_path is not None and orphaned_path is not None
+
+    service.conn.execute(
+        """
+        INSERT INTO AssetVersions (
+            asset_type,
+            filename,
+            stored_path,
+            storage_mode,
+            track_id,
+            approved_for_use,
+            primary_flag,
+            version_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "other",
+            "keep.bin",
+            referenced,
+            STORAGE_MODE_MANAGED_FILE,
+            11,
+            0,
+            0,
+            "approved",
+        ),
+    )
+
+    with conn:
+        service._delete_unreferenced_asset_file(None, cursor=conn.cursor())
+        service._delete_unreferenced_asset_file(str(Path("/tmp/outside.bin")), cursor=conn.cursor())
+        service._delete_unreferenced_asset_file(
+            referenced,
+            cursor=conn.cursor(),
+        )
+    assert referenced_path.exists()
+
+    service._delete_unreferenced_asset_file(orphaned, cursor=conn.cursor())
+    assert not orphaned_path.exists()
+
+    conn.close()
+
+
+def test_extract_media_metadata_defaults_when_mutagen_fails(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    source = tmp_path / "corrupt.bin"
+    source.write_bytes(b"not-audio")
+
+    with mock.patch("isrc_manager.assets.service.MutagenFile", side_effect=RuntimeError("boom")):
+        metadata = service._extract_media_metadata(source)
+
+    assert metadata == {
+        "duration_sec": None,
+        "sample_rate": None,
+        "bit_depth": None,
+    }
+
+    conn.close()
+
+
+def test_managed_asset_bytes_missing_source_raises(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        service._managed_asset_bytes(tmp_path / "never-exists.bin")
+
+    conn.close()
+
+
+def test_build_asset_payload_without_source_uses_managed_file_mode_and_defaults(
+    tmp_path: Path,
+) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    stored_path, filename, data, mime_type, source_hint, duration, sample_rate, bit_depth = (
+        service._build_asset_payload(data=b"inline-bytes")
+    )
+
+    assert stored_path is not None
+    assert filename == "asset"
+    assert data is None
+    assert source_hint == stored_path
+    assert mime_type == ""
+    assert duration is None
+    assert sample_rate is None
+    assert bit_depth is None
+
+    conn.close()
+
+
+def test_create_asset_legacy_stored_path_database_mode(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    legacy_source_path = service.asset_store.write_bytes(
+        b"legacy bytes",
+        filename="legacy.bin",
+        subdir="files",
+    )
+    legacy_full_path = service.resolve_asset_path(legacy_source_path)
+    assert legacy_full_path is not None
+
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            filename="legacy.bin",
+            stored_path=legacy_source_path,
+            storage_mode=STORAGE_MODE_DATABASE,
+            track_id=61,
+        )
+    )
+
+    asset = service.fetch_asset(asset_id)
+    assert asset is not None
+    assert asset.storage_mode == STORAGE_MODE_DATABASE
+    assert asset.stored_path == legacy_source_path
+    blob_bytes, _ = service.fetch_asset_bytes(asset_id)
+    assert blob_bytes == b"legacy bytes"
+    assert legacy_full_path.exists()
+
+    conn.close()
+
+
+def test_update_asset_mode_conversions_no_source_payload(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    source = tmp_path / "managed.wav"
+    source.write_bytes(b"managed-content")
+    service._extract_media_metadata = lambda _path: {
+        "duration_sec": None,
+        "sample_rate": None,
+        "bit_depth": None,
+    }
+
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=71,
+        )
+    )
+    service.update_asset(
+        asset_id,
+        AssetVersionPayload(
+            asset_type="other",
+            filename="managed.wav",
+            storage_mode=STORAGE_MODE_DATABASE,
+            track_id=71,
+        ),
+    )
+    updated = service.fetch_asset(asset_id)
+    assert updated is not None
+    assert updated.storage_mode == STORAGE_MODE_DATABASE
+
+    asset_id2 = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_DATABASE,
+            track_id=72,
+        )
+    )
+    service.update_asset(
+        asset_id2,
+        AssetVersionPayload(
+            asset_type="other",
+            filename="restored.bin",
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=72,
+        ),
+    )
+    updated2 = service.fetch_asset(asset_id2)
+    assert updated2 is not None
+    assert updated2.storage_mode == STORAGE_MODE_MANAGED_FILE
+    assert updated2.stored_path is not None
+    restored_file = service.resolve_asset_path(updated2.stored_path)
+    assert restored_file is not None
+    assert restored_file.exists()
+    assert updated2.id == asset_id2
+
+    conn.close()
+
+
+def test_update_asset_raises_when_database_mode_missing_source_blob(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"database-bytes")
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_DATABASE,
+            track_id=73,
+        )
+    )
+    missing_path = tmp_path / "missing-db-source.bin"
+    assert not missing_path.exists()
+    service.conn.execute(
+        """
+        UPDATE AssetVersions
+        SET file_blob=NULL,
+            storage_mode=?,
+            stored_path=?
+        WHERE id=?
+        """,
+        (
+            STORAGE_MODE_DATABASE,
+            str(missing_path),
+            asset_id,
+        ),
+    )
+    conn.commit()
+
+    with pytest.raises(FileNotFoundError):
+        service.update_asset(
+            asset_id,
+            AssetVersionPayload(
+                asset_type="other",
+                filename="other.bin",
+                storage_mode=STORAGE_MODE_DATABASE,
+                track_id=73,
+            ),
+        )
+
     conn.close()

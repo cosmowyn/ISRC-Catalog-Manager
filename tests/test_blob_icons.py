@@ -13,13 +13,18 @@ try:
         BlobIconEditorWidget,
         BlobIconSettingsService,
         blob_icon_spec_from_storage,
+        blob_icon_spec_to_storage,
         compress_blob_icon_image,
+        decode_blob_icon_image,
         default_blob_icon_settings,
         default_system_icon_name,
+        describe_blob_icon_spec,
         emoji_blob_icon_presets,
+        encode_qimage_to_png_bytes,
         finalize_blob_icon_spec,
         icon_from_blob_icon_spec,
         normalize_blob_icon_settings,
+        normalize_blob_icon_spec,
         recommended_emoji_blob_icon_presets,
         system_blob_icon_choices,
     )
@@ -181,6 +186,61 @@ class BlobIconTests(unittest.TestCase):
             )
         finally:
             editor.close()
+
+    def test_blob_icon_serialization_descriptions_and_image_decoding_edges(self):
+        self.assertEqual(default_system_icon_name("unknown-kind"), "SP_FileIcon")
+        self.assertEqual(
+            normalize_blob_icon_spec(
+                {"mode": "system", "system_name": "MissingIcon"},
+                kind="unknown-kind",
+            ),
+            {"mode": "system", "system_name": "SP_FileIcon"},
+        )
+        self.assertIsNone(
+            blob_icon_spec_to_storage(
+                {"mode": "inherit"},
+                kind="image",
+                allow_inherit=True,
+            )
+        )
+
+        normalized_image = normalize_blob_icon_spec(
+            {
+                "mode": "image",
+                "image_png_base64": "not-png",
+                "image_label": " Cover ",
+                "image_width": "wide",
+                "image_height": "12",
+            },
+            kind="image",
+        )
+        self.assertEqual(normalized_image["image_label"], "Cover")
+        self.assertNotIn("image_width", normalized_image)
+        self.assertEqual(normalized_image["image_height"], 12)
+        self.assertEqual(
+            describe_blob_icon_spec(normalized_image, kind="image"),
+            "Custom image · Cover",
+        )
+        self.assertTrue(decode_blob_icon_image(normalized_image).isNull())
+
+        image = QImage(8, 6, QImage.Format_ARGB32)
+        image.fill(0xFF112233)
+        encoded = encode_qimage_to_png_bytes(image)
+        decoded = decode_blob_icon_image(
+            {
+                "mode": "image",
+                "image_png_base64": base64.b64encode(encoded).decode("ascii"),
+            }
+        )
+        self.assertFalse(decoded.isNull())
+        self.assertEqual((decoded.width(), decoded.height()), (8, 6))
+
+        inherit_description = describe_blob_icon_spec(
+            {"mode": "inherit"},
+            kind="audio_managed",
+            allow_inherit=True,
+        )
+        self.assertEqual(inherit_description, "Uses global audio managed icon")
 
 
 if __name__ == "__main__":

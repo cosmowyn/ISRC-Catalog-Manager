@@ -7,6 +7,7 @@ from PySide6.QtCore import QSettings
 
 from isrc_manager.history import (
     HistoryCleanupBlockedError,
+    HistoryCleanupItem,
     HistoryManager,
     HistoryStorageCleanupService,
     SessionHistoryManager,
@@ -414,6 +415,83 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         self.assertGreater(projection.projected_over_budget_bytes, 0)
         self.assertTrue(projection.blocked_by_protected_items)
         self.assertEqual(len(projection.candidate_items), 0)
+
+    def test_cleanup_private_helpers_handle_invalid_dates_paths_and_unknown_items(self):
+        root = self.history_root / "helper-root"
+        bundle = root / "snapshot.assets"
+        child = bundle / "artifact.bin"
+        child.parent.mkdir(parents=True, exist_ok=True)
+        child.write_bytes(b"payload")
+
+        self.assertIsNone(HistoryStorageCleanupService._parse_created_at(""))
+        self.assertIsNone(HistoryStorageCleanupService._parse_created_at("not-a-date"))
+        self.assertIsNotNone(HistoryStorageCleanupService._parse_created_at("2026-05-27T12:00:00"))
+        self.assertEqual(HistoryStorageCleanupService._path_size(root / "missing"), 0)
+        self.assertEqual(HistoryStorageCleanupService._allocated_path_size(root / "missing"), 0)
+        self.assertEqual(HistoryStorageCleanupService._path_created_at(root / "missing"), "")
+
+        paths = self.cleanup._paths_under_root(
+            {
+                "nested": [str(child), "relative/path", str(self.root / "outside.bin")],
+                "empty": "",
+            },
+            root,
+        )
+        self.assertEqual(paths, {child.resolve()})
+        self.assertTrue(self.cleanup._path_is_referenced(bundle, {child.resolve()}))
+
+        old_pre_restore_item = HistoryCleanupItem(
+            item_key="backup_record:42",
+            item_type="backup_record",
+            label="Old safety copy",
+            created_at="2020-01-01 00:00:00",
+            path=str(self.backups_root / "old.db"),
+            bytes_on_disk=0,
+            reason="old",
+            eligible=True,
+            kind="pre_restore_safety_copy",
+            record_id=42,
+        )
+        self.assertTrue(
+            self.cleanup._is_prunable_pre_restore_backup(
+                old_pre_restore_item,
+                max_age_days=1,
+            )
+        )
+        self.assertFalse(
+            self.cleanup._is_prunable_pre_restore_backup(
+                HistoryCleanupItem(
+                    item_key="backup_record:43",
+                    item_type="backup_record",
+                    label="Manual backup",
+                    created_at="not-a-date",
+                    path=str(self.backups_root / "manual.db"),
+                    bytes_on_disk=0,
+                    reason="manual",
+                    eligible=True,
+                    kind="manual",
+                    record_id=43,
+                ),
+                max_age_days=1,
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "not eligible"):
+            self.cleanup.cleanup_selected(["missing-key"])
+        with self.assertRaisesRegex(ValueError, "Unknown cleanup item type"):
+            self.cleanup._remove_item(
+                HistoryCleanupItem(
+                    item_key="unknown:1",
+                    item_type="unknown",
+                    label="Unknown",
+                    created_at="",
+                    path=str(self.root / "unknown"),
+                    bytes_on_disk=0,
+                    reason="unknown",
+                    eligible=True,
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "Backup 999"):
+            self.cleanup._delete_backup_record(999)
 
 
 if __name__ == "__main__":

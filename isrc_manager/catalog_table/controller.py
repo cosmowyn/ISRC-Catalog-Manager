@@ -298,14 +298,14 @@ class CatalogTableController(QObject):
                 except (TypeError, ValueError):
                     column_field_id = None
                 if column_field_id is not None:
-                    field = next(
-                        (
-                            candidate
-                            for candidate in custom_fields
-                            if int(candidate.get("id") or 0) == column_field_id
-                        ),
-                        None,
-                    )
+                    for candidate in custom_fields:
+                        try:
+                            candidate_id = int(candidate.get("id") or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if candidate_id == column_field_id:
+                            field = candidate
+                            break
             if field is None and 0 <= field_index < len(custom_fields):
                 field = custom_fields[field_index]
         field_id = None

@@ -631,6 +631,225 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist Duo"), primary_id)
         self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist"), primary_id)
 
+    def test_party_internal_alias_and_email_helpers(self):
+        self.assertEqual(
+            self.party_service._normalized_artist_alias_rows(
+                [
+                    "Signal Alpha",
+                    "signal alpha",
+                    "Signal  Alpha",
+                    "",
+                    "Signal Beta",
+                    " signal beta ",
+                ]
+            ),
+            [("Signal Alpha", "signal alpha"), ("Signal Beta", "signal beta")],
+        )
+
+        party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Signal Shared Contact",
+                display_name="Signal Shared Contact",
+                email="contact@signal.test",
+                alternative_email="backup@signal.test",
+                party_type="organization",
+            )
+        )
+
+        cursor = self.conn.cursor()
+        self.assertEqual(
+            self.party_service._validate_cross_email_uniqueness(
+                cursor,
+                "CONTACT@SIGNAL.TEST",
+                party_id=None,
+                label="Email Address",
+            ),
+            "Another party already uses this email address.",
+        )
+        self.assertEqual(
+            self.party_service._validate_cross_email_uniqueness(
+                cursor,
+                "backup@signal.test",
+                party_id=None,
+                label="Alternative Email Address",
+            ),
+            "Another party already uses this alternative email address.",
+        )
+        self.assertIsNone(
+            self.party_service._validate_cross_email_uniqueness(
+                cursor,
+                "contact@signal.test",
+                party_id=int(party_id),
+                label="Email Address",
+            )
+        )
+        self.assertIsNone(
+            self.party_service._validate_cross_email_uniqueness(
+                cursor,
+                "backup@signal.test",
+                party_id=int(party_id),
+                label="Alternative Email Address",
+            )
+        )
+
+    def test_party_find_artist_by_name_includes_track_usage_fallback(self):
+        org_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Fallback Artist Name",
+                display_name="Fallback Artist Name",
+                party_type="organization",
+            )
+        )
+        track_id = self._create_track("NL-ABC-26-00025", "Fallback Track")
+        self.conn.execute(
+            "UPDATE Tracks SET main_artist_party_id=? WHERE id=?",
+            (int(org_party_id), int(track_id)),
+        )
+
+        artist_track_party = self.party_service.find_artist_party_id_by_name("Fallback Artist Name")
+        self.assertEqual(artist_track_party, int(org_party_id))
+
+        non_artist_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Unused Artist Name",
+                display_name="Unused Artist Name",
+                party_type="organization",
+            )
+        )
+        self.assertIsNone(self.party_service.find_artist_party_id_by_name("Unused Artist Name"))
+        self.assertEqual(
+            self.party_service.fetch_party(int(non_artist_id)).party_type, "organization"
+        )
+
+    def test_party_list_artist_parties_falls_back_without_track_tables(self):
+        fallback_conn = sqlite3.connect(":memory:")
+        fallback_schema = DatabaseSchemaService(fallback_conn, data_root=self.data_root)
+        fallback_schema.init_db()
+        fallback_schema.migrate_schema()
+        fallback_service = PartyService(fallback_conn)
+
+        fallback_service.create_party(
+            PartyPayload(
+                legal_name="Fallback Artist",
+                display_name="Fallback Artist",
+                artist_name="Fallback Artist",
+                party_type="artist",
+            )
+        )
+        fallback_service.create_party(
+            PartyPayload(
+                legal_name="Fallback Organization",
+                display_name="Fallback Organization",
+                party_type="organization",
+            )
+        )
+        fallback_conn.execute("DROP TABLE TrackArtists")
+        fallback_conn.execute("DROP TABLE Tracks")
+        fallback_conn.commit()
+
+        records = fallback_service.list_artist_parties()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].party_type, "artist")
+        fallback_conn.close()
+
+    def test_party_merge_noop_when_only_primary_is_duplicated(self):
+        primary_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Primary Artist",
+                display_name="Primary Artist",
+                artist_name="Primary Artist",
+                party_type="artist",
+            )
+        )
+
+        merged = self.party_service.merge_parties(primary_id, [primary_id])
+
+        self.assertEqual(merged.id, int(primary_id))
+        self.assertEqual(merged.artist_name, "Primary Artist")
+
+    def test_party_promote_party_to_artist_appends_prior_primary_label_when_renamed(self):
+        legacy_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Legacy Ensemble",
+                display_name="Legacy Ensemble",
+                party_type="organization",
+            )
+        )
+
+        cursor = self.conn.cursor()
+        self.party_service._promote_party_to_artist_authority(
+            int(legacy_id),
+            "Signal Ensemble",
+            cursor=cursor,
+        )
+
+        upgraded = self.party_service.fetch_party(int(legacy_id))
+        self.assertIsNotNone(upgraded)
+        self.assertEqual(upgraded.party_type, "artist")
+        self.assertEqual(upgraded.artist_name, "Signal Ensemble")
+        aliases = self.party_service.list_artist_aliases(int(legacy_id))
+        self.assertEqual([alias.alias_name for alias in aliases], ["Legacy Ensemble"])
+
+    def test_work_service_cleaning_and_track_linking_helpers(self):
+        self.assertIsNone(self.work_service._clean_status(None))
+        self.assertEqual(self.work_service._clean_status("BLOCKED"), "blocked")
+        self.assertEqual(self.work_service._clean_status("custom"), "metadata_incomplete")
+        self.assertEqual(self.work_service._clean_role("custom role"), "songwriter")
+        self.assertIsNone(self.work_service._clean_share("invalid-number"))
+        self.assertAlmostEqual(self.work_service._clean_share("99.9999"), 99.9999)
+
+        non_artist_work_service = WorkService(self.conn, party_service=None)
+        self.assertIsNone(
+            non_artist_work_service._resolve_party_id(
+                WorkContributorPayload(role="composer", name="", party_id=None),
+                cursor=self.conn.cursor(),
+            )
+        )
+        self.assertEqual(
+            non_artist_work_service._resolve_party_id(
+                WorkContributorPayload(role="composer", name="", party_id=9_001),
+                cursor=self.conn.cursor(),
+            ),
+            9001,
+        )
+
+        work_id = self.work_service.create_work(
+            WorkPayload(title="Track Link Helper", alternate_titles=[], contributors=[])
+        )
+        first_track = self._create_track("NL-ABC-26-00023", "Track One")
+        second_track = self._create_track("NL-ABC-26-00024", "Track Two")
+        with self.conn:
+            cursor = self.conn.cursor()
+            self.work_service._replace_track_links(
+                work_id,
+                [first_track, second_track, first_track, "bad", 0, -5],
+                cursor=cursor,
+            )
+
+        rows = self.conn.execute(
+            """
+            SELECT track_id, is_primary
+            FROM WorkTrackLinks
+            WHERE work_id=?
+            ORDER BY is_primary DESC, track_id
+            """,
+            (int(work_id),),
+        ).fetchall()
+        self.assertEqual(rows, [(int(first_track), 1), (int(second_track), 0)])
+
+    def test_work_service_track_columns_fallback_when_tracks_missing(self):
+        fallback_conn = sqlite3.connect(":memory:")
+        fallback_schema = DatabaseSchemaService(fallback_conn, data_root=self.data_root)
+        fallback_schema.init_db()
+        fallback_schema.migrate_schema()
+        fallback_conn.execute("DROP TABLE Tracks")
+        fallback_conn.commit()
+
+        fallback_work_service = WorkService(fallback_conn, party_service=self.party_service)
+        cursor = fallback_conn.cursor()
+        self.assertEqual(fallback_work_service._track_columns(cursor=cursor), set())
+        fallback_conn.close()
+
     def test_deleting_current_owner_party_requires_reassignment_first(self):
         owner_id = self.party_service.create_party(
             PartyPayload(

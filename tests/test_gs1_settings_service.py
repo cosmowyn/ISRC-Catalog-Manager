@@ -2,11 +2,18 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from openpyxl import Workbook
 from PySide6.QtCore import QSettings
 
-from isrc_manager.services import GS1ContractEntry, GS1ProfileDefaults, GS1SettingsService
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.services import (
+    GS1ContractEntry,
+    GS1ProfileDefaults,
+    GS1SettingsService,
+    GS1TemplateVerificationError,
+)
 
 
 def make_settings_conn():
@@ -213,6 +220,196 @@ class GS1SettingsServiceTests(unittest.TestCase):
         managed_path = explicit_root / stored.managed_file_path
         self.assertTrue(managed_path.exists())
         self.assertEqual(service.data_root, explicit_root.resolve())
+
+    def test_template_validation_bytes_legacy_asset_and_clear_paths(self):
+        missing_template = Path(self.tmpdir.name) / "missing.xlsx"
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "not found"):
+            self.service.import_template_from_path(missing_template)
+
+        unsupported_template = Path(self.tmpdir.name) / "template.txt"
+        unsupported_template.write_text("not a workbook", encoding="utf-8")
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "supported Excel"):
+            self.service.import_template_from_path(unsupported_template)
+
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "empty"):
+            self.service.import_template_from_bytes(b"", filename="empty.xlsx")
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "must be an"):
+            self.service.import_template_from_bytes(b"raw", filename="template.txt")
+
+        legacy_template = Path(self.tmpdir.name) / "legacy-template.xlsx"
+        build_template(legacy_template)
+        self.service.set_template_path(str(legacy_template))
+        legacy_asset = self.service.load_template_asset()
+        self.assertIsNotNone(legacy_asset)
+        assert legacy_asset is not None
+        self.assertEqual(legacy_asset.filename, "legacy-template.xlsx")
+        self.assertEqual(legacy_asset.storage_mode, STORAGE_MODE_MANAGED_FILE)
+
+        missing_legacy = Path(self.tmpdir.name) / "missing-legacy.xlsx"
+        self.service.set_template_path(str(missing_legacy))
+        missing_asset = self.service.load_template_asset()
+        self.assertIsNotNone(missing_asset)
+        assert missing_asset is not None
+        self.assertEqual(missing_asset.filename, "missing-legacy.xlsx")
+        self.assertEqual(missing_asset.storage_mode, STORAGE_MODE_DATABASE)
+
+        stored = self.service.import_template_from_bytes(
+            legacy_template.read_bytes(),
+            filename="from-bytes.xlsx",
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.assertEqual(stored.storage_mode, STORAGE_MODE_DATABASE)
+        self.assertEqual(
+            self.service.convert_template_storage_mode(STORAGE_MODE_DATABASE),
+            stored,
+        )
+        self.service.clear_stored_template()
+        self.assertFalse(self.service.has_stored_template())
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "No official GS1 workbook"):
+            self.service.export_stored_template(Path(self.tmpdir.name) / "missing-out.xlsx")
+
+    def test_managed_template_storage_requires_a_configured_data_root(self):
+        memory_settings = QSettings()
+        service = GS1SettingsService(self.conn, memory_settings, data_root=None)
+
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "not configured"):
+            service.import_template_from_bytes(
+                b"workbook",
+                filename="official.xlsx",
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+            )
+
+        self.service.import_template_from_bytes(
+            b"workbook",
+            filename="official.xlsx",
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        no_root_service = GS1SettingsService(self.conn, memory_settings, data_root=None)
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "not configured"):
+            no_root_service.convert_template_storage_mode(STORAGE_MODE_MANAGED_FILE)
+
+    def test_template_storage_schema_and_missing_asset_edges(self):
+        legacy_conn = make_settings_conn()
+        legacy_conn.execute(
+            """
+            CREATE TABLE GS1TemplateStorage (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                filename TEXT NOT NULL,
+                source_path TEXT,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        try:
+            GS1SettingsService(legacy_conn, self.settings)
+            columns = {
+                row[1]
+                for row in legacy_conn.execute("PRAGMA table_info(GS1TemplateStorage)").fetchall()
+            }
+            self.assertIn("managed_file_path", columns)
+            self.assertIn("storage_mode", columns)
+            self.assertIn("workbook_blob", columns)
+        finally:
+            legacy_conn.close()
+
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "No official GS1 workbook"):
+            self.service.convert_template_storage_mode(STORAGE_MODE_DATABASE)
+
+        self.conn.execute(
+            """
+            INSERT INTO GS1TemplateStorage(
+                id, filename, source_path, storage_mode, workbook_blob, mime_type, size_bytes
+            )
+            VALUES (1, 'missing.xlsx', '', 'database', NULL, '', 0)
+            """
+        )
+        self.assertIsNone(self.service.load_stored_template_bytes())
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "missing or unreadable"):
+            self.service.convert_template_storage_mode(STORAGE_MODE_MANAGED_FILE)
+
+    def test_data_root_and_legacy_template_stat_failures_are_tolerated(self):
+        class BadSettings:
+            def fileName(self):
+                raise RuntimeError("settings unavailable")
+
+        self.assertIsNone(GS1SettingsService(self.conn, BadSettings()).data_root)
+
+        legacy_template = Path(self.tmpdir.name) / "stat-error-template.xlsx"
+        self.service.set_template_path(str(legacy_template))
+        with (
+            mock.patch("isrc_manager.services.gs1_settings.Path.exists", return_value=True),
+            mock.patch("isrc_manager.services.gs1_settings.Path.stat", side_effect=OSError),
+        ):
+            asset = self.service.load_template_asset()
+        self.assertEqual(asset.size_bytes, 0)
+
+    def test_contract_loading_filename_clear_and_missing_export_edges(self):
+        self.conn.execute(
+            "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+            (GS1SettingsService.CONTRACTS_JSON_KEY, "{bad json"),
+        )
+        self.assertEqual(self.service.load_contracts(), ())
+
+        self.assertEqual(self.service.load_stored_contracts_filename(), "")
+        with self.assertRaisesRegex(GS1TemplateVerificationError, "No GTIN contracts CSV"):
+            self.service.export_stored_contracts(Path(self.tmpdir.name) / "missing.csv")
+
+        source_path = Path(self.tmpdir.name) / "source-contracts.csv"
+        source_path.write_text("Contract Number\n1001\n", encoding="utf-8")
+        self.service.set_contracts(
+            [
+                GS1ContractEntry(
+                    contract_number="1001",
+                    product="",
+                    company_number="",
+                    start_number="",
+                    end_number="",
+                ),
+                GS1ContractEntry(contract_number=""),
+            ],
+            source_path=str(source_path),
+            source_filename="",
+        )
+        self.assertEqual(self.service.load_stored_contracts_filename(), "source-contracts.csv")
+        self.assertEqual(self.service.load_stored_contracts_bytes(), source_path.read_bytes())
+
+        self.service.clear_contracts()
+        self.assertEqual(self.service.load_contracts(), ())
+        self.assertEqual(self.service.load_contracts_csv_path(), "")
+
+    def test_contract_bytes_prefer_explicit_sources_and_legacy_fallbacks(self):
+        explicit_bytes = b"Contract Number\n9001\n"
+        explicit_path = Path(self.tmpdir.name) / "explicit-contracts.csv"
+        explicit_path.write_bytes(b"Contract Number\n9002\n")
+
+        self.assertEqual(
+            self.service._resolve_contract_bytes(source_bytes=explicit_bytes),
+            explicit_bytes,
+        )
+        self.assertEqual(
+            self.service._resolve_contract_bytes(source_path=str(explicit_path)),
+            explicit_path.read_bytes(),
+        )
+        self.assertEqual(
+            self.service._contracts_filename(source_filename="named.csv"),
+            "named.csv",
+        )
+        self.assertEqual(
+            self.service._contracts_filename(source_path=str(explicit_path)),
+            "explicit-contracts.csv",
+        )
+
+        legacy_path = Path(self.tmpdir.name) / "legacy-contracts.csv"
+        legacy_path.write_bytes(b"Contract Number\n9003\n")
+        self.conn.execute(
+            "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+            (GS1SettingsService.CONTRACTS_CSV_PATH_KEY, str(legacy_path)),
+        )
+        self.assertEqual(self.service.load_stored_contracts_filename(), "legacy-contracts.csv")
+        self.assertEqual(self.service.load_stored_contracts_bytes(), legacy_path.read_bytes())
 
 
 if __name__ == "__main__":

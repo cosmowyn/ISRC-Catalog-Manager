@@ -1,9 +1,11 @@
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from PySide6.QtCore import QModelIndex, QPoint
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 
+from isrc_manager.promo_codes import controller as promo_controller
 from isrc_manager.promo_codes import dialogs as promo_dialogs
 from isrc_manager.promo_codes.models import (
     PromoCodeImportResult,
@@ -545,6 +547,193 @@ class PromoCodeLedgerPanelTests(unittest.TestCase):
             panel.model.clear()
             panel._open_table_context_menu(QPoint(3, 4))
             menu.exec.assert_not_called()
+
+
+class PromoCodeControllerTests(unittest.TestCase):
+    def test_import_update_open_and_refresh_controller_paths(self):
+        messages = []
+
+        class FakeMessageBox:
+            @classmethod
+            def warning(cls, *_args):
+                messages.append(("warning", _args))
+
+        class FakePromoCodeService:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def import_bandcamp_csv(self, path, *, profile_name, progress_callback):
+                progress_callback(value=3, maximum=10, message="importing")
+                return SimpleNamespace(
+                    sheet_id=12,
+                    sheet_name=f"{profile_name}:{path}",
+                    inserted_codes=4,
+                    active_codes=5,
+                    marked_redeemed_codes=1,
+                    reactivated_codes=2,
+                    updated_existing_sheet=False,
+                )
+
+        monkeypatches = [
+            mock.patch.object(promo_controller, "_message_box", return_value=FakeMessageBox),
+            mock.patch.object(promo_controller, "PromoCodeService", FakePromoCodeService),
+            mock.patch.object(
+                promo_controller,
+                "_root_attr",
+                side_effect=lambda name, fallback: (
+                    (lambda **kwargs: kwargs["mutation"]())
+                    if name == "run_snapshot_history_action"
+                    else fallback
+                ),
+            ),
+        ]
+        with monkeypatches[0], monkeypatches[1], monkeypatches[2]:
+            app = self._controller_app()
+
+            promo_controller.open_promo_code_ledger(SimpleNamespace(promo_code_service=None))
+            self.assertEqual(messages[-1][0], "warning")
+
+            panel = SimpleNamespace(refresh=mock.Mock(), focus_sheet=mock.Mock())
+            app._show_workspace_panel = mock.Mock(
+                side_effect=lambda _factory, **kwargs: kwargs["configure"](panel) or panel
+            )
+            self.assertIs(promo_controller.open_promo_code_ledger(app, sheet_id=9), panel)
+            panel.refresh.assert_called_once()
+            panel.focus_sheet.assert_called_once_with(9)
+
+            self.assertIsNone(promo_controller.import_bandcamp_promo_codes(app, ""))
+            missing_app = self._controller_app()
+            missing_app.promo_code_service = None
+            self.assertIsNone(
+                promo_controller.import_bandcamp_promo_codes(missing_app, "codes.csv")
+            )
+            self.assertEqual(messages[-1][0], "warning")
+
+            success_results = []
+            promo_controller.import_bandcamp_promo_codes(
+                app,
+                "codes.csv",
+                owner="owner",
+                on_success=success_results.append,
+            )
+            task = app.submitted[-1]
+            ctx = _ControllerTaskContext()
+            result = task["task_fn"](SimpleNamespace(conn="conn", history_manager=object()), ctx)
+            self.assertEqual(result.sheet_id, 12)
+            self.assertIn(("importing", 3, 10), app.scaled)
+            task["on_success_before_cleanup"](result, object())
+            task["on_success_after_cleanup"](result)
+            self.assertEqual(app.conn.commits, 1)
+            self.assertEqual(app.history_refreshes, 1)
+            self.assertEqual(success_results, [result])
+            self.assertIn("Imported promo-code sheet", app.status_messages[-1][0])
+
+            result.updated_existing_sheet = True
+            task["on_success_after_cleanup"](result)
+            self.assertIn("Updated promo-code sheet", app.status_messages[-1][0])
+            task["on_error"](RuntimeError("bad csv"))
+            self.assertEqual(app.errors[-1][0], "Promo Code Ledger")
+
+            updated = promo_controller.update_promo_code_ledger(
+                app,
+                7,
+                True,
+                recipient_name="Listener",
+                recipient_email="listener@example.com",
+                ledger_notes="Sent",
+            )
+            self.assertEqual(updated.code, "ABC-1")
+            self.assertEqual(app.promo_code_service.updated[0][0], 7)
+            self.assertEqual(app.promo_refreshes, 1)
+
+            app.promo_code_service.fetch_result = None
+            with self.assertRaisesRegex(ValueError, "not found"):
+                promo_controller.update_promo_code_ledger(app, 404, False)
+
+            no_service = self._controller_app()
+            no_service.promo_code_service = None
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                promo_controller.update_promo_code_ledger(no_service, 7, False)
+
+            first_panel = SimpleNamespace(refresh=mock.Mock())
+            second_panel = SimpleNamespace(refresh=mock.Mock())
+            app.promo_code_ledger_panel = first_panel
+            app.promo_code_ledger_dock = SimpleNamespace(
+                widget=mock.Mock(return_value=second_panel)
+            )
+            promo_controller._refresh_promo_code_ledger_panel(app)
+            first_panel.refresh.assert_called_once()
+            second_panel.refresh.assert_called_once()
+            app.promo_code_ledger_dock.widget.side_effect = RuntimeError("closed")
+            promo_controller._refresh_promo_code_ledger_panel(app)
+
+    @staticmethod
+    def _controller_app():
+        class Conn:
+            def __init__(self):
+                self.commits = 0
+
+            def commit(self):
+                self.commits += 1
+
+        class PromoService:
+            def __init__(self):
+                self.fetch_result = SimpleNamespace(code="ABC-1", sheet_id=3)
+                self.updated = []
+
+            def fetch_code(self, code_id):
+                return self.fetch_result
+
+            def update_code_ledger(self, code_id, **kwargs):
+                self.updated.append((int(code_id), kwargs))
+                return self.fetch_result
+
+        app = SimpleNamespace(
+            promo_code_service=PromoService(),
+            conn=Conn(),
+            logger=mock.Mock(),
+            submitted=[],
+            status_messages=[],
+            errors=[],
+            history_refreshes=0,
+            promo_refreshes=0,
+            _current_profile_name=lambda: "Profile",
+            _scaled_progress_callback=lambda callback, **_kwargs: (
+                lambda **kwargs: app.scaled_progress(callback, **kwargs)
+            ),
+            _refresh_history_actions=lambda: setattr(
+                app, "history_refreshes", app.history_refreshes + 1
+            ),
+            _advance_task_ui_progress=mock.Mock(),
+            _log_event=mock.Mock(),
+            _show_background_task_error=lambda title, failure, **kwargs: app.errors.append(
+                (title, failure, kwargs)
+            ),
+            _submit_background_bundle_task=lambda **kwargs: app.submitted.append(kwargs),
+            _ensure_promo_code_ledger_dock=lambda: "dock",
+            _refresh_promo_code_ledger_panel=lambda: setattr(
+                app, "promo_refreshes", app.promo_refreshes + 1
+            ),
+            statusBar=lambda: SimpleNamespace(
+                showMessage=lambda *args: app.status_messages.append(args)
+            ),
+        )
+        app.scaled = []
+        app.scaled_progress = lambda callback, **kwargs: app.scaled.append(
+            (kwargs["message"], kwargs["value"], kwargs["maximum"])
+        )
+        setattr(app, "__run_snapshot_history_action", lambda **kwargs: kwargs["mutation"]())
+        return app
+
+
+class _ControllerTaskContext:
+    def __init__(self):
+        self.progress = []
+        self.scaled = []
+
+    def report_progress(self, *, value, maximum, message):
+        self.progress.append((value, maximum, message))
+        self.scaled.append((message, value, maximum))
 
 
 if __name__ == "__main__":

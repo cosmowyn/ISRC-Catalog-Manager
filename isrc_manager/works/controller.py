@@ -665,9 +665,12 @@ def _launch_work_scoped_child_track_creation(
     seed_from_work: bool = True,
 ) -> bool:
     app._pending_work_track_context = {
+        "mode": "link_existing_work",
         "work_id": int(work_id),
         "relationship_type": app._normalize_work_track_relationship(relationship_type),
         "parent_track_id": int(parent_track_id) if parent_track_id is not None else None,
+        "locked_work": False,
+        "return_to_work_manager": True,
     }
     return app._begin_work_child_track_creation(int(work_id), seed_from_work=seed_from_work)
 

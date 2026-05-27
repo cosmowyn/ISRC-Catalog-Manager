@@ -272,6 +272,22 @@ Prefer testing:
 - service/controller state transitions
 - user-decision branches through fake prompt services
 
+## Code/Test Synchronisation
+
+Any code change that is governed by existing tests must also update the corresponding tests when behaviour, inputs, outputs, validation rules, error handling, or workflow boundaries change.
+
+Agents must not leave tests stale after changing covered behaviour.
+
+When changing covered code:
+
+- identify the tests that currently govern the changed behaviour;
+- update those tests to reflect the intended behaviour;
+- add new tests when the changed path was previously untested;
+- remove or rewrite tests only when the old behaviour is intentionally deprecated;
+- do not weaken assertions merely to make tests pass.
+
+If a code change intentionally preserves existing behaviour, the existing tests should continue to pass unchanged. If they do not, investigate whether the code change introduced a regression or whether the test needs a justified update.
+
 ## Coverage
 
 Coverage is expected to be branch-aware.
@@ -474,6 +490,29 @@ When adding or updating tests:
 - avoid launching the full app unless the workflow requires it
 - prefer deterministic tests over timing-dependent tests
 - mock file dialogs, message boxes, and external IO boundaries
+
+---
+
+# Mandatory Linting After Agent Changes
+
+Each agent that makes code or test changes must run linting before completing its task.
+
+At minimum, run:
+
+```bash
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+```
+
+If the agent changed typed production code, public interfaces, services, controllers, or test fixtures that affect typed code, also run:
+
+```bash
+python3 -m mypy
+```
+
+If linting or formatting checks fail, fix the issue and rerun the relevant command before handing off or reporting completion.
+
+Agents must not claim a task is complete while known Ruff, Black, or mypy failures remain, unless the failure is explicitly documented as unrelated pre-existing debt and the user has accepted that limitation.
 
 ---
 

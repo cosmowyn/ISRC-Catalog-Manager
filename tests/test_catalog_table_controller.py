@@ -172,3 +172,141 @@ class CatalogTableControllerTests(unittest.TestCase):
         self.assertEqual(custom_target.kind, "custom")
         self.assertEqual(custom_target.custom_field_id, 7)
         self.assertEqual(custom_target.custom_field_type, "text")
+
+    def test_unbound_controller_helpers_return_empty_state_safely(self):
+        controller = CatalogTableController()
+
+        self.assertIsNone(controller.source_model())
+        self.assertIsNone(controller.proxy_model())
+        self.assertIsNone(controller.active_model())
+        self.assertFalse(controller.map_to_source(CatalogTableModel().index(-1, -1)).isValid())
+        self.assertFalse(controller.map_from_source(CatalogTableModel().index(-1, -1)).isValid())
+        self.assertFalse(controller.source_index_for_track_id(1).isValid())
+        self.assertIsNone(controller.column_for_key(""))
+        self.assertIsNone(controller.column_for_key("base:track_title"))
+        self.assertEqual(controller.visible_indexes(), ())
+        self.assertEqual(controller.visible_indexes(column=-1), ())
+        self.assertIsNone(controller.track_id_for_index(CatalogTableModel().index(-1, -1)))
+        self.assertIsNone(controller.track_id_for_source_row(0))
+        self.assertIsNone(controller.source_row_for_track_id(1))
+        self.assertIsNone(controller.current_track_id())
+        self.assertEqual(controller.selected_track_ids(), ())
+        self.assertEqual(controller.visible_track_ids(), ())
+        self.assertEqual(controller.prepare_context_menu_selection(None).isValid(), False)
+        self.assertEqual(controller.effective_context_menu_track_ids("bad"), ())
+        self.assertEqual(controller.effective_context_menu_track_ids(-1), ())
+        self.assertEqual(controller._header_text_for_column(-1), "")
+        self.assertEqual(controller._column_key_for_column(-1), "")
+        self.assertEqual(
+            controller._unique_track_ids([None, "bad", 0, -1, "7", 7, 8]),
+            (7, 8),
+        )
+
+    def test_selection_falls_back_to_cell_indexes_and_current_index(self):
+        table, controller, _proxy = self._make_table()
+        selection_model = table.selectionModel()
+        selection_model.select(
+            table.model().index(0, 2),
+            QItemSelectionModel.ClearAndSelect,
+        )
+        selection_model.select(
+            table.model().index(0, 3),
+            QItemSelectionModel.Select,
+        )
+        pump_events(app=self.app, cycles=2)
+
+        self.assertEqual(controller.selected_track_ids(), (1,))
+
+        table.clearSelection()
+        selection_model.setCurrentIndex(
+            table.model().index(1, 2),
+            QItemSelectionModel.NoUpdate,
+        )
+        pump_events(app=self.app, cycles=2)
+
+        self.assertEqual(controller.current_track_id(), 2)
+        self.assertEqual(controller.selected_track_ids(), (2,))
+
+    def test_controller_uses_bound_models_when_view_is_absent_or_source_only(self):
+        model = CatalogTableModel(
+            snapshot=CatalogSnapshot(
+                column_specs=(CatalogColumnSpec(key="base:id", header_text="ID"),),
+                rows=(
+                    CatalogRowSnapshot(
+                        track_id=9,
+                        cells_by_key={"base:id": CatalogCellValue(display_text="9", raw_value=9)},
+                    ),
+                ),
+            )
+        )
+        self._models.append(model)
+        controller = CatalogTableController()
+        controller.bind_models(table_model=model)
+
+        self.assertIs(controller.active_model(), model)
+        self.assertEqual(controller.column_for_key("base:id"), 0)
+        self.assertEqual([index.row() for index in controller.visible_indexes()], [0])
+        self.assertEqual(controller.visible_track_ids(), (9,))
+        self.assertEqual(controller.default_conversion_track_ids(), ())
+        self.assertEqual(controller.effective_context_menu_track_ids(9), (9,))
+
+    def test_context_selection_and_cell_targets_cover_unknown_and_fallback_custom_fields(self):
+        table, controller, _proxy = self._make_table()
+        index = table.model().index(0, 3)
+
+        fallback_custom = controller.cell_target(
+            index,
+            base_column_count=3,
+            custom_fields=[{"id": "not-int", "name": "Mood", "field_type": "dropdown"}],
+        )
+        self.assertEqual(fallback_custom.kind, "custom")
+        self.assertIsNone(fallback_custom.custom_field_id)
+        self.assertEqual(fallback_custom.custom_field_type, "dropdown")
+
+        unknown_custom = controller.cell_target(
+            index,
+            base_column_count=3,
+            custom_fields=[],
+        )
+        self.assertEqual(unknown_custom.kind, "unknown")
+        self.assertIsNone(unknown_custom.custom_field)
+
+        standard_by_label = controller.cell_target(
+            table.model().index(0, 2),
+            base_column_count=3,
+            custom_fields=None,
+        )
+        self.assertEqual(standard_by_label.standard_field_key, "track_title")
+
+        self.assertEqual(
+            controller.effective_context_menu_track_ids(
+                table.model().index(2, 0),
+                selected_track_ids=(1, 2),
+            ),
+            (3,),
+        )
+        self.assertEqual(
+            controller.effective_context_menu_track_ids(
+                table.model().index(1, 0),
+                selected_track_ids=(1, 2),
+            ),
+            (1, 2),
+        )
+
+    def test_hidden_row_and_row_guard_paths_do_not_leak_track_ids(self):
+        table, controller, _proxy = self._make_table()
+        table.hideRow(1)
+
+        self.assertTrue(controller.has_filtered_rows())
+        self.assertEqual(controller.visible_track_ids(), (1, 3))
+
+        controller._view = type(
+            "ExplodingView",
+            (),
+            {
+                "isRowHidden": lambda self, _row: (_ for _ in ()).throw(RuntimeError("boom")),
+                "selectionModel": lambda self: None,
+                "model": lambda self: None,
+            },
+        )()
+        self.assertFalse(controller._row_is_hidden(0))
