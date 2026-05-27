@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtGui import QCloseEvent, QFont, QKeySequence
 from PySide6.QtWidgets import QComboBox, QDialog, QToolBar, QWidget
 
 from isrc_manager import main_window
@@ -886,6 +886,218 @@ def test_main_window_key_and_drop_event_routing_cover_handled_paths(monkeypatch)
     assert app.eventFilter(app.table, space_event) is True
     assert space_event.accepted is True
     assert previews == [(4, 7)]
+
+
+def test_delete_entry_covers_confirmation_guards_success_and_error_callbacks(monkeypatch) -> None:
+    app = _app()
+    warnings: list[tuple[str, str]] = []
+    criticals: list[tuple[str, str]] = []
+    message_boxes: list[object] = []
+    submitted_tasks: list[dict[str, object]] = []
+    history_calls: list[dict[str, object]] = []
+    deleted_track_ids: list[int] = []
+    refresh_requests: list[object] = []
+    applied_refreshes: list[tuple[dict[str, object], object]] = []
+    task_progress: list[dict[str, object]] = []
+    log_events: list[tuple[str, dict[str, object]]] = []
+    audits: list[tuple[str, str, object, str]] = []
+    background_errors: list[tuple[str, str, str]] = []
+    logger_exceptions: list[str] = []
+
+    class FakeMessageBox:
+        Warning = object()
+        Yes = 1
+        No = 2
+        exec_result = Yes
+
+        def __init__(self, _parent=None) -> None:
+            self.standard_buttons = None
+            message_boxes.append(self)
+
+        @classmethod
+        def warning(cls, _parent, title, message) -> None:
+            warnings.append((title, message))
+
+        @classmethod
+        def critical(cls, _parent, title, message) -> None:
+            criticals.append((title, message))
+
+        def setIcon(self, _icon) -> None:
+            return None
+
+        def setText(self, _text: str) -> None:
+            return None
+
+        def setWindowTitle(self, _title: str) -> None:
+            return None
+
+        def setStandardButtons(self, buttons) -> None:
+            self.standard_buttons = buttons
+
+        def exec(self):
+            return self.exec_result
+
+    monkeypatch.setattr(main_window, "QMessageBox", FakeMessageBox)
+
+    class Index:
+        def __init__(self, valid: bool = True) -> None:
+            self.valid = valid
+
+        def isValid(self) -> bool:
+            return self.valid
+
+    class Controller:
+        def __init__(self, row_id) -> None:
+            self.row_id = row_id
+            self.visible_ids = [10, 20, 30]
+
+        def visible_track_ids(self):
+            return list(self.visible_ids)
+
+        def track_id_for_index(self, _index):
+            return self.row_id
+
+    class FakeConn:
+        def __init__(self) -> None:
+            self.commits = 0
+            self.rollbacks = 0
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def rollback(self) -> None:
+            self.rollbacks += 1
+
+    class FakeContext:
+        def report_progress(self, **kwargs) -> None:
+            task_progress.append(kwargs)
+
+    class FakeTrackService:
+        def __init__(self) -> None:
+            self.snapshot = SimpleNamespace(
+                track_title="Departing Track",
+                isrc="NL-AAA-26-00020",
+            )
+
+        def fetch_track_snapshot(self, track_id):
+            assert int(track_id) == 20
+            return self.snapshot
+
+        def delete_track(self, track_id) -> None:
+            deleted_track_ids.append(int(track_id))
+
+    def run_history_action(**kwargs):
+        history_calls.append(kwargs)
+        kwargs["mutation"]()
+        return {"history": "recorded"}
+
+    monkeypatch.setattr(main_window, "run_snapshot_history_action", run_history_action)
+
+    app.table = SimpleNamespace(currentIndex=lambda: Index(False))
+    app.delete_entry()
+    assert warnings[-1] == ("Warning", "No row selected for deletion!")
+    assert message_boxes == []
+
+    app.table = SimpleNamespace(currentIndex=lambda: Index(True))
+    app._catalog_table_controller = lambda: Controller(20)
+    app._submit_background_bundle_task = lambda **kwargs: submitted_tasks.append(kwargs)
+    FakeMessageBox.exec_result = FakeMessageBox.No
+    app.delete_entry()
+    assert submitted_tasks == []
+
+    FakeMessageBox.exec_result = FakeMessageBox.Yes
+    app._catalog_table_controller = lambda: Controller(None)
+    app.delete_entry()
+    assert warnings[-1] == ("Delete", "Could not determine record ID.")
+    assert submitted_tasks == []
+
+    empty_service = SimpleNamespace(fetch_track_snapshot=lambda _track_id: None)
+    app.track_service = empty_service
+    app._catalog_table_controller = lambda: Controller(20)
+    app.delete_entry()
+    assert warnings[-1] == ("Delete", "Could not load the selected track for deletion.")
+    assert submitted_tasks == []
+
+    fake_conn = FakeConn()
+    track_service = FakeTrackService()
+    app.conn = fake_conn
+    app.track_service = track_service
+    app.logger = SimpleNamespace(exception=lambda message: logger_exceptions.append(message))
+    app._capture_catalog_refresh_request = lambda focus_id=None: refresh_requests.append(
+        focus_id
+    ) or {"focus_id": focus_id}
+    app._load_catalog_ui_dataset_from_bundle = lambda _bundle, _ctx, **_kwargs: {"rows": ["fresh"]}
+    app._scaled_ui_progress_callback = lambda ui_progress, *, start, end: (
+        lambda **kwargs: ui_progress(
+            value=start + int(kwargs.get("value", 0)),
+            maximum=end,
+            message=kwargs.get("message", ""),
+        )
+    )
+    app._apply_catalog_refresh_request = lambda dataset, request, **_kwargs: (
+        applied_refreshes.append((dataset, request))
+    )
+    app._advance_task_ui_progress = lambda ui_progress, **kwargs: ui_progress(**kwargs)
+    app._log_event = lambda name, _message, **kwargs: log_events.append((name, kwargs))
+    app._audit = lambda action, entity, ref_id=None, details=None: audits.append(
+        (action, entity, ref_id, details)
+    )
+    app._audit_commit = lambda: audits.append(("COMMIT", "AuditLog", None, "audit_commit"))
+    app._show_background_task_error = (
+        lambda title, failure, *, user_message: background_errors.append(
+            (title, str(failure.message), user_message)
+        )
+    )
+
+    def submit_delete_task(**kwargs):
+        submitted_tasks.append(kwargs)
+        result = kwargs["task_fn"](
+            SimpleNamespace(history_manager=object(), track_service=track_service),
+            FakeContext(),
+        )
+        kwargs["on_success_before_cleanup"](
+            result,
+            lambda **progress: task_progress.append({"ui": progress}),
+        )
+        kwargs["on_success_after_cleanup"](result)
+
+    app._submit_background_bundle_task = submit_delete_task
+    app.delete_entry()
+
+    assert refresh_requests == [30]
+    assert deleted_track_ids == [20]
+    assert fake_conn.commits == 1
+    assert applied_refreshes == [({"rows": ["fresh"]}, {"focus_id": 30})]
+    assert submitted_tasks[-1]["unique_key"] == "track.delete.20"
+    assert history_calls[-1]["action_label"] == "Delete Track: Departing Track"
+    assert history_calls[-1]["payload"] == {
+        "track_id": 20,
+        "track_title": "Departing Track",
+        "isrc": "NL-AAA-26-00020",
+    }
+    assert log_events[-1][0] == "track.delete"
+    assert audits[-2:] == [
+        ("DELETE", "Track", 20, "delete_entry"),
+        ("COMMIT", "AuditLog", None, "audit_commit"),
+    ]
+    assert task_progress[-1] == {
+        "ui": {"value": 100, "message": "Track deleted and catalog UI is ready."}
+    }
+
+    submitted_tasks[-1]["on_error"](SimpleNamespace(message="background failed"))
+    assert background_errors[-1] == (
+        "Delete Track",
+        "background failed",
+        "Failed to delete:",
+    )
+
+    app._catalog_table_controller = lambda: (_ for _ in ()).throw(
+        RuntimeError("controller exploded")
+    )
+    app.delete_entry()
+    assert fake_conn.rollbacks == 1
+    assert logger_exceptions[-1] == "Delete failed: controller exploded"
+    assert criticals[-1] == ("Delete Error", "Failed to delete:\ncontroller exploded")
 
 
 def test_main_window_workspace_openers_and_controller_routing_seams(monkeypatch) -> None:
@@ -2923,6 +3135,232 @@ def test_first_launch_close_workspace_and_add_track_guard_workflows(monkeypatch)
     assert App._audio_format_label(".mp3") == "MP3"
     assert App._audio_format_label(".weird") == "WEIRD"
     assert App._audio_format_label("") == "audio"
+
+
+def test_close_event_successful_cleanup_and_post_ready_startup_routing(monkeypatch) -> None:
+    require_qapplication()
+    app = _app()
+    main_window.QMainWindow.__init__(app)
+    cleanup_events: list[tuple[str, object]] = []
+    info_messages: list[str] = []
+
+    try:
+        app.background_tasks = SimpleNamespace(has_running_tasks=lambda: False)
+        app._app_sound_hook_timer = SimpleNamespace(
+            stop=lambda: cleanup_events.append(("timer.stop", None))
+        )
+        app._stop_audio_waveform_cache_worker = lambda *, wait: cleanup_events.append(
+            ("waveform.stop", wait)
+        )
+        app._save_main_window_geometry = lambda *, sync: cleanup_events.append(
+            ("geometry.save", sync)
+        )
+        app._store_workspace_panel_visibility_preferences = lambda *, sync: cleanup_events.append(
+            ("workspace.save", sync)
+        )
+        app._save_main_dock_state = lambda *, sync: cleanup_events.append(("dock.save", sync))
+        app.settings = _Settings()
+        app._mark_update_backup_handoff_ready_on_close = lambda: cleanup_events.append(
+            ("update.handoff", None)
+        )
+        app.logger = SimpleNamespace(info=lambda message: info_messages.append(message))
+
+        event = QCloseEvent()
+        app.closeEvent(event)
+
+        assert app._is_closing is True
+        assert cleanup_events == [
+            ("timer.stop", None),
+            ("waveform.stop", False),
+            ("geometry.save", False),
+            ("workspace.save", False),
+            ("dock.save", False),
+            ("update.handoff", None),
+        ]
+        assert app.settings.synced is True
+        assert info_messages == ["Settings synced to disk"]
+        assert event.isAccepted() is True
+    finally:
+        app.deleteLater()
+
+    scheduled: list[int] = []
+    startup_calls: list[tuple[str, object]] = []
+
+    class FakeTimer:
+        @staticmethod
+        def singleShot(delay: int, callback) -> None:
+            scheduled.append(delay)
+            callback()
+
+    monkeypatch.setattr(main_window, "QTimer", FakeTimer)
+    startup_app = _app()
+    startup_app._post_ready_startup_tasks_scheduled = False
+    startup_app._update_add_data_generated_fields = lambda: startup_calls.append(
+        ("generated", None)
+    )
+    startup_app._schedule_owner_party_bootstrap = lambda: startup_calls.append(
+        ("owner-party", None)
+    )
+    startup_app._offer_settings_on_first_launch_if_pending = lambda: startup_calls.append(
+        ("first-launch", None)
+    )
+    startup_app._finalize_update_backup_handoff = lambda *, phase: startup_calls.append(
+        ("update-finalize", phase)
+    )
+    startup_app._schedule_startup_update_check = lambda: startup_calls.append(
+        ("update-check", None)
+    )
+
+    startup_app._schedule_post_ready_startup_tasks()
+    startup_app._schedule_post_ready_startup_tasks()
+
+    assert scheduled == [0]
+    assert startup_app._post_ready_startup_tasks_scheduled is True
+    assert startup_calls == [
+        ("generated", None),
+        ("owner-party", None),
+        ("first-launch", None),
+        ("update-finalize", "startup-ready"),
+        ("update-check", None),
+    ]
+
+
+def test_first_launch_settings_prompt_clears_pending_for_skip_and_missing_choice(
+    monkeypatch,
+) -> None:
+    app = _app()
+    settings_opened: list[bool] = []
+
+    class FakeMessageBox:
+        AcceptRole = object()
+        RejectRole = object()
+        Question = object()
+
+    monkeypatch.setattr(main_window, "QMessageBox", FakeMessageBox)
+
+    class PromptBox:
+        def __init__(self, *, clicked_index: int | None) -> None:
+            self.clicked_index = clicked_index
+            self.buttons: list[object] = []
+            self.default_button = None
+
+        def addButton(self, _label, _role):
+            button = object()
+            self.buttons.append(button)
+            return button
+
+        def setDefaultButton(self, button) -> None:
+            self.default_button = button
+
+        def clickedButton(self):
+            if self.clicked_index is None:
+                return object()
+            return self.buttons[self.clicked_index]
+
+    def run_prompt_for(clicked_index: int | None):
+        def _run(**kwargs):
+            box = PromptBox(clicked_index=clicked_index)
+            kwargs["configure"](box)
+            assert box.default_button is box.buttons[0]
+            return box
+
+        return _run
+
+    app.open_settings_dialog = lambda: settings_opened.append(True)
+    app.settings = _Settings({"startup/offer_open_settings_on_first_launch_pending": True})
+    app._run_startup_message_box = run_prompt_for(-1)
+    app._offer_settings_on_first_launch_if_pending()
+    assert settings_opened == []
+    assert app.settings.values["startup/offer_open_settings_on_first_launch_pending"] is False
+    assert app.settings.synced is True
+
+    app.settings = _Settings({"startup/offer_open_settings_on_first_launch_pending": True})
+    app._run_startup_message_box = lambda **_kwargs: None
+    app._offer_settings_on_first_launch_if_pending()
+    assert settings_opened == []
+    assert app.settings.values["startup/offer_open_settings_on_first_launch_pending"] is False
+    assert app.settings.synced is True
+
+    app.settings = _Settings({"startup/offer_open_settings_on_first_launch_pending": True})
+    app._run_startup_message_box = run_prompt_for(None)
+    app._offer_settings_on_first_launch_if_pending()
+    assert settings_opened == []
+    assert app.settings.values["startup/offer_open_settings_on_first_launch_pending"] is False
+    assert app.settings.synced is True
+
+
+def test_diagnostics_dialog_routing_and_bulk_attach_guardrails(monkeypatch, tmp_path: Path) -> None:
+    app = _app()
+    dialog_events: list[tuple[str, object]] = []
+    warnings: list[tuple[str, str]] = []
+    created_tracks: list[tuple[list[str], str]] = []
+
+    class FakeMessageBox:
+        @classmethod
+        def warning(cls, _parent, title, message) -> None:
+            warnings.append((title, message))
+
+    monkeypatch.setattr(main_window, "QMessageBox", FakeMessageBox)
+
+    def dialog_class(kind: str):
+        class FakeDialog:
+            def __init__(self, owner, parent=None) -> None:
+                dialog_events.append((f"{kind}.init", owner is app and parent is app))
+
+            def focus_cleanup_tab(self, tab: str) -> None:
+                dialog_events.append((f"{kind}.focus", tab))
+
+            def exec(self) -> None:
+                dialog_events.append((f"{kind}.exec", None))
+
+        return FakeDialog
+
+    monkeypatch.setattr(main_window, "ApplicationLogDialog", dialog_class("log"))
+    monkeypatch.setattr(main_window, "ApplicationStorageAdminDialog", dialog_class("storage"))
+    monkeypatch.setattr(main_window, "DiagnosticsDialog", dialog_class("diagnostics"))
+
+    app.open_application_log_dialog()
+    app.open_application_storage_admin_dialog()
+    app.open_diagnostics_dialog(initial_cleanup_tab="storage")
+
+    assert dialog_events == [
+        ("log.init", True),
+        ("log.exec", None),
+        ("storage.init", True),
+        ("storage.exec", None),
+        ("diagnostics.init", True),
+        ("diagnostics.focus", "storage"),
+        ("diagnostics.exec", None),
+    ]
+
+    app.audio_tag_service = None
+    app.track_service = object()
+    app.bulk_attach_audio_files(file_paths=[str(tmp_path / "song.wav")])
+    assert warnings[-1] == ("Bulk Attach Audio Files", "Open a profile first.")
+
+    app.audio_tag_service = object()
+    app.track_service = object()
+    app._bulk_audio_attach_scope_track_ids = lambda track_ids=None: ([], "entire catalog")
+    app._prepare_media_attach_paths = lambda *_args, **_kwargs: [str(tmp_path / "song.wav")]
+    app._create_tracks_from_dropped_audio_files = lambda paths, *, title: created_tracks.append(
+        (list(paths), title)
+    )
+    app._submit_background_bundle_task = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("bulk preview should not run without a catalog scope")
+    )
+
+    app.bulk_attach_audio_files(file_paths=[str(tmp_path / "song.wav")])
+    assert created_tracks == [([str(tmp_path / "song.wav")], "Create Tracks from Audio Files")]
+
+    app.track_service = None
+    app.attach_album_art_file_to_catalog(file_paths=[str(tmp_path / "cover.png")])
+    assert warnings[-1] == ("Attach Album Art File", "Open a profile first.")
+
+    app.track_service = object()
+    app._bulk_audio_attach_scope_track_ids = lambda track_ids=None: ([1], "current selection")
+    app._prepare_media_attach_paths = lambda *_args, **_kwargs: []
+    app.attach_album_art_file_to_catalog(file_paths=[str(tmp_path / "cover.png")])
+    assert len(created_tracks) == 1
 
 
 def test_startup_feedback_logging_and_trace_edge_paths(monkeypatch, tmp_path: Path) -> None:

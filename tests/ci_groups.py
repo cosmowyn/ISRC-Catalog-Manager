@@ -61,6 +61,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_python_314_compatibility",
         "tests.test_quality_service",
         "tests.test_parties_controller",
+        "tests.test_parties_controller_coverage",
         "tests.test_promo_codes_service",
         "tests.test_quality_controller",
         "tests.test_release_service",
@@ -189,6 +190,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_catalog_workflow_integration",
         "tests.test_code_registry_workspace",
         "tests.test_conversion_dialog",
+        "tests.test_conversion_dialogs_coverage",
         "tests.test_desktop_safety_probe",
         "tests.test_dialog_controller_behaviors",
         "tests.test_exchange_dialogs",
@@ -226,6 +228,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_workspace_debug",
         "tests.tracks.test_edit_dialog_behaviors",
         "tests.test_work_dialogs",
+        "tests.test_works_dialogs_coverage",
     ),
 }
 

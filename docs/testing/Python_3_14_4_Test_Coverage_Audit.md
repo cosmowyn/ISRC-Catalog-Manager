@@ -74,12 +74,25 @@ Current validated progression:
   - Full branch-aware coverage: `85.2983%`.
   - Statement coverage: `88.4807%`.
   - Branch coverage: `74.7234%`.
-- Latest full-suite continuation in this worktree:
-  - Full branch-aware coverage: `85.5058%`.
-  - Statement coverage: `88.6710%`.
-  - Branch coverage: `74.9884%`.
-  - Full pytest with `--cov-fail-under=0`: passed (`1983 passed`, `786 warnings`,
-    `86 subtests passed`).
+- Latest full-suite continuation in this worktree after Milestone 4:
+  - Starting full coverage after Milestone 3: `86.70398129979306%` displayed as `87%`.
+  - Starting `isrc_manager/main_window.py`: `92.47943595769682%` displayed as `92%`,
+    with `256` missing lines and `192` missing branches.
+  - Milestone 4 target: `isrc_manager/main_window.py`.
+  - Test file updated: `tests/test_main_window_helpers.py`.
+  - Full branch-aware coverage: `86.73722134654358%` displayed as `87%`.
+  - Statement coverage: `89.82211370770841%` displayed as `90%`.
+  - Branch coverage: `76.49402390438247%` displayed as `76%`.
+  - Improved module: `isrc_manager/main_window.py` reached `92.96625818364949%`
+    displayed as `93%`, with `237` missing lines and `182` missing branches.
+  - Full pytest with `--cov-fail-under=0`: passed (`2037 passed`, `779 warnings`,
+    `86 subtests passed in 425.32s`).
+  - Final batch summary from the initial audit baseline: full coverage moved from about
+    `85.5058%` to `86.73722134654358%`. Improved milestone modules were conversion
+    dialogs from `88.3740%` to `95.1219512195122%`, works dialogs from
+    `92.91044776119404%` to `94.68283582089552%`, parties controller from
+    `83.28729281767956%` to `93.78453038674033%`, and main window from
+    `92.47943595769682%` to `92.96625818364949%`.
 
 The strict `--cov-fail-under=95` gate still fails only because the repository has not yet reached
 the required branch-aware threshold. The test body passes under the same full-suite shape when the
@@ -107,31 +120,32 @@ The next phase should be risk-based production-readiness testing, not shallow pu
 rollback, missing-data, invalid-input, cleanup, and fallback paths. Low-value GUI paint/visual
 defensive branches should be documented separately rather than chased for percentage alone.
 
-High-value remaining targets from the latest coverage evidence:
+Named remaining targets from the latest milestone evidence:
 
-1. `isrc_manager/main_window.py` - `91.5058%` (`303` missing lines, `203` missing branches).
-2. `isrc_manager/conversion/dialogs.py` - `88.3740%` (`79` missing lines, `64` missing branches).
-3. `isrc_manager/works/dialogs.py` - `92.9104%` (`40` missing lines, `36` missing branches).
-4. `isrc_manager/qss_autocomplete.py` - `83.5945%` (`103` missing lines, `75` missing branches).
-5. `isrc_manager/storage_admin.py` - `88.6508%` (`88` missing lines, `55` missing branches).
-6. `isrc_manager/services/tracks.py` - `87.5800%` (`98` missing lines, `96` missing branches).
-7. `isrc_manager/parties/controller.py` - `66.1602%` (`157` missing lines, `88` missing branches).
-8. `isrc_manager/exchange/master_transfer.py` - `89.9056%` (`72` missing lines, `67` missing branches).
-9. `isrc_manager/code_registry/workspace.py` - `73.0942%` (`180` missing lines, `60` missing branches).
-10. `isrc_manager/media/equalizer.py` - `74.3848%` (`171` missing lines, `58` missing branches).
-11. `isrc_manager/application_settings_dialog.py` - `79.2851%` (`150` missing lines, `76` missing branches).
-12. `isrc_manager/authenticity/service.py` - `92.2175%` (`40` missing lines, `33` missing branches).
+1. `isrc_manager/main_window.py` - now `92.96625818364949%` displayed as `93%`, with
+   `237` missing lines and `182` missing branches after Milestone 4.
+2. `isrc_manager/application_settings_dialog.py` - `95.96700274977086%` displayed as `96%`,
+   with `23` missing lines and `21` missing branches.
+3. `isrc_manager/media/equalizer.py` - `96.30872483221476%` displayed as `96%`, with
+   `15` missing lines and `18` missing branches.
+
+The strict `95%` coverage gate is still not met; the current full-suite total remains
+`86.73722134654358%`. Follow-up should continue risk-based targets rather than paint-only/visual
+fallback or impossible-layout branches. Remaining `main_window.py` work should stay on valuable
+command-routing/controller seams and avoid full-window brittle UI automation.
 
 Recommended next production-readiness batches:
 
 - Service/data-safety: `services/tracks.py`, `authenticity/service.py`, `storage_admin.py`, and
   `exchange/master_transfer.py` for rollback, cleanup, corrupted/missing-data, duplicate/conflict,
   and filesystem hazard paths.
-- Workflow/controller: `main_window.py`, `parties/controller.py`, and `code_registry/workspace.py`
-  through narrow command-routing, prompt, worker, and error/no-op seams.
-- Headless dialog workflows: `conversion/dialogs.py`, `works/dialogs.py`,
-  `application_settings_dialog.py`, and `media/equalizer.py` with fake file pickers/prompts and
-  direct widget-state assertions.
+- Workflow/controller: remaining `main_window.py` branches only where they represent meaningful
+  user-decision, guardrail, error/no-op, cleanup, and state-transition behavior.
+- Next recommended milestone per user: target `application_settings_dialog.py` and
+  `media/equalizer.py` together only if the work remains headless-safe with direct widget-state
+  assertions and fake prompts/file pickers.
+- `conversion/dialogs.py`, `works/dialogs.py`, and `parties/controller.py` have already received
+  the Milestone 1, Milestone 2, and Milestone 3 passes.
 - Low-value GUI fallback gaps: paint-only, platform-defensive, WebEngine/media-device, and
   impossible-layout defensive branches should be tracked separately when they are not meaningful
   production-readiness tests.
@@ -4964,3 +4978,343 @@ Recommended next batch:
   recoverability, missing-file, stale-reference, and cleanup warning paths.
 - Batch AM3: return to `main_window.py` through valuable command-routing/controller seams; avoid
   visual fallback or platform-defensive branches that do not alter user-visible workflow behavior.
+
+## Checkpoint 4.39 - Milestone 1 Conversion Dialog Coverage Handoff
+
+Timestamp: `2026-05-26`
+
+Milestone 1 targeted `isrc_manager/conversion/dialogs.py`. The implementation milestone added
+`tests/test_conversion_dialogs_coverage.py` and focused on user-visible conversion dialog workflow
+coverage. No failures were fixed in this milestone.
+
+The starting audit baseline for this milestone was about `85.5058%`. The initial local
+`coverage.json` observed at handoff was stale/partial and reported `16.6670%` before validation
+regenerated it, so the refreshed full-suite report is the authoritative milestone result.
+
+### Coverage delta
+
+Authoritative before baseline from the existing audit:
+
+- Full branch-aware coverage: about `85.5058%`.
+- `isrc_manager/conversion/dialogs.py`: `88.3740%`, with `79` missing lines and `64` missing
+  branches.
+
+Authoritative after baseline from the Milestone 1 full-suite coverage report:
+
+- Full branch-aware coverage: `86.59997212125111%` displayed as `87%`.
+- Statement coverage: `89.7063132193931%` displayed as `90%`.
+- Branch coverage: `76.28555545260818%` displayed as `76%`.
+- `isrc_manager/conversion/dialogs.py`: `95.1219512195122%` displayed as `95%`, with `28`
+  missing lines and `32` missing branches.
+
+Low-value branches were not pursued, specifically paint-only/visual fallback paths and
+impossible-layout defensive branches.
+
+### Validation commands run in this milestone
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_conversion_dialogs_coverage.py --no-cov
+.venv/bin/python -m compileall ISRC_manager.py isrc_manager tests
+.venv/bin/python -m ruff check build.py isrc_manager scripts tests
+.venv/bin/python -m black --check build.py isrc_manager scripts tests
+.venv/bin/python -m mypy
+git diff --check
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=0
+```
+
+Observed result:
+
+- Focused conversion dialog coverage tests: `4 passed in 0.47s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed; `484 files would be left unchanged`.
+- mypy: passed; `Success: no issues found in 29 source files`.
+- Whitespace diff check: passed.
+- Full pytest/coverage with `--cov-fail-under=0`: passed (`2020 passed`, `786 warnings`,
+  `86 subtests passed in 420.13s`; `86.59997212125111%` total branch-aware coverage).
+
+ResourceWarning noise for unclosed SQLite connections was observed in unrelated tests during the
+full coverage run. The warnings did not represent a Milestone 1 failure.
+
+The strict `--cov-fail-under=95` gate remains below target because total branch-aware coverage is
+`86.59997212125111%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining milestone handoff
+
+Remaining named gaps after Milestone 1:
+
+1. `isrc_manager/works/dialogs.py` - `92.91044776119404%` displayed as `93%`.
+2. `isrc_manager/parties/controller.py` - `83.28729281767956%` displayed as `83%`.
+3. `isrc_manager/code_registry/workspace.py` - `96.97309417040358%` displayed as `97%`.
+
+Milestone 2 remains `isrc_manager/works/dialogs.py`. After Milestones 1 and 2 pass, Milestone 3
+should likely prefer `isrc_manager/parties/controller.py` over
+`isrc_manager/code_registry/workspace.py`, because the workspace module is already near `97%` while
+the parties controller still has a materially larger behavioural gap.
+
+## Checkpoint 4.40 - Milestone 2 Works Dialog Coverage Handoff
+
+Timestamp: `2026-05-26`
+
+Milestone 2 targeted `isrc_manager/works/dialogs.py`. The implementation milestone added
+`tests/test_works_dialogs_coverage.py` and focused on headless-safe works dialog behavior. The
+milestone improved the target module while preserving the existing full-suite pass shape under the
+temporary `--cov-fail-under=0` coverage gate.
+
+### Coverage delta
+
+Authoritative before baseline from the Milestone 1 full-suite coverage report:
+
+- Full branch-aware coverage: `86.59997212125111%` displayed as `87%`.
+- `isrc_manager/works/dialogs.py`: `92.91044776119404%` displayed as `93%`, with `40`
+  missing lines and `36` missing branches.
+
+Authoritative after baseline from the Milestone 2 full-suite coverage report:
+
+- Full branch-aware coverage: `86.62141731270306%` displayed as `87%`.
+- Statement coverage: `89.7230554586676%` displayed as `90%`.
+- Branch coverage: `76.32261651070138%` displayed as `76%`.
+- `isrc_manager/works/dialogs.py`: `94.68283582089552%` displayed as `95%`, with `28`
+  missing lines and `29` missing branches.
+
+Low-value branches were not pursued, specifically paint-only/visual fallback paths and
+impossible-layout defensive branches.
+
+### Validation results recorded for this milestone
+
+First validation attempt:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_works_dialogs_coverage.py --no-cov
+```
+
+- Focused works dialog tests: `6 passed in 0.38s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: failed because `tests/test_works_dialogs_coverage.py` would be reformatted.
+- Classification: test-file formatting issue.
+
+Fix Agent formatting commands:
+
+```bash
+.venv/bin/python -m black tests/test_works_dialogs_coverage.py
+.venv/bin/python -m black --check tests/test_works_dialogs_coverage.py
+```
+
+Rerun validation:
+
+- Focused works dialog tests: `6 passed in 0.28s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed; `485 files would be left unchanged`.
+- mypy: passed; `Success: no issues found in 29 source files`.
+- Whitespace diff check: passed.
+- Full pytest/coverage with `--cov=isrc_manager` and `--cov-fail-under=0`: passed
+  (`2026 passed`, `781 warnings`, `86 subtests passed in 408.91s`;
+  `86.62141731270306%` total branch-aware coverage displayed as `87%`).
+
+ResourceWarning noise for unclosed SQLite connections was observed in unrelated tests during the
+full coverage run. The warnings did not represent a Milestone 2 failure.
+
+The strict `--cov-fail-under=95` gate remains below target because total branch-aware coverage is
+`86.62141731270306%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Remaining milestone handoff
+
+Remaining named gaps after Milestone 2:
+
+1. `isrc_manager/parties/controller.py` - `83.28729281767956%` displayed as `83%`, with
+   `68` missing lines and `53` missing branches.
+2. `isrc_manager/code_registry/workspace.py` - `96.97309417040358%` displayed as `97%`, with
+   `10` missing lines and `17` missing branches.
+
+Milestone 3 should likely prefer `isrc_manager/parties/controller.py` because it has larger
+behavioral coverage room. `isrc_manager/code_registry/workspace.py` is already near `97%`.
+
+## Checkpoint 4.41 - Milestone 3 Parties Controller Coverage Handoff
+
+Timestamp: `2026-05-26`
+
+Milestone 3 targeted `isrc_manager/parties/controller.py`. The implementation milestone added
+`tests/test_parties_controller_coverage.py` and focused on controller behavior through safer
+service-backed seams. The target was chosen over `isrc_manager/code_registry/workspace.py` because
+the parties controller had the larger remaining gap and safer behavioral controller seams. Code
+registry workspace was already `96.97309417040358%` displayed as `97%`.
+
+### Coverage delta
+
+Authoritative before baseline from the Milestone 2 full-suite coverage report:
+
+- Full branch-aware coverage: `86.62141731270306%` displayed as `87%`.
+- `isrc_manager/parties/controller.py`: `83.28729281767956%` displayed as `83%`, with `68`
+  missing lines and `53` missing branches.
+
+Authoritative after baseline from the Milestone 3 full-suite coverage report:
+
+- Full branch-aware coverage: `86.70398129979306%` displayed as `87%`.
+- Statement coverage: `89.79420997558424%` displayed as `90%`.
+- Branch coverage: `76.4430649495043%` displayed as `76%`.
+- `isrc_manager/parties/controller.py`: `93.78453038674033%` displayed as `94%`, with `18`
+  missing lines and `27` missing branches.
+
+Final batch summary from the initial audit baseline:
+
+- Full coverage moved from about `85.5058%` to `86.70398129979306%`.
+- `isrc_manager/conversion/dialogs.py` moved from `88.3740%` to `95.1219512195122%`.
+- `isrc_manager/works/dialogs.py` moved from `92.91044776119404%` to
+  `94.68283582089552%`.
+- `isrc_manager/parties/controller.py` moved from `83.28729281767956%` to
+  `93.78453038674033%`.
+
+### Validation results recorded for this milestone
+
+First validation attempt:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_parties_controller_coverage.py --no-cov
+```
+
+- Focused parties controller tests: `7 passed in 0.28s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: failed because `tests/test_parties_controller_coverage.py` would be reformatted.
+- Classification: test-file formatting issue.
+
+Fix Agent formatting commands:
+
+```bash
+.venv/bin/python -m black tests/test_parties_controller_coverage.py
+.venv/bin/python -m black --check tests/test_parties_controller_coverage.py
+```
+
+Rerun validation:
+
+- Focused parties controller tests: `7 passed in 0.26s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed; `486 files would be left unchanged`.
+- mypy: passed; `Success: no issues found in 29 source files`.
+- Whitespace diff check: passed.
+- Full pytest/coverage with `--cov=isrc_manager` and `--cov-fail-under=0`: passed
+  (`2033 passed`, `780 warnings`, `86 subtests passed in 406.78s`;
+  `86.70398129979306%` total branch-aware coverage displayed as `87%`).
+
+ResourceWarning noise for unclosed SQLite connections was observed in unrelated tests during the
+full coverage run. The warnings did not represent a Milestone 3 failure.
+
+The strict `--cov-fail-under=95` gate remains below target because total branch-aware coverage is
+`86.70398129979306%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added.
+
+### Final batch handoff
+
+Remaining gaps after Milestone 3:
+
+- The strict 95% gate is still not met; total coverage remains `86.70398129979306%`.
+- `isrc_manager/code_registry/workspace.py` remains high at `96.97309417040358%`, displayed as
+  `97%`.
+- Follow-up should continue risk-based targets rather than paint-only/visual fallback or
+  impossible-layout branches.
+
+## Checkpoint 4.42 - Milestone 4 Main Window Coverage Handoff
+
+Timestamp: `2026-05-27`
+
+Milestone 4 targeted `isrc_manager/main_window.py`. The implementation milestone expanded
+`tests/test_main_window_helpers.py` and stayed on headless-safe workflow seams rather than
+full-window brittle UI automation or visual/platform fallback branches.
+
+### Coverage delta
+
+Authoritative before baseline from the Milestone 3 full-suite coverage report:
+
+- Full branch-aware coverage: `86.70398129979306%` displayed as `87%`.
+- `isrc_manager/main_window.py`: `92.47943595769682%` displayed as `92%`, with `256`
+  missing lines and `192` missing branches.
+
+Authoritative after baseline from the Milestone 4 full-suite coverage report:
+
+- Full branch-aware coverage: `86.73722134654358%` displayed as `87%`.
+- Statement coverage: `89.82211370770841%` displayed as `90%`.
+- Branch coverage: `76.49402390438247%` displayed as `76%`.
+- `isrc_manager/main_window.py`: `92.96625818364949%` displayed as `93%`, with `237`
+  missing lines and `182` missing branches.
+
+Tests added or expanded in `tests/test_main_window_helpers.py`:
+
+- delete workflow guard, cancel, success, and error callbacks.
+- successful shutdown cleanup.
+- post-ready startup task routing guard.
+- first-launch settings prompt decision branches.
+- diagnostics routing.
+- bulk media attach guardrails.
+
+### Validation results recorded for this milestone
+
+First validation attempt:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_main_window_helpers.py --no-cov
+```
+
+- Focused main-window helper tests: `34 passed in 1.98s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: failed because `tests/test_main_window_helpers.py` would be reformatted.
+- Classification: test-file formatting issue.
+
+Fix Agent formatting commands:
+
+```bash
+.venv/bin/python -m black tests/test_main_window_helpers.py
+.venv/bin/python -m black --check tests/test_main_window_helpers.py
+```
+
+Rerun validation:
+
+- Focused main-window helper tests: `34 passed in 1.66s`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed; `486 files would be left unchanged`.
+- mypy: passed; `Success: no issues found in 29 source files`.
+- Whitespace diff check: passed.
+
+Full coverage command:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  --cov=isrc_manager \
+  --cov-branch \
+  --cov-report=term-missing \
+  --cov-report=html \
+  --cov-report=json \
+  --cov-fail-under=0
+```
+
+- Result: passed (`2037 passed`, `779 warnings`, `86 subtests passed in 425.32s`;
+  `86.73722134654358%` total branch-aware coverage displayed as `87%`).
+
+ResourceWarning noise for unclosed SQLite connections was observed in unrelated app shell catalog
+tests during the full coverage run. The warnings did not represent a Milestone 4 failure.
+
+The strict `--cov-fail-under=95` gate remains below target because total branch-aware coverage is
+`86.73722134654358%`, not because of a test failure. Coverage measurement remains scoped to
+`--cov=isrc_manager` only; no uppercase `--cov=ISRC_manager` target was added, and the strict
+95% gate was not weakened.
+
+### Final batch handoff
+
+Remaining gaps after Milestone 4:
+
+- The strict 95% gate is still not met; total coverage remains `86.73722134654358%`.
+- `isrc_manager/main_window.py` still has meaningful remaining workflow gaps, but Milestone 4
+  intentionally avoided full-window brittle UI automation and visual/platform fallback branches.
+- Next recommended milestone per user: target `application_settings_dialog.py` and
+  `media/equalizer.py` together only if the work remains headless-safe with direct widget-state
+  assertions and fake prompts/file pickers.
+- Current `isrc_manager/application_settings_dialog.py` evidence: `95.96700274977086%`
+  displayed as `96%`, with `23` missing lines and `21` missing branches.
+- Current `isrc_manager/media/equalizer.py` evidence: `96.30872483221476%` displayed as
+  `96%`, with `15` missing lines and `18` missing branches.
