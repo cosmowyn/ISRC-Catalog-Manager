@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from openpyxl import load_workbook
 from PySide6.QtCore import QSettings
@@ -516,7 +517,7 @@ class PartyExchangeServiceTests(unittest.TestCase):
         self.assertEqual(merged.company_name, "Merged Company")
         self.assertEqual(list(merged.artist_aliases), ["Existing Alias", "New Alias"])
 
-        with unittest.mock.patch.object(
+        with mock.patch.object(
             self.party_service,
             "create_party",
             side_effect=RuntimeError("write failed"),
