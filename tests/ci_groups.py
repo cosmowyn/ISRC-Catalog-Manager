@@ -67,6 +67,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_repertoire_status_service",
         "tests.test_release_automation",
         "tests.test_standard_field_specs",
+        "tests.test_sync_version_docs",
         "tests.test_selection_scope",
         "tests.test_tag_service",
         "tests.test_tags_catalog_mapping",
