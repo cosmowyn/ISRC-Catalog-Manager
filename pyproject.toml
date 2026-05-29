@@ -33,12 +33,12 @@ build = [
   "pyinstaller==6.20.0",
 ]
 dev = [
-  "black==26.3.1",
-  "coverage[toml]==7.14.0",
+  "black==26.5.1",
+  "coverage[toml]==7.14.1",
   "pytest==9.0.3",
-  "pytest-cov==6.2.0",
+  "pytest-cov==7.1.0",
   "mypy==2.1.0",
-  "ruff==0.15.14",
+  "ruff==0.15.15",
 ]
 security = [
   "pip-audit==2.10.0",
