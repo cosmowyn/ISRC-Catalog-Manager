@@ -1,7 +1,7 @@
 {
-  "version": "4.0.1",
+  "version": "4.0.0",
   "released_at": "2026-05-29",
-  "summary": "Release 4.0.0 SoundCloud publishing overhaul",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.1.md",
+  "summary": "SoundCloud publishing, secure credential storage, metadata sync, and quality-gate release",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.0.md",
   "minimum_supported_version": null
 }
