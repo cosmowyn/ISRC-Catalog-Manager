@@ -117,7 +117,7 @@ def _catalog_table_column_specs_for_fields(
         header_text = str(field.get("name") or "").strip() or f"Custom {field_index + 1}"
         try:
             field_id = int(field.get("id"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             field_id = None
         logical_index = len(app.BASE_HEADERS) + field_index
         column_key = (
@@ -195,8 +195,7 @@ def _catalog_combo_values_from_connection(
     ]
     if callable(progress_callback):
         progress_callback(2, 5, "Loaded Album lookup values.")
-    combo_values["upcs"] = _values(
-        """
+    combo_values["upcs"] = _values("""
             SELECT value
             FROM (
                 SELECT upc AS value
@@ -208,8 +207,7 @@ def _catalog_combo_values_from_connection(
                 WHERE upc IS NOT NULL AND upc != ''
             )
             ORDER BY value
-            """
-    )
+            """)
     if callable(progress_callback):
         progress_callback(3, 5, "Loaded UPC lookup values.")
     combo_values["genres"] = [
@@ -220,8 +218,7 @@ def _catalog_combo_values_from_connection(
     ]
     if callable(progress_callback):
         progress_callback(4, 5, "Loaded Genre lookup values.")
-    combo_values["catalog_numbers"] = _values(
-        """
+    combo_values["catalog_numbers"] = _values("""
             SELECT value
             FROM (
                 SELECT catalog_number AS value
@@ -233,8 +230,7 @@ def _catalog_combo_values_from_connection(
                 WHERE catalog_number IS NOT NULL AND catalog_number != ''
             )
             ORDER BY value
-            """
-    )
+            """)
     if callable(progress_callback):
         progress_callback(5, 5, "Loaded catalog number lookup values.")
     return combo_values
@@ -295,7 +291,7 @@ def _selected_search_column_key(app) -> str | None:
         return data
     try:
         logical_index = int(data)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     model = app.table.model()
     if model is None or logical_index < 0 or logical_index >= model.columnCount():
@@ -1058,7 +1054,7 @@ def _clear_catalog_table_model(app) -> None:
 def _sort_catalog_table(app, column: int | None, order: Qt.SortOrder) -> None:
     try:
         sort_column = int(column if column is not None else 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         sort_column = 0
     if 0 <= sort_column < app._catalog_view_column_count():
         app.table.sortByColumn(sort_column, order)

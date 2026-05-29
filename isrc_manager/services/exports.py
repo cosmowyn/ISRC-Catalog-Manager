@@ -235,14 +235,12 @@ class XMLExportService:
         if not track_ids:
             return custom_by_track
 
-        defs = self.conn.execute(
-            """
+        defs = self.conn.execute("""
             SELECT id, name, field_type
             FROM CustomFieldDefs
             WHERE active=1
             ORDER BY COALESCE(sort_order, 999999), name
-            """
-        ).fetchall()
+            """).fetchall()
         defmap = {
             field_id: {"name": name, "field_type": field_type}
             for field_id, name, field_type in defs

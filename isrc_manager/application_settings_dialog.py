@@ -71,6 +71,12 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
 )
+from isrc_manager.integrations.soundcloud.ui import (
+    NullSoundCloudConnectionActions,
+    SoundCloudConnectionActions,
+    SoundCloudSettingsPanel,
+    SoundCloudSettingsSnapshot,
+)
 from isrc_manager.parties import (
     PartyRecord,
     PartyService,
@@ -187,6 +193,8 @@ class ApplicationSettingsDialog(
         ),
         owner_party_settings: OwnerPartySettings | None = None,
         party_service: PartyService | None = None,
+        soundcloud_settings: SoundCloudSettingsSnapshot | None = None,
+        soundcloud_actions: SoundCloudConnectionActions | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -907,6 +915,16 @@ class ApplicationSettingsDialog(
         gs1_layout.addStretch(1)
         self._gs1_tab_index = self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
 
+        self.soundcloud_panel = SoundCloudSettingsPanel(
+            snapshot=soundcloud_settings or SoundCloudSettingsSnapshot(),
+            actions=soundcloud_actions
+            or NullSoundCloudConnectionActions(soundcloud_settings or SoundCloudSettingsSnapshot()),
+            parent=self,
+        )
+        self._soundcloud_tab_index = self.tabs.addTab(
+            self._wrap_tab_page(self.soundcloud_panel), "SoundCloud"
+        )
+
         theme_page = QWidget(self)
         self.theme_page = theme_page
         theme_page.setProperty("role", "workspaceCanvas")
@@ -1109,6 +1127,15 @@ class ApplicationSettingsDialog(
             "gs1_product_classification": (
                 self._gs1_tab_index,
                 self.gs1_product_classification_edit,
+            ),
+            "soundcloud": (self._soundcloud_tab_index, self.soundcloud_panel.client_id_edit),
+            "soundcloud_client_id": (
+                self._soundcloud_tab_index,
+                self.soundcloud_panel.client_id_edit,
+            ),
+            "soundcloud_redirect_uri": (
+                self._soundcloud_tab_index,
+                self.soundcloud_panel.redirect_uri_edit,
             ),
             "theme_font_family": (self._theme_tab_index, self.theme_font_family_combo),
             "theme_font_size": (self._theme_tab_index, self.theme_font_size_spin),
@@ -1801,6 +1828,7 @@ class ApplicationSettingsDialog(
             "theme_settings": theme_values,
             "theme_library": dict(self._stored_themes),
             "blob_icon_settings": blob_icon_values,
+            **self.soundcloud_panel.values(),
         }
 
     def _accept_if_valid(self):

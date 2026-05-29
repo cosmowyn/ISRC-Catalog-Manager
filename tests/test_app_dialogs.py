@@ -33,6 +33,7 @@ from isrc_manager.app_dialogs import (
     PAYPAL_DONATE_URL,
     AboutDialog,
     ActionRibbonDialog,
+    ApplicationLogDialog,
     ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
@@ -370,6 +371,22 @@ class _AboutDialogHost(QWidget):
         return 77
 
 
+class _ApplicationLogDialogHost(QWidget):
+    def __init__(self, log_files: list[Path]):
+        super().__init__()
+        self.logs_dir = log_files[0].parent if log_files else Path("/tmp/test-logs")
+        self._log_files = list(log_files)
+
+    def _available_log_files(self):
+        return list(self._log_files)
+
+    def _read_log_for_viewer(self, path: Path):
+        return path.read_text(encoding="utf-8")
+
+    def _open_local_path(self, path, _title):
+        return Path(path).exists()
+
+
 class AppDialogsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -400,6 +417,21 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(requests[-1].source, "AboutDialog.donate")
         finally:
             dialog.close()
+
+    def test_application_log_dialog_can_open_latest_trace_log(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            trace_path = root / "isrc_manager_trace_today.jsonl"
+            app_path = root / "isrc_manager_today.log"
+            trace_path.write_text('{"event":"latest.trace"}\n', encoding="utf-8")
+            app_path.write_text("newer application log\n", encoding="utf-8")
+            host = _ApplicationLogDialogHost([app_path, trace_path])
+            dialog = ApplicationLogDialog(host, prefer_trace=True, scroll_to_latest=True)
+            try:
+                self.assertEqual(Path(dialog.log_combo.currentData()), trace_path)
+                self.assertIn("latest.trace", dialog.contents_edit.toPlainText())
+            finally:
+                dialog.close()
             host.close()
             clear_recorded_external_launches()
 

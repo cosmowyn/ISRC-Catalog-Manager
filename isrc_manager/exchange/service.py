@@ -328,8 +328,7 @@ class ExchangeService:
                 payload_kwargs[field_name] = clean_value
 
     def _release_columns_for_track_rows(self) -> dict[int, dict[str, object]]:
-        release_rows = self.conn.execute(
-            """
+        release_rows = self.conn.execute("""
             SELECT
                 rt.track_id,
                 r.id,
@@ -357,8 +356,7 @@ class ExchangeService:
             FROM ReleaseTracks rt
             JOIN Releases r ON r.id = rt.release_id
             ORDER BY rt.track_id, rt.sequence_number, rt.release_id
-            """
-        ).fetchall()
+            """).fetchall()
         by_track: dict[int, list[dict[str, object]]] = {}
         for row in release_rows:
             by_track.setdefault(int(row[0]), []).append(
@@ -395,12 +393,10 @@ class ExchangeService:
 
     def _custom_field_maps(self) -> tuple[list[dict], dict[tuple[int, int], str]]:
         defs = self.custom_fields.list_active_fields()
-        value_rows = self.conn.execute(
-            """
+        value_rows = self.conn.execute("""
             SELECT track_id, field_def_id, value
             FROM CustomFieldValues
-            """
-        ).fetchall()
+            """).fetchall()
         value_map = {
             (int(track_id), int(field_def_id)): ("" if value is None else str(value))
             for track_id, field_def_id, value in value_rows

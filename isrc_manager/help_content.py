@@ -50,6 +50,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "background tasks",
             "threading",
             "bandcamp promo codes",
+            "soundcloud",
+            "publishing",
+            "oauth",
+            "keychain",
         ),
         content_html="""
         <p><strong>Music Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
@@ -70,6 +74,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
           <li><strong>Docked catalog workspace</strong>: code registry, promo-code ledger, release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
           <li><strong>Import, exchange, and conversion</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, Bandcamp promo-code, template conversion, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, filling external templates, attaching media, exporting it, and archiving it safely.</li>
+          <li><strong>SoundCloud publishing</strong>: private-by-default SoundCloud upload, update, and existing-upload linking workflows are prepared from catalog metadata, reviewed in a manual preflight, and keep OAuth secrets out of SQLite and normal settings.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
@@ -104,6 +109,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
           <li><strong>Tabbed catalog tools</strong>: Code Registry Workspace, Promo Code Ledger, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Publishing entry points</strong>: <strong>Catalog &gt; Publish &gt; SoundCloud…</strong> and catalog-table context menus open the SoundCloud preflight workflow without bypassing manual review.</li>
           <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup lives with Diagnostics so integrity review and cleanup follow-up stay together.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
@@ -172,7 +178,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Edit Row Heights</strong>: <code>Ctrl+Alt+H</code> / <code>Cmd+Option+H</code></li>
           <li><strong>Manage Custom Columns</strong>: <code>Ctrl+Alt+Shift+M</code> / <code>Cmd+Option+Shift+M</code></li>
         </ul>
-        <p>Some actions intentionally stay menu-only or context-menu-only. That usually means the action is highly local to the current selection, already has a direct manipulation gesture such as double-click, or would require a shortcut that conflicts with a more important global workflow.</p>
+        <p>Some actions intentionally stay menu-only or context-menu-only. That usually means the action is highly local to the current selection, already has a direct manipulation gesture such as double-click, would require a shortcut that conflicts with a more important global workflow, or requires a deliberate review step such as SoundCloud publishing.</p>
         """,
     ),
     HelpChapter(
@@ -305,6 +311,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Zoom</strong>: use the table zoom slider, Ctrl/Cmd + wheel, or supported pinch gestures to change density without reloading data.</li>
           <li><strong>Double click</strong>: edit a standard row, or open file pickers directly for standard media columns such as Audio File and Album Art.</li>
           <li><strong>Multi-row selection</strong>: select multiple rows and press <strong>Ctrl/Cmd+Shift+Space</strong>, open <strong>Edit Selected</strong>, or use the context menu to launch bulk edit for the current batch.</li>
+          <li><strong>SoundCloud publish review</strong>: right-click a selected track and choose <strong>Publish to SoundCloud…</strong>, or use <strong>Catalog &gt; Publish &gt; SoundCloud…</strong>, to open the manual SoundCloud preflight workflow for the selected rows.</li>
           <li><strong>Context menu and shortcuts</strong>: preview media, copy values, open GS1 metadata, and edit/delete the current selection. Right-clicking inside an existing multi-row selection keeps that batch selected.</li>
         </ul>
         <p>Table layout, column widths, ordering, visibility, and catalog zoom are remembered so the browser can feel tailored to your workflow rather than generic.</p>
@@ -806,6 +813,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "retention",
             "storage budget",
             "smart budget",
+            "soundcloud settings",
+            "keychain",
+            "session-only",
         ),
         content_html="""
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
@@ -813,6 +823,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
           <li><strong>Sounds</strong>: app-wide sound controls for startup, completed-action notices, and warnings. Each bundled sound can be switched on or off independently.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
+          <li><strong>SoundCloud</strong>: safe connection settings for client id, redirect URI, write-only client secret replacement, connection status, OS keychain/keyring availability, session-only fallback state, and Connect, Refresh connection, and Disconnect actions. Stored secrets and OAuth callback query strings are never displayed.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
         <p>The <strong>Settings</strong> menu also includes <strong>Export Settings…</strong> and <strong>Import Settings…</strong> for portable migration. That ZIP bundle contains a JSON settings payload for the General, Sounds, GS1, and Theme areas plus any bundled exportable assets such as the stored GS1 workbook, stored GTIN contracts CSV, and the current application icon when that file is available.</p>
@@ -988,6 +999,109 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
+        chapter_id="soundcloud-publishing",
+        title="SoundCloud Publishing",
+        summary="Prepare, link, upload, update, compare, and review SoundCloud publications safely from catalog tracks.",
+        keywords=(
+            "soundcloud",
+            "publish",
+            "publishing",
+            "oauth",
+            "keychain",
+            "token storage",
+            "session-only",
+            "preflight",
+            "track picker",
+            "metadata comparison",
+            "publish history",
+            "private",
+            "watermarked wav",
+            "remote_urn",
+            "link existing upload",
+        ),
+        content_html="""
+        <p>The SoundCloud workflow is a manual publishing and update surface for catalog tracks. It is designed to make publishing safe, explicit, and reversible in the catalog record without exposing credentials or skipping preflight review.</p>
+        <h3>Opening the workflow</h3>
+        <ul>
+          <li><strong>Menu path</strong>: use <strong>Catalog &gt; Publish &gt; SoundCloud…</strong> to review the currently selected catalog tracks.</li>
+          <li><strong>Catalog context menu</strong>: right-click a selected track and choose <strong>Publish to SoundCloud…</strong> to open the same review dialog for that selection.</li>
+          <li><strong>Track picker</strong>: use <strong>Choose tracks…</strong> when you want to browse the whole catalog in a separate window. The picker uses checkboxes, filtering, and sorting, including album-oriented browsing, so the publish dialog itself stays uncluttered.</li>
+          <li><strong>Album selection</strong>: use <strong>Use album selection</strong> when the app can safely infer the album-derived set from the current track context.</li>
+        </ul>
+        <h3>Connection and secret handling</h3>
+        <ul>
+          <li><strong>Settings shortcut</strong>: <strong>SoundCloud Settings…</strong> opens Application Settings directly on the SoundCloud tab.</li>
+          <li><strong>Safe settings</strong>: normal settings may store the client id and redirect URI. Client secret, access token, refresh token, auth code, authorization headers, and full OAuth callback URLs are never shown back to the user, stored in SQLite, or written to normal settings.</li>
+          <li><strong>OS keychain/keyring</strong>: when a safe backend is available, SoundCloud credentials and token bundles are stored in the operating system keychain/keyring.</li>
+          <li><strong>Session-only fallback</strong>: if no safe keychain/keyring is available, the app uses in-memory session-only storage and clearly reports that reconnect is required after restart.</li>
+          <li><strong>Disconnect</strong>: disconnect clears local SoundCloud token and client-secret state and marks the account disconnected. It does not delete catalog tracks, publication history, or existing SoundCloud uploads.</li>
+        </ul>
+        <h3>Preflight review</h3>
+        <ul>
+          <li><strong>Readiness table</strong>: the dialog shows track title, operation, metadata readiness, audio/artwork readiness, warnings, blocking errors, planned sharing state, and known remote publication status.</li>
+          <li><strong>Blocking errors</strong>: disconnected accounts, missing titles, missing primary audio, explicit quota exhaustion, oversized audio, and invalid media conditions block publishing until fixed.</li>
+          <li><strong>Warnings</strong>: quota uncertainty, rate-limit state, release-date conflicts, metadata conflicts, unsupported optional fields, omitted internal notes, or unclear update eligibility are shown without hiding the plan.</li>
+          <li><strong>Safe defaults</strong>: sharing defaults to <strong>private</strong>, downloadable remains <strong>false</strong>, and streamable remains <strong>true</strong>.</li>
+        </ul>
+        <h3>Metadata sent to SoundCloud</h3>
+        <ul>
+          <li><strong>Core fields</strong>: title and the prepared audio file are required. Supported optional fields include genre, ISRC, release date, artwork, label name, release title, album title, description, tag list, purchase URL, artist, publisher, composer, barcode/UPC/EAN, ISWC, P line, contains music, explicit-content status, and supported per-run permission flags.</li>
+          <li><strong>Editable review</strong>: description, tags, buy link, label, release, explicit-content, contains-music, comment, reveal, and related fields can be reviewed or edited in the publish/update flow where the UI exposes them.</li>
+          <li><strong>Unsupported fields</strong>: the app avoids sending fields that are not accepted by the supported SoundCloud request schema and warns when a requested value cannot be written through the current API path.</li>
+          <li><strong>Private catalog notes</strong>: internal comments, contracts, rights notes, QA notes, private notes, credentials, and callback details are never published.</li>
+        </ul>
+        <h3>Audio, artwork, and upload execution</h3>
+        <ul>
+          <li><strong>Embedded or managed media</strong>: SoundCloud publishing can resolve audio and artwork from database-stored BLOBs or managed local files, matching the same catalog media model used by preview and export workflows.</li>
+          <li><strong>Watermarked WAV upload</strong>: create uploads are prepared through the managed export path and upload only a watermarked WAV derivative. The clean source audio remains in the catalog and is not sent directly to SoundCloud.</li>
+          <li><strong>Artwork</strong>: unambiguous JPEG, PNG, or GIF artwork can be sent when it is resolved from the track, album, or release context.</li>
+          <li><strong>Background worker</strong>: publishing runs through the background-task-compatible execution service. Cancellation and per-track item status stay visible, and one failed item should not corrupt other publish records.</li>
+          <li><strong>Publish history</strong>: <strong>Publish history</strong> shows persisted SoundCloud runs and item outcomes, including succeeded, failed, skipped, and in-progress states.</li>
+        </ul>
+        <h3>Updates and existing uploads</h3>
+        <ul>
+          <li><strong>Canonical remote link</strong>: the app stores the SoundCloud <code>remote_urn</code> as the canonical remote identifier for update decisions, with the public SoundCloud link retained as non-secret publication state.</li>
+          <li><strong>No audio replacement on update</strong>: update plans do not replace audio. They update supported metadata for the linked SoundCloud track.</li>
+          <li><strong>Link existing uploads</strong>: use the matching/linking workflow to connect catalog tracks to SoundCloud uploads that existed before this app published them.</li>
+          <li><strong>Remote browser</strong>: the richer matching browser can list existing SoundCloud uploads so you do not need to paste an id or URL manually when browsing is available.</li>
+          <li><strong>Metadata comparison</strong>: before an update, the comparison window shows catalog values beside current SoundCloud values and marks fields that differ.</li>
+        </ul>
+        <h3>Troubleshooting</h3>
+        <ul>
+          <li><strong>Redacted errors</strong>: upload and OAuth errors are redacted before they appear in UI text, logs, or stored run records.</li>
+          <li><strong>Application logs</strong>: use <strong>Help &gt; Application Log…</strong> when an error button or troubleshooting prompt asks you to inspect the most recent trace entry.</li>
+          <li><strong>Rate limits</strong>: known SoundCloud rate-limit state is shown as a warning or error depending on whether the remaining quota is uncertain or explicitly exhausted.</li>
+        </ul>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="application-storage-admin",
+        title="Application Storage Admin",
+        summary="Inspect and safely clean application-wide retained storage without touching active catalog data.",
+        keywords=(
+            "application storage",
+            "storage admin",
+            "cleanup",
+            "retained files",
+            "updates",
+            "logs",
+            "snapshots",
+            "data folder",
+            "safe delete",
+        ),
+        content_html="""
+        <p><strong>Help &gt; Application Storage Admin…</strong> opens the maintenance surface for application-wide retained storage. It is separate from profile diagnostics because it focuses on app support folders rather than editing catalog metadata.</p>
+        <ul>
+          <li><strong>What it is for</strong>: review retained update staging files, support artifacts, stale retained storage, logs, snapshots, or other app-level files that can accumulate outside the active catalog table workflow.</li>
+          <li><strong>Preview before cleanup</strong>: use the review surface to understand what will be removed before confirming any cleanup action.</li>
+          <li><strong>Active-profile safety</strong>: the tool is intended to protect the currently active profile database and its referenced managed media. Use profile diagnostics and backups for profile-specific repair decisions.</li>
+          <li><strong>Do not manually delete catalog media</strong>: if a file is referenced by a catalog record, use the app's managed media, diagnostics, or conversion workflows instead of deleting it directly from the data folder.</li>
+          <li><strong>Support workflow</strong>: pair Storage Admin with <strong>Application Log</strong>, <strong>Diagnostics</strong>, and <strong>Open Data Folder</strong> when troubleshooting app storage pressure or update leftovers.</li>
+        </ul>
+        <p>Storage Admin is deliberately conservative. It exists to make cleanup understandable, not to hide destructive file operations behind a single mystery button.</p>
+        """,
+    ),
+    HelpChapter(
         chapter_id="about",
         title="About and Support Information",
         summary="Where to find version information, local support resources, and the built-in tools that help you trust the current workspace.",
@@ -999,6 +1113,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>About Music Catalog Manager…</strong> for version and workspace context.</li>
           <li><strong>Check for Updates…</strong> for a manual update check. See <strong>Application Updates</strong> for the full update, install-helper, and troubleshooting workflow.</li>
           <li><strong>Diagnostics…</strong> for profile health checks and repair paths.</li>
+          <li><strong>Application Storage Admin…</strong> for app-level retained storage review and safe cleanup.</li>
           <li><strong>Application Log…</strong> for readable and structured troubleshooting logs.</li>
           <li><strong>Open Logs Folder…</strong> and <strong>Open Data Folder…</strong> for direct access to local support files.</li>
         </ul>
@@ -1030,6 +1145,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "code-registry": "Daily Workflows",
     "promo-code-ledger": "Daily Workflows",
     "media-preview": "Daily Workflows",
+    "soundcloud-publishing": "Daily Workflows",
     "repertoire-knowledge": "Deep Dives",
     "storage-modes": "Deep Dives",
     "exchange-formats": "Deep Dives",
@@ -1044,6 +1160,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "history": "Operations & Recovery",
     "diagnostics": "Operations & Recovery",
     "application-log": "Operations & Recovery",
+    "application-storage-admin": "Operations & Recovery",
     "application-updates": "Operations & Recovery",
     "settings": "Settings & Reference",
     "theme-settings": "Settings & Reference",
@@ -1090,26 +1207,22 @@ def render_help_html(
             )
             for keyword in chapter.keywords:
                 keyword_map.setdefault(keyword.lower(), []).append(chapter)
-            chapter_blocks.append(
-                f"""
+            chapter_blocks.append(f"""
                 <section class='chapter' id='{escape(chapter.chapter_id)}'>
                   <p class='section-label'>{escape(section_title)}</p>
                   <h2>{escape(chapter.title)}</h2>
                   <p class='summary'>{escape(chapter.summary)}</p>
                   {chapter.content_html}
                 </section>
-                """
-            )
-        toc_sections.append(
-            f"""
+                """)
+        toc_sections.append(f"""
             <section class="toc-section">
               <h3>{escape(section_title)}</h3>
               <ol>
                 {"".join(items)}
               </ol>
             </section>
-            """
-        )
+            """)
 
     keyword_rows = []
     for keyword in sorted(keyword_map):

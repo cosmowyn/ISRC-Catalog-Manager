@@ -165,8 +165,7 @@ class QualityDashboardService:
             track_alias="t",
             artist_alias="main_artist",
         )
-        rows = self.conn.execute(
-            f"""
+        rows = self.conn.execute(f"""
             SELECT
                 t.id,
                 COALESCE(t.track_title, ''),
@@ -182,8 +181,7 @@ class QualityDashboardService:
             FROM Tracks t
             {main_artist_join_sql}
             ORDER BY t.id
-            """
-        ).fetchall()
+            """).fetchall()
         for (
             track_id,
             title,
@@ -278,15 +276,13 @@ class QualityDashboardService:
                     )
                 )
 
-        duplicate_rows = self.conn.execute(
-            """
+        duplicate_rows = self.conn.execute("""
             SELECT isrc, GROUP_CONCAT(id, ',')
             FROM Tracks
             WHERE isrc IS NOT NULL AND trim(isrc) != ''
             GROUP BY isrc
             HAVING COUNT(*) > 1
-            """
-        ).fetchall()
+            """).fetchall()
         for isrc, ids in duplicate_rows:
             for track_id in [int(value) for value in str(ids or "").split(",") if value]:
                 issues.append(
@@ -304,8 +300,7 @@ class QualityDashboardService:
 
     def _release_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 id,
                 COALESCE(title, ''),
@@ -317,8 +312,7 @@ class QualityDashboardService:
                 COALESCE(barcode_validation_status, '')
             FROM Releases
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         for (
             release_id,
             title,
@@ -465,8 +459,7 @@ class QualityDashboardService:
                         )
                     )
 
-        duplicate_upc_rows = self.conn.execute(
-            """
+        duplicate_upc_rows = self.conn.execute("""
             SELECT
                 upc,
                 GROUP_CONCAT(id, ','),
@@ -476,8 +469,7 @@ class QualityDashboardService:
             WHERE upc IS NOT NULL AND trim(upc) != ''
             GROUP BY upc
             HAVING COUNT(*) > 1
-            """
-        ).fetchall()
+            """).fetchall()
         for upc, ids, titles, release_types in duplicate_upc_rows:
             release_ids = [int(value) for value in str(ids or "").split(",") if value]
             release_titles = str(titles or "").split(chr(31))
@@ -564,8 +556,7 @@ class QualityDashboardService:
 
     def _media_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
-        track_rows = self.conn.execute(
-            """
+        track_rows = self.conn.execute("""
             SELECT
                 id,
                 COALESCE(audio_file_path, ''),
@@ -576,8 +567,7 @@ class QualityDashboardService:
                 CASE WHEN album_art_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Tracks
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         for (
             track_id,
             audio_path,
@@ -618,8 +608,7 @@ class QualityDashboardService:
                         )
                     )
 
-        release_rows = self.conn.execute(
-            """
+        release_rows = self.conn.execute("""
             SELECT
                 id,
                 COALESCE(artwork_path, ''),
@@ -627,8 +616,7 @@ class QualityDashboardService:
                 CASE WHEN artwork_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Releases
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         for release_id, artwork_path, storage_mode, blob_present in release_rows:
             clean_path = str(artwork_path or "").strip()
             if not clean_path or self.data_root is None:
@@ -660,14 +648,12 @@ class QualityDashboardService:
 
     def _ordering_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
-        duplicate_order_rows = self.conn.execute(
-            """
+        duplicate_order_rows = self.conn.execute("""
             SELECT release_id, disc_number, track_number, GROUP_CONCAT(track_id, ',')
             FROM ReleaseTracks
             GROUP BY release_id, disc_number, track_number
             HAVING COUNT(*) > 1
-            """
-        ).fetchall()
+            """).fetchall()
         for release_id, disc_number, track_number, track_ids in duplicate_order_rows:
             for track_id in [int(value) for value in str(track_ids or "").split(",") if value]:
                 issues.append(
@@ -683,15 +669,13 @@ class QualityDashboardService:
                     )
                 )
 
-        missing_placement_rows = self.conn.execute(
-            """
+        missing_placement_rows = self.conn.execute("""
             SELECT t.id
             FROM Tracks t
             LEFT JOIN ReleaseTracks rt ON rt.track_id = t.id
             WHERE t.album_id IS NOT NULL
               AND rt.track_id IS NULL
-            """
-        ).fetchall()
+            """).fetchall()
         for (track_id,) in missing_placement_rows:
             issues.append(
                 QualityIssue(
@@ -708,14 +692,12 @@ class QualityDashboardService:
 
     def _custom_field_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, name, field_type, options
             FROM CustomFieldDefs
             WHERE active=1
             ORDER BY COALESCE(sort_order, 999999), id
-            """
-        ).fetchall()
+            """).fetchall()
         for field_id, name, field_type, options in rows:
             try:
                 parsed_options = json.loads(str(options)) if options not in (None, "") else None
@@ -872,15 +854,13 @@ class QualityDashboardService:
                     )
                 )
 
-        duplicate_rows = self.conn.execute(
-            """
+        duplicate_rows = self.conn.execute("""
             SELECT iswc, GROUP_CONCAT(id, ',')
             FROM Works
             WHERE iswc IS NOT NULL AND trim(iswc) != ''
             GROUP BY iswc
             HAVING COUNT(*) > 1
-            """
-        ).fetchall()
+            """).fetchall()
         for iswc, ids in duplicate_rows:
             for work_id in [int(value) for value in str(ids or "").split(",") if value]:
                 issues.append(
@@ -893,8 +873,7 @@ class QualityDashboardService:
                         work_id,
                     )
                 )
-        track_rows = self.conn.execute(
-            """
+        track_rows = self.conn.execute("""
             SELECT id, track_title
             FROM Tracks
             WHERE (
@@ -907,8 +886,7 @@ class QualityDashboardService:
                   SELECT 1 FROM Works w WHERE w.id = Tracks.work_id
               )
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         for track_id, title in track_rows:
             issues.append(
                 QualityIssue(
@@ -1065,8 +1043,7 @@ class QualityDashboardService:
                     deadline.contract_id,
                 )
             )
-        expired_rows = self.conn.execute(
-            """
+        expired_rows = self.conn.execute("""
             SELECT id, title, end_date
             FROM Contracts
             WHERE status='active'
@@ -1074,8 +1051,7 @@ class QualityDashboardService:
               AND trim(end_date) != ''
               AND end_date < date('now')
             ORDER BY end_date
-            """
-        ).fetchall()
+            """).fetchall()
         for contract_id, title, end_date in expired_rows:
             issues.append(
                 QualityIssue(
@@ -1152,15 +1128,13 @@ class QualityDashboardService:
             ("Tracks", "track", "track_title", "repertoire_status"),
             ("Releases", "release", "title", "repertoire_status"),
         ):
-            rows = self.conn.execute(
-                f"""
+            rows = self.conn.execute(f"""
                 SELECT id, COALESCE({title_column}, ''), COALESCE({status_column}, ''), metadata_complete
                 FROM {table_name}
                 WHERE COALESCE({status_column}, '') IN ('blocked', 'metadata_incomplete')
                    OR metadata_complete = 0
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             for entity_id, title, status, metadata_complete in rows:
                 issues.append(
                     QualityIssue(

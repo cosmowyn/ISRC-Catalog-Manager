@@ -147,8 +147,7 @@ def _run_diagnostics_repair(app, repair_key: str, check: dict | None = None) -> 
             raise RuntimeError("Could not determine the custom field reference column.")
         before_count = app._count_orphaned_custom_values()
         with app.conn:
-            app.conn.execute(
-                f"""
+            app.conn.execute(f"""
                 DELETE FROM CustomFieldValues
                 WHERE NOT EXISTS (
                     SELECT 1 FROM CustomFieldDefs cfd WHERE cfd.id = CustomFieldValues.{field_column}
@@ -156,8 +155,7 @@ def _run_diagnostics_repair(app, repair_key: str, check: dict | None = None) -> 
                 OR NOT EXISTS (
                     SELECT 1 FROM Tracks t WHERE t.id = CustomFieldValues.track_id
                 )
-                """
-            )
+                """)
         after_count = app._count_orphaned_custom_values()
         removed = max(0, before_count - after_count)
         app._audit(
@@ -503,8 +501,7 @@ def _run_bundle_diagnostics_repair(
             raise RuntimeError("Could not determine the custom field reference column.")
         before_count = app._count_orphaned_custom_values(conn=bundle.conn)
         with bundle.conn:
-            bundle.conn.execute(
-                f"""
+            bundle.conn.execute(f"""
                 DELETE FROM CustomFieldValues
                 WHERE NOT EXISTS (
                     SELECT 1 FROM CustomFieldDefs cfd WHERE cfd.id = CustomFieldValues.{field_column}
@@ -512,8 +509,7 @@ def _run_bundle_diagnostics_repair(
                 OR NOT EXISTS (
                     SELECT 1 FROM Tracks t WHERE t.id = CustomFieldValues.track_id
                 )
-                """
-            )
+                """)
         after_count = app._count_orphaned_custom_values(conn=bundle.conn)
         removed = max(0, before_count - after_count)
         return {

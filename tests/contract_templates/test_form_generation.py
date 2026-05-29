@@ -34,14 +34,12 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.schema = DatabaseSchemaService(self.conn, data_root=self.root)
         self.schema.init_db()
         self.schema.migrate_schema()
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS app_kv (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
-            """
-        )
+            """)
 
         self.track_service = TrackService(self.conn, self.root)
         self.track_service.create_track(

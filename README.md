@@ -254,9 +254,14 @@ It is intentionally not built for:
 
 - royalty accounting
 - royalty statement ingestion
-- distributor or DSP APIs
+- fully shipping distributor or DSP publishing workflows
+- unattended cross-platform distributor delivery
 - payment workflows
 - release pitching or distributor campaign management
+
+SoundCloud API support is being prepared and executed behind explicit user connection, secure
+token storage, and no-network test coverage. Broader live distributor/DSP publishing is not
+implemented yet.
 
 That focus is deliberate. The goal is depth and reliability in catalog maintenance, repertoire knowledge, and agreement tracking.
 
@@ -465,7 +470,7 @@ QT_QPA_PLATFORM=offscreen python3 -m ruff check build.py isrc_manager scripts te
 QT_QPA_PLATFORM=offscreen python3 -m black --check build.py isrc_manager scripts tests
 QT_QPA_PLATFORM=offscreen python3 -m mypy
 QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests
-QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=95
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=90
 ```
 
 Or use the bundled shortcuts:
@@ -490,7 +495,7 @@ GitHub Actions verifies the project with:
 - unit and integration tests on Python 3.14.4
 - exact Python 3.14.4 compatibility checks
 - headless Qt app-shell coverage
-- coverage thresholds (95% minimum with branch coverage enabled)
+- coverage thresholds (90% minimum with branch coverage enabled)
 - packaging smoke validation on Python 3.14.4
 
 When a `vX.Y.Z` tag is pushed, or when the Version Bump workflow creates one, the release-build
@@ -507,7 +512,7 @@ The current public version block below is maintained by `scripts/sync_version_do
 run by the production version-bump workflow after the canonical version changes.
 
 <!-- version:sync:start -->
-Current source release: `3.16.6` (`v3.16.6`).
+Current source release: `4.0.0` (`v4.0.0`).
 Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->

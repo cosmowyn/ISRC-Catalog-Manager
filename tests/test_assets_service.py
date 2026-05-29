@@ -383,12 +383,10 @@ def test_asset_failure_and_noop_edges(tmp_path: Path) -> None:
             )
         )
 
-    conn.execute(
-        """
+    conn.execute("""
         INSERT INTO AssetVersions(asset_type, filename, storage_mode, file_blob, track_id)
         VALUES ('other', 'missing.bin', 'database', NULL, 1)
-        """
-    )
+        """)
     missing_blob_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     with pytest.raises(FileNotFoundError, match="no database blob"):
         service.fetch_asset_bytes(missing_blob_id)

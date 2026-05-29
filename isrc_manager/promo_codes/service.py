@@ -67,8 +67,7 @@ class PromoCodeService:
 
     def ensure_schema(self) -> None:
         cursor = self.conn.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS PromoCodeSheets (
                 id INTEGER PRIMARY KEY,
                 code_set_name TEXT NOT NULL,
@@ -87,10 +86,8 @@ class PromoCodeService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 notes TEXT
             )
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS PromoCodes (
                 id INTEGER PRIMARY KEY,
                 sheet_id INTEGER NOT NULL,
@@ -107,8 +104,7 @@ class PromoCodeService:
                 FOREIGN KEY (sheet_id) REFERENCES PromoCodeSheets(id) ON DELETE CASCADE,
                 UNIQUE(sheet_id, code)
             )
-            """
-        )
+            """)
         self._ensure_column("PromoCodeSheets", "source_sha256", "TEXT")
         self._ensure_column("PromoCodeSheets", "code_sequence_sha256", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("PromoCodeSheets", "profile_name", "TEXT")
@@ -116,30 +112,22 @@ class PromoCodeService:
         self._ensure_column("PromoCodeSheets", "notes", "TEXT")
         self._ensure_column("PromoCodes", "provided_at", "TEXT")
         self._ensure_column("PromoCodes", "updated_at", "TEXT")
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_source_sha256
             ON PromoCodeSheets(source_sha256)
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_sequence
             ON PromoCodeSheets(code_sequence_sha256)
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_codes_sheet_status
             ON PromoCodes(sheet_id, redeemed, sort_order)
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_codes_code
             ON PromoCodes(code)
-            """
-        )
+            """)
         self.conn.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, column_sql: str) -> None:
@@ -583,8 +571,7 @@ class PromoCodeService:
 
     def list_sheets(self) -> list[PromoCodeSheetRecord]:
         self.ensure_schema()
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 s.id,
                 s.code_set_name,
@@ -607,8 +594,7 @@ class PromoCodeService:
             LEFT JOIN PromoCodes c ON c.sheet_id = s.id
             GROUP BY s.id
             ORDER BY datetime(s.imported_at) DESC, s.id DESC
-            """
-        ).fetchall()
+            """).fetchall()
         return [self._sheet_from_row(row) for row in rows]
 
     def _sheet_from_row(self, row: sqlite3.Row | tuple[object, ...]) -> PromoCodeSheetRecord:

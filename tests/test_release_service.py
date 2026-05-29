@@ -518,8 +518,7 @@ class ReleaseServiceTests(unittest.TestCase):
         conn = sqlite3.connect(":memory:")
         conn.execute("PRAGMA foreign_keys = ON")
         try:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE Artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
                 CREATE TABLE Albums (
                     id INTEGER PRIMARY KEY,
@@ -631,8 +630,7 @@ class ReleaseServiceTests(unittest.TestCase):
                     (1, 'NL-ABC-26-00111', 'NLABC2600111', 'Track A1', 1, 1, '2026-03-15', 200, '036000291452', 'CAT-A'),
                     (2, 'NL-ABC-26-00112', 'NLABC2600112', 'Track B1', 1, 2, '2026-03-16', 220, '036000291452', 'CAT-B');
                 PRAGMA user_version = 18;
-                """
-            )
+                """)
             schema = DatabaseSchemaService(conn, data_root=self.data_root)
             schema.migrate_schema()
 
@@ -654,8 +652,7 @@ class ReleaseServiceTests(unittest.TestCase):
         conn = sqlite3.connect(":memory:")
         conn.execute("PRAGMA foreign_keys = ON")
         try:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE Artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
                 CREATE TABLE Albums (
                     id INTEGER PRIMARY KEY,
@@ -767,8 +764,7 @@ class ReleaseServiceTests(unittest.TestCase):
                     (1, 'NL-ABC-26-00101', 'NLABC2600101', 'Legacy Track A', 1, 1, '2026-03-15', 200, '036000291452', 'CAT-1'),
                     (2, 'NL-ABC-26-00102', 'NLABC2600102', 'Legacy Track B', 1, 1, '2026-03-15', 220, '036000291452', 'CAT-1');
                 PRAGMA user_version = 18;
-                """
-            )
+                """)
             schema = DatabaseSchemaService(conn, data_root=self.data_root)
             schema.migrate_schema()
 

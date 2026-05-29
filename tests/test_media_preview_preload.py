@@ -232,8 +232,7 @@ def test_audio_preview_fetch_source_for_custom_blob_and_cancel_paths(tmp_path: P
     db_path = tmp_path / "profile.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE CustomFieldDefs(id INTEGER PRIMARY KEY, field_type TEXT);
             CREATE TABLE CustomFieldValues(
                 track_id INTEGER,
@@ -245,8 +244,7 @@ def test_audio_preview_fetch_source_for_custom_blob_and_cancel_paths(tmp_path: P
                 mime_type TEXT,
                 size_bytes INTEGER
             );
-            """
-        )
+            """)
         conn.execute("INSERT INTO CustomFieldDefs(id, field_type) VALUES (9, 'blob_audio')")
         conn.execute(
             """
@@ -307,13 +305,11 @@ def test_audio_preview_fetch_source_for_custom_blob_and_cancel_paths(tmp_path: P
 
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE CustomFieldValues
             SET blob_value=NULL, managed_file_path=NULL, storage_mode='database'
             WHERE track_id=3 AND field_def_id=9
-            """
-        )
+            """)
         conn.commit()
     finally:
         conn.close()
@@ -338,8 +334,7 @@ def test_audio_preview_fetch_source_handles_managed_custom_files_and_track_servi
     db_path = tmp_path / "profile.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE CustomFieldDefs(id INTEGER PRIMARY KEY, field_type TEXT);
             CREATE TABLE CustomFieldValues(
                 track_id INTEGER,
@@ -351,19 +346,16 @@ def test_audio_preview_fetch_source_handles_managed_custom_files_and_track_servi
                 mime_type TEXT,
                 size_bytes INTEGER
             );
-            """
-        )
+            """)
         conn.execute("INSERT INTO CustomFieldDefs(id, field_type) VALUES (9, 'blob_audio')")
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO CustomFieldValues(
                 track_id, field_def_id, blob_value, managed_file_path, storage_mode,
                 filename, mime_type, size_bytes
             )
             VALUES (3, 9, NULL, 'custom_field_media/managed.wav', 'managed_file',
                     'managed.wav', '', 0)
-            """
-        )
+            """)
         conn.commit()
     finally:
         conn.close()
@@ -382,13 +374,11 @@ def test_audio_preview_fetch_source_handles_managed_custom_files_and_track_servi
 
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE CustomFieldValues
             SET managed_file_path='custom_field_media/missing.wav',
                 filename='missing.wav'
-            """
-        )
+            """)
         conn.commit()
     finally:
         conn.close()

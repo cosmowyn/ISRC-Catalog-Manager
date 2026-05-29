@@ -82,7 +82,7 @@ class GS1ValidationService:
                 decimal_quantity = Decimal(quantity)
                 if decimal_quantity <= 0:
                     raise InvalidOperation()
-            except (InvalidOperation, ValueError):
+            except InvalidOperation, ValueError:
                 issues.append(
                     GS1ValidationIssue(
                         field_name="quantity",

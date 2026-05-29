@@ -92,8 +92,7 @@ class GS1SettingsService:
 
     def _ensure_template_storage_table(self) -> None:
         with self.conn:
-            self.conn.execute(
-                f"""
+            self.conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self.TEMPLATE_STORAGE_TABLE} (
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     filename TEXT NOT NULL,
@@ -106,8 +105,7 @@ class GS1SettingsService:
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
-                """
-            )
+                """)
             columns = {
                 str(row[1])
                 for row in self.conn.execute(
@@ -130,8 +128,7 @@ class GS1SettingsService:
 
     def _ensure_contract_storage_table(self) -> None:
         with self.conn:
-            self.conn.execute(
-                f"""
+            self.conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self.CONTRACTS_STORAGE_TABLE} (
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     filename TEXT NOT NULL,
@@ -142,8 +139,7 @@ class GS1SettingsService:
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
-                """
-            )
+                """)
 
     def _profile_get(self, key: str) -> str:
         row = self.conn.execute("SELECT value FROM app_kv WHERE key=?", (key,)).fetchone()
@@ -169,8 +165,7 @@ class GS1SettingsService:
         return clean_path
 
     def load_stored_template_info(self) -> GS1TemplateAsset | None:
-        row = self.conn.execute(
-            f"""
+        row = self.conn.execute(f"""
             SELECT
                 filename,
                 source_path,
@@ -183,8 +178,7 @@ class GS1SettingsService:
                 CASE WHEN workbook_blob IS NOT NULL THEN 1 ELSE 0 END AS has_blob
             FROM {self.TEMPLATE_STORAGE_TABLE}
             WHERE id = 1
-            """
-        ).fetchone()
+            """).fetchone()
         if not row:
             return None
         mode = infer_storage_mode(
@@ -236,13 +230,11 @@ class GS1SettingsService:
         return row is not None
 
     def load_stored_template_bytes(self) -> bytes | None:
-        row = self.conn.execute(
-            f"""
+        row = self.conn.execute(f"""
             SELECT workbook_blob, managed_file_path, storage_mode, source_path, filename
             FROM {self.TEMPLATE_STORAGE_TABLE}
             WHERE id = 1
-            """
-        ).fetchone()
+            """).fetchone()
         if not row:
             return None
         blob, managed_file_path, storage_mode, source_path, filename = row
@@ -535,13 +527,11 @@ class GS1SettingsService:
         return tuple(contracts)
 
     def _stored_contracts_row(self) -> tuple[object, ...] | None:
-        row = self.conn.execute(
-            f"""
+        row = self.conn.execute(f"""
             SELECT filename, source_path, csv_blob, mime_type, size_bytes, created_at, updated_at
             FROM {self.CONTRACTS_STORAGE_TABLE}
             WHERE id = 1
-            """
-        ).fetchone()
+            """).fetchone()
         return cast(tuple[object, ...] | None, row)
 
     def _contracts_filename(

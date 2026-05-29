@@ -6,8 +6,7 @@ def build_legacy_v12_profile(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE app_kv (
                 key   TEXT PRIMARY KEY,
                 value TEXT
@@ -55,12 +54,10 @@ def build_legacy_v12_profile(db_path: Path) -> None:
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (track_id, field_def_id)
             );
-            """
-        )
+            """)
         conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Legacy Artist')")
         conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Legacy Album')")
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO Tracks(
                 id,
                 isrc,
@@ -87,8 +84,7 @@ def build_legacy_v12_profile(db_path: Path) -> None:
                 '036000291452',
                 'Ambient'
             )
-            """
-        )
+            """)
         conn.executemany(
             """
             INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)

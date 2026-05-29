@@ -106,7 +106,7 @@ class WaveformWidget(QWidget):
         for frame in frames or []:
             try:
                 values = [max(0.0, min(1.0, float(value))) for value in frame]
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if values:
                 cleaned.append(values)
@@ -140,7 +140,7 @@ class WaveformWidget(QWidget):
         for position_ms in positions_ms or []:
             try:
                 clean_position = max(0, int(position_ms))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if clean_position in seen:
                 continue

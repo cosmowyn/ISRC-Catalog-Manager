@@ -246,14 +246,12 @@ def _audio_preview_album_titles(self) -> list[str]:
     if self.conn is None:
         return []
     try:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT DISTINCT trim(title)
             FROM Albums
             WHERE title IS NOT NULL AND trim(title) != ''
             ORDER BY trim(title) COLLATE NOCASE
-            """
-        ).fetchall()
+            """).fetchall()
     except Exception:
         return []
     titles: list[str] = []

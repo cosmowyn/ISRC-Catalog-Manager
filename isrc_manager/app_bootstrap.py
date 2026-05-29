@@ -32,7 +32,7 @@ def get_or_create_application(
 def _window_factory_supports_startup_feedback(window_factory: Callable[..., object]) -> bool:
     try:
         params = signature(window_factory).parameters.values()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return any(
         parameter.kind == Parameter.VAR_KEYWORD or parameter.name == "startup_feedback"

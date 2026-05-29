@@ -114,7 +114,7 @@ def apply_transform(value: object, transform_name: str) -> str:
             return ""
         try:
             return seconds_to_hms(int(float(str(value).strip())))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return stringify_value(value)
     if transform == TRANSFORM_DATE_TO_YEAR:
         text = stringify_value(value)

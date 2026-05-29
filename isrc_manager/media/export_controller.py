@@ -987,7 +987,7 @@ def _media_cell_has_payload_for_export_spec(self, index, spec: dict[str, object]
         return self._media_cell_has_payload(index, media_key=str(spec.get("media_key") or ""))
     try:
         field_id = int(spec.get("field_id") or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return self._media_cell_has_payload(index, field_id=field_id)
 
@@ -1005,7 +1005,7 @@ def _proxy_ordered_track_ids(
     if media_spec is not None:
         try:
             column = int(media_spec.get("column"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             column_key = str(media_spec.get("column_key") or "")
             resolved_column = controller.column_for_key(column_key)
             column = resolved_column if resolved_column is not None else -1

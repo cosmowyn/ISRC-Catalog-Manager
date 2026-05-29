@@ -258,8 +258,7 @@ class RightsService:
         clean_search = clean_text(search_text)
         if clean_search:
             like = f"%{clean_search}%"
-            clauses.append(
-                """
+            clauses.append("""
                 (
                     COALESCE(rr.title, '') LIKE ?
                     OR COALESCE(rr.right_type, '') LIKE ?
@@ -269,8 +268,7 @@ class RightsService:
                     OR COALESCE(retained_by.legal_name, '') LIKE ?
                     OR COALESCE(c.title, '') LIKE ?
                 )
-                """
-            )
+                """)
             params.extend([like, like, like, like, like, like, like])
         if entity_type and entity_id is not None:
             column_name = {

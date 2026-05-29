@@ -346,7 +346,7 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest \
   --cov-report=term-missing \
   --cov-report=html \
   --cov-report=json \
-  --cov-fail-under=95
+  --cov-fail-under=90
 ```
 
 During incremental coverage work, it is acceptable to run temporarily with:

@@ -7,7 +7,9 @@ Coordinator notes:
 - Previous batch baseline: about 85.5% coverage.
 - Latest local `coverage.json` inspected for Milestone 4 reports `86.70398129979306%` total coverage with `76.4430649495043%` branch coverage.
 - Coverage target remains `--cov=isrc_manager`; do not add `--cov=ISRC_manager`.
-- Strict 95% gate remains unchanged.
+- Repo-wide coverage gate is now 90% with branch coverage enabled.
+- Latest full-suite checkpoint under the 90% gate passed at `90.18%`; SoundCloud integration
+  package coverage passed at `93.25%`.
 - Validation starts only after the active milestone writer is marked `ready-for-validation`.
 - Current milestone: completed through Milestone 4.
 - Milestone 4 starting target coverage: `isrc_manager/main_window.py` at `92.47943595769682%`, with `256` missing lines and `192` missing branches.

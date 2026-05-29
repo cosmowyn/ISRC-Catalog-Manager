@@ -4511,6 +4511,7 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "Workspace",
                 "Metadata & Standards",
+                "Publish",
                 "Audio",
                 "Quality & Repair",
             ],

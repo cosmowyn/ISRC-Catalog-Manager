@@ -6,8 +6,7 @@ from isrc_manager.services import CatalogReadService
 
 def make_catalog_read_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Artists (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL
@@ -55,8 +54,7 @@ def make_catalog_read_conn():
             value TEXT,
             PRIMARY KEY (track_id, field_def_id)
         );
-        """
-    )
+        """)
     conn.executemany(
         "INSERT INTO Artists(id, name) VALUES (?, ?)",
         [(1, "Main Artist"), (2, "Guest Artist"), (3, "Another Artist")],
@@ -197,8 +195,7 @@ class CatalogReadServiceTests(unittest.TestCase):
         self.assertIsNone(self.service.find_album_metadata("Missing Album"))
 
     def test_catalog_reads_prefer_current_tracks_and_albums_tables(self):
-        self.conn.executescript(
-            """
+        self.conn.executescript("""
             CREATE TABLE Tracks_legacy (
                 id INTEGER PRIMARY KEY,
                 album_id INTEGER,
@@ -211,8 +208,7 @@ class CatalogReadServiceTests(unittest.TestCase):
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL
             );
-            """
-        )
+            """)
         self.conn.execute(
             "INSERT INTO Albums_legacy(id, title) VALUES (?, ?)",
             (1, "Album One"),

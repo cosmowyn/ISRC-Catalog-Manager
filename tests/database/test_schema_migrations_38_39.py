@@ -19,16 +19,13 @@ class DatabaseSchemaMigrations3839Tests(unittest.TestCase):
                 conn.execute("DROP TABLE IF EXISTS TrackArtists")
                 conn.execute("DROP TABLE IF EXISTS Tracks")
                 conn.execute("DROP TABLE IF EXISTS Artists")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE Artists (
                         id INTEGER PRIMARY KEY,
                         name TEXT NOT NULL
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -40,18 +37,15 @@ class DatabaseSchemaMigrations3839Tests(unittest.TestCase):
                         release_date DATE,
                         track_length_sec INTEGER NOT NULL DEFAULT 0
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE TrackArtists (
                         track_id INTEGER NOT NULL,
                         artist_id INTEGER NOT NULL,
                         role TEXT NOT NULL DEFAULT 'additional',
                         PRIMARY KEY (track_id, artist_id, role)
                     )
-                    """
-                )
+                    """)
                 conn.executemany(
                     "INSERT INTO Artists(id, name) VALUES (?, ?)",
                     [
@@ -103,23 +97,19 @@ class DatabaseSchemaMigrations3839Tests(unittest.TestCase):
                 self.assertIn("party_id", track_artist_columns)
                 self.assertNotIn("artist_id", track_artist_columns)
 
-                main_row = conn.execute(
-                    """
+                main_row = conn.execute("""
                     SELECT t.track_title, p.artist_name, p.party_type
                     FROM Tracks t
                     JOIN Parties p ON p.id = t.main_artist_party_id
                     WHERE t.id = 1
-                    """
-                ).fetchone()
-                additional_rows = conn.execute(
-                    """
+                    """).fetchone()
+                additional_rows = conn.execute("""
                     SELECT p.artist_name
                     FROM TrackArtists ta
                     JOIN Parties p ON p.id = ta.party_id
                     WHERE ta.track_id = 1
                     ORDER BY p.artist_name
-                    """
-                ).fetchall()
+                    """).fetchall()
 
                 self.assertEqual(main_row, ("Migrated Track", "Legacy Main", "artist"))
                 self.assertEqual(additional_rows, [("Legacy Guest",)])

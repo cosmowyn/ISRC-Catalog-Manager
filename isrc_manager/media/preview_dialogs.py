@@ -675,7 +675,7 @@ def _audio_preview_track_queue_items_for_service(
     for position, track_id in enumerate(track_order, start=1):
         try:
             normalized_id = int(track_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if normalized_id in seen:
             continue
@@ -723,7 +723,7 @@ def _audio_preview_state_for_preload_task(
         for track_id in list(values or []):
             try:
                 normalized = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if normalized in seen:
                 continue
@@ -1437,8 +1437,7 @@ class _AudioPreviewDialog(QDialog):
         self.mute_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.mute_button.setFixedSize(24, 24)
         self.mute_button.setIconSize(self.MEDIA_ICON_SIZE)
-        self.mute_button.setStyleSheet(
-            """
+        self.mute_button.setStyleSheet("""
             QToolButton#audioPreviewMuteButton {
                 min-width: 24px;
                 max-width: 24px;
@@ -1447,8 +1446,7 @@ class _AudioPreviewDialog(QDialog):
                 border-radius: 6px;
                 padding: 0px;
             }
-            """
-        )
+            """)
         volume_body.setColumnStretch(0, 1)
         volume_body.setColumnStretch(4, 1)
         volume_body.setRowMinimumHeight(0, self.CONTROL_BAND_HEIGHT)
@@ -2063,7 +2061,7 @@ class _AudioPreviewDialog(QDialog):
                 if str(spec.get("album") or "").strip().casefold() != clean_title.casefold():
                     continue
                 fallback.append(int(spec.get("track_id")))
-            except (AttributeError, TypeError, ValueError):
+            except AttributeError, TypeError, ValueError:
                 continue
         return self.app._normalize_track_ids(fallback)
 
@@ -2197,7 +2195,7 @@ class _AudioPreviewDialog(QDialog):
         ):
             try:
                 duration = max(duration, int(candidate or 0))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         return max(0, duration)
 
@@ -2209,7 +2207,7 @@ class _AudioPreviewDialog(QDialog):
         ):
             try:
                 position = max(position, int(candidate or 0))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         duration = self._bookmark_duration_ms()
         if duration > 0:
@@ -2387,7 +2385,7 @@ class _AudioPreviewDialog(QDialog):
                 effective_theme = {}
         try:
             hint_size = int(effective_theme.get("secondary_text_font_size") or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             hint_size = 0
         if hint_size <= 0:
             point_size = font.pointSizeF()
@@ -2422,7 +2420,7 @@ class _AudioPreviewDialog(QDialog):
             for position, spec in enumerate(self._track_queue, start=1):
                 try:
                     track_id = int(spec.get("track_id"))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 title = str(spec.get("title") or spec.get("label") or f"Track {track_id}").strip()
                 if not title:
@@ -2442,14 +2440,14 @@ class _AudioPreviewDialog(QDialog):
         for spec in self._base_track_queue:
             try:
                 track_id = int(spec.get("track_id"))
-            except (AttributeError, TypeError, ValueError):
+            except AttributeError, TypeError, ValueError:
                 continue
             by_id[track_id] = dict(spec)
         ordered: list[dict[str, object]] = []
         for position, track_id in enumerate(track_order, start=1):
             try:
                 normalized_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             spec = dict(by_id.get(normalized_id) or {})
             if not spec:
@@ -2481,7 +2479,7 @@ class _AudioPreviewDialog(QDialog):
         current_id = self._current_track_id
         try:
             current_id = int(current_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             current_id = None
         self.play_next_list.blockSignals(True)
         try:
@@ -2493,7 +2491,7 @@ class _AudioPreviewDialog(QDialog):
                 item = self.play_next_list.item(index)
                 try:
                     track_id = int(item.data(Qt.UserRole))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 if track_id == current_id:
                     self.play_next_list.setCurrentItem(item)
@@ -2510,7 +2508,7 @@ class _AudioPreviewDialog(QDialog):
             return
         try:
             track_id = int(item.data(Qt.UserRole))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             self._sync_play_next_selection()
             return
         if track_id == self._current_track_id:
@@ -2543,7 +2541,7 @@ class _AudioPreviewDialog(QDialog):
         if relevant["kind"] == "custom":
             try:
                 relevant["field_id"] = int(source_spec.get("field_id") or 0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 relevant["field_id"] = 0
         else:
             relevant["media_key"] = (
@@ -2677,7 +2675,7 @@ class _AudioPreviewDialog(QDialog):
             for spec in list(source):
                 try:
                     track_id = int(spec.get("track_id"))
-                except (AttributeError, TypeError, ValueError):
+                except AttributeError, TypeError, ValueError:
                     continue
                 known[track_id] = dict(spec)
         items: list[dict[str, object]] = []
@@ -3051,7 +3049,7 @@ class _AudioPreviewDialog(QDialog):
     def _current_track_id_as_int(self) -> int | None:
         try:
             return int(self._current_track_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _create_shuffled_track_order(
@@ -3064,7 +3062,7 @@ class _AudioPreviewDialog(QDialog):
         for track_id in track_order:
             try:
                 normalized_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if normalized_id in seen:
                 continue
@@ -3083,14 +3081,14 @@ class _AudioPreviewDialog(QDialog):
         for track_id in track_order:
             try:
                 normalized.append(int(track_id))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         normalized_set = set(normalized)
         existing: list[int] = []
         for track_id in self._shuffled_track_order:
             try:
                 normalized_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if normalized_id in normalized_set:
                 existing.append(normalized_id)

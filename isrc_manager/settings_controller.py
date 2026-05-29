@@ -23,6 +23,14 @@ from isrc_manager.file_storage import (
     normalize_storage_mode,
     sanitize_export_basename,
 )
+from isrc_manager.integrations.soundcloud.workflow import (
+    SOUNDCLOUD_CLIENT_ID_SETTING,
+    SOUNDCLOUD_PERSISTENT_TOKENS_SETTING,
+    SOUNDCLOUD_REDIRECT_URI_SETTING,
+    SOUNDCLOUD_SETTINGS_FOCUS,
+    SoundCloudAppConnectionActions,
+    soundcloud_settings_snapshot,
+)
 from isrc_manager.services import GS1ProfileDefaults, OwnerPartySettings
 from isrc_manager.storage_sizes import format_budget_megabytes
 
@@ -89,6 +97,18 @@ def _current_settings_values(app) -> dict[str, object]:
         app.settings_reads.load_owner_party_settings() if app.settings_reads is not None else None
     )
     app_sound_settings = app._current_app_sound_settings()
+    soundcloud_client_id = str(
+        app.settings.value(SOUNDCLOUD_CLIENT_ID_SETTING, "", str) or ""
+    ).strip()
+    soundcloud_redirect_uri = str(
+        app.settings.value(SOUNDCLOUD_REDIRECT_URI_SETTING, "", str) or ""
+    ).strip()
+    raw_soundcloud_persistent = app.settings.value(SOUNDCLOUD_PERSISTENT_TOKENS_SETTING, True)
+    soundcloud_prefer_persistent = (
+        raw_soundcloud_persistent
+        if isinstance(raw_soundcloud_persistent, bool)
+        else str(raw_soundcloud_persistent).strip().lower() not in {"0", "false", "no", "off", ""}
+    )
     return {
         "window_title": app.identity.get("window_title_override") or "",
         "effective_window_title": app.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
@@ -142,6 +162,10 @@ def _current_settings_values(app) -> dict[str, object]:
         "gs1_product_classification": (
             gs1_defaults.product_classification if gs1_defaults is not None else ""
         ),
+        "soundcloud_client_id": soundcloud_client_id,
+        "soundcloud_redirect_uri": soundcloud_redirect_uri,
+        "soundcloud_prefer_persistent_tokens": soundcloud_prefer_persistent,
+        "soundcloud_settings": soundcloud_settings_snapshot(app),
     }
 
 
@@ -287,6 +311,50 @@ def _apply_settings_changes(
             changed_count += 1
             if hasattr(app, "table"):
                 app.table.viewport().update()
+
+        before_soundcloud = {
+            "client_id": str(before_values.get("soundcloud_client_id") or "").strip(),
+            "redirect_uri": str(before_values.get("soundcloud_redirect_uri") or "").strip(),
+            "prefer_persistent_tokens": bool(
+                before_values.get("soundcloud_prefer_persistent_tokens", True)
+            ),
+        }
+        after_soundcloud = {
+            "client_id": str(after_values.get("soundcloud_client_id") or "").strip(),
+            "redirect_uri": str(after_values.get("soundcloud_redirect_uri") or "").strip(),
+            "prefer_persistent_tokens": bool(
+                after_values.get("soundcloud_prefer_persistent_tokens", True)
+            ),
+        }
+        if after_soundcloud != before_soundcloud:
+            app.settings.setValue(SOUNDCLOUD_CLIENT_ID_SETTING, after_soundcloud["client_id"])
+            app.settings.setValue(
+                SOUNDCLOUD_REDIRECT_URI_SETTING,
+                after_soundcloud["redirect_uri"],
+            )
+            app.settings.setValue(
+                SOUNDCLOUD_PERSISTENT_TOKENS_SETTING,
+                after_soundcloud["prefer_persistent_tokens"],
+            )
+            sync = getattr(app.settings, "sync", None)
+            if callable(sync):
+                sync()
+            app.logger.info("SoundCloud safe connection settings updated")
+            app._log_event(
+                "settings.soundcloud",
+                "SoundCloud safe connection settings updated",
+                has_client_id=bool(after_soundcloud["client_id"]),
+                has_redirect_uri=bool(after_soundcloud["redirect_uri"]),
+                prefer_persistent_tokens=after_soundcloud["prefer_persistent_tokens"],
+            )
+            if app.history_manager is not None:
+                app.history_manager.record_setting_change(
+                    key="soundcloud",
+                    label="Update SoundCloud Settings",
+                    before_value=before_soundcloud,
+                    after_value=after_soundcloud,
+                )
+            changed_count += 1
 
         before_app_sounds = normalize_app_sound_settings(
             before_values.get("app_sound_settings"),
@@ -743,6 +811,8 @@ def open_settings_dialog(app, initial_focus: str | None = None):
         history_prune_pre_restore_copies_after_days=before_values[
             "history_prune_pre_restore_copies_after_days"
         ],
+        soundcloud_settings=before_values.get("soundcloud_settings"),
+        soundcloud_actions=SoundCloudAppConnectionActions(app),
         party_service=app.party_service,
         parent=app,
     )
@@ -755,6 +825,10 @@ def open_settings_dialog(app, initial_focus: str | None = None):
         app.logger.exception(f"Settings update failed: {e}")
         app._play_warning_sound()
         QMessageBox.critical(app, "Settings Error", f"Could not save settings:\n{e}")
+
+
+def open_soundcloud_settings_dialog(app):
+    return open_settings_dialog(app, initial_focus=SOUNDCLOUD_SETTINGS_FOCUS)
 
 
 def export_application_settings_bundle(app):

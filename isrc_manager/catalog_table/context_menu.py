@@ -58,6 +58,16 @@ def _on_catalog_table_context_menu(app, pos):
     act_gs1.triggered.connect(lambda tid=track_id: app.open_gs1_dialog(tid))
     menu.addAction(act_gs1)
 
+    publish_track_ids = list(ordered_effective_track_ids or ([track_id] if track_id else []))
+    if publish_track_ids and callable(getattr(app, "open_soundcloud_publish_dialog", None)):
+        act_soundcloud_publish = QAction("Publish to SoundCloud…", app)
+        act_soundcloud_publish.triggered.connect(
+            lambda _checked=False, tids=tuple(
+                publish_track_ids
+            ): app.open_soundcloud_publish_dialog(track_ids=list(tids))
+        )
+        menu.addAction(act_soundcloud_publish)
+
     if track_id and app.release_service is not None:
         release = app.release_service.find_primary_release_for_track(track_id)
         if release is not None:

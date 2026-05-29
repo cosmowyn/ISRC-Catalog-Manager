@@ -942,7 +942,7 @@ class WorkBrowserPanel(QWidget):
         for track_id in track_ids or []:
             try:
                 value = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if value <= 0 or value in seen:
                 continue

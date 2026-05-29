@@ -465,13 +465,11 @@ class GlobalSearchService:
         return int(row[0]) if row else 0
 
     def list_saved_searches(self) -> list[SavedSearchRecord]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, name, query_text, entity_types
             FROM SavedSearches
             ORDER BY name, id
-            """
-        ).fetchall()
+            """).fetchall()
         records: list[SavedSearchRecord] = []
         for row in rows:
             try:

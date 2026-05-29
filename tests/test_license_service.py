@@ -10,8 +10,7 @@ from isrc_manager.services import LicenseService
 
 def make_license_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
             track_title TEXT NOT NULL
@@ -41,8 +40,7 @@ def make_license_conn():
         FROM Licenses l
         JOIN Licensees lic ON lic.id = l.licensee_id
         JOIN Tracks t ON t.id = l.track_id;
-        """
-    )
+        """)
     conn.execute("INSERT INTO Tracks(id, track_title) VALUES (1, 'Song A')")
     conn.execute("INSERT INTO Tracks(id, track_title) VALUES (2, 'Song B')")
     conn.commit()

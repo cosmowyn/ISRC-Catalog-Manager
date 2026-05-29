@@ -51,8 +51,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                 conn.execute("DROP TABLE IF EXISTS Releases")
                 conn.execute("DROP TABLE IF EXISTS Contracts")
                 conn.execute("DROP TABLE IF EXISTS ExternalCodeIdentifiers")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -65,10 +64,8 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         main_artist_party_id INTEGER NOT NULL,
                         track_length_sec INTEGER NOT NULL DEFAULT 0
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE Releases (
                         id INTEGER PRIMARY KEY,
                         title TEXT NOT NULL,
@@ -78,10 +75,8 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         catalog_registry_entry_id INTEGER,
                         external_catalog_identifier_id INTEGER
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE Contracts (
                         id INTEGER PRIMARY KEY,
                         title TEXT NOT NULL,
@@ -111,8 +106,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         created_at TEXT NOT NULL DEFAULT (datetime('now')),
                         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                     )
-                    """
-                )
+                    """)
                 conn.execute("DELETE FROM ExternalCatalogIdentifiers")
                 conn.executemany(
                     """
@@ -254,41 +248,32 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                 self.assertIn("license_external_code_identifier_id", contract_columns)
                 self.assertIn("registry_sha256_key_external_code_identifier_id", contract_columns)
 
-                track_sql = conn.execute(
-                    """
+                track_sql = conn.execute("""
                     SELECT sql
                     FROM sqlite_master
                     WHERE type='table' AND name='Tracks'
-                    """
-                ).fetchone()[0]
-                contract_sql = conn.execute(
-                    """
+                    """).fetchone()[0]
+                contract_sql = conn.execute("""
                     SELECT sql
                     FROM sqlite_master
                     WHERE type='table' AND name='Contracts'
-                    """
-                ).fetchone()[0]
+                    """).fetchone()[0]
                 self.assertIn("catalog_registry_entry_id IS NULL", track_sql)
                 self.assertIn("contract_registry_entry_id IS NULL", contract_sql)
                 self.assertIn("license_registry_entry_id IS NULL", contract_sql)
                 self.assertIn("registry_sha256_key_entry_id IS NULL", contract_sql)
 
-                track_row = conn.execute(
-                    """
+                track_row = conn.execute("""
                     SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
                     FROM Tracks
                     WHERE id=1
-                    """
-                ).fetchone()
-                release_row = conn.execute(
-                    """
+                    """).fetchone()
+                release_row = conn.execute("""
                     SELECT catalog_number, catalog_registry_entry_id, catalog_external_code_identifier_id
                     FROM Releases
                     WHERE id=1
-                    """
-                ).fetchone()
-                contract_row = conn.execute(
-                    """
+                    """).fetchone()
+                contract_row = conn.execute("""
                     SELECT
                         contract_number,
                         contract_registry_entry_id,
@@ -301,8 +286,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         registry_sha256_key_external_code_identifier_id
                     FROM Contracts
                     WHERE id=1
-                    """
-                ).fetchone()
+                    """).fetchone()
 
                 self.assertEqual(track_row, ("EXT-TRACK-001", None, 1))
                 self.assertEqual(release_row, ("EXT-REL-001", None, 2))
@@ -319,13 +303,11 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                 self.assertIsNone(contract_row[7])
                 self.assertIsNotNone(contract_row[8])
 
-                external_rows = conn.execute(
-                    """
+                external_rows = conn.execute("""
                     SELECT category_system_key, value
                     FROM ExternalCodeIdentifiers
                     ORDER BY id
-                    """
-                ).fetchall()
+                    """).fetchall()
                 self.assertEqual(
                     external_rows[:2],
                     [
@@ -341,16 +323,11 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                     external_rows,
                 )
 
-                diagnostics = {
-                    (row[0], row[1]): int(row[2] or 0)
-                    for row in conn.execute(
-                        """
+                diagnostics = {(row[0], row[1]): int(row[2] or 0) for row in conn.execute("""
                         SELECT category_system_key, diagnostic_key, diagnostic_count
                         FROM _MigrationDiagnostics
                         WHERE migration_version=40
-                        """
-                    ).fetchall()
-                }
+                        """).fetchall()}
                 self.assertEqual(
                     diagnostics[(BUILTIN_CATEGORY_CATALOG_NUMBER, "legacy_external_rows")], 2
                 )
@@ -385,8 +362,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         )
                     )
                 )
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO Works(
                         id,
                         title,
@@ -395,8 +371,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         rights_verified
                     )
                     VALUES (1, 'Migration Work', 1, 0, 0)
-                    """
-                )
+                    """)
 
                 conn.commit()
                 conn.execute("PRAGMA foreign_keys = OFF")
@@ -404,8 +379,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                 conn.execute("DROP TABLE IF EXISTS Tracks")
                 conn.execute("DROP TABLE IF EXISTS Releases")
                 conn.execute("DROP TABLE IF EXISTS Contracts")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -419,10 +393,8 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         track_length_sec INTEGER NOT NULL DEFAULT 0,
                         work_id INTEGER
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE Releases (
                         id INTEGER PRIMARY KEY,
                         title TEXT NOT NULL,
@@ -432,10 +404,8 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         catalog_registry_entry_id INTEGER,
                         external_catalog_identifier_id INTEGER
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE TABLE Contracts (
                         id INTEGER PRIMARY KEY,
                         title TEXT NOT NULL,
@@ -451,8 +421,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         created_at TEXT NOT NULL DEFAULT (datetime('now')),
                         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                     )
-                    """
-                )
+                    """)
                 conn.execute(
                     """
                     INSERT INTO Tracks(
@@ -539,8 +508,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                     """,
                     (counterparty_id,),
                 )
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO ReleaseTracks(
                         release_id,
                         track_id,
@@ -549,14 +517,11 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         sequence_number
                     )
                     VALUES (1, 1, 1, 1, 1)
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO WorkTrackLinks(work_id, track_id, is_primary, notes)
                     VALUES (1, 1, 1, 'migration work link')
-                    """
-                )
+                    """)
                 conn.execute(
                     """
                     INSERT INTO ContractParties(contract_id, party_id, role_label, is_primary, notes)
@@ -564,8 +529,7 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                     """,
                     (counterparty_id,),
                 )
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO ContractDocuments(
                         id,
                         contract_id,
@@ -588,26 +552,19 @@ class DatabaseSchemaMigrations3940Tests(unittest.TestCase):
                         'managed_file',
                         '2026-04-16 08:00:00'
                     )
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO ContractWorkLinks(contract_id, work_id)
                     VALUES (1, 1)
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO ContractTrackLinks(contract_id, track_id)
                     VALUES (1, 1)
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO ContractReleaseLinks(contract_id, release_id)
                     VALUES (1, 1)
-                    """
-                )
+                    """)
                 conn.execute("PRAGMA user_version = 39")
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.commit()

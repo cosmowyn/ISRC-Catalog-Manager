@@ -60,72 +60,56 @@ def make_conn():
     schema = DatabaseSchemaService(conn)
     schema.init_db()
     schema.migrate_schema()
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS app_kv (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Parties(id, legal_name, display_name, artist_name, party_type)
         VALUES (1, 'Main Artist', 'Main Artist', 'Main Artist', 'artist')
-        """
-    )
+        """)
     conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Orbit Release')")
     conn.execute("INSERT INTO Albums(id, title) VALUES (2, 'Solar Release')")
     conn.execute("INSERT INTO Albums(id, title) VALUES (3, 'Single')")
     conn.execute("INSERT INTO Albums(id, title) VALUES (4, 'single')")
-    conn.execute(
-        """
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(1, 'NL-ABC-26-00001', 'NLABC2600001', 'Orbit Release', 1, 1, '2026-03-14', 180, NULL, '123456789012', 'Pop')
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(2, 'NL-ABC-26-00002', 'NLABC2600002', 'Orbit Reprise', 1, 1, '2026-03-14', 210, NULL, '999999999999', 'Pop')
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(3, 'NL-ABC-26-00003', 'NLABC2600003', 'Solar Flare', 1, 2, '2026-03-15', 195, NULL, '', 'Electronic')
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(4, 'NL-ABC-26-00004', 'NLABC2600004', 'Standalone Echo', 1, NULL, '2026-03-16', 205, NULL, '', 'Ambient')
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(5, 'NL-ABC-26-00005', 'NLABC2600005', 'Night Current', 1, 3, '2026-03-17', 215, NULL, '', 'Ambient')
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(6, 'NL-ABC-26-00006', 'NLABC2600006', 'Silent Orbit', 1, 4, '2026-03-18', 225, NULL, '', 'Ambient')
-        """
-    )
+        """)
     conn.commit()
     return conn
 

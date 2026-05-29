@@ -43,8 +43,7 @@ class CatalogAdminService:
 
     def list_artists_with_usage(self) -> list[ArtistUsage]:
         if uses_party_artist_authority(self.conn):
-            rows = self.conn.execute(
-                """
+            rows = self.conn.execute("""
                 SELECT
                     p.id,
                     COUNT(DISTINCT CASE WHEN t.main_artist_party_id = p.id THEN t.id END) AS main_uses,
@@ -53,8 +52,7 @@ class CatalogAdminService:
                 LEFT JOIN Tracks t ON t.main_artist_party_id = p.id
                 LEFT JOIN TrackArtists ta ON ta.party_id = p.id AND ta.role='additional'
                 GROUP BY p.id
-                """
-            ).fetchall()
+                """).fetchall()
             usage_by_id = {
                 int(party_id): (
                     int(main_uses or 0),
@@ -74,8 +72,7 @@ class CatalogAdminService:
                 for record in artist_records
             ]
             return sorted(artist_usages, key=lambda artist: artist.name.casefold())
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 a.id,
                 a.name,
@@ -93,8 +90,7 @@ class CatalogAdminService:
                 GROUP BY artist_id
             ) AS extra_cnt ON extra_cnt.artist_id = a.id
             ORDER BY a.name COLLATE NOCASE
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             ArtistUsage(
                 artist_id=int(artist_id),
@@ -137,8 +133,7 @@ class CatalogAdminService:
         return unused_ids
 
     def list_albums_with_usage(self) -> list[AlbumUsage]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 a.id,
                 a.title,
@@ -151,8 +146,7 @@ class CatalogAdminService:
                 GROUP BY album_id
             ) AS track_cnt ON track_cnt.album_id = a.id
             ORDER BY a.title COLLATE NOCASE
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             AlbumUsage(
                 album_id=int(album_id),
@@ -186,8 +180,7 @@ class CatalogAdminService:
         return unused_ids
 
     def list_licensees_with_usage(self) -> list[LicenseeUsage]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 lic.id,
                 lic.name,
@@ -199,8 +192,7 @@ class CatalogAdminService:
                 GROUP BY licensee_id
             ) AS cnt ON cnt.licensee_id = lic.id
             ORDER BY lic.name COLLATE NOCASE
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             LicenseeUsage(
                 licensee_id=int(licensee_id),

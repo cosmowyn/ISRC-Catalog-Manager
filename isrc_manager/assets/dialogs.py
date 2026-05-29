@@ -219,8 +219,7 @@ class AssetEditorDialog(QDialog):
             track_alias="t",
             artist_alias="main_artist",
         )
-        for track_id, track_title, artist_name in conn.execute(
-            f"""
+        for track_id, track_title, artist_name in conn.execute(f"""
             SELECT
                 t.id,
                 t.track_title,
@@ -228,21 +227,18 @@ class AssetEditorDialog(QDialog):
             FROM Tracks t
             {main_artist_join_sql}
             ORDER BY t.track_title, t.id
-            """
-        ).fetchall():
+            """).fetchall():
             label = " / ".join(
                 part for part in (str(track_title or ""), str(artist_name or "")) if part
             )
             if not label:
                 label = f"Track {track_id}"
             self.track_id_edit.addItem(f"{track_id} - {label}", int(track_id))
-        for release_id, title, primary_artist in conn.execute(
-            """
+        for release_id, title, primary_artist in conn.execute("""
             SELECT id, title, COALESCE(primary_artist, '')
             FROM Releases
             ORDER BY title, id
-            """
-        ).fetchall():
+            """).fetchall():
             label = " / ".join(
                 part for part in (str(title or ""), str(primary_artist or "")) if part
             )
@@ -270,14 +266,14 @@ class AssetEditorDialog(QDialog):
         if data not in (None, ""):
             try:
                 return int(data)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
         text = combo.currentText().strip()
         if not text:
             return None
         try:
             return int(text.split(" - ", 1)[0].strip())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _pick_file(self) -> None:

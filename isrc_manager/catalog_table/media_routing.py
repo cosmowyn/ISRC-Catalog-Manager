@@ -81,7 +81,7 @@ def _custom_field_for_column_key(app, column_key: str | None) -> dict[str, objec
         return None
     try:
         field_id = int(normalized_key.split(":", 1)[1])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return next(
         (field for field in app.active_custom_fields if int(field.get("id") or 0) == field_id),
@@ -107,7 +107,7 @@ def _media_cell_has_payload(
     if isinstance(raw_value, tuple) and len(raw_value) >= 2:
         try:
             raw_track_id = int(raw_value[0])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raw_track_id = None
         target_track_id = app._catalog_table_controller().track_id_for_index(index)
         if (
@@ -121,7 +121,7 @@ def _media_cell_has_payload(
         if field_id is not None:
             try:
                 return int(raw_value[1]) == int(field_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return False
         return True
     return False
@@ -138,7 +138,7 @@ def _media_column_for_audio_source_spec(
     if kind == "custom":
         try:
             field_id = int(source_spec.get("field_id") or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if field_id <= 0:
             return None
@@ -158,7 +158,7 @@ def _media_cell_has_payload_for_source_spec(
     if kind == "custom":
         try:
             field_id = int(source_spec.get("field_id") or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         return app._media_cell_has_payload(index, field_id=field_id)
     media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"

@@ -70,6 +70,12 @@ class HistoryManager:
             "_MigrationLog",
         }
     )
+    SNAPSHOT_INSERT_ONLY_TABLES = frozenset(
+        {
+            "CodeRegistryCategories",
+            "CodeRegistryEntries",
+        }
+    )
     SNAPSHOT_SIDECAR_SUFFIX = ".snapshot.json"
     BACKUP_SIDECAR_SUFFIX = ".backup.json"
 
@@ -1724,6 +1730,8 @@ class HistoryManager:
             try:
                 self.conn.execute("BEGIN")
                 for table_name in self._snapshot_domain_tables("main"):
+                    if table_name in self.SNAPSHOT_INSERT_ONLY_TABLES:
+                        continue
                     self.conn.execute(f"DELETE FROM {table_name}")
                 for table_name in self._snapshot_domain_tables("snapshot_restore"):
                     if not self._table_exists("snapshot_restore", table_name):
@@ -1732,8 +1740,13 @@ class HistoryManager:
                     if not columns:
                         continue
                     cols_sql = ", ".join(columns)
+                    insert_verb = (
+                        "INSERT OR IGNORE"
+                        if table_name in self.SNAPSHOT_INSERT_ONLY_TABLES
+                        else "INSERT"
+                    )
                     self.conn.execute(
-                        f"INSERT INTO {table_name} ({cols_sql}) "
+                        f"{insert_verb} INTO {table_name} ({cols_sql}) "
                         f"{self._snapshot_restore_select_sql(table_name, columns)}"
                     )
                 if update_current_entry:
@@ -1876,15 +1889,13 @@ class HistoryManager:
         return bool(row)
 
     def _snapshot_domain_tables(self, db_alias: str) -> list[str]:
-        rows = self.conn.execute(
-            f"""
+        rows = self.conn.execute(f"""
             SELECT name
             FROM {db_alias}.sqlite_master
             WHERE type='table'
               AND name NOT LIKE 'sqlite_%'
             ORDER BY name
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             str(row[0])
             for row in rows
@@ -1961,13 +1972,11 @@ class HistoryManager:
         if not self._history_tables_ready():
             return
 
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, parent_id, action_type, strategy, reversible, status
             FROM HistoryEntries
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         if not rows:
             if self.get_current_entry_id() is not None:
                 self._set_current_entry_id(None)
@@ -2018,14 +2027,12 @@ class HistoryManager:
                         )
 
             # Entries that reference deleted snapshots cannot remain reversible.
-            dangling_rows = self.conn.execute(
-                """
+            dangling_rows = self.conn.execute("""
                 SELECT id, snapshot_before_id, snapshot_after_id
                 FROM HistoryEntries
                 WHERE reversible=1
                   AND (snapshot_before_id IS NOT NULL OR snapshot_after_id IS NOT NULL)
-                """
-            ).fetchall()
+                """).fetchall()
             for entry_id, before_id, after_id in dangling_rows:
                 missing_ref = False
                 if before_id is not None and int(before_id) not in snapshot_ids:
@@ -2270,36 +2277,30 @@ class HistoryManager:
         return int(row[0]) if row and row[0] is not None else None
 
     def _all_snapshots(self) -> list[SnapshotRecord]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, created_at, kind, label, db_snapshot_path, settings_json, manifest_json
             FROM HistorySnapshots
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         return [self._snapshot_from_row(row) for row in rows]
 
     def _all_backups(self) -> list[BackupRecord]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, created_at, kind, label, backup_path, source_db_path, metadata_json
             FROM HistoryBackups
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         return [self._backup_from_row(row) for row in rows]
 
     def _all_history_entries(self, *, action_type: str | None = None) -> list[HistoryEntry]:
         current_id = self.get_current_entry_id()
         if action_type is None:
-            rows = self.conn.execute(
-                f"""
+            rows = self.conn.execute(f"""
                 SELECT
                     {_ENTRY_SELECT_COLUMNS}
                 FROM HistoryEntries
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
         else:
             rows = self.conn.execute(
                 f"""
@@ -2417,13 +2418,11 @@ class HistoryManager:
         return f"Registered backup history entry #{entry.entry_id} as backup metadata for {backup_path.name}."
 
     def _referenced_snapshot_ids(self) -> set[int]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT snapshot_before_id, snapshot_after_id
             FROM HistoryEntries
             WHERE snapshot_before_id IS NOT NULL OR snapshot_after_id IS NOT NULL
-            """
-        ).fetchall()
+            """).fetchall()
         snapshot_ids: set[int] = set()
         for before_id, after_id in rows:
             if before_id is not None:
@@ -2435,13 +2434,11 @@ class HistoryManager:
     def _dangling_snapshot_reference_issues(self) -> list[HistoryIssue]:
         snapshot_ids = {snapshot.snapshot_id for snapshot in self._all_snapshots()}
         issues: list[HistoryIssue] = []
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT id, snapshot_before_id, snapshot_after_id
             FROM HistoryEntries
             WHERE snapshot_before_id IS NOT NULL OR snapshot_after_id IS NOT NULL
-            """
-        ).fetchall()
+            """).fetchall()
         for entry_id, before_id, after_id in rows:
             for snapshot_id in (before_id, after_id):
                 if snapshot_id is None or int(snapshot_id) in snapshot_ids:
@@ -2620,14 +2617,12 @@ class HistoryManager:
         return True
 
     def _find_archived_snapshot_payload(self, snapshot_id: int) -> dict:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT payload_json, inverse_json, redo_json
             FROM HistoryEntries
             WHERE action_type IN ('snapshot.create', 'snapshot.delete')
             ORDER BY id DESC
-            """
-        ).fetchall()
+            """).fetchall()
         for payload_json, inverse_json, redo_json in rows:
             payload = self._loads(payload_json)
             inverse_payload = self._loads(inverse_json)

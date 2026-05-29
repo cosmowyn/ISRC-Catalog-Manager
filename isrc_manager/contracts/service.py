@@ -1618,8 +1618,7 @@ class ContractService:
         clean_search = clean_text(search_text)
         if clean_search:
             like = f"%{clean_search}%"
-            clauses.append(
-                """
+            clauses.append("""
                 (
                     c.title LIKE ?
                     OR COALESCE(c.contract_type, '') LIKE ?
@@ -1635,8 +1634,7 @@ class ContractService:
                           )
                     )
                 )
-                """
-            )
+                """)
             params.extend([like, like, like, like, like])
         clean_status = clean_text(status)
         if clean_status:
@@ -1721,8 +1719,7 @@ class ContractService:
         today = date.today()
         cutoff = today + timedelta(days=max(0, int(within_days)))
         deadlines: list[ContractDeadline] = []
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 id,
                 title,
@@ -1734,8 +1731,7 @@ class ContractService:
             FROM Contracts
             WHERE status IN ('active', 'pending_signature', 'draft')
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         for row in rows:
             contract_id = int(row[0])
             title = str(row[1] or "")
@@ -1757,8 +1753,7 @@ class ContractService:
                         due_date=due.isoformat(),
                     )
                 )
-        obligation_rows = self.conn.execute(
-            """
+        obligation_rows = self.conn.execute("""
             SELECT
                 c.id,
                 c.title,
@@ -1769,8 +1764,7 @@ class ContractService:
               AND o.due_date IS NOT NULL
               AND trim(o.due_date) != ''
             ORDER BY o.due_date, o.id
-            """
-        ).fetchall()
+            """).fetchall()
         for contract_id, title, due_date in obligation_rows:
             due = parse_iso_date(due_date)
             if due is None or due < today or due > cutoff:

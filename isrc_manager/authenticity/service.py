@@ -198,13 +198,11 @@ class AuthenticityKeyService:
         )
 
     def list_keys(self) -> list[AuthenticityKeyRecord]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT key_id, algorithm, signer_label, public_key_b64, created_at, retired_at, notes
             FROM AuthenticityKeys
             ORDER BY created_at, key_id
-            """
-        ).fetchall()
+            """).fetchall()
         return [self._row_to_key_record(row) for row in rows]
 
     def fetch_key(self, key_id: str) -> AuthenticityKeyRecord | None:

@@ -726,8 +726,7 @@ class PartyService:
         clean_search = clean_text(search_text)
         if clean_search:
             like = f"%{clean_search}%"
-            clauses.append(
-                """
+            clauses.append("""
                 (
                     legal_name LIKE ?
                     OR COALESCE(display_name, '') LIKE ?
@@ -749,8 +748,7 @@ class PartyService:
                           AND alias.alias_name LIKE ?
                     )
                 )
-                """
-            )
+                """)
             params.extend([like] * 14)
         clean_party_type = clean_text(party_type)
         if clean_party_type:
@@ -775,10 +773,7 @@ class PartyService:
         additional_columns = self._table_columns("TrackArtists")
         if "main_artist_party_id" not in track_columns or "party_id" not in additional_columns:
             return [record for record in records if self._is_artist_relevant_record(record)]
-        used_party_ids = {
-            int(row[0])
-            for row in self.conn.execute(
-                """
+        used_party_ids = {int(row[0]) for row in self.conn.execute("""
                 SELECT main_artist_party_id
                 FROM Tracks
                 WHERE main_artist_party_id IS NOT NULL
@@ -786,10 +781,7 @@ class PartyService:
                 SELECT party_id
                 FROM TrackArtists
                 WHERE party_id IS NOT NULL
-                """
-            ).fetchall()
-            if row and row[0] is not None
-        }
+                """).fetchall() if row and row[0] is not None}
         filtered = [
             record
             for record in records
@@ -1139,16 +1131,14 @@ class PartyService:
                         f"UPDATE TrackArtists SET {additional_column}=? WHERE {additional_column}=?",
                         (primary_party_id, duplicate_id),
                     )
-                    cur.execute(
-                        f"""
+                    cur.execute(f"""
                         DELETE FROM TrackArtists
                         WHERE rowid NOT IN (
                             SELECT MIN(rowid)
                             FROM TrackArtists
                             GROUP BY track_id, {additional_column}, role
                         )
-                        """
-                    )
+                        """)
                 if "WorkContributionEntries" in table_names:
                     cur.execute(
                         "UPDATE WorkContributionEntries SET party_id=? WHERE party_id=?",

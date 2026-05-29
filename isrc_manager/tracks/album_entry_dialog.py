@@ -354,7 +354,7 @@ class _AlbumTrackSection(QWidget):
         value = self.parent_work.currentData()
         try:
             return int(value) if value not in (None, "") else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def selected_relationship_type(self) -> str:
@@ -364,7 +364,7 @@ class _AlbumTrackSection(QWidget):
         value = self.parent_track.currentData()
         try:
             return int(value) if value not in (None, "") else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def selected_governance_mode(self) -> str:
@@ -402,7 +402,7 @@ class _AlbumTrackSection(QWidget):
             for record in self.dialog._available_work_records():
                 try:
                     work_id = int(getattr(record, "id", 0) or 0)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 if work_id <= 0:
                     continue

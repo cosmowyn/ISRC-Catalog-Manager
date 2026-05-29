@@ -198,8 +198,7 @@ class XMLImportServiceTests(unittest.TestCase):
             (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
             (1, 0, 0, 0),
         )
-        row = self.conn.execute(
-            """
+        row = self.conn.execute("""
             SELECT
                 t.isrc,
                 t.track_title,
@@ -219,25 +218,20 @@ class XMLImportServiceTests(unittest.TestCase):
             LEFT JOIN Albums al ON al.id = t.album_id
             LEFT JOIN Works w ON w.id = t.work_id
             WHERE t.isrc_compact='NLABC2600002'
-            """
-        ).fetchone()
-        extras = self.conn.execute(
-            """
+            """).fetchone()
+        extras = self.conn.execute("""
             SELECT COALESCE(a.display_name, a.artist_name, a.legal_name)
             FROM TrackArtists ta
             JOIN Parties a ON a.id = ta.party_id
             WHERE ta.track_id = (SELECT id FROM Tracks WHERE isrc_compact='NLABC2600002')
             ORDER BY COALESCE(a.display_name, a.artist_name, a.legal_name)
-            """
-        ).fetchall()
-        custom = self.conn.execute(
-            """
+            """).fetchall()
+        custom = self.conn.execute("""
             SELECT value
             FROM CustomFieldValues
             WHERE track_id = (SELECT id FROM Tracks WHERE isrc_compact='NLABC2600002')
               AND field_def_id = 1
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(
             row[:11],
@@ -284,13 +278,11 @@ class XMLImportServiceTests(unittest.TestCase):
             (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
             (1, 0, 0, 0),
         )
-        row = self.conn.execute(
-            """
+        row = self.conn.execute("""
             SELECT isrc, isrc_compact, track_title, work_id
             FROM Tracks
             WHERE track_title = 'No Code Yet'
-            """
-        ).fetchone()
+            """).fetchone()
         self.assertEqual(row[:3], ("", "", "No Code Yet"))
         self.assertIsNotNone(row[3])
 
@@ -325,15 +317,13 @@ class XMLImportServiceTests(unittest.TestCase):
         field_row = self.conn.execute(
             "SELECT field_type, options FROM CustomFieldDefs WHERE name='Energy'"
         ).fetchone()
-        custom_row = self.conn.execute(
-            """
+        custom_row = self.conn.execute("""
             SELECT cfv.value, t.work_id
             FROM CustomFieldValues cfv
             JOIN Tracks t ON t.id = cfv.track_id
             JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
             WHERE t.isrc_compact='NLABC2600003' AND cfd.name='Energy'
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(field_row, ("dropdown", '["High"]'))
         self.assertEqual(custom_row[0], "High")
@@ -365,13 +355,11 @@ class XMLImportServiceTests(unittest.TestCase):
             self.service.execute_import(file_path)
 
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
-        queued_rows = self.conn.execute(
-            """
+        queued_rows = self.conn.execute("""
             SELECT status, source_format
             FROM TrackImportRepairQueue
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         self.assertEqual(queued_rows, [("pending", "xml")])
 
     def test_inspect_file_supports_full_schema_xml(self):
@@ -499,13 +487,11 @@ class XMLImportServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Custom column type conflicts:"):
             self.service.execute_import(file_path)
 
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT status, source_format, row_index, failure_category, failure_message
             FROM TrackImportRepairQueue
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         self.assertEqual(
             rows,
             [

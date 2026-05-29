@@ -419,24 +419,20 @@ class CodeRegistryService:
         parts: list[str] = []
         track_column = self._catalog_external_column_name("Tracks")
         if track_column is not None:
-            parts.append(
-                f"""
+            parts.append(f"""
                 SELECT {track_column} AS external_id, COUNT(*) AS usage_count
                 FROM Tracks
                 WHERE {track_column} IS NOT NULL
                 GROUP BY {track_column}
-                """
-            )
+                """)
         release_column = self._catalog_external_column_name("Releases")
         if release_column is not None:
-            parts.append(
-                f"""
+            parts.append(f"""
                 SELECT {release_column} AS external_id, COUNT(*) AS usage_count
                 FROM Releases
                 WHERE {release_column} IS NOT NULL
                 GROUP BY {release_column}
-                """
-            )
+                """)
         contract_columns = (
             self._contract_external_column_name(BUILTIN_CATEGORY_CONTRACT_NUMBER),
             self._contract_external_column_name(BUILTIN_CATEGORY_LICENSE_NUMBER),
@@ -445,14 +441,12 @@ class CodeRegistryService:
         for column_name in contract_columns:
             if column_name is None:
                 continue
-            parts.append(
-                f"""
+            parts.append(f"""
                 SELECT {column_name} AS external_id, COUNT(*) AS usage_count
                 FROM Contracts
                 WHERE {column_name} IS NOT NULL
                 GROUP BY {column_name}
-                """
-            )
+                """)
         if not parts:
             return """
                 WITH usage_totals AS (
@@ -1036,28 +1030,24 @@ class CodeRegistryService:
         params: list[object] = []
         table_name = self._external_identifier_table_name()
         if table_name == "ExternalCodeIdentifiers":
-            values_sql.append(
-                """
+            values_sql.append("""
                 SELECT value
                 FROM ExternalCodeIdentifiers
                 WHERE category_system_key=?
                   AND value IS NOT NULL
                   AND value != ''
-                """
-            )
+                """)
             params.append(clean_system_key)
         elif (
             table_name == "ExternalCatalogIdentifiers"
             and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER
         ):
-            values_sql.append(
-                """
+            values_sql.append("""
                 SELECT value
                 FROM ExternalCatalogIdentifiers
                 WHERE value IS NOT NULL
                   AND value != ''
-                """
-            )
+                """)
         owner_columns: list[tuple[str, str, str | None, str | None]] = []
         if clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
             owner_columns.extend(
@@ -1116,13 +1106,11 @@ class CodeRegistryService:
             ]
             if external_column:
                 where_bits.append(f"{external_column} IS NULL")
-            values_sql.append(
-                f"""
+            values_sql.append(f"""
                 SELECT {text_column} AS value
                 FROM {table}
                 WHERE {' AND '.join(where_bits)}
-                """
-            )
+                """)
         if not values_sql:
             return []
         query = "\nUNION\n".join(values_sql)
@@ -2831,23 +2819,19 @@ class CodeRegistryService:
         params: list[object] = []
         track_column = self._catalog_external_column_name("Tracks")
         if track_column is not None:
-            unions.append(
-                f"""
+            unions.append(f"""
                 SELECT 'track' AS subject_kind, t.id, COALESCE(t.track_title, ''), 'Catalog Number'
                 FROM Tracks t
                 WHERE t.{track_column}=?
-                """
-            )
+                """)
             params.append(int(external_id))
         release_column = self._catalog_external_column_name("Releases")
         if release_column is not None:
-            unions.append(
-                f"""
+            unions.append(f"""
                 SELECT 'release' AS subject_kind, r.id, COALESCE(r.title, ''), 'Catalog Number'
                 FROM Releases r
                 WHERE r.{release_column}=?
-                """
-            )
+                """)
             params.append(int(external_id))
         contract_column_map = {
             self._contract_external_column_name(
@@ -2861,13 +2845,11 @@ class CodeRegistryService:
         for column_name, label in contract_column_map.items():
             if column_name is None:
                 continue
-            unions.append(
-                f"""
+            unions.append(f"""
                 SELECT 'contract' AS subject_kind, c.id, COALESCE(c.title, ''), '{label}'
                 FROM Contracts c
                 WHERE c.{column_name}=?
-                """
-            )
+                """)
             params.append(int(external_id))
         if not unions:
             return []

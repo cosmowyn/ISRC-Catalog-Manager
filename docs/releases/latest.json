@@ -1,7 +1,7 @@
 {
-  "version": "3.16.6",
-  "released_at": "2026-05-27",
+  "version": "4.0.0",
+  "released_at": "2026-05-29",
   "summary": "import unittest mock explicitly",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v3.16.6.md",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.0.md",
   "minimum_supported_version": null
 }

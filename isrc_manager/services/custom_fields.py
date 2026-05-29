@@ -74,14 +74,12 @@ class CustomFieldDefinitionService:
             if self._has_blob_icon_payload_column()
             else "NULL AS blob_icon_payload"
         )
-        rows = self.conn.execute(
-            f"""
+        rows = self.conn.execute(f"""
             SELECT id, name, field_type, options, {blob_icon_sql}
             FROM CustomFieldDefs
             WHERE active=1
             ORDER BY COALESCE(sort_order, 999999), name
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             {
                 "id": row[0],
@@ -194,13 +192,11 @@ class CustomFieldDefinitionService:
             blob_icon_sql = (
                 "blob_icon_payload" if supports_blob_icon_payload else "NULL AS blob_icon_payload"
             )
-            rows = cur.execute(
-                f"""
+            rows = cur.execute(f"""
                 SELECT id, name, active, sort_order, field_type, options, {blob_icon_sql}
                 FROM CustomFieldDefs
                 ORDER BY COALESCE(sort_order, 999999), id
-                """
-            ).fetchall()
+                """).fetchall()
             by_name = {
                 str(row[1]): {
                     "id": int(row[0]),
@@ -538,8 +534,7 @@ class CustomFieldValueService:
         self._normalize_text_field_attachment_state()
 
     def _normalize_text_field_attachment_state(self) -> None:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT DISTINCT
                 cfv.track_id,
                 cfv.field_def_id,
@@ -555,14 +550,12 @@ class CustomFieldValueService:
                   OR COALESCE(trim(cfv.mime_type), '') != ''
                   OR COALESCE(cfv.size_bytes, 0) != 0
               )
-            """
-        ).fetchall()
+            """).fetchall()
         if not rows:
             return
         stale_paths = {str(row[2] or "").strip() for row in rows if str(row[2] or "").strip()}
         with self.conn:
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 UPDATE CustomFieldValues
                 SET blob_value=NULL,
                     managed_file_path='',
@@ -584,8 +577,7 @@ class CustomFieldValueService:
                       OR COALESCE(trim(mime_type), '') != ''
                       OR COALESCE(size_bytes, 0) != 0
                   )
-                """
-            )
+                """)
             cleanup_cursor = self.conn.cursor()
             for stale_path in stale_paths:
                 self._delete_managed_file_if_unreferenced(stale_path, cursor=cleanup_cursor)
@@ -821,8 +813,7 @@ class CustomFieldValueService:
         if not normalized_field_ids:
             return {}
 
-        query_parts = [
-            """
+        query_parts = ["""
             SELECT
                 track_id,
                 field_def_id,
@@ -835,8 +826,7 @@ class CustomFieldValueService:
                 mime_type
             FROM CustomFieldValues
             WHERE field_def_id IN ({field_placeholders})
-            """
-        ]
+            """]
         params: list[int] = list(normalized_field_ids)
         normalized_track_ids: list[int] = []
         if track_ids is not None:

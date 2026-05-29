@@ -733,7 +733,7 @@ class EditDialog(QDialog):
         for candidate in candidates:
             try:
                 value = int(candidate)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if value <= 0 or value in seen:
                 continue

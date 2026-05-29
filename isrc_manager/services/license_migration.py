@@ -395,8 +395,7 @@ class LegacyLicenseMigrationService:
         )
 
     def _legacy_license_rows(self, *, cursor: sqlite3.Cursor) -> list[_LegacyLicenseRow]:
-        rows = cursor.execute(
-            """
+        rows = cursor.execute("""
             SELECT
                 l.id,
                 l.track_id,
@@ -410,8 +409,7 @@ class LegacyLicenseMigrationService:
             JOIN Licensees lic ON lic.id = l.licensee_id
             LEFT JOIN Tracks t ON t.id = l.track_id
             ORDER BY lic.name COLLATE NOCASE, l.id
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             _LegacyLicenseRow(
                 record_id=int(row[0]),

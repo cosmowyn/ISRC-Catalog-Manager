@@ -543,7 +543,7 @@ class LiveEqualizerPlayer(QObject):
             return samples
         try:
             pan = float(self._equalizer_settings.get("pan", 0.0))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pan = 0.0
         pan = max(-1.0, min(1.0, pan))
         if abs(pan) < 0.001:

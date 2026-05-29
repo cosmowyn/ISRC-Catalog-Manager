@@ -9,8 +9,7 @@ from isrc_manager.services import CustomFieldDefinitionService, CustomFieldValue
 
 def make_custom_field_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE CustomFieldDefs (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -29,8 +28,7 @@ def make_custom_field_conn():
             size_bytes INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (track_id, field_def_id)
         );
-        """
-    )
+        """)
     conn.executemany(
         """
         INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)

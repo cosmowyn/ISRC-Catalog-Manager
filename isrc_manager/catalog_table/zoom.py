@@ -106,7 +106,7 @@ class CatalogZoomController(QObject):
     def apply_pinch_scale(self, scale_factor: float, *, immediate: bool = False) -> int:
         try:
             factor = float(scale_factor)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             factor = 1.0
         if factor <= 0:
             factor = 1.0
@@ -142,7 +142,7 @@ class CatalogZoomController(QObject):
             return self._zoom_percent
         try:
             zoom_percent = int(payload.get(CATALOG_ZOOM_LAYOUT_KEY, self._zoom_percent))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             zoom_percent = self._zoom_percent
         return self.set_zoom_percent(
             zoom_percent,
@@ -156,7 +156,7 @@ class CatalogZoomController(QObject):
     def clamp_zoom_percent(zoom_percent: int) -> int:
         try:
             numeric_zoom_percent = int(round(float(zoom_percent)))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             numeric_zoom_percent = CATALOG_ZOOM_DEFAULT_PERCENT
         return max(
             CATALOG_ZOOM_MIN_PERCENT,

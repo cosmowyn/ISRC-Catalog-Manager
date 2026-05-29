@@ -657,7 +657,7 @@ def _load_splash_version_font(font_size: int):
     if callable(font_variant):
         try:
             return fallback_font.font_variant(size=font_size)
-        except (AttributeError, OSError, TypeError, ValueError):
+        except AttributeError, OSError, TypeError, ValueError:
             pass
     return fallback_font
 

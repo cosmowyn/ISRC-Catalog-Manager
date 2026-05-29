@@ -23,6 +23,9 @@ class HistorySnapshotTests(HistoryManagerTestCase):
     test_snapshot_restore_preserves_audit_log_and_supports_undo_redo = (
         HistoryManagerTestCase.case_snapshot_restore_preserves_audit_log_and_supports_undo_redo
     )
+    test_snapshot_restore_preserves_immutable_code_registry_entries = (
+        HistoryManagerTestCase.case_snapshot_restore_preserves_immutable_code_registry_entries
+    )
     test_snapshot_history_undo_redo_does_not_duplicate_entries = (
         HistoryManagerTestCase.case_snapshot_history_undo_redo_does_not_duplicate_entries
     )

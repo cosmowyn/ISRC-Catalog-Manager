@@ -599,7 +599,7 @@ class TrackService:
     def normalize_track_number(value) -> int | None:
         try:
             normalized = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return normalized if normalized > 0 else None
 
@@ -2072,7 +2072,7 @@ class TrackService:
         for track_id in exclude_track_ids or []:
             try:
                 normalized_track_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if normalized_track_id > 0:
                 exclude_value_set.add(normalized_track_id)

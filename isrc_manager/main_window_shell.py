@@ -738,6 +738,16 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
     )
     metadata_menu = catalog_menu.addMenu("Metadata & Standards")
+    publish_menu = catalog_menu.addMenu("Publish")
+    app.soundcloud_publish_action = app._create_action(
+        "SoundCloud…",
+        slot=app.open_soundcloud_publish_dialog,
+    )
+    app.soundcloud_publish_action.setStatusTip(
+        "Review a private-by-default SoundCloud publish preflight for selected catalog tracks."
+    )
+    app.soundcloud_publish_action.setToolTip(app.soundcloud_publish_action.statusTip())
+    publish_menu.addAction(app.soundcloud_publish_action)
     audio_menu = catalog_menu.addMenu("Audio")
     audio_ingest_menu = audio_menu.addMenu("Import & Attach")
     audio_export_menu = audio_menu.addMenu("Delivery & Conversion")

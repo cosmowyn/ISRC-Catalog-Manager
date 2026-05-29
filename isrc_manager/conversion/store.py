@@ -19,8 +19,7 @@ class ConversionTemplateStoreService:
 
     def _ensure_table(self) -> None:
         with self.conn:
-            self.conn.execute(
-                f"""
+            self.conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -35,12 +34,10 @@ class ConversionTemplateStoreService:
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
-                """
-            )
+                """)
 
     def list_saved_templates(self) -> tuple[SavedConversionTemplateRecord, ...]:
-        rows = self.conn.execute(
-            f"""
+        rows = self.conn.execute(f"""
             SELECT
                 id,
                 name,
@@ -55,8 +52,7 @@ class ConversionTemplateStoreService:
                 updated_at
             FROM {self.TABLE_NAME}
             ORDER BY lower(name), id
-            """
-        ).fetchall()
+            """).fetchall()
         return tuple(self._record_from_row(row) for row in rows)
 
     def load_saved_template(self, template_id: int) -> SavedConversionTemplateRecord:

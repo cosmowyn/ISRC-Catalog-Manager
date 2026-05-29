@@ -56,7 +56,7 @@ class StereoPeakMeterWidget(QWidget):
             try:
                 left = float(frame[0])
                 right = float(frame[1])
-            except (TypeError, ValueError, IndexError):
+            except TypeError, ValueError, IndexError:
                 continue
             cleaned.append((self._clamp_db(left), self._clamp_db(right)))
         self._frames = cleaned

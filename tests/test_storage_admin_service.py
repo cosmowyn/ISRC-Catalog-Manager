@@ -64,12 +64,10 @@ class StorageAdminServiceTests(unittest.TestCase):
         )
         self.service = ApplicationStorageAdminService(self.layout)
 
-        self.conn.execute(
-            """
+        self.conn.execute("""
             INSERT INTO Parties(legal_name, display_name, artist_name, party_type)
             VALUES ('Test Artist', 'Test Artist', 'Test Artist', 'artist')
-            """
-        )
+            """)
         artist_id = int(self.conn.execute("SELECT id FROM Parties").fetchone()[0])
 
         self.live_audio_path = self.layout.data_root / "track_media" / "live_audio.wav"
@@ -305,13 +303,11 @@ class StorageAdminServiceTests(unittest.TestCase):
         history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[
             0
         ]
-        quarantined_rows = self.conn.execute(
-            """
+        quarantined_rows = self.conn.execute("""
             SELECT reversible, status
             FROM HistoryEntries
             WHERE status='artifact_missing'
-            """
-        ).fetchall()
+            """).fetchall()
 
         self.assertGreaterEqual(len(result.removed_history_entry_ids), 1)
         self.assertEqual(history_entries_after, history_entries_before)

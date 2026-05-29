@@ -62,8 +62,7 @@ class CatalogReadService:
             artist_alias="main_artist",
         )
         additional_artists_sql = track_additional_artists_expr(self.conn, track_id_expr="t.id")
-        base_rows = self.conn.execute(
-            f"""
+        base_rows = self.conn.execute(f"""
             SELECT
                 t.id,
                 '' AS audio_file,
@@ -86,8 +85,7 @@ class CatalogReadService:
             LEFT JOIN Albums al ON al.id = t.album_id
             LEFT JOIN Works w ON w.id = t.work_id
             ORDER BY t.id
-            """
-        ).fetchall()
+            """).fetchall()
         if callable(progress_callback):
             progress_callback(2, 4, f"Loaded {len(base_rows)} catalog track rows.")
 
@@ -181,7 +179,7 @@ class CatalogReadService:
                 continue
             try:
                 blob_field_ids.append(int(field_id_text))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         custom_fields = (
             custom_field_values.get_value_meta_map(

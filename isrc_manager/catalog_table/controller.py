@@ -295,13 +295,13 @@ class CatalogTableController(QObject):
             if column_key.startswith("custom:"):
                 try:
                     column_field_id = int(column_key.split(":", 1)[1])
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     column_field_id = None
                 if column_field_id is not None:
                     for candidate in custom_fields:
                         try:
                             candidate_id = int(candidate.get("id") or 0)
-                        except (TypeError, ValueError):
+                        except TypeError, ValueError:
                             continue
                         if candidate_id == column_field_id:
                             field = candidate
@@ -312,7 +312,7 @@ class CatalogTableController(QObject):
         if field is not None:
             try:
                 field_id = int(field.get("id"))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 field_id = None
         field_type = str(field.get("field_type") or "").strip() if field is not None else None
         return CatalogCellTarget(
@@ -352,7 +352,7 @@ class CatalogTableController(QObject):
             return None
         try:
             track_id = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return track_id if track_id > 0 else None
 
@@ -381,7 +381,7 @@ class CatalogTableController(QObject):
                 continue
             try:
                 track_id = int(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if track_id <= 0 or track_id in seen:
                 continue

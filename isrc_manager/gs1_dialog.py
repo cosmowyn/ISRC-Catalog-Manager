@@ -851,7 +851,7 @@ class GS1MetadataDialog(QDialog):
         for track_id in track_ids:
             try:
                 clean_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if clean_id <= 0 or clean_id in seen:
                 continue

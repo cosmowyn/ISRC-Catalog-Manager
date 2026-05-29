@@ -536,14 +536,12 @@ class ApplicationStorageAdminService:
                 try:
                     rows = conn.execute(query).fetchall()
                 except sqlite3.OperationalError:
-                    rows = conn.execute(
-                        f"""
+                    rows = conn.execute(f"""
                         SELECT id, {path_column}, ''
                         FROM {table}
                         WHERE COALESCE(trim({path_column}), '') != ''
                         ORDER BY id
-                        """
-                    ).fetchall()
+                        """).fetchall()
                 for row_id, stored_path, name in rows:
                     clean_path = self._normalize_stored_path(stored_path)
                     if not clean_path or not store.is_managed(clean_path):
@@ -905,29 +903,23 @@ class ApplicationStorageAdminService:
         backup_rows = []
         entry_rows = []
         if "HistorySnapshots" in table_names:
-            snapshot_rows = conn.execute(
-                """
+            snapshot_rows = conn.execute("""
                 SELECT id, created_at, kind, label, db_snapshot_path, manifest_json
                 FROM HistorySnapshots
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
         if "HistoryBackups" in table_names:
-            backup_rows = conn.execute(
-                """
+            backup_rows = conn.execute("""
                 SELECT id, created_at, kind, label, backup_path, source_db_path, metadata_json
                 FROM HistoryBackups
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
         if "HistoryEntries" in table_names:
-            entry_rows = conn.execute(
-                """
+            entry_rows = conn.execute("""
                 SELECT id, parent_id, payload_json, inverse_json, redo_json, snapshot_before_id, snapshot_after_id
                 FROM HistoryEntries
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
 
         protected_snapshot_ids: set[int] = set()
         live_archive_paths: set[Path] = set()

@@ -216,8 +216,7 @@ class ContractTemplateService:
 
     def list_templates(self, *, include_archived: bool = False) -> list[ContractTemplateRecord]:
         where_sql = "" if include_archived else "WHERE archived=0"
-        rows = self.conn.execute(
-            f"""
+        rows = self.conn.execute(f"""
             SELECT
                 id,
                 name,
@@ -231,8 +230,7 @@ class ContractTemplateService:
             FROM ContractTemplates
             {where_sql}
             ORDER BY archived ASC, updated_at DESC, id DESC
-            """
-        ).fetchall()
+            """).fetchall()
         return [
             ContractTemplateRecord(
                 template_id=int(row[0]),

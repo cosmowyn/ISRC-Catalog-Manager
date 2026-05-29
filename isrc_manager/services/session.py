@@ -24,14 +24,12 @@ class ProfileKVService:
         self.conn = conn
 
     def ensure_store(self) -> None:
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS app_kv (
                 key   TEXT PRIMARY KEY,
                 value TEXT
             )
-            """
-        )
+            """)
         self.conn.commit()
 
     def get(self, key: str, default: object = None) -> object:

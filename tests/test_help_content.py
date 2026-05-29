@@ -24,6 +24,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
         self.assertIn("keyboard-shortcuts", HELP_CHAPTERS_BY_ID)
         self.assertIn("application-updates", HELP_CHAPTERS_BY_ID)
+        self.assertIn("soundcloud-publishing", HELP_CHAPTERS_BY_ID)
+        self.assertIn("application-storage-admin", HELP_CHAPTERS_BY_ID)
 
     def test_rendered_help_contains_contents_index_and_anchors(self):
         html = render_help_html("Music Catalog Manager", "1.2.3")
@@ -104,9 +106,11 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("overview", grouped_ids["Quick Start"])
         self.assertIn("keyboard-shortcuts", grouped_ids["Quick Start"])
         self.assertIn("code-registry", grouped_ids["Daily Workflows"])
+        self.assertIn("soundcloud-publishing", grouped_ids["Daily Workflows"])
         self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
         self.assertIn("conversion", grouped_ids["Deep Dives"])
         self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
+        self.assertIn("application-storage-admin", grouped_ids["Operations & Recovery"])
         self.assertIn("application-updates", grouped_ids["Operations & Recovery"])
         self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")
 
@@ -153,6 +157,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("custom value acts as an explicit override", settings.content_html)
         self.assertIn("Export Settings", settings.content_html)
         self.assertIn("Sounds", settings.content_html)
+        self.assertIn("SoundCloud", settings.content_html)
+        self.assertIn("OS keychain/keyring availability", settings.content_html)
         self.assertIn("Aeon Cosmowyn", settings.content_html)
         self.assertIn("GTIN contracts CSV", settings.content_html)
 
@@ -178,6 +184,34 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("/Applications", chapter.content_html)
         self.assertIn("updates", chapter.content_html)
         self.assertIn("Application Updates", html)
+
+    def test_soundcloud_publishing_help_documents_secure_publish_workflow(self):
+        chapter = HELP_CHAPTERS_BY_ID["soundcloud-publishing"]
+        html = render_help_html("Music Catalog Manager", "3.6.5")
+
+        self.assertIn("Catalog &gt; Publish &gt; SoundCloud", chapter.content_html)
+        self.assertIn("Publish to SoundCloud", chapter.content_html)
+        self.assertIn("Choose tracks", chapter.content_html)
+        self.assertIn("private", chapter.content_html)
+        self.assertIn("downloadable", chapter.content_html)
+        self.assertIn("streamable", chapter.content_html)
+        self.assertIn("OS keychain/keyring", chapter.content_html)
+        self.assertIn("Session-only fallback", chapter.content_html)
+        self.assertIn("watermarked WAV", chapter.content_html)
+        self.assertIn("remote_urn", chapter.content_html)
+        self.assertIn("Publish history", chapter.content_html)
+        self.assertIn("Metadata comparison", chapter.content_html)
+        self.assertIn("SoundCloud Publishing", html)
+
+    def test_application_storage_admin_help_documents_safe_cleanup(self):
+        chapter = HELP_CHAPTERS_BY_ID["application-storage-admin"]
+        about = HELP_CHAPTERS_BY_ID["about"]
+
+        self.assertIn("Help &gt; Application Storage Admin", chapter.content_html)
+        self.assertIn("Preview before cleanup", chapter.content_html)
+        self.assertIn("Active-profile safety", chapter.content_html)
+        self.assertIn("managed media", chapter.content_html)
+        self.assertIn("Application Storage Admin", about.content_html)
 
 
 if __name__ == "__main__":

@@ -137,14 +137,12 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         schema = DatabaseSchemaService(self.conn, data_root=self.root)
         schema.init_db()
         schema.migrate_schema()
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS app_kv (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
-            """
-        )
+            """)
         self.track_service = TrackService(self.conn, self.root)
         self.primary_track_id = self.track_service.create_track(
             TrackCreatePayload(

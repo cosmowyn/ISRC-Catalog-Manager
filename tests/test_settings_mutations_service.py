@@ -12,8 +12,7 @@ from isrc_manager.services import OwnerPartySettings, SettingsMutationService
 def make_settings_conn():
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE app_kv (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -70,8 +69,7 @@ def make_settings_conn():
             created_at TEXT,
             updated_at TEXT
         );
-        """
-    )
+        """)
     return conn
 
 

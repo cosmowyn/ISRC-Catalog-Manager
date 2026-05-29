@@ -327,7 +327,7 @@ class CatalogHeaderStateManager:
                 continue
             try:
                 occurrence = int(entry.get("occurrence", 0))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 occurrence = 0
             hidden_columns.append((label, max(0, occurrence)))
         return hidden_columns

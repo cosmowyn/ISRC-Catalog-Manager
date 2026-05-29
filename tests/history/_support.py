@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QByteArray, QPoint, QSettings
 
+from isrc_manager.code_registry import BUILTIN_CATEGORY_CATALOG_NUMBER, CodeRegistryService
 from isrc_manager.history import HistoryManager, HistoryRecoveryError
 from isrc_manager.services import (
     ContractService,
@@ -539,12 +540,10 @@ class HistoryManagerTestCase(unittest.TestCase):
     def case_snapshot_restore_sanitizes_legacy_text_custom_field_attachment_state(self):
         track_id = self._create_track()
         with self.conn:
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
                 VALUES (901, 'Mood Notes', 1, 1, 'text', NULL)
-                """
-            )
+                """)
             self.conn.execute(
                 """
                 INSERT INTO CustomFieldValues(
@@ -972,6 +971,47 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.history.redo()
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
         self.assertEqual(self.history.get_current_entry_id(), entry.entry_id)
+
+    def case_snapshot_restore_preserves_immutable_code_registry_entries(self):
+        registry = CodeRegistryService(self.conn)
+        category = registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER)
+        self.assertIsNotNone(category)
+        assert category is not None
+        registry.update_category(category.id, prefix="ACR")
+        generated = registry.generate_next_code(
+            category_id=category.id,
+            created_via="test.history.snapshot",
+        ).entry
+        track_id = self._create_track(title="Registry Linked Song")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET catalog_number=?,
+                catalog_registry_entry_id=?
+            WHERE id=?
+            """,
+            (generated.value, generated.id, track_id),
+        )
+        self.conn.commit()
+        snapshot = self.history.create_manual_snapshot("Registry linked snapshot")
+
+        entry = self.history.restore_snapshot_as_action(snapshot.snapshot_id)
+
+        self.assertEqual(entry.action_type, "snapshot.restore")
+        restored_track = self.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(restored_track)
+        restored_link = self.conn.execute(
+            """
+            SELECT catalog_registry_entry_id
+            FROM Tracks
+            WHERE id=?
+            """,
+            (track_id,),
+        ).fetchone()
+        self.assertIsNotNone(restored_link)
+        assert restored_link is not None
+        self.assertEqual(restored_link[0], generated.id)
+        self.assertIsNotNone(registry.fetch_entry(generated.id))
 
     def case_snapshot_history_undo_redo_does_not_duplicate_entries(self):
         created_track_id = run_snapshot_history_action(

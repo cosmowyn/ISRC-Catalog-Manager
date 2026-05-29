@@ -8,3 +8,4 @@ numpy==2.3.2
 soundfile==0.13.1
 scipy==1.17.1
 cryptography==48.0.0
+keyring==25.7.0

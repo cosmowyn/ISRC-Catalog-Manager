@@ -403,17 +403,14 @@ class RightEditorDialog(QDialog):
                 track_alias="t",
                 artist_alias="main_artist",
             )
-            for work_id, title, iswc in conn.execute(
-                """
+            for work_id, title, iswc in conn.execute("""
                 SELECT id, title, COALESCE(iswc, '')
                 FROM Works
                 ORDER BY title, id
-                """
-            ).fetchall():
+                """).fetchall():
                 label = " / ".join(part for part in (str(title or ""), str(iswc or "")) if part)
                 self.work_combo.addItem(label, int(work_id))
-            for track_id, track_title, artist_name in conn.execute(
-                f"""
+            for track_id, track_title, artist_name in conn.execute(f"""
                 SELECT
                     t.id,
                     t.track_title,
@@ -421,19 +418,16 @@ class RightEditorDialog(QDialog):
                 FROM Tracks t
                 {main_artist_join_sql}
                 ORDER BY t.track_title, t.id
-                """
-            ).fetchall():
+                """).fetchall():
                 label = " / ".join(
                     part for part in (str(track_title or ""), str(artist_name or "")) if part
                 )
                 self.track_combo.addItem(label, int(track_id))
-            for release_id, title, primary_artist in conn.execute(
-                """
+            for release_id, title, primary_artist in conn.execute("""
                 SELECT id, title, COALESCE(primary_artist, '')
                 FROM Releases
                 ORDER BY title, id
-                """
-            ).fetchall():
+                """).fetchall():
                 label = " / ".join(
                     part for part in (str(title or ""), str(primary_artist or "")) if part
                 )

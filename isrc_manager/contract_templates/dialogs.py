@@ -4869,7 +4869,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             return None
         try:
             return int(item.data(Qt.UserRole))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _selected_admin_template_id(self) -> int | None:
@@ -5494,7 +5494,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         value = self.fill_template_combo.currentData()
         try:
             return int(value) if value is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _selected_fill_revision_id(self) -> int | None:
@@ -5503,7 +5503,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         value = self.fill_revision_combo.currentData()
         try:
             return int(value) if value is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _selected_fill_draft_id(self) -> int | None:
@@ -5512,7 +5512,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         value = self.fill_draft_combo.currentData()
         try:
             return int(value) if value is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _selected_fill_draft_record(self) -> ContractTemplateDraftRecord | None:
@@ -5735,7 +5735,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         raw_value = dict(manual_values or {}).get("{{duplicate.number}}")
         try:
             value = float(str(raw_value if raw_value is not None else "").strip())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 1
         if not value.is_integer():
             return 1

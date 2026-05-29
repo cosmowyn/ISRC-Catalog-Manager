@@ -186,8 +186,7 @@ class LegacyLicenseMigrationServiceTests(unittest.TestCase):
 
     def test_inspect_reports_missing_track_and_unmanaged_file_with_minimal_tables(self):
         conn = sqlite3.connect(":memory:")
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE Tracks(id INTEGER PRIMARY KEY, track_title TEXT);
             CREATE TABLE Licensees(id INTEGER PRIMARY KEY, name TEXT);
             CREATE TABLE Licenses(
@@ -203,8 +202,7 @@ class LegacyLicenseMigrationServiceTests(unittest.TestCase):
             VALUES
                 (10, NULL, 1, 'missing.pdf', 'missing.pdf', '2026-04-01T12:34:00'),
                 (11, 99, 2, 'external.pdf', 'external.pdf', 'short');
-            """
-        )
+            """)
         external_pdf = self.data_root / "outside.pdf"
         external_pdf.write_bytes(b"external")
         license_service = SimpleNamespace(

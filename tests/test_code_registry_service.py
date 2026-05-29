@@ -1091,15 +1091,13 @@ class CodeRegistryServiceTests(unittest.TestCase):
             system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
             created_via="test.delete.blocked",
         ).entry
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TRIGGER block_registry_entry_delete
             BEFORE DELETE ON CodeRegistryEntries
             BEGIN
                 SELECT RAISE(ABORT, 'blocked registry delete');
             END
-            """
-        )
+            """)
         try:
             with self.assertRaisesRegex(ValueError, "could not be deleted"):
                 self.registry.delete_entry(blocked_entry.id)
@@ -1207,15 +1205,13 @@ class CodeRegistryServiceTests(unittest.TestCase):
 
         minimal_conn = sqlite3.connect(":memory:")
         try:
-            minimal_conn.execute(
-                """
+            minimal_conn.execute("""
                 CREATE TABLE Contracts (
                     id INTEGER PRIMARY KEY,
                     contract_number TEXT,
                     contract_registry_entry_id INTEGER
                 )
-                """
-            )
+                """)
             minimal_conn.execute(
                 "INSERT INTO Contracts(id, contract_number, contract_registry_entry_id) VALUES(1, 'OLD', 7)"
             )
@@ -1252,15 +1248,13 @@ class CodeRegistryServiceTests(unittest.TestCase):
             self.assertIsNone(minimal_registry.fetch_external_code_identifier(1))
             self.assertEqual(minimal_registry.usage_for_external_identifier(1), [])
 
-            minimal_conn.execute(
-                """
+            minimal_conn.execute("""
                 CREATE TABLE Tracks (
                     id INTEGER PRIMARY KEY,
                     catalog_number TEXT,
                     catalog_registry_entry_id INTEGER
                 )
-                """
-            )
+                """)
             minimal_conn.execute(
                 "INSERT INTO Tracks(id, catalog_number, catalog_registry_entry_id) VALUES(1, NULL, NULL)"
             )
@@ -1406,8 +1400,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
 
         legacy_conn = sqlite3.connect(":memory:")
         try:
-            legacy_conn.executescript(
-                """
+            legacy_conn.executescript("""
                 CREATE TABLE CodeRegistryCategories (
                     id INTEGER PRIMARY KEY,
                     system_key TEXT UNIQUE,
@@ -1482,8 +1475,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
                     registry_sha256_key TEXT,
                     registry_sha256_key_entry_id INTEGER
                 );
-                """
-            )
+                """)
             legacy_registry = CodeRegistryService(legacy_conn)
             legacy_registry.update_category(
                 legacy_registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER).id,
@@ -1561,13 +1553,11 @@ class CodeRegistryServiceTests(unittest.TestCase):
                 promotable_external_id,
                 created_via="test.legacy.promote",
             )
-            promoted_row = legacy_conn.execute(
-                """
+            promoted_row = legacy_conn.execute("""
                 SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
                 FROM Tracks
                 WHERE id=7
-                """
-            ).fetchone()
+                """).fetchone()
             shadowed = legacy_registry.fetch_external_catalog_identifier(promotable_external_id)
 
             self.assertEqual(promoted.value, canonical_value)
@@ -1579,8 +1569,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
     def test_legacy_external_catalog_identifier_schema_remains_readable(self):
         conn = sqlite3.connect(":memory:")
         try:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE CodeRegistryCategories (
                     id INTEGER PRIMARY KEY,
                     system_key TEXT UNIQUE,
@@ -1653,10 +1642,8 @@ class CodeRegistryServiceTests(unittest.TestCase):
                     registry_sha256_key TEXT,
                     registry_sha256_key_entry_id INTEGER
                 );
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 INSERT INTO ExternalCatalogIdentifiers(
                     id,
                     subject_kind,
@@ -1668,10 +1655,8 @@ class CodeRegistryServiceTests(unittest.TestCase):
                     source_label
                 )
                 VALUES(1, 'track', 10, 'LEGACY-CAT-1', 'legacy-cat-1', 'imported', 'external', 'legacy import')
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 INSERT INTO Tracks(
                     id,
                     track_title,
@@ -1680,8 +1665,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
                     external_catalog_identifier_id
                 )
                 VALUES(10, 'Legacy Track', 'LEGACY-CAT-1', NULL, 1)
-                """
-            )
+                """)
             registry = CodeRegistryService(conn)
 
             self.assertEqual(

@@ -156,8 +156,7 @@ class ReleaseEditorDialog(QDialog):
                         values.append(clean_value)
             conn = getattr(self.release_service, "conn", None)
             if conn is not None:
-                for row in conn.execute(
-                    """
+                for row in conn.execute("""
                     SELECT primary_artist AS value
                     FROM Releases
                     WHERE primary_artist IS NOT NULL AND primary_artist != ''
@@ -166,8 +165,7 @@ class ReleaseEditorDialog(QDialog):
                     FROM Releases
                     WHERE album_artist IS NOT NULL AND album_artist != ''
                     ORDER BY value
-                    """
-                ).fetchall():
+                    """).fetchall():
                     clean_value = str(row[0] or "").strip()
                     if not clean_value or clean_value in seen:
                         continue
@@ -218,8 +216,7 @@ class ReleaseEditorDialog(QDialog):
         self.original_release_date_edit.setPlaceholderText("YYYY-MM-DD")
         scheduling_form.addRow("Original Release Date", self.original_release_date_edit)
 
-        self.label_edit = stored_value_combo(
-            """
+        self.label_edit = stored_value_combo("""
             SELECT value
             FROM (
                 SELECT publisher AS value
@@ -231,19 +228,16 @@ class ReleaseEditorDialog(QDialog):
                 WHERE label IS NOT NULL AND label != ''
             )
             ORDER BY value
-            """
-        )
+            """)
         identity_form.addRow("Label", self.label_edit)
 
-        self.sublabel_edit = stored_value_combo(
-            """
+        self.sublabel_edit = stored_value_combo("""
             SELECT sublabel
             FROM Releases
             WHERE sublabel IS NOT NULL AND sublabel != ''
             GROUP BY sublabel
             ORDER BY sublabel
-            """
-        )
+            """)
         identity_form.addRow("Sublabel", self.sublabel_edit)
 
         registry_service_provider = getattr(self.release_service, "code_registry_service", None)
@@ -259,8 +253,7 @@ class ReleaseEditorDialog(QDialog):
         )
         scheduling_form.addRow("Catalog#", self.catalog_number_edit)
 
-        self.upc_edit = stored_value_combo(
-            """
+        self.upc_edit = stored_value_combo("""
             SELECT value
             FROM (
                 SELECT upc AS value FROM Tracks WHERE upc IS NOT NULL AND upc != ''
@@ -268,8 +261,7 @@ class ReleaseEditorDialog(QDialog):
                 SELECT upc AS value FROM Releases WHERE upc IS NOT NULL AND upc != ''
             )
             ORDER BY value
-            """
-        )
+            """)
         scheduling_form.addRow("UPC / EAN", self.upc_edit)
 
         self.territory_edit = QLineEdit()

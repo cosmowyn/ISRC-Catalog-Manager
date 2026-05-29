@@ -64,7 +64,7 @@ def _queue_audio_waveform_cache_for_track(
         return False
     try:
         clean_track_id = int(track_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if clean_track_id <= 0:
         return False

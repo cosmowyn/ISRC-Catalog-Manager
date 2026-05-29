@@ -45,12 +45,10 @@ class LegacyPromotedFieldRepairServiceTests(unittest.TestCase):
 
     def test_repair_candidates_merges_safe_values_and_removes_redundant_field(self):
         with self.conn:
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
                 VALUES (1, 'Catalog#', 1, 1, 'dropdown', '["CAT-01"]')
-                """
-            )
+                """)
             self.conn.execute(
                 """
                 INSERT INTO CustomFieldValues(track_id, field_def_id, value, blob_value, mime_type, size_bytes)
@@ -91,12 +89,10 @@ class LegacyPromotedFieldRepairServiceTests(unittest.TestCase):
                 "UPDATE Tracks SET catalog_number='CAT-DEFAULT' WHERE id=?",
                 (self.track_id,),
             )
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
                 VALUES (1, 'Catalog#', 1, 1, 'dropdown', '["CAT-LEGACY"]')
-                """
-            )
+                """)
             self.conn.execute(
                 """
                 INSERT INTO CustomFieldValues(track_id, field_def_id, value, blob_value, mime_type, size_bytes)

@@ -20,8 +20,7 @@ from isrc_manager.services.tracks import TrackMediaSourceHandle
 def make_track_conn(path: str | Path | None = None):
     conn = sqlite3.connect(str(path) if path is not None else ":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Artists (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL
@@ -94,14 +93,12 @@ def make_track_conn(path: str | Path | None = None):
             FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
             FOREIGN KEY (derived_from_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
         );
-        """
-    )
+        """)
     return conn
 
 
 def enable_governance_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Works (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL
@@ -116,8 +113,7 @@ def enable_governance_schema(conn: sqlite3.Connection) -> None:
         ALTER TABLE Tracks ADD COLUMN work_id INTEGER;
         ALTER TABLE Tracks ADD COLUMN parent_track_id INTEGER;
         ALTER TABLE Tracks ADD COLUMN relationship_type TEXT NOT NULL DEFAULT 'original';
-        """
-    )
+        """)
 
 
 class TrackServiceTests(unittest.TestCase):
@@ -478,13 +474,11 @@ class TrackServiceTests(unittest.TestCase):
             (1, parent_track_id, "remix"),
         )
         self.assertEqual(
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 SELECT work_id, track_id, is_primary
                 FROM WorkTrackLinks
                 ORDER BY track_id
-                """
-            ).fetchall(),
+                """).fetchall(),
             [(1, parent_track_id, 1), (1, remix_track_id, 0)],
         )
 

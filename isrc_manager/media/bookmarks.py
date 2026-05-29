@@ -23,8 +23,7 @@ def ensure_audio_bookmark_schema(conn: sqlite3.Connection) -> None:
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if row and row[0]
     }
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS TrackAudioBookmarks (
             id INTEGER PRIMARY KEY,
             track_id INTEGER NOT NULL,
@@ -35,31 +34,26 @@ def ensure_audio_bookmark_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(track_id, position_ms),
             FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_track_audio_bookmarks_track_position
         ON TrackAudioBookmarks(track_id, position_ms)
-        """
-    )
+        """)
     if "Tracks" in table_names:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_audio_bookmarks_delete
             AFTER DELETE ON Tracks
             FOR EACH ROW
             BEGIN
                 DELETE FROM TrackAudioBookmarks WHERE track_id = OLD.id;
             END
-            """
-        )
+            """)
 
 
 def _coerce_positive_track_id(track_id: Any) -> int:
     try:
         clean_track_id = int(track_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         clean_track_id = 0
     if clean_track_id <= 0:
         raise ValueError("track_id must be a positive integer")
@@ -69,12 +63,12 @@ def _coerce_positive_track_id(track_id: Any) -> int:
 def _coerce_position_ms(position_ms: Any, *, duration_ms: Any = None) -> int:
     try:
         clean_position = int(round(float(position_ms)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         clean_position = 0
     clean_position = max(0, clean_position)
     try:
         clean_duration = int(round(float(duration_ms)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         clean_duration = 0
     if clean_duration > 0:
         clean_position = min(clean_position, clean_duration)
@@ -167,7 +161,7 @@ def delete_audio_bookmark(
     ensure_audio_bookmark_schema(conn)
     try:
         clean_bookmark_id = int(bookmark_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
     if clean_bookmark_id <= 0:
         return 0
@@ -177,7 +171,7 @@ def delete_audio_bookmark(
     if track_id is not None:
         try:
             clean_track_id = int(track_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0
         sql += " AND track_id=?"
         params = (clean_bookmark_id, clean_track_id)

@@ -31,18 +31,15 @@ class SettingsMutationService:
         self.settings = settings
 
     def _ensure_profile_store(self) -> None:
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS app_kv (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
-            """
-        )
+            """)
 
     def _ensure_owner_binding_table(self) -> None:
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 party_id INTEGER NOT NULL UNIQUE,
@@ -50,8 +47,7 @@ class SettingsMutationService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
 
     def _profile_set(self, key: str, value: object) -> None:
         with self.conn:

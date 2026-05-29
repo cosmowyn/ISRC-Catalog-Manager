@@ -86,14 +86,12 @@ class HistoryDialogTests(unittest.TestCase):
                 schema = DatabaseSchemaService(conn)
                 schema.init_db()
                 schema.migrate_schema()
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS app_kv (
                         key TEXT PRIMARY KEY,
                         value TEXT
                     )
-                    """
-                )
+                    """)
                 conn.commit()
                 history = HistoryManager(
                     conn,

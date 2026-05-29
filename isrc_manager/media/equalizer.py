@@ -78,7 +78,7 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
 def _coerce_gain(value: Any) -> float:
     try:
         gain = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         gain = 0.0
     gain = max(EQ_GAIN_MIN_DB, min(EQ_GAIN_MAX_DB, gain))
     return round(gain / EQ_GAIN_STEP_DB) * EQ_GAIN_STEP_DB
@@ -87,7 +87,7 @@ def _coerce_gain(value: Any) -> float:
 def _coerce_pan(value: Any) -> float:
     try:
         pan = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pan = 0.0
     pan = max(EQ_PAN_MIN, min(EQ_PAN_MAX, pan))
     if abs(pan) < 0.005:

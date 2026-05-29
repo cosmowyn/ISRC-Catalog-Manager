@@ -100,8 +100,7 @@ def ensure_audio_waveform_cache_schema(conn: sqlite3.Connection) -> None:
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if row and row[0]
     }
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS TrackAudioWaveformCache (
             track_id INTEGER PRIMARY KEY,
             source_fingerprint TEXT NOT NULL,
@@ -119,25 +118,20 @@ def ensure_audio_waveform_cache_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_track_audio_waveform_cache_fingerprint
         ON TrackAudioWaveformCache(source_fingerprint)
-        """
-    )
+        """)
     if "Tracks" in table_names:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_waveform_cache_delete
             AFTER DELETE ON Tracks
             FOR EACH ROW
             BEGIN
                 DELETE FROM TrackAudioWaveformCache WHERE track_id = OLD.id;
             END
-            """
-        )
+            """)
 
 
 def delete_audio_waveform_cache(
@@ -170,7 +164,7 @@ def _json_to_peaks(value: object) -> list[tuple[float, float]]:
         try:
             lo = max(-1.0, min(0.0, float(item[0])))
             hi = max(0.0, min(1.0, float(item[1])))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         peaks.append((lo, hi))
     return peaks
@@ -1269,16 +1263,14 @@ class AudioWaveformCacheService:
     ) -> WaveformCacheRunSummary:
         self.ensure_schema()
         cur = cursor or self.conn.cursor()
-        rows = cur.execute(
-            """
+        rows = cur.execute("""
             SELECT id, COALESCE(track_title, '')
             FROM Tracks
             WHERE COALESCE(trim(audio_file_path), '') != ''
                OR audio_file_blob IS NOT NULL
                OR COALESCE(audio_file_size_bytes, 0) > 0
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         summary = WaveformCacheRunSummary(total_audio_tracks=len(rows))
         total = max(1, len(rows))
         if not rows:
@@ -1326,16 +1318,14 @@ class AudioWaveformCacheService:
     def inspect_invalid_caches(self, track_service: TrackService) -> WaveformCacheInspection:
         self.ensure_schema()
         cur = self.conn.cursor()
-        rows = cur.execute(
-            """
+        rows = cur.execute("""
             SELECT c.track_id, c.source_fingerprint, c.analyzer_version,
                    c.width_px, c.height_px, c.peaks_json,
                    c.light_preview_png, c.dark_preview_png, t.id
             FROM TrackAudioWaveformCache c
             LEFT JOIN Tracks t ON t.id = c.track_id
             ORDER BY c.track_id
-            """
-        ).fetchall()
+            """).fetchall()
         orphaned: list[int] = []
         stale: list[int] = []
         missing_audio: list[int] = []

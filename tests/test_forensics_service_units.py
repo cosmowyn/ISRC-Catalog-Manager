@@ -183,8 +183,7 @@ def _coordinator(tmp_path: Path) -> ForensicExportCoordinator:
 
 def _ledger_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE ForensicWatermarkExports(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             forensic_export_id TEXT,
@@ -208,17 +207,14 @@ def _ledger_connection() -> sqlite3.Connection:
             last_verification_status TEXT,
             last_verification_confidence REAL
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE TrackAudioDerivatives(
             export_id TEXT PRIMARY KEY,
             source_audio_sha256 TEXT,
             source_lineage_ref TEXT
         )
-        """
-    )
+        """)
     return conn
 
 

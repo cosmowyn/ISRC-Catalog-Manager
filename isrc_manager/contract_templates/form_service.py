@@ -852,13 +852,11 @@ class ContractTemplateFormService:
         return ()
 
     def _track_choices(self) -> tuple[ContractTemplateFormChoice, ...]:
-        rows = self.template_service.conn.execute(
-            """
+        rows = self.template_service.conn.execute("""
             SELECT id, track_title
             FROM Tracks
             ORDER BY track_title COLLATE NOCASE, id
-            """
-        ).fetchall()
+            """).fetchall()
         return tuple(
             ContractTemplateFormChoice(
                 value=str(int(row[0])),

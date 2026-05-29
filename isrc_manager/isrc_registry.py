@@ -325,8 +325,7 @@ class ApplicationISRCRegistryService:
 
     @classmethod
     def _ensure_schema(cls, conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS registry_profile_sources (
                 profile_path TEXT PRIMARY KEY,
                 profile_name TEXT NOT NULL,
@@ -339,10 +338,8 @@ class ApplicationISRCRegistryService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS registry_isrc_claims (
                 isrc_compact TEXT PRIMARY KEY,
                 isrc_iso TEXT NOT NULL,
@@ -355,22 +352,17 @@ class ApplicationISRCRegistryService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_registry_isrc_claims_profile
             ON registry_isrc_claims(profile_path, track_id)
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
-            """
-        )
+            """)
 
     @classmethod
     def _sync_profile(
@@ -520,15 +512,13 @@ class ApplicationISRCRegistryService:
         compact_expr = "isrc_compact" if "isrc_compact" in columns else "''"
         title_expr = "track_title" if "track_title" in columns else "''"
         try:
-            rows = conn.execute(
-                f"""
+            rows = conn.execute(f"""
                 SELECT id, {title_expr}, isrc, {compact_expr}
                 FROM Tracks
                 WHERE COALESCE(trim(isrc), '') != ''
                    OR COALESCE(trim({compact_expr}), '') != ''
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
         except sqlite3.Error:
             return []
         return [

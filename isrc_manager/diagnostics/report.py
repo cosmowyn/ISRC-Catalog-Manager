@@ -71,15 +71,13 @@ def _count_orphaned_custom_values(app, conn=None) -> int:
     field_column = app._custom_value_field_column_name(conn=connection)
     if field_column is None:
         return 0
-    row = connection.execute(
-        f"""
+    row = connection.execute(f"""
         SELECT COUNT(*)
         FROM CustomFieldValues cfv
         LEFT JOIN CustomFieldDefs cfd ON cfd.id = cfv.{field_column}
         LEFT JOIN Tracks t ON t.id = cfv.track_id
         WHERE cfd.id IS NULL OR t.id IS NULL
-        """
-    ).fetchone()
+        """).fetchone()
     return int(row[0] or 0) if row else 0
 
 
@@ -107,27 +105,21 @@ def _diagnostics_managed_file_scan_counts(app, conn=None) -> dict[str, int]:
         return int(row[0] or 0) if row else 0
 
     return {
-        "audio_file_refs": _count(
-            """
+        "audio_file_refs": _count("""
             SELECT COUNT(*)
             FROM Tracks
             WHERE COALESCE(trim(audio_file_path), '') != ''
-            """
-        ),
-        "album_art_refs": _count(
-            """
+            """),
+        "album_art_refs": _count("""
             SELECT COUNT(*)
             FROM Albums
             WHERE COALESCE(trim(album_art_path), '') != ''
-            """
-        ),
-        "license_file_refs": _count(
-            """
+            """),
+        "license_file_refs": _count("""
             SELECT COUNT(*)
             FROM Licenses
             WHERE COALESCE(trim(file_path), '') != ''
-            """
-        ),
+            """),
     }
 
 
@@ -806,14 +798,12 @@ def _build_diagnostics_report(
         missing_files = []
 
         if connection is not None:
-            media_rows = connection.execute(
-                """
+            media_rows = connection.execute("""
                 SELECT id, track_title, audio_file_path
                 FROM Tracks
                 WHERE audio_file_path IS NOT NULL AND trim(audio_file_path) != ''
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             managed_file_start = progress.completed_units
             for track_id, track_title, audio_path in media_rows:
                 resolved = (
@@ -837,14 +827,12 @@ def _build_diagnostics_report(
                 )
 
             progress.set_message("Checking managed album artwork references...")
-            album_art_rows = connection.execute(
-                """
+            album_art_rows = connection.execute("""
                 SELECT id, title, album_art_path
                 FROM Albums
                 WHERE album_art_path IS NOT NULL AND album_art_path != ''
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             for album_id, album_title, art_path in album_art_rows:
                 resolved = (
                     active_track_service.resolve_media_path(art_path)
@@ -867,14 +855,12 @@ def _build_diagnostics_report(
                 )
 
             progress.set_message("Checking managed license files...")
-            license_rows = connection.execute(
-                """
+            license_rows = connection.execute("""
                 SELECT id, filename, file_path
                 FROM Licenses
                 WHERE file_path IS NOT NULL AND trim(file_path) != ''
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             for record_id, filename, file_path in license_rows:
                 resolved = (
                     active_license_service.resolve_path(file_path)

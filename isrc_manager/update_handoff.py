@@ -31,7 +31,7 @@ def read_update_backup_handoff(*, state_path: str | Path | None = None) -> dict[
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     return payload if isinstance(payload, dict) else None
 

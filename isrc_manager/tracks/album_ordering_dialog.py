@@ -210,7 +210,7 @@ class AlbumTrackOrderingDialog(QDialog):
                 continue
             try:
                 ordered_ids.append(int(item.data(Qt.UserRole)))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         return ordered_ids
 

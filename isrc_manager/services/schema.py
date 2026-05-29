@@ -117,8 +117,7 @@ class DatabaseSchemaService:
                 self.cursor.execute(sql, [payload.get(column) for column in insert_columns])
 
     def _create_current_tracks_table(self, table_name: str = "Tracks") -> None:
-        self.cursor.execute(
-            f"""
+        self.cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY,
                 isrc TEXT NOT NULL,
@@ -169,12 +168,10 @@ class DatabaseSchemaService:
                     OR catalog_external_code_identifier_id IS NULL
                 )
             )
-            """
-        )
+            """)
 
     def _create_current_releases_table(self, table_name: str = "Releases") -> None:
-        self.cursor.execute(
-            f"""
+        self.cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -210,12 +207,10 @@ class DatabaseSchemaService:
                     OR catalog_external_code_identifier_id IS NULL
                 )
             )
-            """
-        )
+            """)
 
     def _create_current_contracts_table(self, table_name: str = "Contracts") -> None:
-        self.cursor.execute(
-            f"""
+        self.cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -262,12 +257,10 @@ class DatabaseSchemaService:
                     OR registry_sha256_key_external_code_identifier_id IS NULL
                 )
             )
-            """
-        )
+            """)
 
     def _create_current_track_artists_table(self, table_name: str = "TrackArtists") -> None:
-        self.cursor.execute(
-            f"""
+        self.cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 track_id INTEGER NOT NULL,
                 party_id INTEGER NOT NULL,
@@ -276,15 +269,12 @@ class DatabaseSchemaService:
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
         if "party_id" in self._table_columns(table_name):
-            self.cursor.execute(
-                f"""
+            self.cursor.execute(f"""
                 CREATE INDEX IF NOT EXISTS idx_track_artists_party_id
                 ON {table_name}(party_id)
-                """
-            )
+                """)
 
     def _ensure_current_track_indexes_and_triggers(self) -> None:
         track_columns = self._table_columns("Tracks")
@@ -306,8 +296,7 @@ class DatabaseSchemaService:
                 "CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)"
             )
         if "db_entry_date" in track_columns:
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE TRIGGER IF NOT EXISTS trg_tracks_db_entry_date_fill_ins
                 AFTER INSERT ON Tracks
                 FOR EACH ROW
@@ -315,8 +304,7 @@ class DatabaseSchemaService:
                 BEGIN
                     UPDATE Tracks SET db_entry_date = CURRENT_DATE WHERE id = NEW.id;
                 END
-                """
-            )
+                """)
 
     def _ensure_audio_waveform_cache_table(self) -> None:
         ensure_audio_waveform_cache_schema(self.conn)
@@ -326,8 +314,7 @@ class DatabaseSchemaService:
 
     def init_db(self) -> None:
         # Core entities
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Albums (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -338,8 +325,7 @@ class DatabaseSchemaService:
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0
             )
-            """
-        )
+            """)
         self._ensure_current_album_columns()
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON Albums(title)")
 
@@ -350,16 +336,13 @@ class DatabaseSchemaService:
         self._ensure_audio_bookmark_table()
 
         # Licenses & Licensees
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licensees (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licenses (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -374,11 +357,9 @@ class DatabaseSchemaService:
                 FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
         self._ensure_license_columns()
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE VIEW IF NOT EXISTS vw_Licenses AS
             SELECT l.id,
                 lic.name AS licensee,
@@ -391,14 +372,12 @@ class DatabaseSchemaService:
             FROM Licenses l
             JOIN Licensees lic ON lic.id = l.licensee_id
             JOIN Tracks t ON t.id = l.track_id
-            """
-        )
+            """)
 
         self._create_current_track_artists_table()
 
         # Custom fields (definitions + values) with type + options
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS CustomFieldDefs (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -408,10 +387,8 @@ class DatabaseSchemaService:
                 options TEXT,
                 blob_icon_payload TEXT
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS CustomFieldValues (
                 track_id INTEGER NOT NULL,
                 field_def_id INTEGER NOT NULL,
@@ -426,8 +403,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY (field_def_id) REFERENCES CustomFieldDefs(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         self._ensure_current_custom_field_value_schema()
 
         # Settings (single-row)
@@ -441,8 +417,7 @@ class DatabaseSchemaService:
         )
 
         # Audit log (immutable append-only)
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS AuditLog (
                 id INTEGER PRIMARY KEY,
                 ts TEXT NOT NULL DEFAULT (datetime('now')),
@@ -452,11 +427,9 @@ class DatabaseSchemaService:
                 ref_id TEXT,
                 details TEXT
             )
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryEntries (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER,
@@ -475,18 +448,14 @@ class DatabaseSchemaService:
                 status TEXT NOT NULL DEFAULT 'applied',
                 visible_in_history INTEGER NOT NULL DEFAULT 1
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryHead (
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 current_entry_id INTEGER
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistorySnapshots (
                 id INTEGER PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -496,10 +465,8 @@ class DatabaseSchemaService:
                 settings_json TEXT,
                 manifest_json TEXT
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryBackups (
                 id INTEGER PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -509,8 +476,7 @@ class DatabaseSchemaService:
                 source_db_path TEXT,
                 metadata_json TEXT
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
         )
@@ -526,6 +492,7 @@ class DatabaseSchemaService:
         self._ensure_derivative_export_tables()
         self._ensure_forensic_watermark_tables()
         self._ensure_promo_code_tables()
+        self._ensure_soundcloud_tables()
         self._ensure_blob_icon_schema()
         self._backfill_dual_storage_defaults()
 
@@ -542,19 +509,16 @@ class DatabaseSchemaService:
         self.conn.execute(f"PRAGMA user_version = {version}")
 
     def _ensure_migration_log(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS _MigrationLog (
                 version     INTEGER PRIMARY KEY,
                 applied_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 notes       TEXT
             )
-            """
-        )
+            """)
 
     def _ensure_migration_diagnostics(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS _MigrationDiagnostics (
                 migration_version INTEGER NOT NULL,
                 category_system_key TEXT NOT NULL,
@@ -563,8 +527,7 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (migration_version, category_system_key, diagnostic_key)
             )
-            """
-        )
+            """)
 
     def _write_migration_diagnostics(
         self,
@@ -769,6 +732,9 @@ class DatabaseSchemaService:
             elif version == 41:
                 self._apply_migration(41, self._mig_41_to_42)
                 version = 42
+            elif version == 42:
+                self._apply_migration(42, self._mig_42_to_43)
+                version = 43
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -809,28 +775,23 @@ class DatabaseSchemaService:
         )
 
     def _mig_4_to_5(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_auditlog_no_update
             BEFORE UPDATE ON AuditLog
             BEGIN
                 SELECT RAISE(ABORT, 'AuditLog is append-only (UPDATE forbidden)');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_auditlog_no_delete
             BEFORE DELETE ON AuditLog
             BEGIN
                 SELECT RAISE(ABORT, 'AuditLog is append-only (DELETE forbidden)');
             END
-            """
-        )
+            """)
 
     def _mig_5_to_6(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -842,10 +803,8 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -857,10 +816,8 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_upc_check_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -868,10 +825,8 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'UPC/EAN must be 12 or 13 digits');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_upc_check_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -879,10 +834,8 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'UPC/EAN must be 12 or 13 digits');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -890,10 +843,8 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
             END
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -901,15 +852,13 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
             END
-            """
-        )
+            """)
 
     def _mig_6_to_7(self) -> None:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_ins")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_upd")
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -919,11 +868,9 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
             END
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -933,15 +880,13 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
             END
-            """
-        )
+            """)
 
     def _mig_7_to_8(self) -> None:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -954,11 +899,9 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -971,8 +914,7 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
+            """)
 
     def _mig_8_to_9(self) -> None:
         cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
@@ -985,16 +927,13 @@ class DatabaseSchemaService:
         self._ensure_current_custom_field_value_schema()
 
     def _mig_10_to_11(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licensees (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licenses (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -1009,11 +948,9 @@ class DatabaseSchemaService:
                 FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
         self._ensure_license_columns()
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE VIEW IF NOT EXISTS vw_Licenses AS
             SELECT l.id,
                 lic.name AS licensee,
@@ -1026,13 +963,11 @@ class DatabaseSchemaService:
             FROM Licenses l
             JOIN Licensees lic ON lic.id = l.licensee_id
             JOIN Tracks t ON t.id = l.track_id
-            """
-        )
+            """)
         self.conn.commit()
 
     def _mig_11_to_12(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryEntries (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER,
@@ -1051,18 +986,14 @@ class DatabaseSchemaService:
                 status TEXT NOT NULL DEFAULT 'applied',
                 visible_in_history INTEGER NOT NULL DEFAULT 1
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryHead (
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 current_entry_id INTEGER
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistorySnapshots (
                 id INTEGER PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1072,8 +1003,7 @@ class DatabaseSchemaService:
                 settings_json TEXT,
                 manifest_json TEXT
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
         )
@@ -1117,8 +1047,7 @@ class DatabaseSchemaService:
         self._ensure_blob_icon_schema()
 
     def _mig_22_to_23(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryBackups (
                 id INTEGER PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1128,12 +1057,10 @@ class DatabaseSchemaService:
                 source_db_path TEXT,
                 metadata_json TEXT
             )
-            """
-        )
+            """)
 
     def _mig_23_to_24(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS HistoryEntries (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER,
@@ -1152,8 +1079,7 @@ class DatabaseSchemaService:
                 status TEXT NOT NULL DEFAULT 'applied',
                 visible_in_history INTEGER NOT NULL DEFAULT 1
             )
-            """
-        )
+            """)
         cols = [
             row[1] for row in self.cursor.execute("PRAGMA table_info(HistoryEntries)").fetchall()
         ]
@@ -1303,8 +1229,7 @@ class DatabaseSchemaService:
 
         legacy_external_rows: list[tuple] = []
         if self._table_exists("ExternalCatalogIdentifiers"):
-            legacy_external_rows = self.cursor.execute(
-                """
+            legacy_external_rows = self.cursor.execute("""
                 SELECT
                     id,
                     subject_kind,
@@ -1319,8 +1244,7 @@ class DatabaseSchemaService:
                     updated_at
                 FROM ExternalCatalogIdentifiers
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             for row in legacy_external_rows:
                 self.cursor.execute(
                     """
@@ -1727,8 +1651,7 @@ class DatabaseSchemaService:
             self.cursor.execute("ALTER TABLE Tracks ADD COLUMN track_number INTEGER")
         if not self._table_exists("ReleaseTracks"):
             return
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             WITH consistent_track_numbers AS (
                 SELECT
                     track_id,
@@ -1747,11 +1670,13 @@ class DatabaseSchemaService:
             )
             WHERE COALESCE(track_number, 0) <= 0
               AND id IN (SELECT track_id FROM consistent_track_numbers)
-            """
-        )
+            """)
 
     def _mig_41_to_42(self) -> None:
         self._ensure_promo_code_tables()
+
+    def _mig_42_to_43(self) -> None:
+        self._ensure_soundcloud_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -1769,18 +1694,14 @@ class DatabaseSchemaService:
                     f"ALTER TABLE CustomFieldValues ADD COLUMN {column_name} {column_sql}"
                 )
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_cfvalues_track_field
             ON CustomFieldValues(track_id, field_def_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_cfvalues_field_track
             ON CustomFieldValues(field_def_id, track_id)
-            """
-        )
+            """)
 
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_ins")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_upd")
@@ -1848,8 +1769,7 @@ class DatabaseSchemaService:
         self.cursor.execute(text_guard.format(name="trg_cfvalues_text_enforce_upd", verb="UPDATE"))
 
     def _ensure_license_columns(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licenses (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -1864,8 +1784,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
         table_info = {
             str(row[1]): row
             for row in self.cursor.execute("PRAGMA table_info(Licenses)").fetchall()
@@ -1876,8 +1795,7 @@ class DatabaseSchemaService:
         if file_path_notnull:
             self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
             self.cursor.execute("ALTER TABLE Licenses RENAME TO Licenses_legacy")
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE TABLE Licenses (
                     id INTEGER PRIMARY KEY,
                     track_id INTEGER NOT NULL,
@@ -1892,8 +1810,7 @@ class DatabaseSchemaService:
                     FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                     FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
                 )
-                """
-            )
+                """)
             legacy_cols = {
                 str(row[1])
                 for row in self.cursor.execute("PRAGMA table_info(Licenses_legacy)").fetchall()
@@ -1915,8 +1832,7 @@ class DatabaseSchemaService:
             file_blob_expr = "file_blob" if "file_blob" in legacy_cols else "NULL"
             mime_expr = "mime_type" if "mime_type" in legacy_cols else "NULL"
             size_expr = "size_bytes" if "size_bytes" in legacy_cols else "0"
-            self.cursor.execute(
-                f"""
+            self.cursor.execute(f"""
                 INSERT INTO Licenses (
                     id,
                     track_id,
@@ -1941,8 +1857,7 @@ class DatabaseSchemaService:
                     {size_expr},
                     uploaded_at
                 FROM Licenses_legacy
-                """
-            )
+                """)
             self.cursor.execute("DROP TABLE Licenses_legacy")
             table_info = {
                 str(row[1]): row
@@ -1961,8 +1876,7 @@ class DatabaseSchemaService:
                 self.cursor.execute(f"ALTER TABLE Licenses ADD COLUMN {column_name} {column_sql}")
 
         self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE VIEW IF NOT EXISTS vw_Licenses AS
             SELECT l.id,
                 lic.name AS licensee,
@@ -1975,8 +1889,7 @@ class DatabaseSchemaService:
             FROM Licenses l
             JOIN Licensees lic ON lic.id = l.licensee_id
             JOIN Tracks t ON t.id = l.track_id
-            """
-        )
+            """)
 
     def _backfill_storage_fields(
         self,
@@ -2181,26 +2094,20 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_parent_track_id ON Tracks(parent_track_id)"
         )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_relationship_type
             ON Tracks(relationship_type)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_main_artist_party_id
             ON Tracks(main_artist_party_id)
-            """
-        )
+            """)
         if "relationship_type" in self._table_columns("Tracks"):
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 UPDATE Tracks
                 SET relationship_type='original'
                 WHERE relationship_type IS NULL OR trim(relationship_type)=''
-                """
-            )
+                """)
 
     def _migrate_tracks_artist_authority_to_parties(self) -> None:
         self._ensure_repertoire_tables()
@@ -2318,12 +2225,10 @@ class DatabaseSchemaService:
         self._ensure_current_track_columns()
         self._ensure_current_track_indexes_and_triggers()
         self._create_current_track_artists_table()
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_artists_party_id
             ON TrackArtists(party_id)
-            """
-        )
+            """)
 
         track_insert_columns = [
             "id",
@@ -2435,20 +2340,16 @@ class DatabaseSchemaService:
     def _ensure_optional_isrc_constraints(self) -> None:
         self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
         self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_compact_unique")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique
             ON Tracks(isrc)
             WHERE isrc IS NOT NULL AND trim(isrc) != ''
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique
             ON Tracks(isrc_compact)
             WHERE isrc_compact IS NOT NULL AND trim(isrc_compact) != ''
-            """
-        )
+            """)
         self._ensure_optional_isrc_validation_triggers()
 
     def _ensure_blob_icon_schema(self) -> None:
@@ -2460,8 +2361,7 @@ class DatabaseSchemaService:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
             BEFORE INSERT ON Tracks
             FOR EACH ROW
@@ -2478,11 +2378,9 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
             BEFORE UPDATE ON Tracks
             FOR EACH ROW
@@ -2499,12 +2397,10 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'ISRC validation failed');
             END
-            """
-        )
+            """)
 
     def _ensure_current_album_columns(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Albums (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -2515,8 +2411,7 @@ class DatabaseSchemaService:
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0
             )
-            """
-        )
+            """)
         cols = self._table_columns("Albums")
         additions = (
             ("album_art_path", "TEXT"),
@@ -2531,8 +2426,7 @@ class DatabaseSchemaService:
                 self.cursor.execute(f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}")
 
     def _ensure_gs1_metadata_table(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS GS1Metadata (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL UNIQUE,
@@ -2555,8 +2449,7 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         cols = self._table_columns("GS1Metadata")
         if "contract_number" not in cols:
             self.cursor.execute("ALTER TABLE GS1Metadata ADD COLUMN contract_number TEXT")
@@ -2571,8 +2464,7 @@ class DatabaseSchemaService:
         )
 
     def _ensure_gs1_template_storage_table(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS GS1TemplateStorage (
                 id INTEGER PRIMARY KEY CHECK(id = 1),
                 filename TEXT NOT NULL,
@@ -2585,8 +2477,7 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         table_info = {
             str(row[1]): row
             for row in self.cursor.execute("PRAGMA table_info(GS1TemplateStorage)").fetchall()
@@ -2598,8 +2489,7 @@ class DatabaseSchemaService:
             self.cursor.execute(
                 "ALTER TABLE GS1TemplateStorage RENAME TO GS1TemplateStorage_legacy"
             )
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE TABLE GS1TemplateStorage (
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     filename TEXT NOT NULL,
@@ -2612,8 +2502,7 @@ class DatabaseSchemaService:
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
-                """
-            )
+                """)
             legacy_cols = {
                 str(row[1])
                 for row in self.cursor.execute(
@@ -2634,8 +2523,7 @@ class DatabaseSchemaService:
             managed_path_expr = (
                 "managed_file_path" if "managed_file_path" in legacy_cols else "NULL"
             )
-            self.cursor.execute(
-                f"""
+            self.cursor.execute(f"""
                 INSERT INTO GS1TemplateStorage (
                     id,
                     filename,
@@ -2660,8 +2548,7 @@ class DatabaseSchemaService:
                     created_at,
                     updated_at
                 FROM GS1TemplateStorage_legacy
-                """
-            )
+                """)
             self.cursor.execute("DROP TABLE GS1TemplateStorage_legacy")
             table_info = {
                 str(row[1]): row
@@ -2705,8 +2592,7 @@ class DatabaseSchemaService:
         for column_name, column_sql in release_additions:
             if column_name not in release_columns:
                 self.cursor.execute(f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ReleaseTracks (
                 release_id INTEGER NOT NULL,
                 track_id INTEGER NOT NULL,
@@ -2717,74 +2603,56 @@ class DatabaseSchemaService:
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE,
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_release_tracks_order_unique
             ON ReleaseTracks(release_id, disc_number, track_number)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_release_tracks_track
             ON ReleaseTracks(track_id)
-            """
-        )
+            """)
         # Older builds enforced release UPC uniqueness at the DB level, which makes
         # legacy migrations fail when historical data legitimately reuses a UPC.
         # Keep UPC indexed for lookups, but detect duplicates in validation/dashboard
         # instead of aborting schema upgrades.
         self.cursor.execute("DROP INDEX IF EXISTS idx_releases_upc_unique")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_releases_upc
             ON Releases(upc)
             WHERE upc IS NOT NULL AND trim(upc) != ''
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_releases_catalog_number
             ON Releases(catalog_number)
-            """
-        )
+            """)
         if (
             "catalog_registry_entry_id" in release_columns
             or "catalog_registry_entry_id" in self._table_columns("Releases")
         ):
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
                 ON Releases(catalog_registry_entry_id)
-                """
-            )
+                """)
         if (
             "catalog_external_code_identifier_id" in release_columns
             or "catalog_external_code_identifier_id" in self._table_columns("Releases")
         ):
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_releases_catalog_external_code_identifier_id
                 ON Releases(catalog_external_code_identifier_id)
-                """
-            )
-        self.cursor.execute(
-            """
+                """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_releases_release_date
             ON Releases(release_date)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_releases_title
             ON Releases(title)
-            """
-        )
+            """)
 
     def _ensure_code_registry_tables(self, *, backfill_catalog_links: bool = True) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS CodeRegistryCategories (
                 id INTEGER PRIMARY KEY,
                 system_key TEXT UNIQUE,
@@ -2799,10 +2667,8 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS CodeRegistrySequences (
                 category_id INTEGER NOT NULL,
                 sequence_year INTEGER NOT NULL,
@@ -2812,10 +2678,8 @@ class DatabaseSchemaService:
                 PRIMARY KEY (category_id, sequence_year),
                 FOREIGN KEY (category_id) REFERENCES CodeRegistryCategories(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS CodeRegistryEntries (
                 id INTEGER PRIMARY KEY,
                 category_id INTEGER NOT NULL,
@@ -2831,10 +2695,8 @@ class DatabaseSchemaService:
                 notes TEXT,
                 FOREIGN KEY (category_id) REFERENCES CodeRegistryCategories(id) ON DELETE RESTRICT
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ExternalCodeIdentifiers (
                 id INTEGER PRIMARY KEY,
                 category_system_key TEXT NOT NULL,
@@ -2850,10 +2712,8 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ExternalCatalogIdentifiers (
                 id INTEGER PRIMARY KEY,
                 subject_kind TEXT NOT NULL,
@@ -2867,67 +2727,48 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_categories_prefix
             ON CodeRegistryCategories(normalized_prefix)
             WHERE normalized_prefix IS NOT NULL AND trim(normalized_prefix) != ''
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_code_registry_categories_subject_kind
             ON CodeRegistryCategories(subject_kind, sort_order, display_name)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_entries_normalized_value
             ON CodeRegistryEntries(normalized_value)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_entries_sequence_unique
             ON CodeRegistryEntries(category_id, sequence_year, sequence_number)
             WHERE sequence_year IS NOT NULL AND sequence_number IS NOT NULL
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_code_registry_entries_category
             ON CodeRegistryEntries(category_id, created_at DESC, id DESC)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_external_code_identifiers_status
             ON ExternalCodeIdentifiers(category_system_key, classification_status, updated_at DESC)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_external_code_identifiers_normalized_value
             ON ExternalCodeIdentifiers(category_system_key, normalized_value)
             WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_external_catalog_identifiers_status
             ON ExternalCatalogIdentifiers(classification_status, updated_at DESC)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_external_catalog_identifiers_normalized_value
             ON ExternalCatalogIdentifiers(normalized_value)
             WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
-            """
-        )
+            """)
 
         self._ensure_code_registry_entry_immutability_triggers()
 
@@ -2944,18 +2785,14 @@ class DatabaseSchemaService:
         ):
             if column_name not in track_columns:
                 self.cursor.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_catalog_registry_entry_id
             ON Tracks(catalog_registry_entry_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_catalog_external_code_identifier_id
             ON Tracks(catalog_external_code_identifier_id)
-            """
-        )
+            """)
 
         if self._table_exists("Releases"):
             release_columns = self._table_columns("Releases")
@@ -2973,18 +2810,14 @@ class DatabaseSchemaService:
                     self.cursor.execute(
                         f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}"
                     )
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
                 ON Releases(catalog_registry_entry_id)
-                """
-            )
-            self.cursor.execute(
-                """
+                """)
+            self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_releases_catalog_external_code_identifier_id
                 ON Releases(catalog_external_code_identifier_id)
-                """
-            )
+                """)
 
         if self._table_exists("Contracts"):
             contract_columns = self._table_columns("Contracts")
@@ -3022,27 +2855,21 @@ class DatabaseSchemaService:
                     self.cursor.execute(
                         f"ALTER TABLE Contracts ADD COLUMN {column_name} {column_sql}"
                     )
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
                 ON Contracts(contract_registry_entry_id)
                 WHERE contract_registry_entry_id IS NOT NULL
-                """
-            )
-            self.cursor.execute(
-                """
+                """)
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
                 ON Contracts(license_registry_entry_id)
                 WHERE license_registry_entry_id IS NOT NULL
-                """
-            )
-            self.cursor.execute(
-                """
+                """)
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
                 ON Contracts(registry_sha256_key_entry_id)
                 WHERE registry_sha256_key_entry_id IS NOT NULL
-                """
-            )
+                """)
 
         self._seed_code_registry_categories()
         if backfill_catalog_links:
@@ -3057,8 +2884,7 @@ class DatabaseSchemaService:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_update
             BEFORE UPDATE ON CodeRegistryEntries
             FOR EACH ROW
@@ -3066,32 +2892,26 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
             END
-            """
-        )
+            """)
         delete_checks: list[str] = []
         if "Tracks" in tables:
-            delete_checks.append(
-                """
+            delete_checks.append("""
                 EXISTS(
                     SELECT 1
                     FROM Tracks t
                     WHERE t.catalog_registry_entry_id = OLD.id
                 )
-                """
-            )
+                """)
         if "Releases" in tables:
-            delete_checks.append(
-                """
+            delete_checks.append("""
                 EXISTS(
                     SELECT 1
                     FROM Releases r
                     WHERE r.catalog_registry_entry_id = OLD.id
                 )
-                """
-            )
+                """)
         if "Contracts" in tables:
-            delete_checks.append(
-                """
+            delete_checks.append("""
                 EXISTS(
                     SELECT 1
                     FROM Contracts c
@@ -3099,21 +2919,17 @@ class DatabaseSchemaService:
                        OR c.license_registry_entry_id = OLD.id
                        OR c.registry_sha256_key_entry_id = OLD.id
                 )
-                """
-            )
+                """)
         if "ContractTemplateDraftRegistryAssignments" in tables:
-            delete_checks.append(
-                """
+            delete_checks.append("""
                 EXISTS(
                     SELECT 1
                     FROM ContractTemplateDraftRegistryAssignments a
                     WHERE a.registry_entry_id = OLD.id
                 )
-                """
-            )
+                """)
         delete_guard = " OR ".join(check.strip() for check in delete_checks) or "0"
-        self.cursor.execute(
-            f"""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_delete
             BEFORE DELETE ON CodeRegistryEntries
             FOR EACH ROW
@@ -3122,8 +2938,7 @@ class DatabaseSchemaService:
             BEGIN
                 SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
             END
-            """
-        )
+            """)
 
     def _deduplicate_external_catalog_registry_rows(self) -> None:
         tables = {
@@ -3137,16 +2952,14 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "DROP INDEX IF EXISTS idx_external_catalog_identifiers_normalized_value"
         )
-        duplicate_rows = self.cursor.execute(
-            """
+        duplicate_rows = self.cursor.execute("""
             SELECT normalized_value
             FROM ExternalCatalogIdentifiers
             WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
             GROUP BY normalized_value
             HAVING COUNT(*) > 1
             ORDER BY normalized_value
-            """
-        ).fetchall()
+            """).fetchall()
         for (normalized_value,) in duplicate_rows:
             rows = self.cursor.execute(
                 """
@@ -3190,13 +3003,11 @@ class DatabaseSchemaService:
                     f"DELETE FROM ExternalCatalogIdentifiers WHERE id IN ({placeholders})",
                     duplicate_ids,
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_external_catalog_identifiers_normalized_value
             ON ExternalCatalogIdentifiers(normalized_value)
             WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
-            """
-        )
+            """)
 
     def _seed_code_registry_categories(self) -> None:
         try:
@@ -3229,16 +3040,14 @@ class DatabaseSchemaService:
             else:
                 external_column = None
             external_clause = f"AND {external_column} IS NULL" if external_column else ""
-            rows = self.cursor.execute(
-                f"""
+            rows = self.cursor.execute(f"""
                 SELECT id, catalog_number
                 FROM {table_name}
                 WHERE COALESCE(trim(catalog_number), '') != ''
                   AND catalog_registry_entry_id IS NULL
                   {external_clause}
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
             for owner_id, raw_value in rows:
                 clean_value = str(raw_value or "").strip()
                 if not clean_value:
@@ -3283,8 +3092,7 @@ class DatabaseSchemaService:
                 )
 
     def _ensure_repertoire_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Parties (
                 id INTEGER PRIMARY KEY,
                 legal_name TEXT NOT NULL,
@@ -3320,8 +3128,7 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         self._ensure_current_party_schema()
         self._ensure_party_artist_alias_tables()
         self._ensure_application_owner_binding_table()
@@ -3342,18 +3149,15 @@ class DatabaseSchemaService:
             "CREATE INDEX IF NOT EXISTS idx_parties_alternative_email ON Parties(alternative_email)"
         )
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_ipi_cae ON Parties(ipi_cae)")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_parties_chamber_of_commerce_number
             ON Parties(chamber_of_commerce_number)
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_pro_number ON Parties(pro_number)"
         )
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Works (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -3374,12 +3178,10 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_works_title ON Works(title)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_works_iswc ON Works(iswc)")
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS WorkContributors (
                 id INTEGER PRIMARY KEY,
                 work_id INTEGER NOT NULL,
@@ -3392,16 +3194,14 @@ class DatabaseSchemaService:
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_work_contributors_work_id ON WorkContributors(work_id)"
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_work_contributors_party_id ON WorkContributors(party_id)"
         )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS WorkContributionEntries (
                 id INTEGER PRIMARY KEY,
                 work_id INTEGER NOT NULL,
@@ -3416,22 +3216,16 @@ class DatabaseSchemaService:
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_work_contribution_entries_work_id
             ON WorkContributionEntries(work_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_work_contribution_entries_party_id
             ON WorkContributionEntries(party_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS WorkTrackLinks (
                 work_id INTEGER NOT NULL,
                 track_id INTEGER NOT NULL,
@@ -3441,13 +3235,11 @@ class DatabaseSchemaService:
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_work_track_links_track_id ON WorkTrackLinks(track_id)"
         )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS RecordingContributionEntries (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -3461,20 +3253,15 @@ class DatabaseSchemaService:
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_recording_contribution_entries_track_id
             ON RecordingContributionEntries(track_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_recording_contribution_entries_party_id
             ON RecordingContributionEntries(party_id)
-            """
-        )
+            """)
 
         self._create_current_contracts_table()
         contract_columns = self._table_columns("Contracts")
@@ -3486,31 +3273,24 @@ class DatabaseSchemaService:
             "CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON Contracts(end_date)"
         )
         if "contract_registry_entry_id" in contract_columns:
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
                 ON Contracts(contract_registry_entry_id)
                 WHERE contract_registry_entry_id IS NOT NULL
-                """
-            )
+                """)
         if "license_registry_entry_id" in contract_columns:
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
                 ON Contracts(license_registry_entry_id)
                 WHERE license_registry_entry_id IS NOT NULL
-                """
-            )
+                """)
         if "registry_sha256_key_entry_id" in contract_columns:
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
                 ON Contracts(registry_sha256_key_entry_id)
                 WHERE registry_sha256_key_entry_id IS NOT NULL
-                """
-            )
-        self.cursor.execute(
-            """
+                """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractParties (
                 contract_id INTEGER NOT NULL,
                 party_id INTEGER NOT NULL,
@@ -3521,13 +3301,11 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_contract_parties_party_id ON ContractParties(party_id)"
         )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractObligations (
                 id INTEGER PRIMARY KEY,
                 contract_id INTEGER NOT NULL,
@@ -3541,16 +3319,12 @@ class DatabaseSchemaService:
                 notes TEXT,
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_obligations_due_date
             ON ContractObligations(due_date)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractDocuments (
                 id INTEGER PRIMARY KEY,
                 contract_id INTEGER NOT NULL,
@@ -3575,8 +3349,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (supersedes_document_id) REFERENCES ContractDocuments(id) ON DELETE SET NULL,
                 FOREIGN KEY (superseded_by_document_id) REFERENCES ContractDocuments(id) ON DELETE SET NULL
             )
-            """
-        )
+            """)
         contract_document_columns = self._table_columns("ContractDocuments")
         for column_name, column_sql in (
             ("storage_mode", "TEXT"),
@@ -3586,20 +3359,15 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE ContractDocuments ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_documents_contract_id
             ON ContractDocuments(contract_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_documents_active_flag
             ON ContractDocuments(active_flag)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractWorkLinks (
                 contract_id INTEGER NOT NULL,
                 work_id INTEGER NOT NULL,
@@ -3607,10 +3375,8 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTrackLinks (
                 contract_id INTEGER NOT NULL,
                 track_id INTEGER NOT NULL,
@@ -3618,10 +3384,8 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractReleaseLinks (
                 contract_id INTEGER NOT NULL,
                 release_id INTEGER NOT NULL,
@@ -3629,10 +3393,8 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS WorkOwnershipInterests (
                 id INTEGER PRIMARY KEY,
                 work_id INTEGER NOT NULL,
@@ -3649,28 +3411,20 @@ class DatabaseSchemaService:
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL,
                 FOREIGN KEY (source_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_work_id
             ON WorkOwnershipInterests(work_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_party_id
             ON WorkOwnershipInterests(party_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_contract_id
             ON WorkOwnershipInterests(source_contract_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS RecordingOwnershipInterests (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -3687,26 +3441,19 @@ class DatabaseSchemaService:
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL,
                 FOREIGN KEY (source_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_track_id
             ON RecordingOwnershipInterests(track_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_party_id
             ON RecordingOwnershipInterests(party_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_contract_id
             ON RecordingOwnershipInterests(source_contract_id)
-            """
-        )
+            """)
 
     def _backfill_track_governance_links(self) -> None:
         track_columns = self._table_columns("Tracks")
@@ -3717,17 +3464,14 @@ class DatabaseSchemaService:
             ).fetchall()
         }
         if "relationship_type" in track_columns:
-            self.cursor.execute(
-                """
+            self.cursor.execute("""
                 UPDATE Tracks
                 SET relationship_type='original'
                 WHERE relationship_type IS NULL OR trim(relationship_type)=''
-                """
-            )
+                """)
         if "work_id" not in track_columns or "WorkTrackLinks" not in tables:
             return
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             UPDATE Tracks
             SET work_id = (
                 SELECT wt.work_id
@@ -3742,10 +3486,8 @@ class DatabaseSchemaService:
                 FROM WorkTrackLinks wt
                 WHERE wt.track_id = Tracks.id
               )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             DELETE FROM WorkTrackLinks
             WHERE EXISTS (
                 SELECT 1
@@ -3754,18 +3496,14 @@ class DatabaseSchemaService:
                   AND t.work_id IS NOT NULL
                   AND t.work_id != WorkTrackLinks.work_id
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             INSERT OR IGNORE INTO WorkTrackLinks(work_id, track_id, is_primary)
             SELECT t.work_id, t.id, 0
             FROM Tracks t
             WHERE t.work_id IS NOT NULL
-            """
-        )
-        primary_pairs = self.cursor.execute(
-            """
+            """)
+        primary_pairs = self.cursor.execute("""
             SELECT wt.work_id,
                    (
                        SELECT wt2.track_id
@@ -3776,8 +3514,7 @@ class DatabaseSchemaService:
                    ) AS primary_track_id
             FROM WorkTrackLinks wt
             GROUP BY wt.work_id
-            """
-        ).fetchall()
+            """).fetchall()
         self.cursor.execute("UPDATE WorkTrackLinks SET is_primary=0")
         for work_id, track_id in primary_pairs:
             if work_id is None or track_id is None:
@@ -3800,8 +3537,7 @@ class DatabaseSchemaService:
         }
         if "WorkContributors" not in tables or "WorkContributionEntries" not in tables:
             return
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             INSERT INTO WorkContributionEntries(
                 work_id,
                 party_id,
@@ -3831,16 +3567,13 @@ class DatabaseSchemaService:
                   AND COALESCE(wce.role_share_percent, -1) = COALESCE(wc.role_share_percent, -1)
                   AND COALESCE(wce.notes, '') = COALESCE(wc.notes, '')
             )
-            """
-        )
+            """)
 
     def _ensure_unique_work_track_links(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_work_track_links_unique_track
             ON WorkTrackLinks(track_id)
-            """
-        )
+            """)
 
     def _ensure_current_party_schema(self) -> None:
         cols = self._table_columns("Parties")
@@ -3862,8 +3595,7 @@ class DatabaseSchemaService:
                 self.cursor.execute(f"ALTER TABLE Parties ADD COLUMN {column_name} {column_sql}")
 
     def _ensure_party_artist_alias_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS PartyArtistAliases (
                 id INTEGER PRIMARY KEY,
                 party_id INTEGER NOT NULL,
@@ -3874,24 +3606,18 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_party_artist_aliases_normalized_alias
             ON PartyArtistAliases(normalized_alias)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_party_artist_aliases_party_id
             ON PartyArtistAliases(party_id, sort_order, id)
-            """
-        )
+            """)
 
     def _ensure_application_owner_binding_table(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 party_id INTEGER NOT NULL UNIQUE,
@@ -3899,11 +3625,9 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
             )
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS RightsRecords (
                 id INTEGER PRIMARY KEY,
                 title TEXT,
@@ -3933,8 +3657,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_rights_work_id ON RightsRecords(work_id)"
         )
@@ -3948,8 +3671,7 @@ class DatabaseSchemaService:
             "CREATE INDEX IF NOT EXISTS idx_rights_source_contract_id ON RightsRecords(source_contract_id)"
         )
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS AssetVersions (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER,
@@ -3975,8 +3697,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE,
                 FOREIGN KEY (derived_from_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
             )
-            """
-        )
+            """)
         asset_columns = self._table_columns("AssetVersions")
         for column_name, column_sql in (
             ("storage_mode", "TEXT"),
@@ -3992,15 +3713,12 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_asset_versions_release_id ON AssetVersions(release_id)"
         )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_asset_versions_primary_flag
             ON AssetVersions(primary_flag)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS SavedSearches (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
@@ -4009,15 +3727,13 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_saved_searches_name ON SavedSearches(name)"
         )
 
     def _ensure_track_import_repair_queue_table(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS TrackImportRepairQueue (
                 id INTEGER PRIMARY KEY,
                 source_format TEXT NOT NULL,
@@ -4038,24 +3754,18 @@ class DatabaseSchemaService:
                 FOREIGN KEY (resolved_track_id) REFERENCES Tracks(id) ON DELETE SET NULL,
                 FOREIGN KEY (resolved_work_id) REFERENCES Works(id) ON DELETE SET NULL
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_import_repair_queue_status
             ON TrackImportRepairQueue(status, created_at DESC, id DESC)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_import_repair_queue_source
             ON TrackImportRepairQueue(source_format, source_path)
-            """
-        )
+            """)
 
     def _ensure_contract_template_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplates (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -4067,23 +3777,17 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_templates_family
             ON ContractTemplates(template_family)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_templates_archived
             ON ContractTemplates(archived)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateRevisions (
                 id INTEGER PRIMARY KEY,
                 template_id INTEGER NOT NULL,
@@ -4107,8 +3811,7 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (template_id) REFERENCES ContractTemplates(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         revision_columns = self._table_columns("ContractTemplateRevisions")
         for column_name, column_sql in (
             ("scan_adapter", "TEXT"),
@@ -4118,27 +3821,20 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE ContractTemplateRevisions ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_template_id
             ON ContractTemplateRevisions(template_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_scan_status
             ON ContractTemplateRevisions(scan_status)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_template_created_at
             ON ContractTemplateRevisions(template_id, created_at)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplatePlaceholders (
                 id INTEGER PRIMARY KEY,
                 revision_id INTEGER NOT NULL,
@@ -4154,23 +3850,17 @@ class DatabaseSchemaService:
                 UNIQUE(revision_id, canonical_symbol),
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_placeholders_revision_id
             ON ContractTemplatePlaceholders(revision_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_placeholders_binding_kind
             ON ContractTemplatePlaceholders(binding_kind)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplatePlaceholderBindings (
                 id INTEGER PRIMARY KEY,
                 revision_id INTEGER NOT NULL,
@@ -4190,23 +3880,17 @@ class DatabaseSchemaService:
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE,
                 FOREIGN KEY (placeholder_id) REFERENCES ContractTemplatePlaceholders(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_bindings_revision_id
             ON ContractTemplatePlaceholderBindings(revision_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_bindings_resolver_kind
             ON ContractTemplatePlaceholderBindings(resolver_kind)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateDrafts (
                 id INTEGER PRIMARY KEY,
                 revision_id INTEGER NOT NULL,
@@ -4230,8 +3914,7 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         draft_columns = self._table_columns("ContractTemplateDrafts")
         for column_name, column_sql in (
             ("working_file_path", "TEXT"),
@@ -4244,33 +3927,24 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE ContractTemplateDrafts ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_revision_id
             ON ContractTemplateDrafts(revision_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_status
             ON ContractTemplateDrafts(status)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_updated_at
             ON ContractTemplateDrafts(updated_at)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_working_file_path
             ON ContractTemplateDrafts(working_file_path)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateRevisionAssets (
                 id INTEGER PRIMARY KEY,
                 revision_id INTEGER NOT NULL,
@@ -4286,23 +3960,17 @@ class DatabaseSchemaService:
                 UNIQUE(revision_id, managed_file_path),
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_revision_assets_revision_id
             ON ContractTemplateRevisionAssets(revision_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_revision_assets_managed_file_path
             ON ContractTemplateRevisionAssets(managed_file_path)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateResolvedSnapshots (
                 id INTEGER PRIMARY KEY,
                 draft_id INTEGER NOT NULL,
@@ -4317,10 +3985,8 @@ class DatabaseSchemaService:
                 FOREIGN KEY (draft_id) REFERENCES ContractTemplateDrafts(id) ON DELETE CASCADE,
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateDraftRegistryAssignments (
                 id INTEGER PRIMARY KEY,
                 draft_id INTEGER NOT NULL,
@@ -4335,35 +4001,25 @@ class DatabaseSchemaService:
                 FOREIGN KEY (draft_id) REFERENCES ContractTemplateDrafts(id) ON DELETE CASCADE,
                 FOREIGN KEY (registry_entry_id) REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_draft_registry_assignments_draft_id
             ON ContractTemplateDraftRegistryAssignments(draft_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_draft_registry_assignments_entry_id
             ON ContractTemplateDraftRegistryAssignments(registry_entry_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_snapshots_draft_id
             ON ContractTemplateResolvedSnapshots(draft_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_snapshots_revision_id
             ON ContractTemplateResolvedSnapshots(revision_id)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ContractTemplateOutputArtifacts (
                 id INTEGER PRIMARY KEY,
                 snapshot_id INTEGER NOT NULL,
@@ -4378,20 +4034,15 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (snapshot_id) REFERENCES ContractTemplateResolvedSnapshots(id) ON DELETE CASCADE
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_artifacts_snapshot_id
             ON ContractTemplateOutputArtifacts(snapshot_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_contract_template_artifacts_artifact_type
             ON ContractTemplateOutputArtifacts(artifact_type)
-            """
-        )
+            """)
 
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_ins")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_upd")
@@ -4471,8 +4122,7 @@ class DatabaseSchemaService:
         )
 
     def _ensure_authenticity_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS AuthenticityKeys (
                 key_id TEXT PRIMARY KEY,
                 algorithm TEXT NOT NULL DEFAULT 'ed25519',
@@ -4482,14 +4132,12 @@ class DatabaseSchemaService:
                 retired_at TEXT,
                 notes TEXT
             )
-            """
-        )
+            """)
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_authenticity_keys_created_at ON AuthenticityKeys(created_at)"
         )
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS AuthenticityManifests (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -4514,44 +4162,32 @@ class DatabaseSchemaService:
                 FOREIGN KEY (reference_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL,
                 FOREIGN KEY (key_id) REFERENCES AuthenticityKeys(key_id) ON DELETE RESTRICT
             )
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_authenticity_manifests_manifest_id
             ON AuthenticityManifests(manifest_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_track_id
             ON AuthenticityManifests(track_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_watermark_id
             ON AuthenticityManifests(watermark_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_key_id
             ON AuthenticityManifests(key_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_payload_sha256
             ON AuthenticityManifests(payload_sha256)
-            """
-        )
+            """)
 
     def _ensure_derivative_export_tables(self) -> None:
         # This ledger is only for managed catalog derivatives and managed authenticity exports.
         # External utility conversions stay outside these tables.
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS DerivativeExportBatches (
                 id INTEGER PRIMARY KEY,
                 batch_id TEXT NOT NULL,
@@ -4573,8 +4209,7 @@ class DatabaseSchemaService:
                 completed_at TEXT,
                 status TEXT NOT NULL DEFAULT 'pending'
             )
-            """
-        )
+            """)
         batch_columns = self._table_columns("DerivativeExportBatches")
         for column_name, column_sql in (
             ("schema_version", "INTEGER NOT NULL DEFAULT 1"),
@@ -4599,51 +4234,36 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE DerivativeExportBatches ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_derivative_export_batches_batch_id
             ON DerivativeExportBatches(batch_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_created_at
             ON DerivativeExportBatches(created_at)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_status
             ON DerivativeExportBatches(status)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_workflow_kind
             ON DerivativeExportBatches(workflow_kind)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_derivative_kind
             ON DerivativeExportBatches(derivative_kind)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_authenticity_basis
             ON DerivativeExportBatches(authenticity_basis)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_recipe_sha256
             ON DerivativeExportBatches(recipe_sha256)
-            """
-        )
+            """)
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS TrackAudioDerivatives (
                 id INTEGER PRIMARY KEY,
                 export_id TEXT NOT NULL,
@@ -4684,8 +4304,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (source_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL,
                 FOREIGN KEY (derivative_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
             )
-            """
-        )
+            """)
         derivative_columns = self._table_columns("TrackAudioDerivatives")
         for column_name, column_sql in (
             ("export_id", "TEXT NOT NULL DEFAULT ''"),
@@ -4726,76 +4345,53 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE TrackAudioDerivatives ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_track_audio_derivatives_export_id
             ON TrackAudioDerivatives(export_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_batch_id
             ON TrackAudioDerivatives(batch_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_track_id
             ON TrackAudioDerivatives(track_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_workflow_kind
             ON TrackAudioDerivatives(workflow_kind)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_kind
             ON TrackAudioDerivatives(derivative_kind)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_authenticity_basis
             ON TrackAudioDerivatives(authenticity_basis)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_source_asset_id
             ON TrackAudioDerivatives(source_asset_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_asset_id
             ON TrackAudioDerivatives(derivative_asset_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_parent_manifest_id
             ON TrackAudioDerivatives(parent_manifest_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_manifest_id
             ON TrackAudioDerivatives(derivative_manifest_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_output_sha256
             ON TrackAudioDerivatives(output_sha256)
-            """
-        )
+            """)
 
     def _ensure_forensic_watermark_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS ForensicWatermarkExports (
                 id INTEGER PRIMARY KEY,
                 forensic_export_id TEXT NOT NULL,
@@ -4822,8 +4418,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (derivative_export_id) REFERENCES TrackAudioDerivatives(export_id) ON DELETE SET NULL,
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
             )
-            """
-        )
+            """)
         forensic_columns = self._table_columns("ForensicWatermarkExports")
         for column_name, column_sql in (
             ("forensic_export_id", "TEXT NOT NULL DEFAULT ''"),
@@ -4851,52 +4446,37 @@ class DatabaseSchemaService:
                 self.cursor.execute(
                     f"ALTER TABLE ForensicWatermarkExports ADD COLUMN {column_name} {column_sql}"
                 )
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_watermark_exports_export_id
             ON ForensicWatermarkExports(forensic_export_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_watermark_exports_token_binding
             ON ForensicWatermarkExports(token_id, binding_crc32)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_batch_id
             ON ForensicWatermarkExports(batch_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_derivative_export_id
             ON ForensicWatermarkExports(derivative_export_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_track_id
             ON ForensicWatermarkExports(track_id)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_output_sha256
             ON ForensicWatermarkExports(output_sha256)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_created_at
             ON ForensicWatermarkExports(created_at)
-            """
-        )
+            """)
 
     def _ensure_promo_code_tables(self) -> None:
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS PromoCodeSheets (
                 id INTEGER PRIMARY KEY,
                 code_set_name TEXT NOT NULL,
@@ -4915,8 +4495,7 @@ class DatabaseSchemaService:
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 notes TEXT
             )
-            """
-        )
+            """)
         sheet_columns = self._table_columns("PromoCodeSheets")
         for column_name, column_sql in (
             ("source_sha256", "TEXT"),
@@ -4930,8 +4509,7 @@ class DatabaseSchemaService:
                     f"ALTER TABLE PromoCodeSheets ADD COLUMN {column_name} {column_sql}"
                 )
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS PromoCodes (
                 id INTEGER PRIMARY KEY,
                 sheet_id INTEGER NOT NULL,
@@ -4948,8 +4526,7 @@ class DatabaseSchemaService:
                 FOREIGN KEY (sheet_id) REFERENCES PromoCodeSheets(id) ON DELETE CASCADE,
                 UNIQUE(sheet_id, code)
             )
-            """
-        )
+            """)
         code_columns = self._table_columns("PromoCodes")
         for column_name, column_sql in (
             ("provided_at", "TEXT"),
@@ -4958,30 +4535,173 @@ class DatabaseSchemaService:
             if column_name not in code_columns:
                 self.cursor.execute(f"ALTER TABLE PromoCodes ADD COLUMN {column_name} {column_sql}")
 
-        self.cursor.execute(
-            """
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_source_sha256
             ON PromoCodeSheets(source_sha256)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_code_sheets_sequence
             ON PromoCodeSheets(code_sequence_sha256)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_codes_sheet_status
             ON PromoCodes(sheet_id, redeemed, sort_order)
-            """
-        )
-        self.cursor.execute(
-            """
+            """)
+        self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_promo_codes_code
             ON PromoCodes(code)
-            """
-        )
+            """)
+
+    def _ensure_soundcloud_tables(self) -> None:
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SoundCloudAccounts (
+                id INTEGER PRIMARY KEY,
+                account_key TEXT NOT NULL UNIQUE,
+                soundcloud_user_id TEXT,
+                username TEXT,
+                permalink_url TEXT,
+                avatar_url TEXT,
+                connection_status TEXT NOT NULL DEFAULT 'connected',
+                token_store_key TEXT NOT NULL,
+                token_kind TEXT NOT NULL DEFAULT 'session',
+                scope TEXT,
+                token_expires_at TEXT,
+                connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_token_refresh_at TEXT,
+                disconnected_at TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SoundCloudTrackPublications (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                remote_urn TEXT NOT NULL,
+                remote_numeric_id INTEGER,
+                remote_url TEXT,
+                soundcloud_url TEXT,
+                last_operation TEXT,
+                last_status TEXT NOT NULL DEFAULT 'success',
+                metadata_hash TEXT,
+                audio_hash TEXT,
+                last_published_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (account_id) REFERENCES SoundCloudAccounts(id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                UNIQUE(account_id, track_id),
+                UNIQUE(account_id, remote_urn)
+            )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SoundCloudPublishRuns (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'created',
+                requested_track_ids_json TEXT NOT NULL DEFAULT '[]',
+                options_json TEXT NOT NULL DEFAULT '{}',
+                quota_snapshot_json TEXT,
+                items_total INTEGER NOT NULL DEFAULT 0,
+                items_succeeded INTEGER NOT NULL DEFAULT 0,
+                items_failed INTEGER NOT NULL DEFAULT 0,
+                items_skipped INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT,
+                completed_at TEXT,
+                cancelled_at TEXT,
+                redacted_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (account_id) REFERENCES SoundCloudAccounts(id) ON DELETE SET NULL
+            )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SoundCloudPublishRunItems (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                publication_id INTEGER,
+                track_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                plan_status TEXT NOT NULL,
+                remote_urn TEXT,
+                remote_numeric_id INTEGER,
+                remote_url TEXT,
+                soundcloud_url TEXT,
+                metadata_hash TEXT,
+                audio_hash TEXT,
+                operation_message TEXT,
+                redacted_error TEXT,
+                issues_json TEXT NOT NULL DEFAULT '[]',
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (run_id) REFERENCES SoundCloudPublishRuns(id) ON DELETE CASCADE,
+                FOREIGN KEY (publication_id) REFERENCES SoundCloudTrackPublications(id) ON DELETE SET NULL,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """)
+        publication_columns = self._table_columns("SoundCloudTrackPublications")
+        if "remote_url" not in publication_columns:
+            self.cursor.execute(
+                "ALTER TABLE SoundCloudTrackPublications ADD COLUMN remote_url TEXT"
+            )
+            publication_columns.add("remote_url")
+        if "soundcloud_url" not in publication_columns:
+            self.cursor.execute(
+                "ALTER TABLE SoundCloudTrackPublications ADD COLUMN soundcloud_url TEXT"
+            )
+        self.cursor.execute("""
+            UPDATE SoundCloudTrackPublications
+            SET soundcloud_url=remote_url
+            WHERE soundcloud_url IS NULL
+              AND remote_url IS NOT NULL
+            """)
+        run_item_columns = self._table_columns("SoundCloudPublishRunItems")
+        if "remote_url" not in run_item_columns:
+            self.cursor.execute("ALTER TABLE SoundCloudPublishRunItems ADD COLUMN remote_url TEXT")
+            run_item_columns.add("remote_url")
+        if "soundcloud_url" not in run_item_columns:
+            self.cursor.execute(
+                "ALTER TABLE SoundCloudPublishRunItems ADD COLUMN soundcloud_url TEXT"
+            )
+        self.cursor.execute("""
+            UPDATE SoundCloudPublishRunItems
+            SET soundcloud_url=remote_url
+            WHERE soundcloud_url IS NULL
+              AND remote_url IS NOT NULL
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_accounts_status
+            ON SoundCloudAccounts(connection_status, updated_at DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publications_track
+            ON SoundCloudTrackPublications(track_id, updated_at DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publications_soundcloud_url
+            ON SoundCloudTrackPublications(soundcloud_url)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publications_remote_urn
+            ON SoundCloudTrackPublications(remote_urn)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publish_runs_status
+            ON SoundCloudPublishRuns(status, created_at DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publish_items_run
+            ON SoundCloudPublishRunItems(run_id, status, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soundcloud_publish_items_track
+            ON SoundCloudPublishRunItems(track_id, created_at DESC)
+            """)
 
     def _migrate_legacy_releases(self) -> None:
         tables = {
@@ -5001,8 +4721,7 @@ class DatabaseSchemaService:
             artist_alias="main_artist",
         )
 
-        rows = self.cursor.execute(
-            f"""
+        rows = self.cursor.execute(f"""
             SELECT
                 t.id,
                 t.track_title,
@@ -5022,8 +4741,7 @@ class DatabaseSchemaService:
             {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             ORDER BY t.id
-            """
-        ).fetchall()
+            """).fetchall()
         if not rows:
             return
 

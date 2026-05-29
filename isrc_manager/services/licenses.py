@@ -83,13 +83,11 @@ class LicenseService:
 
     def list_rows(self, track_filter_id: int | None = None) -> list[LicenseRow]:
         if track_filter_id is None:
-            rows = self.conn.execute(
-                """
+            rows = self.conn.execute("""
                 SELECT licensee, tracktitle, uploaded_at, filename, file_path, id
                 FROM vw_Licenses
                 ORDER BY uploaded_at DESC
-                """
-            ).fetchall()
+                """).fetchall()
         else:
             rows = self.conn.execute(
                 """

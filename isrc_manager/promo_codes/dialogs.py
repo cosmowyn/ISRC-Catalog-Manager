@@ -358,7 +358,7 @@ class PromoCodeLedgerPanel(QWidget):
         sheet_id = self.sheet_combo.currentData()
         try:
             return int(sheet_id) if sheet_id is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _on_sheet_changed(self, _index: int | None = None) -> None:
@@ -483,7 +483,7 @@ class PromoCodeLedgerPanel(QWidget):
         code_id = self.model.data(self.model.index(source_index.row(), 0), _CODE_ID_ROLE)
         try:
             return int(code_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _selected_code(self) -> PromoCodeRecord | None:

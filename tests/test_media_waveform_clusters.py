@@ -902,8 +902,7 @@ def test_audio_visualization_loaders_decode_ffmpeg_fallbacks(
 def _new_cache_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE Tracks(
             id INTEGER PRIMARY KEY,
             track_title TEXT,
@@ -914,8 +913,7 @@ def _new_cache_connection() -> sqlite3.Connection:
             audio_file_size_bytes INTEGER,
             audio_file_blob BLOB
         )
-        """
-    )
+        """)
     return conn
 
 
@@ -1446,15 +1444,13 @@ def test_audio_waveform_cache_service_get_inspect_cleanup_and_summary(monkeypatc
     conn.execute("DELETE FROM Tracks")
 
     _insert_cache_row(conn, track_id=2, fingerprint="reuse")
-    conn.execute(
-        """
+    conn.execute("""
         INSERT OR REPLACE INTO Tracks(id, track_title, audio_file_path, audio_file_size_bytes)
         VALUES (2, 'Reuse', 'reuse.wav', 1),
                (5, 'Render', 'render.wav', 1),
                (6, 'Skip', 'skip.wav', 1),
                (7, 'Error', 'error.wav', 1)
-        """
-    )
+        """)
 
     def fake_ensure_track_cache(_track_service, track_id, **_kwargs):
         if track_id == 2:
@@ -1515,14 +1511,12 @@ def test_audio_waveform_cache_service_generates_persists_and_deletes_empty_cache
     conn = _new_cache_connection()
     service = AudioWaveformCacheService(conn)
     service.ensure_schema()
-    conn.execute(
-        """
+    conn.execute("""
         INSERT INTO Tracks(id, track_title, audio_file_path, audio_file_filename,
                            audio_file_mime_type, audio_file_size_bytes)
         VALUES (1, 'Generate', 'generate.wav', 'generate.wav', 'audio/wav', 11),
                (2, 'Delete', 'delete.wav', 'delete.wav', 'audio/wav', 11)
-        """
-    )
+        """)
     handle = _FakeHandle()
     track_service = _FakeTrackService(handle)
     progress: list[tuple[int, int, str]] = []

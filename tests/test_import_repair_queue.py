@@ -13,8 +13,7 @@ from isrc_manager.services.import_repair_queue import (
 class TrackImportRepairQueueServiceTests(unittest.TestCase):
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE TrackImportRepairQueue(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_format TEXT,
@@ -33,8 +32,7 @@ class TrackImportRepairQueueServiceTests(unittest.TestCase):
                 resolved_track_id INTEGER,
                 resolved_work_id INTEGER
             )
-            """
-        )
+            """)
         self.service = TrackImportRepairQueueService(self.conn)
 
     def tearDown(self):

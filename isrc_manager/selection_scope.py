@@ -324,6 +324,6 @@ class TrackSelectionChooserDialog(QDialog):
                 continue
             try:
                 track_ids.append(int(item.data(Qt.UserRole)))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         return track_ids

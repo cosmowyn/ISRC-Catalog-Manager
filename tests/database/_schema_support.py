@@ -238,6 +238,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("DerivativeExportBatches", tables)
         self.assertIn("TrackAudioDerivatives", tables)
         self.assertIn("ForensicWatermarkExports", tables)
+        self.assertIn("SoundCloudAccounts", tables)
+        self.assertIn("SoundCloudTrackPublications", tables)
+        self.assertIn("SoundCloudPublishRuns", tables)
+        self.assertIn("SoundCloudPublishRunItems", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertTrue(
@@ -676,8 +680,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             service.init_db()
             conn.execute("PRAGMA user_version = 21")
             conn.execute("DROP TABLE IF EXISTS CustomFieldDefs")
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE CustomFieldDefs (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
@@ -686,8 +689,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     field_type TEXT NOT NULL DEFAULT 'text',
                     options TEXT
                 )
-                """
-            )
+                """)
             conn.commit()
 
             service.migrate_schema()
@@ -707,8 +709,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             service.init_db()
             conn.execute("PRAGMA user_version = 23")
             conn.execute("DROP TABLE IF EXISTS HistoryEntries")
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE HistoryEntries (
                     id INTEGER PRIMARY KEY,
                     parent_id INTEGER,
@@ -726,8 +727,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     snapshot_after_id INTEGER,
                     status TEXT NOT NULL DEFAULT 'applied'
                 )
-                """
-            )
+                """)
             conn.commit()
 
             service.migrate_schema()
@@ -1010,8 +1010,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             conn.execute("DROP TABLE IF EXISTS ContractTemplatePlaceholders")
             conn.execute("DROP TABLE IF EXISTS ContractTemplateRevisions")
             conn.execute("DROP TABLE IF EXISTS ContractTemplates")
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE ContractTemplates (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -1044,8 +1043,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (template_id) REFERENCES ContractTemplates(id) ON DELETE CASCADE
                 );
-                """
-            )
+                """)
             conn.commit()
 
             service.migrate_schema()
@@ -1076,8 +1074,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             conn.execute("DROP INDEX IF EXISTS idx_parties_company_name")
             conn.execute("DROP INDEX IF EXISTS idx_parties_artist_name")
             conn.execute("DROP TABLE IF EXISTS Parties")
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE Parties (
                     id INTEGER PRIMARY KEY,
                     legal_name TEXT NOT NULL,
@@ -1140,8 +1137,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     'Existing note',
                     'default'
                 );
-                """
-            )
+                """)
             conn.commit()
             conn.execute("PRAGMA foreign_keys = ON")
 
@@ -1159,8 +1155,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             alias_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
             }
-            party_row = conn.execute(
-                """
+            party_row = conn.execute("""
                 SELECT
                     legal_name,
                     display_name,
@@ -1172,8 +1167,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     pro_number
                 FROM Parties
                 WHERE id=1
-                """
-            ).fetchone()
+                """).fetchone()
 
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
             self.assertTrue(
@@ -1221,8 +1215,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         try:
             service = DatabaseSchemaService(conn)
             conn.execute("PRAGMA foreign_keys = OFF")
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE Artists (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL
@@ -1388,8 +1381,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     (1, 1, 1, 'keep this'),
                     (2, 1, 0, 'drop this duplicate'),
                     (1, 2, 0, 'same work second track');
-                """
-            )
+                """)
             conn.execute("PRAGMA user_version = 32")
             conn.commit()
             conn.execute("PRAGMA foreign_keys = ON")
@@ -1406,27 +1398,21 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             work_track_link_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list(WorkTrackLinks)").fetchall()
             }
-            governance_rows = conn.execute(
-                """
+            governance_rows = conn.execute("""
                 SELECT id, work_id, parent_track_id, relationship_type
                 FROM Tracks
                 ORDER BY id
-                """
-            ).fetchall()
-            shadow_rows = conn.execute(
-                """
+                """).fetchall()
+            shadow_rows = conn.execute("""
                 SELECT work_id, track_id, is_primary
                 FROM WorkTrackLinks
                 ORDER BY work_id, track_id
-                """
-            ).fetchall()
-            contribution_rows = conn.execute(
-                """
+                """).fetchall()
+            contribution_rows = conn.execute("""
                 SELECT work_id, party_id, display_name, role, share_percent, role_share_percent, notes
                 FROM WorkContributionEntries
                 ORDER BY id
-                """
-            ).fetchall()
+                """).fetchall()
 
             self.assertTrue({"work_id", "parent_track_id", "relationship_type"} <= track_columns)
             self.assertTrue(
@@ -1459,8 +1445,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
-                conn.executescript(
-                    """
+                conn.executescript("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -1491,14 +1476,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         size_bytes INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (track_id, field_def_id)
                     );
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO Tracks(id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
                     VALUES (1, 'NL-ABC-26-00001', 'NLABC2600001', 'Migrated Song', 1, NULL, '2026-03-13', 180, NULL, NULL, NULL)
-                    """
-                )
+                    """)
                 conn.executemany(
                     """
                     INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
@@ -1529,8 +1511,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service = DatabaseSchemaService(conn, data_root=tmpdir)
                 service.migrate_schema()
 
-                row = conn.execute(
-                    """
+                row = conn.execute("""
                     SELECT
                         catalog_number,
                         buma_work_number,
@@ -1542,8 +1523,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         album_art_size_bytes
                     FROM Tracks
                     WHERE id = 1
-                    """
-                ).fetchone()
+                    """).fetchone()
                 self.assertIsNotNone(row)
                 self.assertEqual(row[0], "CAT-LEGACY-01")
                 self.assertEqual(row[1], "BUMA-LEGACY-99")
@@ -1574,24 +1554,18 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.service.init_db()
         self.service.migrate_schema()
 
-        self.conn.execute(
-            """
+        self.conn.execute("""
             INSERT INTO Parties(id, legal_name, display_name, artist_name, party_type)
             VALUES (1, 'Schema Artist', 'Schema Artist', 'Schema Artist', 'artist')
-            """
-        )
-        self.conn.execute(
-            """
+            """)
+        self.conn.execute("""
             INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_party_id, track_length_sec)
             VALUES ('', '', 'Blank ISRC One', 1, 0)
-            """
-        )
-        self.conn.execute(
-            """
+            """)
+        self.conn.execute("""
             INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_party_id, track_length_sec)
             VALUES ('', '', 'Blank ISRC Two', 1, 0)
-            """
-        )
+            """)
 
         rows = self.conn.execute("SELECT isrc, isrc_compact FROM Tracks ORDER BY id").fetchall()
         self.assertEqual(rows, [("", ""), ("", "")])
@@ -1600,8 +1574,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
-                conn.executescript(
-                    """
+                conn.executescript("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -1641,10 +1614,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         size_bytes INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (track_id, field_def_id)
                     );
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO Tracks(
                         id, isrc, isrc_compact, db_entry_date,
                         audio_file_path, audio_file_mime_type, audio_file_size_bytes,
@@ -1659,8 +1630,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         NULL, NULL, 0,
                         1, NULL, NULL, '2026-03-13', 180, NULL, NULL, NULL
                     )
-                    """
-                )
+                    """)
                 conn.executemany(
                     """
                     INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
@@ -1691,8 +1661,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service = DatabaseSchemaService(conn, data_root=tmpdir)
                 service.migrate_schema()
 
-                row = conn.execute(
-                    """
+                row = conn.execute("""
                     SELECT
                         catalog_number,
                         buma_work_number,
@@ -1704,8 +1673,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         album_art_size_bytes
                     FROM Tracks
                     WHERE id = 1
-                    """
-                ).fetchone()
+                    """).fetchone()
                 self.assertEqual(row[0], "CAT-V13-01")
                 self.assertEqual(row[1], "BUMA-V13-88")
                 self.assertTrue(str(row[2]).startswith("track_media/audio/"))
@@ -1730,8 +1698,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
-                conn.executescript(
-                    """
+                conn.executescript("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -1762,14 +1729,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         size_bytes INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (track_id, field_def_id)
                     );
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO Tracks(id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
                     VALUES (1, 'NL-ABC-26-00001', 'NLABC2600001', 'Keep Custom Types', 1, NULL, '2026-03-13', 180, NULL, NULL, NULL)
-                    """
-                )
+                    """)
                 conn.executemany(
                     """
                     INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
@@ -1796,8 +1760,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service = DatabaseSchemaService(conn, data_root=tmpdir)
                 service.migrate_schema()
 
-                row = conn.execute(
-                    """
+                row = conn.execute("""
                     SELECT
                         audio_file_path,
                         audio_file_mime_type,
@@ -1805,8 +1768,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         catalog_number
                     FROM Tracks
                     WHERE id = 1
-                    """
-                ).fetchone()
+                    """).fetchone()
                 self.assertEqual(row, (None, None, 0, None))
                 self.assertEqual(
                     conn.execute(
@@ -1827,8 +1789,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
     def case_init_db_tolerates_older_tracks_schema_before_migration(self):
         conn = sqlite3.connect(":memory:")
         try:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE Artists (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL
@@ -1850,8 +1811,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     upc TEXT,
                     genre TEXT
                 );
-                """
-            )
+                """)
             service = DatabaseSchemaService(conn)
 
             service.init_db()
@@ -1992,27 +1952,23 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     2,
                 )
                 self.assertEqual(
-                    conn.execute(
-                        """
+                    conn.execute("""
                         SELECT
                             catalog_number,
                             catalog_registry_entry_id,
                             catalog_external_code_identifier_id
                         FROM Tracks
-                        """
-                    ).fetchone(),
+                        """).fetchone(),
                     ("LEG-001", None, 1),
                 )
                 self.assertEqual(
-                    conn.execute(
-                        """
+                    conn.execute("""
                         SELECT
                             catalog_number,
                             catalog_registry_entry_id,
                             catalog_external_code_identifier_id
                         FROM Releases
-                        """
-                    ).fetchone(),
+                        """).fetchone(),
                     ("LEG-REL-001", None, 2),
                 )
         finally:
@@ -2031,8 +1987,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 conn.execute("DROP TABLE IF EXISTS ReleaseTracks")
                 conn.execute("DROP TABLE IF EXISTS TrackArtists")
                 conn.execute("DROP TABLE IF EXISTS Tracks")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE Tracks (
                         id INTEGER PRIMARY KEY,
                         isrc TEXT NOT NULL,
@@ -2042,8 +1997,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         external_catalog_identifier_id INTEGER,
                         main_artist_party_id INTEGER NOT NULL
                     )
-                    """
-                )
+                    """)
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA user_version = 36")
                 conn.execute(
@@ -2051,8 +2005,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 )
 
                 artist_id = int(PartyService(conn).ensure_artist_party_by_name("Migration Artist"))
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO ExternalCatalogIdentifiers(
                         id,
                         subject_kind,
@@ -2067,8 +2020,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     VALUES
                         (1, 'track', 1, 'ALB-2501', 'alb-2501', 'migration', 'external', NULL, 'old_schema'),
                         (2, 'track', 2, 'ALB-2501', 'alb-2501', 'migration', 'external', NULL, 'old_schema')
-                    """
-                )
+                    """)
                 conn.execute(
                     """
                     INSERT INTO Tracks(
@@ -2106,22 +2058,18 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     conn.execute("SELECT COUNT(*) FROM ExternalCatalogIdentifiers").fetchone()[0],
                     1,
                 )
-                rows = conn.execute(
-                    """
+                rows = conn.execute("""
                     SELECT catalog_external_code_identifier_id
                     FROM Tracks
                     ORDER BY id
-                    """
-                ).fetchall()
+                    """).fetchall()
                 self.assertEqual(rows, [(1,), (1,)])
-                normalized_index = conn.execute(
-                    """
+                normalized_index = conn.execute("""
                     SELECT COUNT(*)
                     FROM sqlite_master
                     WHERE type='index'
                       AND name='idx_external_catalog_identifiers_normalized_value'
-                    """
-                ).fetchone()
+                    """).fetchone()
                 self.assertEqual(normalized_index[0], 1)
         finally:
             conn.close()
@@ -2138,8 +2086,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service._mig_36_to_37()
                 conn.execute("PRAGMA user_version = 37")
                 conn.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TRIGGER trg_code_registry_entries_no_delete
                     BEFORE DELETE ON CodeRegistryEntries
                     FOR EACH ROW
@@ -2147,8 +2094,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     BEGIN
                         SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
                     END
-                    """
-                )
+                    """)
                 conn.commit()
 
                 registry = CodeRegistryService(conn)

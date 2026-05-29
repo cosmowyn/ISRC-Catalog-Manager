@@ -115,14 +115,14 @@ def _current_work_track_context(app) -> dict[str, object]:
         mode = "create_new_work"
     try:
         work_id = int(context.get("work_id"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         work_id = None
     parent_track_id = context.get("parent_track_id")
     try:
         normalized_parent_track_id = (
             int(parent_track_id) if parent_track_id not in (None, "") else None
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         normalized_parent_track_id = None
     locked_work = bool(context.get("locked_work"))
     return_to_work_manager = bool(context.get("return_to_work_manager"))
@@ -214,7 +214,7 @@ def _refresh_work_track_creation_context_ui(app) -> None:
         for record in app._available_work_records():
             try:
                 work_id = int(getattr(record, "id", 0) or 0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if work_id <= 0:
                 continue
@@ -340,7 +340,7 @@ def _on_add_track_work_changed(app, _index: int) -> None:
     work_id = app.add_data_work_work_combo.currentData()
     try:
         context["work_id"] = int(work_id) if work_id not in (None, "") else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         context["work_id"] = None
     context["parent_track_id"] = None
     app._pending_work_track_context = context
@@ -364,7 +364,7 @@ def _on_add_track_parent_track_changed(app, _index: int) -> None:
         context["parent_track_id"] = (
             int(parent_track_id) if parent_track_id not in (None, "") else None
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         context["parent_track_id"] = None
     app._pending_work_track_context = context
 

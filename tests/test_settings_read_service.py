@@ -22,8 +22,7 @@ from isrc_manager.services import (
 
 def make_settings_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE ISRC_Prefix (
             id INTEGER PRIMARY KEY,
             prefix TEXT NOT NULL
@@ -80,8 +79,7 @@ def make_settings_conn():
             created_at TEXT,
             updated_at TEXT
         );
-        """
-    )
+        """)
     return conn
 
 
@@ -267,8 +265,7 @@ class SettingsReadServiceTests(unittest.TestCase):
                     "Canonical owner record",
                 ),
             )
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     party_id INTEGER NOT NULL UNIQUE,
@@ -276,8 +273,7 @@ class SettingsReadServiceTests(unittest.TestCase):
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
                 )
-                """
-            )
+                """)
             self.conn.execute(
                 "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES (1, ?)",
                 (7,),

@@ -37,16 +37,14 @@ class ApplicationISRCRegistryServiceTests(unittest.TestCase):
                 "INSERT INTO app_kv(key, value) VALUES ('isrc_artist_code', ?)",
                 (artist_code,),
             )
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE Tracks(
                     id INTEGER PRIMARY KEY,
                     track_title TEXT NOT NULL,
                     isrc TEXT NOT NULL,
                     isrc_compact TEXT
                 )
-                """
-            )
+                """)
             for track_id, title, isrc in tracks:
                 compact = isrc.replace("-", "").upper()
                 conn.execute(

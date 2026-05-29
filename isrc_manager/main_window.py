@@ -2334,8 +2334,18 @@ class App(QMainWindow):
             on_status=on_status,
         )
 
-    def open_application_log_dialog(self):
-        ApplicationLogDialog(self, parent=self).exec()
+    def open_application_log_dialog(
+        self,
+        *,
+        prefer_trace: bool = False,
+        scroll_to_latest: bool = False,
+    ):
+        ApplicationLogDialog(
+            self,
+            parent=self,
+            prefer_trace=prefer_trace,
+            scroll_to_latest=scroll_to_latest,
+        ).exec()
 
     def open_application_storage_admin_dialog(self):
         ApplicationStorageAdminDialog(self, parent=self).exec()
@@ -2774,6 +2784,14 @@ class App(QMainWindow):
             self,
             initial_focus,
         )
+
+    def open_soundcloud_settings_dialog(self):
+        return settings_controller.open_soundcloud_settings_dialog(self)
+
+    def open_soundcloud_publish_dialog(self, track_ids=None):
+        from isrc_manager.integrations.soundcloud.workflow import open_soundcloud_publish_dialog
+
+        return open_soundcloud_publish_dialog(self, track_ids=track_ids)
 
     def export_application_settings_bundle(self):
         return settings_controller.export_application_settings_bundle(
@@ -3345,11 +3363,11 @@ class App(QMainWindow):
         resized_wrapper = getattr(self, "_header_section_resized_wrapper", None)
         try:
             header.sectionMoved.disconnect(moved_wrapper or self._on_header_sections_reordered)
-        except (RuntimeError, TypeError):
+        except RuntimeError, TypeError:
             pass
         try:
             header.sectionResized.disconnect(resized_wrapper or self._on_header_sections_resized)
-        except (RuntimeError, TypeError):
+        except RuntimeError, TypeError:
             pass
         self._header_section_moved_wrapper = None
         self._header_section_resized_wrapper = None
@@ -5275,7 +5293,7 @@ class App(QMainWindow):
     def _normalize_track_number_value(value) -> int | None:
         try:
             normalized = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return normalized if normalized > 0 else None
 
@@ -5786,7 +5804,7 @@ class App(QMainWindow):
         else:
             try:
                 track_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 track_id = 0
             if track_id <= 0:
                 QMessageBox.warning(
@@ -5824,7 +5842,7 @@ class App(QMainWindow):
             track_id = self._current_catalog_context_track_id()
         try:
             resolved_track_id = int(track_id or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             resolved_track_id = 0
         if resolved_track_id <= 0:
             QMessageBox.information(
@@ -6082,7 +6100,7 @@ class App(QMainWindow):
         else:
             try:
                 track_id = int(track_id)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 track_id = 0
             if track_id <= 0:
                 selected_ids = list(self._catalog_table_controller().selected_track_ids())
@@ -6130,7 +6148,7 @@ class App(QMainWindow):
         for value in track_ids or []:
             try:
                 track_id = int(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if track_id <= 0 or track_id in seen:
                 continue
@@ -6212,8 +6230,7 @@ class App(QMainWindow):
             track_alias="t",
             artist_alias="main_artist",
         )
-        rows = active_conn.execute(
-            f"""
+        rows = active_conn.execute(f"""
             SELECT
                 t.id,
                 COALESCE(t.track_title, ''),
@@ -6223,8 +6240,7 @@ class App(QMainWindow):
             {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             ORDER BY t.track_title COLLATE NOCASE, t.id
-            """
-        ).fetchall()
+            """).fetchall()
         choices: list[TrackChoice] = []
         for track_id, track_title, artist_name, album_title in rows:
             clean_title = str(track_title or "").strip() or f"Track {int(track_id)}"
@@ -8298,7 +8314,7 @@ class App(QMainWindow):
             )
             try:
                 field_id = int(field.get("id"))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 field_id = None
             column_key = (
                 f"custom:{field_id}"
@@ -8422,7 +8438,7 @@ class App(QMainWindow):
             label = str(entry.get("label") or "")
             try:
                 occurrence = int(entry.get("occurrence", 0))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 occurrence = 0
             if label:
                 hidden_columns.append((label, occurrence))

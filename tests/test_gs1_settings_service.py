@@ -18,14 +18,12 @@ from isrc_manager.services import (
 
 def make_settings_conn():
     conn = sqlite3.connect(":memory:")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE app_kv (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-        """
-    )
+        """)
     return conn
 
 
@@ -290,8 +288,7 @@ class GS1SettingsServiceTests(unittest.TestCase):
 
     def test_template_storage_schema_and_missing_asset_edges(self):
         legacy_conn = make_settings_conn()
-        legacy_conn.execute(
-            """
+        legacy_conn.execute("""
             CREATE TABLE GS1TemplateStorage (
                 id INTEGER PRIMARY KEY CHECK(id = 1),
                 filename TEXT NOT NULL,
@@ -301,8 +298,7 @@ class GS1SettingsServiceTests(unittest.TestCase):
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         try:
             GS1SettingsService(legacy_conn, self.settings)
             columns = {
@@ -318,14 +314,12 @@ class GS1SettingsServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(GS1TemplateVerificationError, "No official GS1 workbook"):
             self.service.convert_template_storage_mode(STORAGE_MODE_DATABASE)
 
-        self.conn.execute(
-            """
+        self.conn.execute("""
             INSERT INTO GS1TemplateStorage(
                 id, filename, source_path, storage_mode, workbook_blob, mime_type, size_bytes
             )
             VALUES (1, 'missing.xlsx', '', 'database', NULL, '', 0)
-            """
-        )
+            """)
         self.assertIsNone(self.service.load_stored_template_bytes())
         with self.assertRaisesRegex(GS1TemplateVerificationError, "missing or unreadable"):
             self.service.convert_template_storage_mode(STORAGE_MODE_MANAGED_FILE)

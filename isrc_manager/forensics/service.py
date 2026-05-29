@@ -397,8 +397,7 @@ class ForensicLedgerService:
         return self._row_to_record(row)
 
     def iter_resolution_candidates(self) -> list[_ResolutionCandidate]:
-        rows = self.conn.execute(
-            """
+        rows = self.conn.execute("""
             SELECT
                 f.forensic_export_id,
                 f.batch_id,
@@ -425,8 +424,7 @@ class ForensicLedgerService:
             FROM ForensicWatermarkExports f
             LEFT JOIN TrackAudioDerivatives d ON d.export_id = f.derivative_export_id
             ORDER BY f.created_at DESC, f.id DESC
-            """
-        ).fetchall()
+            """).fetchall()
         candidates: list[_ResolutionCandidate] = []
         for row in rows:
             record = self._row_to_record(row[:20])

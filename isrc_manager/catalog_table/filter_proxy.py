@@ -51,7 +51,7 @@ class CatalogFilterProxyModel(QSortFilterProxyModel):
             for track_id in track_ids:
                 try:
                     normalized_track_id = int(track_id)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 if normalized_track_id > 0:
                     collected.add(normalized_track_id)

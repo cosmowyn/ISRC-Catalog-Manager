@@ -167,22 +167,18 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(source_path.read_bytes(), source_bytes_before)
         output_path = Path(result.written_paths[0])
         exported_tags = self.audio_tag_service.read_tags(output_path)
-        derivative_row = self.conn.execute(
-            """
+        derivative_row = self.conn.execute("""
             SELECT workflow_kind, derivative_kind, authenticity_basis, watermark_applied,
                    metadata_embedded, output_filename, output_sha256
             FROM TrackAudioDerivatives
-            """
-        ).fetchone()
-        forensic_row = self.conn.execute(
-            """
+            """).fetchone()
+        forensic_row = self.conn.execute("""
             SELECT batch_id, derivative_export_id, track_id, key_id, token_version,
                    forensic_watermark_version, token_id, binding_crc32, recipient_label,
                    share_label, output_format, output_filename, output_sha256,
                    output_size_bytes, source_lineage_ref
             FROM ForensicWatermarkExports
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(exported_tags.title, "Forensic Source")
         self.assertEqual(exported_tags.album, "Forensic Album")
@@ -343,12 +339,10 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(report.recipient_label, "Reviewer")
         self.assertTrue(report.exact_hash_match)
         self.assertEqual(report.resolution_basis, "exact_output_hash")
-        verification_row = self.conn.execute(
-            """
+        verification_row = self.conn.execute("""
             SELECT last_verification_status, last_verification_confidence
             FROM ForensicWatermarkExports
-            """
-        ).fetchone()
+            """).fetchone()
         self.assertEqual(verification_row[0], FORENSIC_STATUS_MATCH_FOUND)
         self.assertEqual(float(verification_row[1]), 1.0)
 

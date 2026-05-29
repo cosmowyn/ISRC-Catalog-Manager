@@ -299,7 +299,7 @@ class BulkAudioAttachDialog(QDialog):
             return None
         try:
             return int(match.group(1))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _resolve_track_id(self, combo: QComboBox) -> int | None:
@@ -312,7 +312,7 @@ class BulkAudioAttachDialog(QDialog):
             ):
                 try:
                     return int(data)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     return None
         extracted = self._extract_track_id(combo.currentText())
         if extracted in self._track_choice_map:
@@ -327,7 +327,7 @@ class BulkAudioAttachDialog(QDialog):
         for value in item.get("candidate_track_ids") or []:
             try:
                 candidate_ids.append(int(value))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         if not candidate_ids:
             return ""
@@ -417,7 +417,7 @@ class BulkAudioAttachDialog(QDialog):
             if original_track_id not in (None, ""):
                 try:
                     track_id = int(original_track_id)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     track_id = None
         if track_id is None:
             target_item.setText("")
@@ -658,7 +658,7 @@ class DroppedAudioImportDialog(QDialog):
     def _int_or_none(value: object) -> int | None:
         try:
             parsed = int(str(value or "").strip())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return parsed if parsed > 0 else None
 

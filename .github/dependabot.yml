@@ -13,10 +13,6 @@ updates:
         dependency-type: "production"
       python-development-dependencies:
         dependency-type: "development"
-    ignore:
-      - dependency-name: "black"
-        update-types:
-          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -237,14 +237,12 @@ class ExchangeServiceTestCase(unittest.TestCase):
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Releases").fetchone()[0], 1)
             self.assertEqual(
-                new_conn.execute(
-                    """
+                new_conn.execute("""
                     SELECT cfv.value
                     FROM CustomFieldValues cfv
                     JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
                     WHERE cfd.name='Mood'
-                    """
-                ).fetchone()[0],
+                    """).fetchone()[0],
                 "Dreamy",
             )
             self.assertEqual(
@@ -1148,13 +1146,11 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 new_conn.execute("SELECT COUNT(*) FROM ReleaseTracks").fetchone()[0], 2
             )
             self.assertEqual(
-                new_conn.execute(
-                    """
+                new_conn.execute("""
                     SELECT COUNT(*)
                     FROM Releases
                     WHERE title='Same Identity Release' AND upc='036000291452'
-                    """
-                ).fetchone()[0],
+                    """).fetchone()[0],
                 2,
             )
         finally:
@@ -2626,13 +2622,11 @@ class ExchangeServiceTestCase(unittest.TestCase):
 
         self.assertEqual(report.passed, 1)
         self.assertEqual(
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 SELECT cfd.name, cfv.value
                 FROM CustomFieldValues cfv
                 JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
-                """
-            ).fetchall(),
+                """).fetchall(),
             [("Mood", "Dreamy")],
         )
 
@@ -2676,14 +2670,12 @@ class ExchangeServiceTestCase(unittest.TestCase):
             "dropdown",
         )
         self.assertEqual(
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 SELECT cfv.value
                 FROM CustomFieldValues cfv
                 JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
                 WHERE cfd.name='Distribution Status'
-                """
-            ).fetchone()[0],
+                """).fetchone()[0],
             "Approved",
         )
 

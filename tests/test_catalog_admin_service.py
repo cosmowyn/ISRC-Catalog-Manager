@@ -6,8 +6,7 @@ from isrc_manager.services import CatalogAdminService
 
 def make_catalog_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Artists (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL
@@ -38,8 +37,7 @@ def make_catalog_conn():
             file_path TEXT NOT NULL,
             filename TEXT NOT NULL
         );
-        """
-    )
+        """)
     conn.executemany(
         "INSERT INTO Artists(id, name) VALUES (?, ?)",
         [

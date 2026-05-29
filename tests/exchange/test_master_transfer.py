@@ -800,18 +800,12 @@ class MasterTransferServiceTests(unittest.TestCase):
 
         source_release_id = self.source_ids["release_id"]
         imported_release_id = result.catalog_report.source_release_id_map[source_release_id]
-        right_row = (
-            target["conn"]
-            .execute(
-                """
+        right_row = target["conn"].execute("""
             SELECT track_id, release_id, source_contract_id
             FROM RightsRecords
             ORDER BY id
             LIMIT 1
-            """
-            )
-            .fetchone()
-        )
+            """).fetchone()
         self.assertEqual((right_row[0], right_row[1]), (imported_track_id, imported_release_id))
 
         source_base_contract_id = self.source_ids["base_contract_id"]

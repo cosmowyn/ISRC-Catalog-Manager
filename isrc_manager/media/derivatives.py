@@ -333,8 +333,7 @@ class DerivativeLedgerService:
         search = str(search_text or "").strip().lower()
         if search:
             like_value = f"%{search}%"
-            where_parts.append(
-                """
+            where_parts.append("""
                 (
                     lower(b.batch_id) LIKE ?
                     OR lower(coalesce(b.output_format, '')) LIKE ?
@@ -353,8 +352,7 @@ class DerivativeLedgerService:
                           )
                     )
                 )
-                """
-            )
+                """)
             params.extend([like_value] * 8)
         clean_output_format = str(output_format or "").strip().lower()
         if clean_output_format:
@@ -433,8 +431,7 @@ class DerivativeLedgerService:
         search = str(search_text or "").strip().lower()
         if search:
             like_value = f"%{search}%"
-            where_parts.append(
-                """
+            where_parts.append("""
                 (
                     lower(coalesce(t.track_title, '')) LIKE ?
                     OR lower(coalesce(d.output_filename, '')) LIKE ?
@@ -444,8 +441,7 @@ class DerivativeLedgerService:
                     OR lower(coalesce(d.output_sha256, '')) LIKE ?
                     OR lower(coalesce(d.export_id, '')) LIKE ?
                 )
-                """
-            )
+                """)
             params.extend([like_value] * 7)
         clean_output_format = str(output_format or "").strip().lower()
         if clean_output_format:

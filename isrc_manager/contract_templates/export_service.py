@@ -564,7 +564,7 @@ class ContractTemplateExportService:
     def _coerce_record_id(value: object | None) -> int | None:
         try:
             record_id = int(str(value if value is not None else "").strip())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return record_id if record_id > 0 else None
 
@@ -1686,7 +1686,7 @@ class ContractTemplateExportService:
             return ""
         try:
             seconds = int(float(text))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return text
         if seconds < 0:
             return text

@@ -241,15 +241,13 @@ def _checks_by_title(payload: dict[str, object]) -> dict[str, dict[str, object]]
 def _diagnostics_connection(tmp_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys=OFF")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE Tracks(
             id INTEGER PRIMARY KEY,
             track_title TEXT,
             audio_file_path TEXT
         )
-        """
-    )
+        """)
     conn.execute("CREATE TABLE Albums(id INTEGER PRIMARY KEY, title TEXT, album_art_path TEXT)")
     conn.execute("CREATE TABLE Licenses(id INTEGER PRIMARY KEY, filename TEXT, file_path TEXT)")
     conn.execute(

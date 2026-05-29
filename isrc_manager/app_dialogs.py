@@ -859,9 +859,18 @@ class MasterTransferExportDialog(QDialog):
 
 
 class ApplicationLogDialog(QDialog):
-    def __init__(self, app, parent=None):
+    def __init__(
+        self,
+        app,
+        parent=None,
+        *,
+        prefer_trace: bool = False,
+        scroll_to_latest: bool = False,
+    ):
         super().__init__(parent or app)
         self.app = app
+        self._prefer_trace = bool(prefer_trace)
+        self._scroll_to_latest = bool(scroll_to_latest)
         self.setObjectName("applicationLogDialog")
         self.setProperty("role", "panel")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -998,6 +1007,11 @@ class ApplicationLogDialog(QDialog):
                 if self.log_combo.itemData(index) == current_path:
                     target_index = index
                     break
+        elif self._prefer_trace:
+            for index in range(self.log_combo.count()):
+                if ".jsonl" in str(self.log_combo.itemData(index) or ""):
+                    target_index = index
+                    break
 
         self.open_file_button.setEnabled(True)
         self.log_combo.setCurrentIndex(target_index)
@@ -1019,7 +1033,8 @@ class ApplicationLogDialog(QDialog):
         self.open_file_button.setEnabled(path.exists())
         text = self.app._read_log_for_viewer(path)
         self.contents_edit.setPlainText(text)
-        self.contents_edit.verticalScrollBar().setValue(0)
+        scrollbar = self.contents_edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum() if self._scroll_to_latest else 0)
 
     def _open_selected_log(self):
         path = self._selected_log_path()

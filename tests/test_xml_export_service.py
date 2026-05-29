@@ -9,8 +9,7 @@ from isrc_manager.services import XMLExportService
 
 def make_export_conn():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE Artists (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL
@@ -71,24 +70,19 @@ def make_export_conn():
             size_bytes INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (track_id, field_def_id)
         );
-        """
-    )
+        """)
     conn.executemany(
         "INSERT INTO Artists(id, name) VALUES (?, ?)",
         [(1, "Main Artist"), (2, "Guest Artist"), (3, "Second Artist")],
     )
-    conn.execute(
-        """
+    conn.execute("""
         INSERT INTO Albums(id, title, album_art_path, album_art_mime_type, album_art_size_bytes)
         VALUES (1, 'Album One', 'track_media/images/cover.png', 'image/png', 42)
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         INSERT INTO Works(id, title, iswc, registration_number)
         VALUES (1, 'First Song Work', 'T-123.456.789-0', 'BUMA-42')
-        """
-    )
+        """)
     conn.executemany(
         """
         INSERT INTO Tracks(

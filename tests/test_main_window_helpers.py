@@ -3436,7 +3436,7 @@ def test_diagnostics_dialog_routing_and_bulk_attach_guardrails(monkeypatch, tmp_
 
     def dialog_class(kind: str):
         class FakeDialog:
-            def __init__(self, owner, parent=None) -> None:
+            def __init__(self, owner, parent=None, **_kwargs) -> None:
                 dialog_events.append((f"{kind}.init", owner is app and parent is app))
 
             def focus_cleanup_tab(self, tab: str) -> None:

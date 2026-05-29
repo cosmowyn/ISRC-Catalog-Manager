@@ -659,8 +659,7 @@ class WorkService:
         clean_search = clean_text(search_text)
         if clean_search:
             like = f"%{clean_search}%"
-            clauses.append(
-                """
+            clauses.append("""
                 (
                     w.title LIKE ?
                     OR COALESCE(w.version_subtitle, '') LIKE ?
@@ -668,16 +667,14 @@ class WorkService:
                     OR COALESCE(w.registration_number, '') LIKE ?
                     OR COALESCE(w.alternate_titles, '') LIKE ?
                 )
-                """
-            )
+                """)
             params.extend([like, like, like, like, like])
         clean_status = self._clean_status(status)
         if clean_status:
             clauses.append("COALESCE(w.work_status, '')=?")
             params.append(clean_status)
         if linked_track_id is not None:
-            clauses.append(
-                """
+            clauses.append("""
                 EXISTS (
                     SELECT 1
                     FROM Tracks t2
@@ -687,8 +684,7 @@ class WorkService:
                     WHERE t2.id=?
                       AND (t2.work_id = w.id OR (t2.work_id IS NULL AND wt2.work_id IS NOT NULL))
                 )
-                """
-            )
+                """)
             params.append(int(linked_track_id))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(

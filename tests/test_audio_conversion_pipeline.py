@@ -172,21 +172,17 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(result.skipped, 0)
         output_path = Path(result.written_paths[0])
         exported_tags = self.audio_tag_service.read_tags(output_path)
-        derivative_row = self.conn.execute(
-            """
+        derivative_row = self.conn.execute("""
             SELECT batch_id, track_id, workflow_kind, derivative_kind, authenticity_basis,
                    source_lineage_ref, watermark_applied, metadata_embedded, output_filename,
                    filename_hash_suffix, output_sha256, output_size_bytes, derivative_manifest_id
             FROM TrackAudioDerivatives
-            """
-        ).fetchone()
-        batch_row = self.conn.execute(
-            """
+            """).fetchone()
+        batch_row = self.conn.execute("""
             SELECT batch_id, workflow_kind, derivative_kind, authenticity_basis, output_format,
                    zip_filename, requested_count, exported_count, skipped_count, package_mode, status
             FROM DerivativeExportBatches
-            """
-        ).fetchone()
+            """).fetchone()
         derivative_columns = [
             row[1]
             for row in self.conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
@@ -351,21 +347,17 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertIsNone(result.zip_path)
         output_path = Path(result.written_paths[0])
         exported_tags = self.audio_tag_service.read_tags(output_path)
-        derivative_row = self.conn.execute(
-            """
+        derivative_row = self.conn.execute("""
             SELECT track_id, workflow_kind, derivative_kind, authenticity_basis, source_storage_mode,
                    output_format, output_suffix, output_filename, filename_hash_suffix, output_sha256,
                    derivative_manifest_id, metadata_embedded, output_size_bytes, watermark_applied
             FROM TrackAudioDerivatives
-            """
-        ).fetchone()
-        batch_row = self.conn.execute(
-            """
+            """).fetchone()
+        batch_row = self.conn.execute("""
             SELECT batch_id, workflow_kind, derivative_kind, authenticity_basis, output_format,
                    zip_filename, requested_count, exported_count, skipped_count, package_mode, status
             FROM DerivativeExportBatches
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(source_path.read_bytes(), source_bytes_before)
         watermark_mock.assert_not_called()
@@ -464,21 +456,17 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
                 archive.extract(name, path=extract_root)
                 extracted = extract_root / name
                 extracted_titles.add(str(self.audio_tag_service.read_tags(extracted).title or ""))
-        derivative_rows = self.conn.execute(
-            """
+        derivative_rows = self.conn.execute("""
             SELECT track_id, workflow_kind, derivative_kind, authenticity_basis, source_storage_mode,
                    output_format, output_filename, output_sha256, watermark_applied, derivative_manifest_id
             FROM TrackAudioDerivatives
             ORDER BY track_id
-            """
-        ).fetchall()
-        batch_row = self.conn.execute(
-            """
+            """).fetchall()
+        batch_row = self.conn.execute("""
             SELECT batch_id, workflow_kind, derivative_kind, authenticity_basis, output_format,
                    zip_filename, exported_count, skipped_count, package_mode
             FROM DerivativeExportBatches
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(extracted_titles, {"Managed Lossy Source", "Blob Lossy Source"})
         self.assertEqual(
@@ -569,12 +557,10 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
 
         after_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
         exported_tags = self.audio_tag_service.read_tags(result.written_paths[0])
-        derivative_row = self.conn.execute(
-            """
+        derivative_row = self.conn.execute("""
             SELECT source_storage_mode, output_format, watermark_applied
             FROM TrackAudioDerivatives
-            """
-        ).fetchone()
+            """).fetchone()
 
         self.assertEqual(result.exported, 1)
         watermark_mock.assert_not_called()

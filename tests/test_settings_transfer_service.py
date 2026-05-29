@@ -24,14 +24,12 @@ from isrc_manager.starter_themes import starter_theme_library
 
 def make_conn():
     conn = sqlite3.connect(":memory:")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE app_kv (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-        """
-    )
+        """)
     return conn
 
 
