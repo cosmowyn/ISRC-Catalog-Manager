@@ -14,6 +14,10 @@ PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
 RELEASE_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "release-build.yml"
 MIN_PYINSTALLER_PYTHON_314_VERSION = (6, 19, 0)
+MIN_BINARY_RUNTIME_WHEEL_VERSIONS = {
+    "numpy": (2, 3, 2),
+    "scipy": (1, 17, 1),
+}
 
 
 def _section_text(text: str, section_name: str) -> str:
@@ -88,13 +92,13 @@ class Python314CompatibilityTests(unittest.TestCase):
             _section_text(pyproject_text, "project"), "dependencies"
         )
 
-        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
-            with self.subTest(requirement=requirement):
-                self.assertIn(requirement, project_dependencies)
+        for package_name, minimum_version in MIN_BINARY_RUNTIME_WHEEL_VERSIONS.items():
+            with self.subTest(package=package_name):
+                pyproject_pin = _pinned_requirement_version(project_dependencies, package_name)
+                requirements_pin = _pinned_requirement_version(requirements, package_name)
 
-        for requirement in ("numpy==2.3.2", "scipy==1.17.1"):
-            with self.subTest(requirement=requirement):
-                self.assertIn(requirement, requirements)
+                self.assertEqual(pyproject_pin, requirements_pin)
+                self.assertGreaterEqual(_release_version_tuple(pyproject_pin), minimum_version)
 
     def test_setuptools_package_list_covers_all_isrc_manager_packages(self):
         text = PYPROJECT_PATH.read_text(encoding="utf-8")
