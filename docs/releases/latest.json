@@ -1,7 +1,7 @@
 {
-  "version": "4.0.0",
+  "version": "4.0.1",
   "released_at": "2026-05-29",
-  "summary": "import unittest mock explicitly",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.0.md",
+  "summary": "Release 4.0.0 SoundCloud publishing overhaul",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.1.md",
   "minimum_supported_version": null
 }
