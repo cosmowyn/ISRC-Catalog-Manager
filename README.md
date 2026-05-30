@@ -1,6 +1,6 @@
 # Music Catalog Manager
 
-[![Release](https://img.shields.io/github/v/release/cosmowyn/ISRC-Catalog-Manager?label=release)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
+[![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
 [![CI](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/cosmowyn/ISRC-Catalog-Manager/total?label=downloads)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
 [![Issues](https://img.shields.io/github/issues/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/issues)
