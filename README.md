@@ -1,5 +1,23 @@
 # Music Catalog Manager
 
+[![Release](https://img.shields.io/github/v/release/cosmowyn/ISRC-Catalog-Manager?label=release)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
+[![CI](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/cosmowyn/ISRC-Catalog-Manager/total?label=downloads)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
+[![Issues](https://img.shields.io/github/issues/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/issues)
+[![Stars](https://img.shields.io/github/stars/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/stargazers)
+[![License](https://img.shields.io/badge/license-see%20license.md-blue)](license.md)
+
+![Local First](https://img.shields.io/badge/architecture-local--first-blueviolet)
+![SoundCloud Publishing](https://img.shields.io/badge/SoundCloud-live-orange)
+![Rights Management](https://img.shields.io/badge/rights-integrated-success)
+![Contract Templates](https://img.shields.io/badge/contracts-integrated-success)
+![Audio Authenticity](https://img.shields.io/badge/audio-authenticity-blue)
+![Watermarking](https://img.shields.io/badge/watermarking-integrated-blue)
+![ISRC](https://img.shields.io/badge/ISRC-managed-green)
+![ISWC](https://img.shields.io/badge/ISWC-supported-green)
+![GS1](https://img.shields.io/badge/GS1-supported-green)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-success)
+
 Music Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
 It combines recording metadata, releases, works, parties, contracts, rights, documents, assets, GS1 product data, import and export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
