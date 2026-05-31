@@ -46,6 +46,50 @@ jobs:
             --base-ref "${{ github.event.before }}" \
             --head-ref "${{ github.sha }}"
 
+      - name: Add release badge to generated notes
+        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        run: |
+          export VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
+          RELEASE_FILE="docs/releases/v${VERSION}.md"
+          BADGE="[![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager?label=release)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/v${VERSION})"
+
+          if [ ! -f "$RELEASE_FILE" ]; then
+            echo "Release file not found: $RELEASE_FILE"
+            exit 1
+          fi
+
+          if grep -Fq "$BADGE" "$RELEASE_FILE"; then
+            echo "Release badge already present."
+            exit 0
+          fi
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          release_file = Path(f"docs/releases/v{version}.md")
+          badge = (
+              "[![Release](https://img.shields.io/github/v/tag/"
+              "cosmowyn/ISRC-Catalog-Manager?label=release)]"
+              f"(https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/v{version})"
+          )
+
+          text = release_file.read_text(encoding="utf-8")
+          lines = text.splitlines()
+
+          if not lines or not lines[0].startswith("# "):
+              raise SystemExit(f"Unexpected release note format: {release_file}")
+
+          if badge in text:
+              print("Release badge already present.")
+              raise SystemExit(0)
+
+          new_text = "\n".join([lines[0], "", badge, *lines[1:]]) + "\n"
+          release_file.write_text(new_text, encoding="utf-8")
+          PY
+          
+
       - name: Verify synced version docs
         if: ${{ steps.freshness.outputs.fresh == 'true' }}
         run: python scripts/sync_version_docs.py --check
