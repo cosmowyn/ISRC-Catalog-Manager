@@ -292,6 +292,13 @@ jobs:
           else
             printf '# %s\n\nAutomated release build for %s.\n' "$tag" "$tag" > "$notes_file"
           fi
+          
+          tmp_notes_file="$(mktemp)"
+          {
+            printf '[![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager?label=release)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/%s)\n\n' "$tag"
+            cat "$notes_file"
+          } > "$tmp_notes_file"
+          mv "$tmp_notes_file" "$notes_file"
 
           file_count="$(find release-assets -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -size +0c | wc -l | tr -d ' ')"
           if [ "$file_count" -lt 3 ]; then
