@@ -1,7 +1,7 @@
 {
-  "version": "4.0.1",
-  "released_at": "2026-05-30",
-  "summary": "Update product version in license.md",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.1.md",
+  "version": "4.0.2",
+  "released_at": "2026-05-31",
+  "summary": "Enhance release-build.yml with badge and notes update",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.2.md",
   "minimum_supported_version": null
 }
