@@ -89,11 +89,26 @@ jobs:
 
       - name: Commit release metadata
         if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        env:
+          MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
         run: |
           if git diff --quiet; then
             echo "No release metadata changes."
             exit 0
           fi
+
+          if [ -z "${MAIN_AUTOMATION_DEPLOY_KEY:-}" ]; then
+            echo "MAIN_AUTOMATION_DEPLOY_KEY is required to push through the protected main ruleset." >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > ~/.ssh/main_automation_deploy_key
+          chmod 600 ~/.ssh/main_automation_deploy_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          git remote set-url origin "git@github.com:${{ github.repository }}.git"
+          git config core.sshCommand "ssh -i ~/.ssh/main_automation_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
           VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
 
