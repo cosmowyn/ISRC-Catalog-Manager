@@ -1,6 +1,6 @@
 Copyright (c) 2025 M. van de Kleut
 
-Current product version: `4.0.0`
+Current product version: [![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,
