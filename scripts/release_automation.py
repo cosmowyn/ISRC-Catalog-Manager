@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,6 +37,22 @@ GENERATED_PATHS = {
     "pyproject.toml",
 }
 SKIP_MARKERS = ("[skip version]", "semver: none", "skip-version: true")
+EXPLICIT_BUMP_MARKERS = (
+    "[bump version]",
+    "[version bump]",
+    "version-bump: true",
+    "release: true",
+    "semver: patch",
+    "semver: minor",
+    "semver: major",
+)
+APPLICATION_FINGERPRINT_PATHS = (
+    "ISRC_manager.py",
+    "build.py",
+    "icon_factory.py",
+    "isrc_manager/",
+)
+AUTO_BUMP_MIN_APP_LOC = 1000
 BUMP_ORDER = {"patch": 0, "minor": 1, "major": 2}
 
 
@@ -59,6 +76,17 @@ class ReleasePlan:
     next_version: str
     bump_level: str
     commits: tuple[CommitInfo, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationChangeFingerprint:
+    changed_files: int = 0
+    added_lines: int = 0
+    deleted_lines: int = 0
+
+    @property
+    def touched_lines(self) -> int:
+        return self.added_lines + self.deleted_lines
 
 
 def read_project_version(pyproject_path: Path | None = None) -> str:
@@ -116,6 +144,14 @@ def has_skip_marker(commits: Iterable[CommitInfo]) -> bool:
     for commit in commits:
         lowered = commit.message.lower()
         if any(marker in lowered for marker in SKIP_MARKERS):
+            return True
+    return False
+
+
+def has_explicit_bump_marker(commits: Iterable[CommitInfo]) -> bool:
+    for commit in commits:
+        lowered = commit.message.lower()
+        if any(marker in lowered for marker in EXPLICIT_BUMP_MARKERS):
             return True
     return False
 
@@ -190,8 +226,35 @@ def _path_suggests_user_feature(path: str) -> bool:
     return clean_path.startswith("isrc_manager/") or clean_path == "ISRC_manager.py"
 
 
-def build_release_plan(current_version: str, commits: Iterable[CommitInfo]) -> ReleasePlan | None:
+def should_create_release(
+    commits: Iterable[CommitInfo],
+    fingerprint: ApplicationChangeFingerprint,
+    *,
+    auto_bump_min_app_loc: int = AUTO_BUMP_MIN_APP_LOC,
+) -> bool:
     selected = releasable_commits(commits)
+    if not selected or has_skip_marker(selected):
+        return False
+    if has_explicit_bump_marker(selected):
+        return True
+    return fingerprint.changed_files > 0 and fingerprint.touched_lines >= auto_bump_min_app_loc
+
+
+def build_release_plan(
+    current_version: str,
+    commits: Iterable[CommitInfo],
+    *,
+    fingerprint: ApplicationChangeFingerprint | None = None,
+    require_release_gate: bool = False,
+    auto_bump_min_app_loc: int = AUTO_BUMP_MIN_APP_LOC,
+) -> ReleasePlan | None:
+    selected = releasable_commits(commits)
+    if require_release_gate and not should_create_release(
+        selected,
+        fingerprint or ApplicationChangeFingerprint(),
+        auto_bump_min_app_loc=auto_bump_min_app_loc,
+    ):
+        return None
     level = classify_bump(selected)
     if level is None:
         return None
@@ -335,6 +398,51 @@ def collect_commits(base_ref: str, head_ref: str = "HEAD") -> tuple[CommitInfo, 
     return tuple(commits)
 
 
+def collect_application_change_fingerprint(
+    base_ref: str,
+    head_ref: str = "HEAD",
+) -> ApplicationChangeFingerprint:
+    try:
+        diff_text = git(
+            [
+                "diff",
+                "--numstat",
+                f"{base_ref}..{head_ref}",
+                "--",
+                *APPLICATION_FINGERPRINT_PATHS,
+            ]
+        )
+    except subprocess.CalledProcessError:
+        return ApplicationChangeFingerprint()
+    return parse_application_numstat(diff_text.splitlines())
+
+
+def parse_application_numstat(lines: Iterable[str]) -> ApplicationChangeFingerprint:
+    changed_files = 0
+    added_lines = 0
+    deleted_lines = 0
+    for line in lines:
+        parts = str(line).split("\t", 2)
+        if len(parts) < 3:
+            continue
+        added, deleted, _path = parts
+        changed_files += 1
+        added_lines += _safe_numstat_int(added)
+        deleted_lines += _safe_numstat_int(deleted)
+    return ApplicationChangeFingerprint(
+        changed_files=changed_files,
+        added_lines=added_lines,
+        deleted_lines=deleted_lines,
+    )
+
+
+def _safe_numstat_int(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        return 0
+
+
 def resolve_base_ref(raw_base_ref: str) -> str:
     base_ref = str(raw_base_ref or "").strip()
     if base_ref and set(base_ref) != {"0"}:
@@ -343,6 +451,16 @@ def resolve_base_ref(raw_base_ref: str) -> str:
         return git(["rev-parse", "HEAD~1"])
     except Exception:
         return git(["rev-list", "--max-parents=0", "HEAD"]).splitlines()[0]
+
+
+def write_github_output(**values: str) -> None:
+    raw_output_path = os.environ.get("GITHUB_OUTPUT", "").strip()
+    if not raw_output_path:
+        return
+    output_path = Path(raw_output_path)
+    with output_path.open("a", encoding="utf-8") as output:
+        for key, value in values.items():
+            output.write(f"{key}={value}\n")
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -354,14 +472,30 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     base_ref = resolve_base_ref(args.base_ref)
     commits = collect_commits(base_ref, args.head_ref)
+    fingerprint = collect_application_change_fingerprint(base_ref, args.head_ref)
     current_version = read_project_version()
-    plan = build_release_plan(current_version, commits)
+    plan = build_release_plan(
+        current_version,
+        commits,
+        fingerprint=fingerprint,
+        require_release_gate=True,
+    )
     if plan is None:
-        print("No version bump required.")
+        print(
+            "No version bump required. "
+            f"Application fingerprint: {fingerprint.changed_files} files, "
+            f"{fingerprint.touched_lines} touched LOC."
+        )
+        write_github_output(bumped="false")
         return 0
     print(f"{plan.current_version} -> {plan.next_version} ({plan.bump_level})")
     if not args.dry_run:
         apply_release_plan(plan)
+    write_github_output(
+        bumped="true",
+        version=plan.next_version,
+        bump_level=plan.bump_level,
+    )
     return 0
 
 

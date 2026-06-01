@@ -40,6 +40,7 @@ jobs:
           python-version: "3.14.4"
 
       - name: Generate version metadata
+        id: release_metadata
         if: ${{ steps.freshness.outputs.fresh == 'true' }}
         run: |
           python scripts/release_automation.py \
@@ -47,7 +48,7 @@ jobs:
             --head-ref "${{ github.sha }}"
 
       - name: Add release badge to generated notes
-        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        if: ${{ steps.freshness.outputs.fresh == 'true' && steps.release_metadata.outputs.bumped == 'true' }}
         run: |
           export VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
           export BADGE="[![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager?label=release)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/v${VERSION})"
@@ -84,11 +85,11 @@ jobs:
           PY
 
       - name: Verify synced version docs
-        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        if: ${{ steps.freshness.outputs.fresh == 'true' && steps.release_metadata.outputs.bumped == 'true' }}
         run: python scripts/sync_version_docs.py --check
 
       - name: Commit release metadata
-        if: ${{ steps.freshness.outputs.fresh == 'true' }}
+        if: ${{ steps.freshness.outputs.fresh == 'true' && steps.release_metadata.outputs.bumped == 'true' }}
         env:
           MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
         run: |

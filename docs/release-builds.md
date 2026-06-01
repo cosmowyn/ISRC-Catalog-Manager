@@ -8,24 +8,29 @@ The normal release path is:
 
 ```text
 push to main
-version-bump workflow updates release metadata
-version-bump workflow creates vX.Y.Z
+version-bump workflow fingerprints application-code changes
+version-bump workflow updates release metadata only when the gate opens
+version-bump workflow creates vX.Y.Z only for gated or explicitly requested releases
 release-build workflow builds and publishes packages for that tag
 ```
 
 The release workflow is `.github/workflows/release-build.yml` and runs only for tags matching
-`v*`. It also runs after the `Version Bump` workflow completes successfully, resolves the generated
-tag from `docs/releases/latest.json`, and builds that tag when it points at the current `main` tip.
-This second trigger is important because GitHub does not start new workflows from tags pushed by a
-workflow using the repository `GITHUB_TOKEN`. In both paths, the resolved tag is validated as
+`v*`. The version-bump workflow pushes release tags through the protected-main automation deploy key,
+so tag pushes start release builds directly. In that path, the resolved tag is validated as
 SemVer-style before packaging.
+
+Documentation-only pushes, reruns, Help screenshot refresh commits, generated release metadata, and
+small application-code edits do not create a new version automatically. Automatic bumps require at
+least 1,000 touched lines in the configured application-code fingerprint paths. Maintainers can still
+request an explicit bump with commit markers such as `[bump version]`, `[version bump]`,
+`version-bump: true`, `release: true`, or `semver: patch|minor|major`.
 
 ## Canonical Version Sync
 
 `pyproject.toml` under `[project].version` is the single canonical source for the production app
-version. The version-bump workflow updates that value first, then runs
-`scripts/sync_version_docs.py` to align the current public markers, `RELEASE_NOTES.md`, and
-`docs/releases/latest.json`.
+version. When the fingerprint gate or explicit marker requests a release, the version-bump workflow
+updates that value first, then runs `scripts/sync_version_docs.py` to align the current public
+markers, `RELEASE_NOTES.md`, and `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
 Current canonical source version: `5.0.1` (`v5.0.1`).

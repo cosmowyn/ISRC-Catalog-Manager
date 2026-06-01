@@ -56,6 +56,85 @@ class ReleaseAutomationTests(unittest.TestCase):
         self.assertEqual(automation.releasable_commits(commits), ())
         self.assertIsNone(automation.classify_bump(commits))
 
+    def test_application_fingerprint_gates_automatic_bump(self):
+        commits = (
+            automation.CommitInfo(
+                sha="1",
+                subject="fix: adjust help copy",
+                files=("docs/help_content_notes.md",),
+            ),
+        )
+        small_app_change = automation.ApplicationChangeFingerprint(
+            changed_files=2,
+            added_lines=200,
+            deleted_lines=100,
+        )
+        large_app_change = automation.ApplicationChangeFingerprint(
+            changed_files=4,
+            added_lines=700,
+            deleted_lines=350,
+        )
+
+        self.assertFalse(automation.should_create_release(commits, small_app_change))
+        self.assertTrue(automation.should_create_release(commits, large_app_change))
+        self.assertIsNone(
+            automation.build_release_plan(
+                "5.0.0",
+                commits,
+                fingerprint=small_app_change,
+                require_release_gate=True,
+            )
+        )
+        self.assertEqual(
+            automation.build_release_plan(
+                "5.0.0",
+                commits,
+                fingerprint=large_app_change,
+                require_release_gate=True,
+            ).next_version,
+            "5.0.1",
+        )
+
+    def test_explicit_bump_marker_overrides_application_fingerprint_gate(self):
+        commits = (
+            automation.CommitInfo(
+                sha="1",
+                subject="docs: prepare release [bump version]",
+                files=("docs/manual.md",),
+            ),
+        )
+        plan = automation.build_release_plan(
+            "5.0.0",
+            commits,
+            fingerprint=automation.ApplicationChangeFingerprint(
+                changed_files=0,
+                added_lines=0,
+                deleted_lines=0,
+            ),
+            require_release_gate=True,
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.next_version, "5.0.1")
+
+    def test_parse_application_numstat_handles_binary_rows(self):
+        fingerprint = automation.parse_application_numstat(
+            [
+                "12\t8\tisrc_manager/main_window.py",
+                "-\t-\tisrc_manager/assets/logo.png",
+                "3\t0\tbuild.py",
+            ]
+        )
+
+        self.assertEqual(fingerprint.changed_files, 3)
+        self.assertEqual(fingerprint.added_lines, 15)
+        self.assertEqual(fingerprint.deleted_lines, 8)
+        self.assertEqual(fingerprint.touched_lines, 23)
+
+    def test_write_github_output_is_noop_without_output_path(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            automation.write_github_output(bumped="false")
+
     def test_release_notes_group_commit_messages_without_invention(self):
         markdown = automation.generate_release_markdown(
             version="3.2.1",
