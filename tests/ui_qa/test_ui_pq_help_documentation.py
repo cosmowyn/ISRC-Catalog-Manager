@@ -15,12 +15,16 @@ def test_ui_pq_help_documentation_is_fully_validated(ui_pq_harness):
     assert event.data["chapter_screenshot_count"] == event.data["chapter_count"]
     assert event.data["refreshed_chapter_screenshot_count"] == event.data["chapter_count"]
     assert event.data["screenshot_count"] >= event.data["chapter_count"] + 3
+    assert event.data["unique_screenshot_hash_count"] == event.data["screenshot_count"]
+    assert event.data["duplicate_screenshot_hash_count"] == 0
     report_path = Path(event.data["report_path"])
     validated_help_path = Path(event.data["validated_help_manual_path"])
     require_artifact(report_path)
     require_artifact(validated_help_path)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["chapter_screenshot_count"] == report["chapter_count"]
+    assert report["unique_screenshot_hash_count"] == report["screenshot_count"]
+    assert not report["duplicate_screenshot_hashes"]
     assert not report["findings"]
     help_html = validated_help_path.read_text(encoding="utf-8")
     for chapter_id in report["chapter_ids"]:

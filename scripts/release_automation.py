@@ -46,13 +46,17 @@ EXPLICIT_BUMP_MARKERS = (
     "semver: minor",
     "semver: major",
 )
-APPLICATION_FINGERPRINT_PATHS = (
+PRODUCTION_CODE_PATHS = (
     "ISRC_manager.py",
     "build.py",
     "icon_factory.py",
     "isrc_manager/",
 )
-AUTO_BUMP_MIN_APP_LOC = 1000
+PRODUCTION_CODE_EXCLUDED_FILES = {
+    "isrc_manager/help_content.py",
+    "isrc_manager/version.py",
+}
+PRODUCTION_CODE_EXCLUDED_PREFIXES = ("isrc_manager/qa/",)
 BUMP_ORDER = {"patch": 0, "minor": 1, "major": 2}
 
 
@@ -229,15 +233,13 @@ def _path_suggests_user_feature(path: str) -> bool:
 def should_create_release(
     commits: Iterable[CommitInfo],
     fingerprint: ApplicationChangeFingerprint,
-    *,
-    auto_bump_min_app_loc: int = AUTO_BUMP_MIN_APP_LOC,
 ) -> bool:
     selected = releasable_commits(commits)
     if not selected or has_skip_marker(selected):
         return False
     if has_explicit_bump_marker(selected):
         return True
-    return fingerprint.changed_files > 0 and fingerprint.touched_lines >= auto_bump_min_app_loc
+    return fingerprint.changed_files > 0
 
 
 def build_release_plan(
@@ -246,13 +248,11 @@ def build_release_plan(
     *,
     fingerprint: ApplicationChangeFingerprint | None = None,
     require_release_gate: bool = False,
-    auto_bump_min_app_loc: int = AUTO_BUMP_MIN_APP_LOC,
 ) -> ReleasePlan | None:
     selected = releasable_commits(commits)
     if require_release_gate and not should_create_release(
         selected,
         fingerprint or ApplicationChangeFingerprint(),
-        auto_bump_min_app_loc=auto_bump_min_app_loc,
     ):
         return None
     level = classify_bump(selected)
@@ -409,7 +409,7 @@ def collect_application_change_fingerprint(
                 "--numstat",
                 f"{base_ref}..{head_ref}",
                 "--",
-                *APPLICATION_FINGERPRINT_PATHS,
+                *PRODUCTION_CODE_PATHS,
             ]
         )
     except subprocess.CalledProcessError:
@@ -425,7 +425,9 @@ def parse_application_numstat(lines: Iterable[str]) -> ApplicationChangeFingerpr
         parts = str(line).split("\t", 2)
         if len(parts) < 3:
             continue
-        added, deleted, _path = parts
+        added, deleted, path = parts
+        if not _is_production_code_path(path):
+            continue
         changed_files += 1
         added_lines += _safe_numstat_int(added)
         deleted_lines += _safe_numstat_int(deleted)
@@ -441,6 +443,23 @@ def _safe_numstat_int(value: str) -> int:
         return int(value)
     except ValueError:
         return 0
+
+
+def _is_production_code_path(path: str) -> bool:
+    clean_path = str(path or "").strip().replace("\\", "/")
+    if not clean_path:
+        return False
+    if _is_generated_path(clean_path):
+        return False
+    if clean_path in PRODUCTION_CODE_EXCLUDED_FILES:
+        return False
+    if any(clean_path.startswith(prefix) for prefix in PRODUCTION_CODE_EXCLUDED_PREFIXES):
+        return False
+    return any(
+        clean_path == production_path.rstrip("/")
+        or (production_path.endswith("/") and clean_path.startswith(production_path))
+        for production_path in PRODUCTION_CODE_PATHS
+    )
 
 
 def resolve_base_ref(raw_base_ref: str) -> str:

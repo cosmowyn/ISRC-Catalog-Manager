@@ -3,10 +3,10 @@
   "comparisons": [
     {
       "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_report_summary.json",
-      "actual_sha256": "c604b2f15e9684beb979f88d108b008b17fa49707ae74a10c128b6c071c2983e",
+      "actual_sha256": "1db6abf68e16894cb2b8af782e2a8f7de84ff383c698e475ded1308b11953456",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_report_summary.json",
-      "baseline_sha256": "c604b2f15e9684beb979f88d108b008b17fa49707ae74a10c128b6c071c2983e",
+      "baseline_sha256": "1db6abf68e16894cb2b8af782e2a8f7de84ff383c698e475ded1308b11953456",
       "comparison_type": "report",
       "details": {
         "normalized_bytes": 544
@@ -17,10 +17,10 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_document.html",
-      "actual_sha256": "a00dbdacbbf33c98bae18b1504d456eb9849387204d9224d54c26d2a3f748734",
+      "actual_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_generated_document.html",
-      "baseline_sha256": "a00dbdacbbf33c98bae18b1504d456eb9849387204d9224d54c26d2a3f748734",
+      "baseline_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
       "comparison_type": "generated_document",
       "details": {
         "normalized_bytes": 253
@@ -31,10 +31,10 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_report.csv",
-      "actual_sha256": "23abf080e5d64c78ac1821edba3d6929a75e34a662dc900d9f4aed64858504b4",
+      "actual_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_generated_report.csv",
-      "baseline_sha256": "23abf080e5d64c78ac1821edba3d6929a75e34a662dc900d9f4aed64858504b4",
+      "baseline_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
       "comparison_type": "report",
       "details": {
         "normalized_bytes": 80

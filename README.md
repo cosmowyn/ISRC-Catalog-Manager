@@ -536,12 +536,15 @@ Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.j
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->
 
-Pushes to `main` run an automated SemVer bump workflow that updates the runtime fallback in
-`isrc_manager/version.py`, writes concise release notes under `docs/releases/`, updates
-`RELEASE_NOTES.md`, and publishes `docs/releases/latest.json` as repository release metadata. The
-generated `vX.Y.Z` tag is resolved by the cross-platform release-build workflow after version
-bumping completes, so public GitHub Release assets and the app-facing `latest.json` update manifest
-are produced online instead of relying on a local maintainer machine.
+Pushes to `main` run an automated SemVer bump workflow, but the workflow now gates automatic bumps
+on the application-code fingerprint. It creates release metadata only when the app code changes by
+at least 1,000 touched lines under the configured application paths, or when a commit explicitly
+requests a bump with a marker such as `[bump version]`, `version-bump: true`, or `semver: minor`.
+When the gate opens, it updates the runtime fallback in `isrc_manager/version.py`, writes concise
+release notes under `docs/releases/`, updates `RELEASE_NOTES.md`, publishes
+`docs/releases/latest.json`, and pushes the generated `vX.Y.Z` tag. The cross-platform release-build
+workflow runs from that immutable tag, so public GitHub Release assets and the app-facing
+`latest.json` update manifest are produced online instead of relying on a local maintainer machine.
 
 Version-specific files such as `docs/releases/vX.Y.Z.md`, older implementation handoffs, and
 historical changelog examples are intentionally not rewritten by the sync script. Only the explicit
@@ -564,7 +567,7 @@ fails, the helper restores the backup and writes an install log in the update wo
 
 ## Support
 
-If you find a bug or want to improve the project, open an issue or pull request on GitHub. The app also includes `Help > Report a Bug…`, which prepares a sanitised local preview before any crash or manual report is submitted or saved. See [docs/reporting.md](docs/reporting.md) for the reporting privacy model, proxy setup, and limitations.
+If you find a bug or want to improve the project, open an issue or pull request on GitHub. The app also includes `Help > Report a Bug…`, which prepares a sanitised local preview before any crash or manual report is submitted or saved. Release builds can submit without user GitHub setup only when packaged with a public HTTPS report proxy endpoint; no bug-report token, shared account credential, or GitHub private key is shipped in the app. See [docs/reporting.md](docs/reporting.md) for the reporting privacy model, proxy setup, and limitations.
 
 If the app has helped your catalog work, small donations are welcome through [PayPal](https://paypal.me/cosmowyn). The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
 

@@ -6,9 +6,17 @@ from html import escape
 from pathlib import Path
 
 try:
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 except Exception:  # pragma: no cover - optional in non-Qt documentation contexts
     QApplication = None
+    QColor = None
+    QFont = None
+    QImage = None
+    QPainter = None
+    QRect = None
+    Qt = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +90,266 @@ HELP_SCREENSHOT_REFERENCES: tuple[HelpScreenshot, ...] = (
         caption=(
             "The About surface confirms the running version and points to the local data "
             "and support context used for diagnostics and support handoffs."
+        ),
+    ),
+    HelpScreenshot(
+        filename="add_track_workspace.png",
+        title="Add Track Workspace",
+        alt_text="Add Track workspace with governed work-linking and recording metadata fields.",
+        caption=(
+            "The Add Track surface is the normal starting point for a single recording. "
+            "It keeps work governance, recording metadata, release hints, and media paths together."
+        ),
+    ),
+    HelpScreenshot(
+        filename="add_album_dialog.png",
+        title="Add Album Dialog",
+        alt_text="Add Album dialog with release-level fields and batch track-entry rows.",
+        caption=(
+            "The Add Album dialog captures release metadata and multiple track rows in one "
+            "governed workflow."
+        ),
+    ),
+    HelpScreenshot(
+        filename="catalog_table_workspace.png",
+        title="Catalog Table Workspace",
+        alt_text="Catalog table workspace with searchable recording rows and table controls.",
+        caption=(
+            "The catalog table is the central browser for finding, selecting, sorting, and "
+            "reviewing recordings."
+        ),
+    ),
+    HelpScreenshot(
+        filename="edit_track_dialog.png",
+        title="Edit Track Dialog",
+        alt_text="Edit Track dialog with track metadata, release metadata, and managed media fields.",
+        caption=(
+            "The Edit Track dialog is the focused surface for updating an existing catalog row."
+        ),
+    ),
+    HelpScreenshot(
+        filename="custom_columns_dialog.png",
+        title="Custom Columns Dialog",
+        alt_text="Manage Custom Columns dialog with metadata field definitions and controls.",
+        caption=(
+            "Custom columns extend the catalog with profile-specific metadata fields while "
+            "keeping the table layout governed."
+        ),
+    ),
+    HelpScreenshot(
+        filename="bulk_audio_attach_dialog.png",
+        title="Bulk Audio Attach Dialog",
+        alt_text="Bulk audio attach review dialog with storage mode and track matching controls.",
+        caption=(
+            "Bulk audio attach lets users review file-to-track matches before any managed media "
+            "write is applied."
+        ),
+    ),
+    HelpScreenshot(
+        filename="release_browser.png",
+        title="Release Browser",
+        alt_text="Release Browser workspace with release table and detail panels.",
+        caption=(
+            "The Release Browser manages release products, UPC/EAN context, track ordering, "
+            "and release-level review."
+        ),
+    ),
+    HelpScreenshot(
+        filename="code_registry_workspace.png",
+        title="Code Registry Workspace",
+        alt_text="Code Registry workspace for internal catalog, contract, license, and registry keys.",
+        caption=(
+            "The Code Registry workspace keeps internal numbers and external identifier classes "
+            "traceable."
+        ),
+    ),
+    HelpScreenshot(
+        filename="promo_code_ledger.png",
+        title="Promo Code Ledger",
+        alt_text="Promo Code Ledger workspace for Bandcamp code sheets and redemption tracking.",
+        caption=(
+            "The Promo Code Ledger keeps imported code sheets, assignments, and redemption "
+            "state visible."
+        ),
+    ),
+    HelpScreenshot(
+        filename="global_search_workspace.png",
+        title="Global Search Workspace",
+        alt_text="Global Search workspace with relationship-aware search controls.",
+        caption=(
+            "Global Search helps navigate across tracks, works, releases, contracts, rights, "
+            "parties, documents, and assets."
+        ),
+    ),
+    HelpScreenshot(
+        filename="contract_template_workspace.png",
+        title="Contract Template Workspace",
+        alt_text="Contract Template workspace with import, parsing, form, and export tabs.",
+        caption=(
+            "The Contract Template workspace turns reusable agreement templates into governed "
+            "forms and exports."
+        ),
+    ),
+    HelpScreenshot(
+        filename="asset_registry.png",
+        title="Asset Registry",
+        alt_text="Asset Registry workspace with deliverables and version state.",
+        caption=(
+            "The Asset Registry tracks deliverables, artwork variants, approval state, and "
+            "primary-version decisions."
+        ),
+    ),
+    HelpScreenshot(
+        filename="invoice_workspace.png",
+        title="Royalties and Accounting Workspace",
+        alt_text="Royalties and Accounting workspace with invoice, royalty, payment, and report tabs.",
+        caption=(
+            "The accounting workspace keeps invoices, payments, credit notes, royalties, "
+            "statements, payouts, ledgers, and reports in one operational surface."
+        ),
+    ),
+    HelpScreenshot(
+        filename="work_manager.png",
+        title="Work Manager",
+        alt_text="Work Manager workspace with works, contributors, linked tracks, and detail review.",
+        caption=(
+            "The Work Manager governs composition records, contributors, ownership, and links "
+            "from recordings to musical works."
+        ),
+    ),
+    HelpScreenshot(
+        filename="party_manager.png",
+        title="Party Manager",
+        alt_text="Party Manager workspace with party table and identity/readiness details.",
+        caption=(
+            "The Party Manager keeps artists, labels, publishers, licensees, payees, and "
+            "business contacts reusable across workflows."
+        ),
+    ),
+    HelpScreenshot(
+        filename="contract_manager.png",
+        title="Contract Manager",
+        alt_text="Contract Manager workspace with contract table and linked rights detail.",
+        caption=(
+            "The Contract Manager is the main review surface for agreement records, parties, "
+            "linked catalog items, and lifecycle state."
+        ),
+    ),
+    HelpScreenshot(
+        filename="rights_matrix.png",
+        title="Rights Matrix",
+        alt_text="Rights Matrix workspace with rights grant table and detail review.",
+        caption=(
+            "The Rights Matrix turns contracts and catalog relationships into explicit rights "
+            "positions."
+        ),
+    ),
+    HelpScreenshot(
+        filename="conversion_dialog.png",
+        title="Template Conversion Dialog",
+        alt_text="Template Conversion dialog with source/template setup and mapping tabs.",
+        caption=(
+            "Template Conversion lets users inspect source data, map it into rigid target "
+            "templates, and export without mutating catalog data."
+        ),
+    ),
+    HelpScreenshot(
+        filename="quality_dashboard_dialog.png",
+        title="Data Quality Dashboard",
+        alt_text="Data Quality Dashboard dialog with issue filters and repair controls.",
+        caption=(
+            "The Data Quality Dashboard highlights metadata gaps, relationship issues, media "
+            "problems, and readiness blockers."
+        ),
+    ),
+    HelpScreenshot(
+        filename="diagnostics_dialog.png",
+        title="Diagnostics Dialog",
+        alt_text="Diagnostics dialog with profile checks, cleanup, and recovery controls.",
+        caption=(
+            "Diagnostics gives support and recovery workflows a current view of profile health, "
+            "integrity checks, and cleanup tools."
+        ),
+    ),
+    HelpScreenshot(
+        filename="application_log_dialog.png",
+        title="Application Log Dialog",
+        alt_text="Application Log dialog with readable log and trace output.",
+        caption=(
+            "Application Log exposes recent support context without requiring users to search "
+            "through the filesystem first."
+        ),
+    ),
+    HelpScreenshot(
+        filename="application_storage_admin_dialog.png",
+        title="Application Storage Admin",
+        alt_text="Application Storage Admin dialog with retained storage audit and cleanup controls.",
+        caption=(
+            "Application Storage Admin reviews retained app files, backups, generated artifacts, "
+            "and cleanup candidates."
+        ),
+    ),
+    HelpScreenshot(
+        filename="history_dialog.png",
+        title="History and Snapshots Dialog",
+        alt_text="History and Snapshots dialog with session, history, snapshot, and backup tabs.",
+        caption=(
+            "History and Snapshots make recovery actions visible before a user commits to undo, "
+            "redo, restore, or cleanup."
+        ),
+    ),
+    HelpScreenshot(
+        filename="settings_dialog.png",
+        title="Application Settings Dialog",
+        alt_text="Application Settings dialog with identity, registration, GS1, theme, history, and SoundCloud settings.",
+        caption=(
+            "Application Settings centralizes profile identity, registration defaults, GS1, "
+            "theme, history, storage, sounds, and SoundCloud configuration."
+        ),
+    ),
+    HelpScreenshot(
+        filename="action_ribbon_dialog.png",
+        title="Action Ribbon Dialog",
+        alt_text="Customize Action Ribbon dialog with available and selected quick actions.",
+        caption=(
+            "The Action Ribbon dialog lets users choose which existing actions stay one click "
+            "away in the main window."
+        ),
+    ),
+    HelpScreenshot(
+        filename="authenticity_verification_dialog.png",
+        title="Audio Authenticity Verification",
+        alt_text="Audio Authenticity Verification dialog with confidence and verification details.",
+        caption=(
+            "The authenticity verification surface reports direct, likely, and low-confidence "
+            "watermark evidence with honest technical details."
+        ),
+    ),
+    HelpScreenshot(
+        filename="forensic_export_dialog.png",
+        title="Forensic Watermark Export",
+        alt_text="Forensic watermark export dialog with output format, recipient, and share label fields.",
+        caption=(
+            "Forensic watermark export creates recipient-specific delivery copies for leak "
+            "traceability."
+        ),
+    ),
+    HelpScreenshot(
+        filename="media_equalizer_dialog.png",
+        title="Media Equalizer Dialog",
+        alt_text="Media Equalizer dialog with playback tone controls and panning.",
+        caption=(
+            "The media equalizer is part of the audio preview toolset used while reviewing "
+            "attached catalog media."
+        ),
+    ),
+    HelpScreenshot(
+        filename="soundcloud_publish_dialog.png",
+        title="SoundCloud Publish Dialog",
+        alt_text="Publish to SoundCloud dialog with preflight options and publish controls.",
+        caption=(
+            "The SoundCloud Publish dialog prepares private-by-default upload/update runs with "
+            "manual preflight review."
         ),
     ),
 )
@@ -1353,7 +1621,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Report a Bug…</strong>: opens a manual report workflow that collects your summary, description, reproduction steps, expected result, and actual result, then shows a sanitised preview before anything is submitted.</li>
         </ul>
         <p>Use logs together with Diagnostics when you need to understand what happened during imports, restores, settings changes, publishing, conversion, or file-management actions. The readable log is usually enough for normal support notes. The trace log is more detailed and is useful when a background task, update check, SoundCloud workflow, or repair action needs a precise event trail.</p>
-        <p>If the previous app session ended without a clean shutdown, startup asks whether you want to review a crash report. Crash and manual bug reports use the same pipeline: the app builds a structured GitHub issue, sanitises the payload locally, shows the exact Markdown preview, lets you copy it, and only submits after you press <strong>Submit Report</strong>. If no secure report proxy is configured or the app is offline, the report is saved under the app data reports folder for later review.</p>
+        <p>If the previous app session ended without a clean shutdown, startup asks whether you want to review a crash report. Crash and manual bug reports use the same pipeline: the app builds a structured GitHub issue, sanitises the payload locally, shows the exact Markdown preview, lets you copy it, and only submits after you press <strong>Submit Report</strong>. Installed release builds can submit without GitHub login only when they include a public HTTPS report proxy endpoint; the app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. If no secure report proxy is configured or the app is offline, the report is saved under the app data reports folder for later review.</p>
         <p>The sanitiser redacts tokens, passwords, API keys, connection strings, email addresses, phone numbers, local user names, and private home-folder paths. Reports must not be used to send catalog databases, raw royalty or contract data, private documents, or audio files. If a workflow depends on sensitive catalog records, describe the steps and visible symptoms rather than pasting private source data.</p>
         <p>Do not edit logs as a way to fix the catalog. Logs are evidence. If a log points to a database, managed-file, or settings problem, use the relevant workflow to repair the source issue and then keep the log as the explanation of what happened.</p>
         """,
@@ -1549,17 +1817,54 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
 )
 
-_CHAPTER_SCREENSHOT_BASE_BY_ID: dict[str, str] = {
-    "about": "about_dialog.png",
-    "application-storage-admin": "about_dialog.png",
-    "application-updates": "about_dialog.png",
+HELP_CHAPTER_SCREENSHOT_BASES: dict[str, str] = {
+    "overview": "main_window.png",
+    "main-window": "main_window.png",
+    "keyboard-shortcuts": "help_contents_dialog.png",
     "visual-ui-reference": "help_contents_dialog.png",
     "workflow-playbooks": "help_contents_dialog.png",
+    "profiles": "main_window.png",
+    "background-tasks": "diagnostics_dialog.png",
+    "add-data": "add_track_workspace.png",
+    "album-entry": "add_album_dialog.png",
+    "catalog-table": "catalog_table_workspace.png",
+    "custom-columns": "custom_columns_dialog.png",
+    "edit-entry": "edit_track_dialog.png",
+    "audio-tags": "edit_track_dialog.png",
+    "bulk-audio-attach": "bulk_audio_attach_dialog.png",
+    "releases": "release_browser.png",
+    "code-registry": "code_registry_workspace.png",
+    "promo-code-ledger": "promo_code_ledger.png",
+    "global-search": "global_search_workspace.png",
+    "contract-templates": "contract_template_workspace.png",
+    "assets-deliverables": "asset_registry.png",
+    "accounting-royalties": "invoice_workspace.png",
+    "repertoire-knowledge": "work_manager.png",
+    "storage-modes": "application_storage_admin_dialog.png",
+    "conversion": "conversion_dialog.png",
+    "exchange-formats": "conversion_dialog.png",
+    "import-workflows": "conversion_dialog.png",
+    "quality-dashboard": "quality_dashboard_dialog.png",
+    "gs1-metadata": "settings_dialog.png",
+    "metadata-dates": "add_track_workspace.png",
+    "catalog-managers": "diagnostics_dialog.png",
+    "audio-authenticity": "authenticity_verification_dialog.png",
+    "layout-action-ribbon": "action_ribbon_dialog.png",
+    "settings": "settings_dialog.png",
+    "theme-settings": "settings_dialog.png",
+    "history": "history_dialog.png",
+    "diagnostics": "diagnostics_dialog.png",
+    "application-log": "application_log_dialog.png",
+    "application-updates": "about_dialog.png",
+    "media-preview": "media_equalizer_dialog.png",
+    "soundcloud-publishing": "soundcloud_publish_dialog.png",
+    "application-storage-admin": "application_storage_admin_dialog.png",
+    "about": "about_dialog.png",
 }
 
 
 def representative_screenshot_for_chapter(chapter_id: str) -> str:
-    return _CHAPTER_SCREENSHOT_BASE_BY_ID.get(chapter_id, "main_window.png")
+    return HELP_CHAPTER_SCREENSHOT_BASES[str(chapter_id)]
 
 
 def refresh_help_chapter_screenshots(
@@ -1577,13 +1882,55 @@ def refresh_help_chapter_screenshots(
         if not source_path.exists():
             continue
         destination_path = target_dir / help_chapter_screenshot_filename(chapter.chapter_id)
+        _write_chapter_screenshot(source_path, destination_path, chapter)
+        refreshed.append(destination_path)
+    return refreshed
+
+
+def _write_chapter_screenshot(
+    source_path: Path,
+    destination_path: Path,
+    chapter: HelpChapter,
+) -> None:
+    if QImage is None or QPainter is None or QColor is None or QRect is None or Qt is None:
         if (
             not destination_path.exists()
             or source_path.read_bytes() != destination_path.read_bytes()
         ):
             shutil.copy2(source_path, destination_path)
-        refreshed.append(destination_path)
-    return refreshed
+        return
+
+    source_image = QImage(str(source_path))
+    if source_image.isNull():
+        if (
+            not destination_path.exists()
+            or source_path.read_bytes() != destination_path.read_bytes()
+        ):
+            shutil.copy2(source_path, destination_path)
+        return
+
+    image = source_image.copy()
+    painter = QPainter(image)
+    try:
+        header_height = min(max(42, image.height() // 11), 68)
+        painter.fillRect(0, 0, image.width(), header_height, QColor(15, 23, 42, 232))
+        painter.setPen(QColor(248, 250, 252))
+        if QFont is not None:
+            title_font = QFont()
+            title_font.setPointSize(13)
+            title_font.setBold(True)
+            painter.setFont(title_font)
+        text_rect = QRect(16, 6, max(20, image.width() - 32), max(12, header_height - 10))
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextSingleLine,
+            f"{chapter.title} | {source_path.stem.replace('_', ' ')}",
+        )
+    finally:
+        painter.end()
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    if not image.save(str(destination_path), "PNG"):
+        raise OSError(f"Could not write Help chapter screenshot: {destination_path}")
 
 
 HELP_SECTION_ORDER: tuple[str, ...] = (

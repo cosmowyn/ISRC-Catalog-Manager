@@ -23,6 +23,11 @@ saves the sanitised pending report under the local app data `reports/pending` fo
 `ISRC_REPORT_REPOSITORY` can override the repository slug sent to a proxy. It defaults to
 `cosmowyn/ISRC-Catalog-Manager`.
 
+Do not create a shared `bug_report` GitHub account, ship a personal access token, embed a GitHub
+App private key, or package any other write credential in the desktop app. Even a fine-grained token
+limited to Issues read/write would be extractable from the app bundle and could be abused to create
+issues as that account. GitHub secret scanning may also revoke such leaked credentials.
+
 ## GitHub Repository Configuration
 
 The repository is configured with structured issue forms under `.github/ISSUE_TEMPLATE`:
@@ -73,17 +78,28 @@ GITHUB_APP_ID
 GITHUB_APP_INSTALLATION_ID
 GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_FILE
 ISRC_REPORT_PROXY_REPOSITORY=cosmowyn/ISRC-Catalog-Manager
-ISRC_REPORT_PROXY_ALLOWED_VERSIONS=4.0.0,4.0.1
+ISRC_REPORT_PROXY_ALLOWED_VERSIONS=5.0.0
 ISRC_REPORT_PROXY_MAX_BYTES=180000
 ISRC_REPORT_PROXY_PER_IP_HOUR_LIMIT=20
 ```
 
-The desktop client should then be launched or packaged with:
+The desktop client should then be launched or packaged with only the public endpoint and repository:
 
 ```text
 ISRC_REPORT_PROXY_URL=https://reports.example.com/isrc-catalog-manager
 ISRC_REPORT_REPOSITORY=cosmowyn/ISRC-Catalog-Manager
 ```
+
+Release builds read those two environment variables when `python build.py` runs. When
+`ISRC_REPORT_PROXY_URL` is present, the build writes a bundled `resources/reporting.json` file that
+contains the public HTTPS proxy URL, the repository slug, and an explicit
+`contains_credentials: false` marker. The packaged app loads `ISRC_REPORT_PROXY_URL` first, then
+falls back to that bundled public config. Users do not need a GitHub login, token, or local setup.
+
+For GitHub Actions release builds, set the repository or organization secret
+`ISRC_REPORT_PROXY_URL` to the deployed HTTPS endpoint. The release workflow passes that value only
+to the packaging step. It is not a credential, and the proxy must still enforce server-side schema,
+size, rate-limit, sanitisation, and label policy before creating a GitHub issue.
 
 ## Automatic Crash Detection
 

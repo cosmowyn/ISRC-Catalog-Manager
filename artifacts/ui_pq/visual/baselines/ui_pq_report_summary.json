@@ -15,10 +15,10 @@
   },
   "qa_data": {
     "contract_id": 1,
-    "party_id": 2,
+    "party_id": 3,
     "release_id": 1,
     "right_id": 1,
-    "track_id": 1,
-    "work_id": 2
+    "track_id": 2,
+    "work_id": 3
   }
 }

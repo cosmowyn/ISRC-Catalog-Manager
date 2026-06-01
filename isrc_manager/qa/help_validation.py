@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
@@ -15,6 +16,7 @@ from isrc_manager.help_content import (
     HelpChapter,
     help_chapter_screenshot_reference,
     help_screenshot_source_dir,
+    iter_help_screenshot_references,
     render_help_html,
 )
 
@@ -55,6 +57,8 @@ class HelpCoverageReport:
     finding_count: int
     screenshot_count: int
     chapter_screenshot_count: int
+    unique_screenshot_hash_count: int
+    duplicate_screenshot_hashes: dict[str, list[str]]
     chapter_count: int
     chapter_ids: list[str]
     workflow_example_count: int
@@ -555,6 +559,40 @@ def validate_help_coverage(
                 ),
             )
 
+    screenshot_hashes: dict[str, list[str]] = {}
+    for reference in iter_help_screenshot_references(chapters):
+        path = screenshot_source / reference.filename
+        if not path.exists() or not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        screenshot_hashes.setdefault(digest, []).append(reference.filename)
+    duplicate_screenshot_hashes = {
+        digest: filenames
+        for digest, filenames in sorted(screenshot_hashes.items())
+        if len(filenames) > 1
+    }
+    requirement_count += 1
+    if duplicate_screenshot_hashes:
+        duplicate_groups = [
+            ", ".join(filenames) for filenames in duplicate_screenshot_hashes.values()
+        ]
+        add_finding(
+            severity="high",
+            category="screenshot-uniqueness",
+            subject="docs/help/screenshots",
+            expected=(
+                "Every Help screenshot file has a unique SHA-256 byte hash so repeated "
+                "placeholder captures cannot pass qualification."
+            ),
+            actual="Duplicate screenshot byte hashes: " + " | ".join(duplicate_groups),
+            recommended_update=(
+                "Refresh Help screenshots from the actual dialog or workspace for each "
+                "chapter and keep chapter screenshots unique."
+            ),
+        )
+    else:
+        covered_count += 1
+
     coverage_percent = (
         round((covered_count / requirement_count) * 100, 2) if requirement_count else 100.0
     )
@@ -567,6 +605,8 @@ def validate_help_coverage(
         finding_count=len(findings),
         screenshot_count=len(HELP_SCREENSHOT_REFERENCES) + chapter_screenshot_count,
         chapter_screenshot_count=chapter_screenshot_count,
+        unique_screenshot_hash_count=len(screenshot_hashes),
+        duplicate_screenshot_hashes=duplicate_screenshot_hashes,
         chapter_count=len(chapters),
         chapter_ids=[chapter.chapter_id for chapter in chapters],
         workflow_example_count=len(_WORKFLOW_REQUIREMENTS),

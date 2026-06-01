@@ -11,12 +11,172 @@
       "width": 1506
     },
     {
+      "height": 702,
+      "name": "catalog_table_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
+      "sample_count": 289,
+      "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 702,
+      "name": "add_track_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
+      "sample_count": 272,
+      "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+      "unique_sample_colors": 20,
+      "width": 320
+    },
+    {
+      "height": 650,
+      "name": "release_browser",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
+      "sample_count": 289,
+      "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1163,
+      "name": "code_registry_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
+      "sample_count": 289,
+      "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+      "unique_sample_colors": 12,
+      "width": 1174
+    },
+    {
+      "height": 1304,
+      "name": "promo_code_ledger",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
+      "sample_count": 289,
+      "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1304,
+      "name": "global_search_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
+      "sample_count": 289,
+      "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1304,
+      "name": "contract_template_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
+      "sample_count": 289,
+      "sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
+      "unique_sample_colors": 26,
+      "width": 1174
+    },
+    {
+      "height": 1387,
+      "name": "asset_registry",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
+      "sample_count": 289,
+      "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+      "unique_sample_colors": 4,
+      "width": 1174
+    },
+    {
+      "height": 1467,
+      "name": "invoice_workspace",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
+      "sample_count": 289,
+      "sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+      "unique_sample_colors": 5,
+      "width": 1174
+    },
+    {
+      "height": 1510,
+      "name": "work_manager",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
+      "sample_count": 289,
+      "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+      "unique_sample_colors": 8,
+      "width": 1174
+    },
+    {
+      "height": 1510,
+      "name": "party_manager",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
+      "sample_count": 289,
+      "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+      "unique_sample_colors": 13,
+      "width": 1174
+    },
+    {
+      "height": 1510,
+      "name": "contract_manager",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
+      "sample_count": 289,
+      "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+      "unique_sample_colors": 3,
+      "width": 1174
+    },
+    {
+      "height": 1510,
+      "name": "rights_matrix",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
+      "sample_count": 289,
+      "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+      "unique_sample_colors": 6,
+      "width": 1174
+    },
+    {
+      "height": 780,
+      "name": "quality_dashboard_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
+      "sample_count": 289,
+      "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+      "unique_sample_colors": 4,
+      "width": 1180
+    },
+    {
+      "height": 760,
+      "name": "conversion_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
+      "sample_count": 272,
+      "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+      "unique_sample_colors": 8,
+      "width": 1120
+    },
+    {
+      "height": 909,
+      "name": "settings_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
+      "sample_count": 289,
+      "sha256": "e6238d934efe8e6f57edb31aec97b9abae6519ae053d12a744244cc9af364eeb",
+      "unique_sample_colors": 15,
+      "width": 1233
+    },
+    {
       "height": 520,
       "name": "about_dialog",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
       "sample_count": 272,
-      "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+      "sha256": "f69274a9d122097219acf6507c0da2c33b82e0e03e58ee43d34321774a6ae481",
       "unique_sample_colors": 22,
       "width": 720
     },
@@ -26,9 +186,139 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
       "sample_count": 289,
-      "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+      "sha256": "8063244948285943dd9e002674aa87fba3fb0322311c2baf37ac35643d776b8a",
       "unique_sample_colors": 24,
       "width": 1180
+    },
+    {
+      "height": 960,
+      "name": "add_album_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
+      "sample_count": 256,
+      "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+      "unique_sample_colors": 13,
+      "width": 960
+    },
+    {
+      "height": 560,
+      "name": "custom_columns_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
+      "sample_count": 272,
+      "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+      "unique_sample_colors": 20,
+      "width": 760
+    },
+    {
+      "height": 860,
+      "name": "edit_track_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
+      "sample_count": 289,
+      "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+      "unique_sample_colors": 8,
+      "width": 760
+    },
+    {
+      "height": 720,
+      "name": "bulk_audio_attach_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
+      "sample_count": 272,
+      "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+      "unique_sample_colors": 6,
+      "width": 1080
+    },
+    {
+      "height": 780,
+      "name": "diagnostics_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
+      "sample_count": 289,
+      "sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
+      "unique_sample_colors": 21,
+      "width": 1080
+    },
+    {
+      "height": 860,
+      "name": "application_storage_admin_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
+      "sample_count": 289,
+      "sha256": "43d774d70a46bf12191a6931249f7a59c82a84a07d30ecefb5078bcbf432af1b",
+      "unique_sample_colors": 20,
+      "width": 1220
+    },
+    {
+      "height": 700,
+      "name": "application_log_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
+      "sample_count": 289,
+      "sha256": "e1c6dd4ea033ffb1da3ea53b9c30197389a1f51516903ed55d9c3ec4d5e7507b",
+      "unique_sample_colors": 29,
+      "width": 860
+    },
+    {
+      "height": 720,
+      "name": "history_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
+      "sample_count": 256,
+      "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+      "unique_sample_colors": 14,
+      "width": 1040
+    },
+    {
+      "height": 620,
+      "name": "action_ribbon_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
+      "sample_count": 289,
+      "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+      "unique_sample_colors": 29,
+      "width": 980
+    },
+    {
+      "height": 520,
+      "name": "authenticity_verification_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
+      "sample_count": 289,
+      "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+      "unique_sample_colors": 24,
+      "width": 780
+    },
+    {
+      "height": 431,
+      "name": "forensic_export_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
+      "sample_count": 289,
+      "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+      "unique_sample_colors": 34,
+      "width": 481
+    },
+    {
+      "height": 350,
+      "name": "media_equalizer_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
+      "sample_count": 289,
+      "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+      "unique_sample_colors": 23,
+      "width": 600
+    },
+    {
+      "height": 780,
+      "name": "soundcloud_publish_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
+      "sample_count": 289,
+      "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+      "unique_sample_colors": 13,
+      "width": 1788
     }
   ],
   "comparisons": [
@@ -68,11 +358,571 @@
       "reason": "Screenshot is visually within the baseline tolerance."
     },
     {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
+      "actual_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/catalog_table_workspace.png",
+      "baseline_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 702,
+          "name": "catalog_table_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
+          "sample_count": 289,
+          "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1122,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "catalog_table_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
+      "actual_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/add_track_workspace.png",
+      "baseline_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 702,
+          "name": "add_track_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
+          "sample_count": 272,
+          "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+          "unique_sample_colors": 20,
+          "width": 320
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1088,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "add_track_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
+      "actual_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/release_browser.png",
+      "baseline_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 650,
+          "name": "release_browser",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
+          "sample_count": 289,
+          "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "release_browser",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
+      "actual_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/code_registry_workspace.png",
+      "baseline_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1163,
+          "name": "code_registry_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
+          "sample_count": 289,
+          "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+          "unique_sample_colors": 12,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "code_registry_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
+      "actual_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/promo_code_ledger.png",
+      "baseline_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "promo_code_ledger",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
+          "sample_count": 289,
+          "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "promo_code_ledger",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
+      "actual_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/global_search_workspace.png",
+      "baseline_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "global_search_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
+          "sample_count": 289,
+          "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "global_search_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
+      "actual_sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/contract_template_workspace.png",
+      "baseline_sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "contract_template_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
+          "sample_count": 289,
+          "sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
+          "unique_sample_colors": 26,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "contract_template_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
+      "actual_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/asset_registry.png",
+      "baseline_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1387,
+          "name": "asset_registry",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
+          "sample_count": 289,
+          "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+          "unique_sample_colors": 4,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "asset_registry",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
+      "actual_sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/invoice_workspace.png",
+      "baseline_sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1467,
+          "name": "invoice_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
+          "sample_count": 289,
+          "sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+          "unique_sample_colors": 5,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "invoice_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
+      "actual_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/work_manager.png",
+      "baseline_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1510,
+          "name": "work_manager",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
+          "sample_count": 289,
+          "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+          "unique_sample_colors": 8,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "work_manager",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
+      "actual_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/party_manager.png",
+      "baseline_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1510,
+          "name": "party_manager",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
+          "sample_count": 289,
+          "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+          "unique_sample_colors": 13,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "party_manager",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
+      "actual_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/contract_manager.png",
+      "baseline_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1510,
+          "name": "contract_manager",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
+          "sample_count": 289,
+          "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+          "unique_sample_colors": 3,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "contract_manager",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
+      "actual_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/rights_matrix.png",
+      "baseline_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1510,
+          "name": "rights_matrix",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
+          "sample_count": 289,
+          "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+          "unique_sample_colors": 6,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "rights_matrix",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
+      "actual_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/quality_dashboard_dialog.png",
+      "baseline_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "quality_dashboard_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
+          "sample_count": 289,
+          "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+          "unique_sample_colors": 4,
+          "width": 1180
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "quality_dashboard_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
+      "actual_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/conversion_dialog.png",
+      "baseline_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 760,
+          "name": "conversion_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
+          "sample_count": 272,
+          "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+          "unique_sample_colors": 8,
+          "width": 1120
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1088,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "conversion_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
+      "actual_sha256": "e6238d934efe8e6f57edb31aec97b9abae6519ae053d12a744244cc9af364eeb",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
+      "baseline_sha256": "2f9d880d453b7ab86480ca094047701ebcbae15b633a88cc879670300b95784c",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 909,
+          "name": "settings_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
+          "sample_count": 289,
+          "sha256": "e6238d934efe8e6f57edb31aec97b9abae6519ae053d12a744244cc9af364eeb",
+          "unique_sample_colors": 15,
+          "width": 1233
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.010101010101010102,
+          "changed_samples": 11,
+          "mean_channel_delta": 0.8966942148760331,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "settings_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
       "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-      "actual_sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+      "actual_sha256": "f69274a9d122097219acf6507c0da2c33b82e0e03e58ee43d34321774a6ae481",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
-      "baseline_sha256": "9fd82b7e81341499084f8cf63d7948df44523103d5ebec1c01497bd7bc40d277",
+      "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
@@ -81,14 +931,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
           "sample_count": 272,
-          "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+          "sha256": "f69274a9d122097219acf6507c0da2c33b82e0e03e58ee43d34321774a6ae481",
           "unique_sample_colors": 22,
           "width": 720
         },
         "comparison_profile": {
           "changed_sample_ratio": 0.0036730945821854912,
           "changed_samples": 4,
-          "mean_channel_delta": 0.41735537190082644,
+          "mean_channel_delta": 0.2679063360881543,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -104,10 +954,10 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
-      "actual_sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+      "actual_sha256": "8063244948285943dd9e002674aa87fba3fb0322311c2baf37ac35643d776b8a",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/help_contents_dialog.png",
-      "baseline_sha256": "6528a3171d4a55f7d6dc1d65babbf3065acee83ee86a8c96a3910b0cd0804bb2",
+      "baseline_sha256": "a5381a1110a31129354f750f98116134d3759f85043053c6d05621b40551bc5b",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
@@ -116,7 +966,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
           "sample_count": 289,
-          "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+          "sha256": "8063244948285943dd9e002674aa87fba3fb0322311c2baf37ac35643d776b8a",
           "unique_sample_colors": 24,
           "width": 1180
         },
@@ -134,6 +984,461 @@
         }
       },
       "name": "help_contents_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
+      "actual_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/add_album_dialog.png",
+      "baseline_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 960,
+          "name": "add_album_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
+          "sample_count": 256,
+          "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+          "unique_sample_colors": 13,
+          "width": 960
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1024,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "add_album_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
+      "actual_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/custom_columns_dialog.png",
+      "baseline_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 560,
+          "name": "custom_columns_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
+          "sample_count": 272,
+          "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+          "unique_sample_colors": 20,
+          "width": 760
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1122,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "custom_columns_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
+      "actual_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/edit_track_dialog.png",
+      "baseline_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 860,
+          "name": "edit_track_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
+          "sample_count": 289,
+          "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+          "unique_sample_colors": 8,
+          "width": 760
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1156,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "edit_track_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
+      "actual_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/bulk_audio_attach_dialog.png",
+      "baseline_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 720,
+          "name": "bulk_audio_attach_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
+          "sample_count": 272,
+          "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+          "unique_sample_colors": 6,
+          "width": 1080
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "bulk_audio_attach_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
+      "actual_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/diagnostics_dialog.png",
+      "baseline_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "diagnostics_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
+          "sample_count": 289,
+          "sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
+          "unique_sample_colors": 21,
+          "width": 1080
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "diagnostics_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
+      "actual_sha256": "43d774d70a46bf12191a6931249f7a59c82a84a07d30ecefb5078bcbf432af1b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
+      "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 860,
+          "name": "application_storage_admin_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
+          "sample_count": 289,
+          "sha256": "43d774d70a46bf12191a6931249f7a59c82a84a07d30ecefb5078bcbf432af1b",
+          "unique_sample_colors": 20,
+          "width": 1220
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.00089126559714795,
+          "changed_samples": 1,
+          "mean_channel_delta": 0.17045454545454544,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1122,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "application_storage_admin_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
+      "actual_sha256": "e1c6dd4ea033ffb1da3ea53b9c30197389a1f51516903ed55d9c3ec4d5e7507b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
+      "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 700,
+          "name": "application_log_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
+          "sample_count": 289,
+          "sha256": "e1c6dd4ea033ffb1da3ea53b9c30197389a1f51516903ed55d9c3ec4d5e7507b",
+          "unique_sample_colors": 29,
+          "width": 860
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.010380622837370242,
+          "changed_samples": 12,
+          "mean_channel_delta": 1.2210207612456747,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1156,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "application_log_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
+      "actual_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/history_dialog.png",
+      "baseline_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 720,
+          "name": "history_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
+          "sample_count": 256,
+          "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+          "unique_sample_colors": 14,
+          "width": 1040
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "history_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
+      "actual_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/action_ribbon_dialog.png",
+      "baseline_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 620,
+          "name": "action_ribbon_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
+          "sample_count": 289,
+          "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+          "unique_sample_colors": 29,
+          "width": 980
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "action_ribbon_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
+      "actual_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/authenticity_verification_dialog.png",
+      "baseline_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 520,
+          "name": "authenticity_verification_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
+          "sample_count": 289,
+          "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+          "unique_sample_colors": 24,
+          "width": 780
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "authenticity_verification_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
+      "actual_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/forensic_export_dialog.png",
+      "baseline_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 431,
+          "name": "forensic_export_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
+          "sample_count": 289,
+          "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+          "unique_sample_colors": 34,
+          "width": 481
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1122,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "forensic_export_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
+      "actual_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/media_equalizer_dialog.png",
+      "baseline_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 350,
+          "name": "media_equalizer_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
+          "sample_count": 289,
+          "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+          "unique_sample_colors": 23,
+          "width": 600
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1190,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "media_equalizer_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
+      "actual_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_publish_dialog.png",
+      "baseline_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "soundcloud_publish_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
+          "sample_count": 289,
+          "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+          "unique_sample_colors": 13,
+          "width": 1788
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "soundcloud_publish_dialog",
       "passed": true,
       "reason": "Screenshot is visually within the baseline tolerance."
     },

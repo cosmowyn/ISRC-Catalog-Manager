@@ -17,7 +17,7 @@ body:
     attributes:
       label: Application version
       description: Copy the version from Help > About or the report preview if available.
-      placeholder: "4.x.x"
+      placeholder: "5.x.x"
     validations:
       required: true
   - type: dropdown

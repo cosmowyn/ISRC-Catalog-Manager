@@ -46,11 +46,13 @@
   ],
   "chapter_screenshot_count": 42,
   "coverage_percent": 100.0,
-  "covered_count": 319,
+  "covered_count": 349,
+  "duplicate_screenshot_hashes": {},
   "finding_count": 0,
   "findings": [],
-  "requirement_count": 319,
-  "screenshot_count": 45,
+  "requirement_count": 349,
+  "screenshot_count": 74,
   "status": "passed",
+  "unique_screenshot_hash_count": 74,
   "workflow_example_count": 7
 }

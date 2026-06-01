@@ -150,6 +150,101 @@ def _capture_workflow_widget(
     }
 
 
+def _capture_help_surface(
+    harness: Any,
+    service: VisualQualificationService,
+    help_screenshot_dir: Path,
+    widget: QWidget,
+    name: str,
+    results: list[dict[str, object]],
+) -> None:
+    widget.show()
+    harness.process_events(cycles=8)
+    capture = service.capture_widget(widget, name)
+    shutil.copy2(capture.path, help_screenshot_dir / f"{name}.png")
+    comparison = service.compare_capture_to_baseline(capture)
+    results.append(
+        {
+            "surface": name,
+            "object_name": widget.objectName(),
+            "window_title": widget.windowTitle(),
+            "capture": capture.to_dict(),
+            "comparison": comparison.to_dict(),
+        }
+    )
+
+
+def _capture_help_dialog_surface(
+    harness: Any,
+    service: VisualQualificationService,
+    help_screenshot_dir: Path,
+    dialog: QDialog,
+    name: str,
+    results: list[dict[str, object]],
+) -> None:
+    try:
+        dialog.setObjectName(dialog.objectName() or name)
+        _capture_help_surface(harness, service, help_screenshot_dir, dialog, name, results)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+
+def _ensure_help_visual_track(harness: Any) -> int:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Help screenshot capture requires an open application window.")
+    row = harness.connection.execute(
+        "SELECT id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
+        ("Help Screenshot Reference Track",),
+    ).fetchone()
+    if row is not None:
+        return int(row[0])
+    track_service = getattr(window, "track_service", None)
+    work_service = getattr(window, "work_service", None)
+    if track_service is None or work_service is None:
+        raise AssertionError("Track and Work services are required for Help screenshot surfaces.")
+    from isrc_manager.services.tracks import TrackCreatePayload
+    from isrc_manager.works.models import WorkPayload
+
+    work_id = int(
+        work_service.create_work(
+            WorkPayload(
+                title="Help Screenshot Reference Work",
+                genre_notes="Reference",
+                metadata_complete=True,
+                notes="UI PQ Help screenshot reference work.",
+            )
+        )
+    )
+
+    track_id = int(
+        track_service.create_track(
+            TrackCreatePayload(
+                isrc="",
+                track_title="Help Screenshot Reference Track",
+                artist_name="Help Screenshot Artist",
+                additional_artists=[],
+                album_title="Help Screenshot Release",
+                release_date="2026-06-01",
+                track_length_sec=183,
+                iswc=None,
+                upc=None,
+                genre="Reference",
+                track_number=1,
+                work_id=work_id,
+            )
+        )
+    )
+    harness.connection.commit()
+    refresh = getattr(window, "refresh_table_preserve_view", None)
+    if callable(refresh):
+        refresh(focus_id=track_id)
+        harness.process_events(cycles=8)
+    return track_id
+
+
 def _set_combo_text(widget: Any, text: str) -> None:
     if isinstance(widget, QComboBox):
         widget.setCurrentText(text)
@@ -1242,41 +1337,268 @@ def run_visual_qualification_workflow(harness: Any) -> None:
     service = VisualQualificationService(harness.artifact_dir)
     help_screenshot_dir = help_screenshot_source_dir()
     help_screenshot_dir.mkdir(parents=True, exist_ok=True)
+    surface_results: list[dict[str, object]] = []
 
     main_capture = service.capture_widget(window, "main_window")
     shutil.copy2(main_capture.path, help_screenshot_dir / "main_window.png")
     main_comparison = service.compare_capture_to_baseline(main_capture)
 
-    from isrc_manager.app_dialogs import AboutDialog, HelpContentsDialog
+    track_id = _ensure_help_visual_track(harness)
 
-    dialog_results: list[dict[str, object]] = []
-    for dialog_name, factory in (
+    from isrc_manager.app_dialogs import (
+        AboutDialog,
+        ActionRibbonDialog,
+        ApplicationLogDialog,
+        ApplicationStorageAdminDialog,
+        CustomColumnsDialog,
+        DiagnosticsDialog,
+        HelpContentsDialog,
+    )
+    from isrc_manager.application_settings_dialog import ApplicationSettingsDialog
+    from isrc_manager.authenticity.dialogs import AuthenticityVerificationDialog
+    from isrc_manager.authenticity.models import AuthenticityVerificationReport
+    from isrc_manager.conversion.dialogs import ConversionDialog
+    from isrc_manager.forensics.dialogs import ForensicExportDialog
+    from isrc_manager.history.dialogs import HistoryDialog
+    from isrc_manager.integrations.soundcloud.models import (
+        SoundCloudPublishOptions,
+        SoundCloudPublishPlanResult,
+    )
+    from isrc_manager.integrations.soundcloud.ui import SoundCloudPublishDialog
+    from isrc_manager.media.equalizer import EqualizerDialog
+    from isrc_manager.tags.dialogs import BulkAudioAttachDialog
+    from isrc_manager.tracks.album_entry_dialog import AlbumEntryDialog
+    from isrc_manager.tracks.edit_dialog import EditDialog
+
+    catalog_dock = window.open_catalog_workspace()
+    if catalog_dock is None:
+        raise AssertionError("Catalog table workspace did not open for Help screenshot capture.")
+    _capture_help_surface(
+        harness,
+        service,
+        help_screenshot_dir,
+        catalog_dock,
+        "catalog_table_workspace",
+        surface_results,
+    )
+
+    add_track_dock = window.open_add_track_workspace()
+    if add_track_dock is None:
+        raise AssertionError("Add Track workspace did not open for Help screenshot capture.")
+    _set_combo_text(window.artist_field, "Help Screenshot Artist")
+    _set_combo_text(window.album_title_field, "Help Screenshot Release")
+    _set_combo_text(window.genre_field, "Reference")
+    window.track_title_field.setText("Help Screenshot Single")
+    window.track_number_field.setValue(1)
+    window.track_len_m.setValue(3)
+    window.track_len_s.setValue(3)
+    _capture_help_surface(
+        harness,
+        service,
+        help_screenshot_dir,
+        add_track_dock,
+        "add_track_workspace",
+        surface_results,
+    )
+
+    workspace_openers: tuple[tuple[str, object], ...] = (
+        ("release_browser", window.open_release_browser),
+        ("code_registry_workspace", window.open_code_registry_workspace),
+        ("promo_code_ledger", window.open_promo_code_ledger),
+        ("global_search_workspace", window.open_global_search),
+        ("contract_template_workspace", window.open_contract_template_workspace),
+        ("asset_registry", window.open_asset_registry),
+        ("invoice_workspace", window.open_invoice_workspace),
+        ("work_manager", window.open_work_manager),
+        ("party_manager", window.open_party_manager),
+        ("contract_manager", window.open_contract_manager),
+        ("rights_matrix", window.open_rights_matrix),
+        ("quality_dashboard_dialog", window.open_quality_dashboard),
+    )
+    for surface_name, opener in workspace_openers:
+        panel = opener()
+        if panel is None:
+            raise AssertionError(f"Help screenshot surface did not open: {surface_name}")
+        _capture_help_surface(
+            harness,
+            service,
+            help_screenshot_dir,
+            panel,
+            surface_name,
+            surface_results,
+        )
+
+    def _capture_modal_exec(surface_name: str):
+        def _exec(dialog: QDialog) -> int:
+            _capture_help_surface(
+                harness,
+                service,
+                help_screenshot_dir,
+                dialog,
+                surface_name,
+                surface_results,
+            )
+            dialog.close()
+            return QDialog.Rejected
+
+        return _exec
+
+    with mock.patch.object(ConversionDialog, "exec", _capture_modal_exec("conversion_dialog")):
+        window.open_conversion_dialog()
+
+    with mock.patch.object(
+        ApplicationSettingsDialog,
+        "exec",
+        _capture_modal_exec("settings_dialog"),
+    ):
+        window.open_settings_dialog()
+
+    dialog_factories: tuple[tuple[str, object], ...] = (
         ("about_dialog", lambda: AboutDialog(window, parent=window)),
         ("help_contents_dialog", lambda: HelpContentsDialog(window, parent=window)),
-    ):
-        dialog = factory()
-        try:
-            dialog.setObjectName(dialog.objectName() or dialog_name)
-            dialog.show()
-            harness.process_events(8)
-            if not dialog.isVisible():
-                raise AssertionError(f"Dialog did not become visible: {dialog_name}")
-            capture = service.capture_widget(dialog, dialog_name)
-            shutil.copy2(capture.path, help_screenshot_dir / f"{dialog_name}.png")
-            comparison = service.compare_capture_to_baseline(capture)
-            dialog_results.append(
-                {
-                    "dialog": dialog_name,
-                    "object_name": dialog.objectName(),
-                    "window_title": dialog.windowTitle(),
-                    "capture": capture.to_dict(),
-                    "comparison": comparison.to_dict(),
-                }
-            )
-        finally:
-            dialog.close()
-            dialog.deleteLater()
-            harness.process_events(2)
+        (
+            "add_album_dialog",
+            lambda: AlbumEntryDialog(window),
+        ),
+        (
+            "custom_columns_dialog",
+            lambda: CustomColumnsDialog(
+                [
+                    {
+                        "id": 1,
+                        "name": "Mood",
+                        "field_type": "dropdown",
+                        "options": "Calm\nEnergetic\nFocus",
+                    }
+                ],
+                parent=window,
+            ),
+        ),
+        (
+            "edit_track_dialog",
+            lambda: EditDialog(track_id, window),
+        ),
+        (
+            "bulk_audio_attach_dialog",
+            lambda: BulkAudioAttachDialog(
+                title="Bulk Attach Audio Files",
+                intro="Review detected audio files and choose the matching catalog track.",
+                items=[
+                    {
+                        "source_name": "help-reference.wav",
+                        "source_path": str(harness.artifact_dir / "help-reference.wav"),
+                        "matched_track_id": track_id,
+                        "candidate_track_ids": [track_id],
+                        "match_basis": "title and artist",
+                        "detected_title": "Help Screenshot Reference Track",
+                        "detected_artist": "Help Screenshot Artist",
+                        "detected_album": "Help Screenshot Release",
+                    }
+                ],
+                track_choices=[
+                    (
+                        track_id,
+                        "Help Screenshot Reference Track",
+                        "Help Screenshot Artist",
+                    )
+                ],
+                parent=window,
+            ),
+        ),
+        ("diagnostics_dialog", lambda: DiagnosticsDialog(window, parent=window)),
+        (
+            "application_storage_admin_dialog",
+            lambda: ApplicationStorageAdminDialog(window, parent=window),
+        ),
+        ("application_log_dialog", lambda: ApplicationLogDialog(window, parent=window)),
+        ("history_dialog", lambda: HistoryDialog(window, parent=window)),
+        (
+            "action_ribbon_dialog",
+            lambda: ActionRibbonDialog(
+                list(getattr(window, "_action_ribbon_specs", [])),
+                list(getattr(window, "_action_ribbon_action_ids", [])),
+                ribbon_visible=True,
+                parent=window,
+            ),
+        ),
+        (
+            "authenticity_verification_dialog",
+            lambda: AuthenticityVerificationDialog(
+                report=AuthenticityVerificationReport(
+                    status="watermark_match_likely",
+                    message=(
+                        "Likely match found with 70.1% confidence after lossy "
+                        "derivative conversion."
+                    ),
+                    inspected_path="<USER_PATH>/SoundCloud-rip.mp3",
+                    key_id="help-reference-key",
+                    manifest_id="help-reference-manifest",
+                    watermark_id=7,
+                    verification_basis="forensic watermark extraction",
+                    document_type="direct_watermark",
+                    workflow_kind="authenticity_master",
+                    signature_valid=True,
+                    exact_hash_match=False,
+                    fingerprint_similarity=0.688,
+                    extraction_confidence=0.701,
+                    details=[
+                        "sync_score=0.688",
+                        "lossy source material can lower score without preventing discovery",
+                    ],
+                ),
+                parent=window,
+            ),
+        ),
+        (
+            "forensic_export_dialog",
+            lambda: ForensicExportDialog(
+                format_labels=[
+                    ("wav", "WAV forensic master"),
+                    ("mp3", "MP3 lossy delivery copy"),
+                    ("opus", "Opus streaming copy"),
+                ],
+                fixed_recipient_label="SoundCloud",
+                share_label_caption="Public Profile Trace",
+                share_label_placeholder="soundcloud.com/example-profile",
+                parent=window,
+            ),
+        ),
+        ("media_equalizer_dialog", lambda: EqualizerDialog({}, parent=window)),
+        (
+            "soundcloud_publish_dialog",
+            lambda: SoundCloudPublishDialog(
+                track_ids=[],
+                planner=type(
+                    "EmptySoundCloudPlanner",
+                    (),
+                    {
+                        "plan_tracks": lambda _self, track_ids, options: (
+                            SoundCloudPublishPlanResult(
+                                track_ids=tuple(track_ids),
+                                items=(),
+                                options=(
+                                    options
+                                    if isinstance(options, SoundCloudPublishOptions)
+                                    else SoundCloudPublishOptions()
+                                ),
+                                quota_snapshot=None,
+                            )
+                        )
+                    },
+                )(),
+                parent=window,
+            ),
+        ),
+    )
+    for surface_name, factory in dialog_factories:
+        _capture_help_dialog_surface(
+            harness,
+            service,
+            help_screenshot_dir,
+            factory(),
+            surface_name,
+            surface_results,
+        )
 
     theme_defaults = window._theme_setting_defaults()
     prepared_theme = window._prepare_theme_application_payload(theme_defaults)
@@ -1308,7 +1630,12 @@ def run_visual_qualification_workflow(harness: Any) -> None:
             "screenshot_count": len(service.captures),
             "comparison_count": len(service.comparisons),
             "main_window_comparison": main_comparison.to_dict(),
-            "dialogs": dialog_results,
+            "dialogs": [
+                result
+                for result in surface_results
+                if str(result.get("surface", "")).endswith("_dialog")
+            ],
+            "help_screenshot_surfaces": surface_results,
             "theme_comparison": theme_comparison.to_dict(),
         },
     )
@@ -1375,6 +1702,8 @@ def run_help_documentation_workflow(harness: Any) -> None:
             "workflow_example_count": report.workflow_example_count,
             "screenshot_count": report.screenshot_count,
             "chapter_screenshot_count": report.chapter_screenshot_count,
+            "unique_screenshot_hash_count": report.unique_screenshot_hash_count,
+            "duplicate_screenshot_hash_count": len(report.duplicate_screenshot_hashes),
             "refreshed_chapter_screenshot_count": len(refreshed_chapter_screenshots),
             "copied_screenshot_count": len(copied_screenshots),
         },

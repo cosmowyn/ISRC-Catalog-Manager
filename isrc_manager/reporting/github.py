@@ -39,7 +39,9 @@ class BackendProxySubmitter:
         if not self.endpoint_url:
             return ReportSubmissionResult(
                 False,
-                "No report proxy is configured; the report was saved locally for later submission.",
+                "No secure report proxy endpoint is configured. Automatic submission without "
+                "a user GitHub login requires a packaged public proxy URL or "
+                "ISRC_REPORT_PROXY_URL; the report was saved locally for later submission.",
             )
 
         payload = report.to_issue_payload()

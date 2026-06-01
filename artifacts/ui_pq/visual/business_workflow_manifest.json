@@ -1,13 +1,13 @@
 {
   "captures": [
     {
-      "height": 800,
+      "height": 1660,
       "name": "ui_pq_add_track_dialog_populated",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
-      "sample_count": 272,
-      "sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
-      "unique_sample_colors": 15,
+      "sample_count": 289,
+      "sha256": "d48463ee3766d245340f52edc7416e37398d39c0f6b52fd1557405bbc42adf49",
+      "unique_sample_colors": 17,
       "width": 1506
     },
     {
@@ -31,13 +31,13 @@
       "width": 840
     },
     {
-      "height": 750,
+      "height": 1488,
       "name": "ui_pq_party_manager_created_party_selected",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
-      "sample_count": 289,
-      "sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
-      "unique_sample_colors": 17,
+      "sample_count": 272,
+      "sha256": "256bf64c0ef62f2bf7e458a8eb754a00869dac2bee2c0cce9e8a07f3a90c5320",
+      "unique_sample_colors": 12,
       "width": 1174
     },
     {
@@ -51,23 +51,23 @@
       "width": 1020
     },
     {
-      "height": 1385,
+      "height": 1488,
       "name": "ui_pq_work_manager_created_work_selected",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
-      "sample_count": 289,
-      "sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
-      "unique_sample_colors": 15,
+      "sample_count": 272,
+      "sha256": "2d6999348a6de017e9fb1768c967def5c7b0459c76c9963c256c18da6aa6012a",
+      "unique_sample_colors": 6,
       "width": 1174
     },
     {
-      "height": 1385,
+      "height": 1488,
       "name": "ui_pq_release_browser_ui_created_release_selected",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
-      "sample_count": 289,
-      "sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
-      "unique_sample_colors": 9,
+      "sample_count": 272,
+      "sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
+      "unique_sample_colors": 11,
       "width": 1174
     },
     {
@@ -81,13 +81,13 @@
       "width": 980
     },
     {
-      "height": 1385,
+      "height": 1488,
       "name": "ui_pq_contract_manager_created_contract_selected",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
-      "sample_count": 289,
-      "sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
-      "unique_sample_colors": 6,
+      "sample_count": 272,
+      "sha256": "153db9a58d692b48ca169c62fb76e5cdb1f0ea25685e1c357c3dcec646c1629a",
+      "unique_sample_colors": 8,
       "width": 1174
     },
     {
@@ -101,143 +101,143 @@
       "width": 820
     },
     {
-      "height": 1385,
+      "height": 1488,
       "name": "ui_pq_rights_matrix_created_right_selected",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
-      "sample_count": 289,
-      "sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
-      "unique_sample_colors": 3,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_paid_invoice_line_entry",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
-      "sample_count": 289,
-      "sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
-      "unique_sample_colors": 11,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_paid_invoice_draft_created",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
-      "sample_count": 289,
-      "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
-      "unique_sample_colors": 11,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_invoice_posted",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
-      "sample_count": 289,
-      "sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
-      "unique_sample_colors": 7,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_payment_entered",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
-      "sample_count": 289,
-      "sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
-      "unique_sample_colors": 7,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_credit_invoice_line_entry",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
-      "sample_count": 289,
-      "sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
-      "unique_sample_colors": 11,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_credit_invoice_draft_created",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
-      "sample_count": 289,
-      "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
-      "unique_sample_colors": 11,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_credit_invoice_posted",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
-      "sample_count": 289,
-      "sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
-      "unique_sample_colors": 7,
-      "width": 1174
-    },
-    {
-      "height": 1567,
-      "name": "accounting_credit_note_created",
-      "non_blank": true,
-      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
-      "sample_count": 289,
-      "sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "sample_count": 272,
+      "sha256": "e55deae2e2c69b0c3bc852d239cfdfe751a0c55538814dc1af43ceab31de52da",
       "unique_sample_colors": 6,
       "width": 1174
     },
     {
-      "height": 1567,
+      "height": 1488,
+      "name": "accounting_paid_invoice_line_entry",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
+      "sample_count": 272,
+      "sha256": "351252c2f1887201969cdabce10e6d6392e248645c93df424be9474d80c5b641",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_paid_invoice_draft_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
+      "sample_count": 272,
+      "sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_invoice_posted",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
+      "sample_count": 272,
+      "sha256": "113f6f133159b6038530b3e7609e9cf877bdcd63c777521a7bc4a356f5bb0b6e",
+      "unique_sample_colors": 4,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_payment_entered",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
+      "sample_count": 272,
+      "sha256": "8bcd6758295b0cbab4a3fda771790e1fc8e3689721e53c8eb8bfbc7fc26a1359",
+      "unique_sample_colors": 4,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_credit_invoice_line_entry",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
+      "sample_count": 272,
+      "sha256": "f25e7182eb967c805126e9dc288423e6af4b9cc875d314f05b5742c54f562313",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_credit_invoice_draft_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
+      "sample_count": 272,
+      "sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_credit_invoice_posted",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
+      "sample_count": 272,
+      "sha256": "ca66119e92bc679647c3cbeede1c75bd9d2a8d28012cd1b92454899c6c3cd3fe",
+      "unique_sample_colors": 4,
+      "width": 1174
+    },
+    {
+      "height": 1488,
+      "name": "accounting_credit_note_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
+      "sample_count": 272,
+      "sha256": "1b498bd2e0ddd379fc12bc8a23015580d3f7edc548317dd8f7f13f45ea5035c8",
+      "unique_sample_colors": 3,
+      "width": 1174
+    },
+    {
+      "height": 1488,
       "name": "accounting_royalty_calculation_created",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
-      "sample_count": 289,
-      "sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
-      "unique_sample_colors": 10,
+      "sample_count": 272,
+      "sha256": "652a7498a2bf1402d6a107e609c9702d178fdcf4f18b659fb3b4fa499396e93b",
+      "unique_sample_colors": 9,
       "width": 1174
     },
     {
-      "height": 1567,
+      "height": 1488,
       "name": "accounting_royalty_posted",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
-      "sample_count": 289,
-      "sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
-      "unique_sample_colors": 10,
+      "sample_count": 272,
+      "sha256": "95ac14cc7e8299227b1782544eff7b8ca4d576c07121ceaea532a09841f56f56",
+      "unique_sample_colors": 9,
       "width": 1174
     },
     {
-      "height": 1567,
+      "height": 1488,
       "name": "accounting_royalty_statement_generated",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
-      "sample_count": 289,
-      "sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
-      "unique_sample_colors": 10,
+      "sample_count": 272,
+      "sha256": "3ef6bc77394ff06439bde57632a2d788df9f61cd5618c625e876f8fd3413a8f5",
+      "unique_sample_colors": 11,
       "width": 1174
     },
     {
-      "height": 1567,
+      "height": 1488,
       "name": "accounting_payout_created",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
-      "sample_count": 289,
-      "sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
-      "unique_sample_colors": 10,
+      "sample_count": 272,
+      "sha256": "292ba059c8a92befc11c78c36cfb67558538eb60998626074ffcfb0fb7e33fdb",
+      "unique_sample_colors": 9,
       "width": 1174
     },
     {
-      "height": 1567,
+      "height": 1488,
       "name": "accounting_report_generated",
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
-      "sample_count": 289,
-      "sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
-      "unique_sample_colors": 11,
+      "sample_count": 272,
+      "sha256": "788efbec421a8b0195a67da0eb396db8878d618c789a0f38c90c1884bd5c168d",
+      "unique_sample_colors": 10,
       "width": 1174
     },
     {
@@ -274,20 +274,20 @@
   "comparisons": [
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
-      "actual_sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+      "actual_sha256": "d48463ee3766d245340f52edc7416e37398d39c0f6b52fd1557405bbc42adf49",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_add_track_dialog_populated.png",
-      "baseline_sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+      "baseline_sha256": "d48463ee3766d245340f52edc7416e37398d39c0f6b52fd1557405bbc42adf49",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 800,
+          "height": 1660,
           "name": "ui_pq_add_track_dialog_populated",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
-          "sample_count": 272,
-          "sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
-          "unique_sample_colors": 15,
+          "sample_count": 289,
+          "sha256": "d48463ee3766d245340f52edc7416e37398d39c0f6b52fd1557405bbc42adf49",
+          "unique_sample_colors": 17,
           "width": 1506
         },
         "comparison_profile": {
@@ -296,7 +296,7 @@
           "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
-          "sample_count": 1056,
+          "sample_count": 1089,
           "tolerance": {
             "max_changed_sample_ratio": 0.35,
             "max_mean_channel_delta": 6.0
@@ -379,20 +379,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
-      "actual_sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+      "actual_sha256": "256bf64c0ef62f2bf7e458a8eb754a00869dac2bee2c0cce9e8a07f3a90c5320",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_party_manager_created_party_selected.png",
-      "baseline_sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+      "baseline_sha256": "256bf64c0ef62f2bf7e458a8eb754a00869dac2bee2c0cce9e8a07f3a90c5320",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 750,
+          "height": 1488,
           "name": "ui_pq_party_manager_created_party_selected",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
-          "sample_count": 289,
-          "sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
-          "unique_sample_colors": 17,
+          "sample_count": 272,
+          "sha256": "256bf64c0ef62f2bf7e458a8eb754a00869dac2bee2c0cce9e8a07f3a90c5320",
+          "unique_sample_colors": 12,
           "width": 1174
         },
         "comparison_profile": {
@@ -449,20 +449,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
-      "actual_sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+      "actual_sha256": "2d6999348a6de017e9fb1768c967def5c7b0459c76c9963c256c18da6aa6012a",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_work_manager_created_work_selected.png",
-      "baseline_sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+      "baseline_sha256": "2d6999348a6de017e9fb1768c967def5c7b0459c76c9963c256c18da6aa6012a",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1385,
+          "height": 1488,
           "name": "ui_pq_work_manager_created_work_selected",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
-          "sample_count": 289,
-          "sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
-          "unique_sample_colors": 15,
+          "sample_count": 272,
+          "sha256": "2d6999348a6de017e9fb1768c967def5c7b0459c76c9963c256c18da6aa6012a",
+          "unique_sample_colors": 6,
           "width": 1174
         },
         "comparison_profile": {
@@ -484,20 +484,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
-      "actual_sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+      "actual_sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
-      "baseline_sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+      "baseline_sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1385,
+          "height": 1488,
           "name": "ui_pq_release_browser_ui_created_release_selected",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
-          "sample_count": 289,
-          "sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
-          "unique_sample_colors": 9,
+          "sample_count": 272,
+          "sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
+          "unique_sample_colors": 11,
           "width": 1174
         },
         "comparison_profile": {
@@ -554,20 +554,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
-      "actual_sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+      "actual_sha256": "153db9a58d692b48ca169c62fb76e5cdb1f0ea25685e1c357c3dcec646c1629a",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_contract_manager_created_contract_selected.png",
-      "baseline_sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+      "baseline_sha256": "153db9a58d692b48ca169c62fb76e5cdb1f0ea25685e1c357c3dcec646c1629a",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1385,
+          "height": 1488,
           "name": "ui_pq_contract_manager_created_contract_selected",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
-          "sample_count": 289,
-          "sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
-          "unique_sample_colors": 6,
+          "sample_count": 272,
+          "sha256": "153db9a58d692b48ca169c62fb76e5cdb1f0ea25685e1c357c3dcec646c1629a",
+          "unique_sample_colors": 8,
           "width": 1174
         },
         "comparison_profile": {
@@ -624,20 +624,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
-      "actual_sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+      "actual_sha256": "e55deae2e2c69b0c3bc852d239cfdfe751a0c55538814dc1af43ceab31de52da",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_rights_matrix_created_right_selected.png",
-      "baseline_sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+      "baseline_sha256": "e55deae2e2c69b0c3bc852d239cfdfe751a0c55538814dc1af43ceab31de52da",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1385,
+          "height": 1488,
           "name": "ui_pq_rights_matrix_created_right_selected",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
-          "sample_count": 289,
-          "sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
-          "unique_sample_colors": 3,
+          "sample_count": 272,
+          "sha256": "e55deae2e2c69b0c3bc852d239cfdfe751a0c55538814dc1af43ceab31de52da",
+          "unique_sample_colors": 6,
           "width": 1174
         },
         "comparison_profile": {
@@ -659,20 +659,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
-      "actual_sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+      "actual_sha256": "351252c2f1887201969cdabce10e6d6392e248645c93df424be9474d80c5b641",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_line_entry.png",
-      "baseline_sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+      "baseline_sha256": "351252c2f1887201969cdabce10e6d6392e248645c93df424be9474d80c5b641",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_paid_invoice_line_entry",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
-          "sample_count": 289,
-          "sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
-          "unique_sample_colors": 11,
+          "sample_count": 272,
+          "sha256": "351252c2f1887201969cdabce10e6d6392e248645c93df424be9474d80c5b641",
+          "unique_sample_colors": 7,
           "width": 1174
         },
         "comparison_profile": {
@@ -694,20 +694,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
-      "actual_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "actual_sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_draft_created.png",
-      "baseline_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "baseline_sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_paid_invoice_draft_created",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
-          "sample_count": 289,
-          "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
-          "unique_sample_colors": 11,
+          "sample_count": 272,
+          "sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
+          "unique_sample_colors": 7,
           "width": 1174
         },
         "comparison_profile": {
@@ -729,20 +729,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
-      "actual_sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+      "actual_sha256": "113f6f133159b6038530b3e7609e9cf877bdcd63c777521a7bc4a356f5bb0b6e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_invoice_posted.png",
-      "baseline_sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+      "baseline_sha256": "113f6f133159b6038530b3e7609e9cf877bdcd63c777521a7bc4a356f5bb0b6e",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_invoice_posted",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
-          "sample_count": 289,
-          "sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
-          "unique_sample_colors": 7,
+          "sample_count": 272,
+          "sha256": "113f6f133159b6038530b3e7609e9cf877bdcd63c777521a7bc4a356f5bb0b6e",
+          "unique_sample_colors": 4,
           "width": 1174
         },
         "comparison_profile": {
@@ -764,20 +764,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
-      "actual_sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+      "actual_sha256": "8bcd6758295b0cbab4a3fda771790e1fc8e3689721e53c8eb8bfbc7fc26a1359",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payment_entered.png",
-      "baseline_sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+      "baseline_sha256": "8bcd6758295b0cbab4a3fda771790e1fc8e3689721e53c8eb8bfbc7fc26a1359",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_payment_entered",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
-          "sample_count": 289,
-          "sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
-          "unique_sample_colors": 7,
+          "sample_count": 272,
+          "sha256": "8bcd6758295b0cbab4a3fda771790e1fc8e3689721e53c8eb8bfbc7fc26a1359",
+          "unique_sample_colors": 4,
           "width": 1174
         },
         "comparison_profile": {
@@ -799,20 +799,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
-      "actual_sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+      "actual_sha256": "f25e7182eb967c805126e9dc288423e6af4b9cc875d314f05b5742c54f562313",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_line_entry.png",
-      "baseline_sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+      "baseline_sha256": "f25e7182eb967c805126e9dc288423e6af4b9cc875d314f05b5742c54f562313",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_credit_invoice_line_entry",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
-          "sample_count": 289,
-          "sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
-          "unique_sample_colors": 11,
+          "sample_count": 272,
+          "sha256": "f25e7182eb967c805126e9dc288423e6af4b9cc875d314f05b5742c54f562313",
+          "unique_sample_colors": 7,
           "width": 1174
         },
         "comparison_profile": {
@@ -834,20 +834,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
-      "actual_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "actual_sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_draft_created.png",
-      "baseline_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "baseline_sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_credit_invoice_draft_created",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
-          "sample_count": 289,
-          "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
-          "unique_sample_colors": 11,
+          "sample_count": 272,
+          "sha256": "6907176fc4b7f7d5d4cdd3c7d4b099a19028ed029b1b8304bd845e415ea5c375",
+          "unique_sample_colors": 7,
           "width": 1174
         },
         "comparison_profile": {
@@ -869,20 +869,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
-      "actual_sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+      "actual_sha256": "ca66119e92bc679647c3cbeede1c75bd9d2a8d28012cd1b92454899c6c3cd3fe",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_posted.png",
-      "baseline_sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+      "baseline_sha256": "ca66119e92bc679647c3cbeede1c75bd9d2a8d28012cd1b92454899c6c3cd3fe",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_credit_invoice_posted",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
-          "sample_count": 289,
-          "sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
-          "unique_sample_colors": 7,
+          "sample_count": 272,
+          "sha256": "ca66119e92bc679647c3cbeede1c75bd9d2a8d28012cd1b92454899c6c3cd3fe",
+          "unique_sample_colors": 4,
           "width": 1174
         },
         "comparison_profile": {
@@ -904,20 +904,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
-      "actual_sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "actual_sha256": "1b498bd2e0ddd379fc12bc8a23015580d3f7edc548317dd8f7f13f45ea5035c8",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_note_created.png",
-      "baseline_sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "baseline_sha256": "1b498bd2e0ddd379fc12bc8a23015580d3f7edc548317dd8f7f13f45ea5035c8",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_credit_note_created",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
-          "sample_count": 289,
-          "sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
-          "unique_sample_colors": 6,
+          "sample_count": 272,
+          "sha256": "1b498bd2e0ddd379fc12bc8a23015580d3f7edc548317dd8f7f13f45ea5035c8",
+          "unique_sample_colors": 3,
           "width": 1174
         },
         "comparison_profile": {
@@ -939,20 +939,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
-      "actual_sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+      "actual_sha256": "652a7498a2bf1402d6a107e609c9702d178fdcf4f18b659fb3b4fa499396e93b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_calculation_created.png",
-      "baseline_sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+      "baseline_sha256": "652a7498a2bf1402d6a107e609c9702d178fdcf4f18b659fb3b4fa499396e93b",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_royalty_calculation_created",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
-          "sample_count": 289,
-          "sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
-          "unique_sample_colors": 10,
+          "sample_count": 272,
+          "sha256": "652a7498a2bf1402d6a107e609c9702d178fdcf4f18b659fb3b4fa499396e93b",
+          "unique_sample_colors": 9,
           "width": 1174
         },
         "comparison_profile": {
@@ -974,20 +974,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
-      "actual_sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+      "actual_sha256": "95ac14cc7e8299227b1782544eff7b8ca4d576c07121ceaea532a09841f56f56",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_posted.png",
-      "baseline_sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+      "baseline_sha256": "95ac14cc7e8299227b1782544eff7b8ca4d576c07121ceaea532a09841f56f56",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_royalty_posted",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
-          "sample_count": 289,
-          "sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
-          "unique_sample_colors": 10,
+          "sample_count": 272,
+          "sha256": "95ac14cc7e8299227b1782544eff7b8ca4d576c07121ceaea532a09841f56f56",
+          "unique_sample_colors": 9,
           "width": 1174
         },
         "comparison_profile": {
@@ -1009,20 +1009,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
-      "actual_sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+      "actual_sha256": "3ef6bc77394ff06439bde57632a2d788df9f61cd5618c625e876f8fd3413a8f5",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_statement_generated.png",
-      "baseline_sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+      "baseline_sha256": "3ef6bc77394ff06439bde57632a2d788df9f61cd5618c625e876f8fd3413a8f5",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_royalty_statement_generated",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
-          "sample_count": 289,
-          "sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
-          "unique_sample_colors": 10,
+          "sample_count": 272,
+          "sha256": "3ef6bc77394ff06439bde57632a2d788df9f61cd5618c625e876f8fd3413a8f5",
+          "unique_sample_colors": 11,
           "width": 1174
         },
         "comparison_profile": {
@@ -1044,20 +1044,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
-      "actual_sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+      "actual_sha256": "292ba059c8a92befc11c78c36cfb67558538eb60998626074ffcfb0fb7e33fdb",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payout_created.png",
-      "baseline_sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+      "baseline_sha256": "292ba059c8a92befc11c78c36cfb67558538eb60998626074ffcfb0fb7e33fdb",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_payout_created",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
-          "sample_count": 289,
-          "sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
-          "unique_sample_colors": 10,
+          "sample_count": 272,
+          "sha256": "292ba059c8a92befc11c78c36cfb67558538eb60998626074ffcfb0fb7e33fdb",
+          "unique_sample_colors": 9,
           "width": 1174
         },
         "comparison_profile": {
@@ -1079,20 +1079,20 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
-      "actual_sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+      "actual_sha256": "788efbec421a8b0195a67da0eb396db8878d618c789a0f38c90c1884bd5c168d",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_report_generated.png",
-      "baseline_sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+      "baseline_sha256": "788efbec421a8b0195a67da0eb396db8878d618c789a0f38c90c1884bd5c168d",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
-          "height": 1567,
+          "height": 1488,
           "name": "accounting_report_generated",
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
-          "sample_count": 289,
-          "sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
-          "unique_sample_colors": 11,
+          "sample_count": 272,
+          "sha256": "788efbec421a8b0195a67da0eb396db8878d618c789a0f38c90c1884bd5c168d",
+          "unique_sample_colors": 10,
           "width": 1174
         },
         "comparison_profile": {

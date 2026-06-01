@@ -485,6 +485,66 @@ class SplashResolutionTests(unittest.TestCase):
         self.assertIn("Version: 3.1.1-17042026.3723", stamped.detail)
 
 
+class ReportingConfigResolutionTests(unittest.TestCase):
+    def test_reporting_config_generated_from_public_endpoint_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.dict(
+                build.os.environ,
+                {
+                    "ISRC_REPORT_PROXY_URL": "https://reports.example.test/isrc",
+                    "ISRC_REPORT_REPOSITORY": "owner/repo",
+                },
+                clear=False,
+            ):
+                resolved = build._resolve_reporting_runtime_config(root)
+
+            payload = json.loads(Path(resolved.path).read_text(encoding="utf-8"))
+
+        self.assertEqual(resolved.kind, "generated")
+        self.assertEqual(payload["proxy_url"], "https://reports.example.test/isrc")
+        self.assertEqual(payload["repository"], "owner/repo")
+        self.assertIs(payload["contains_credentials"], False)
+        self.assertNotIn("token", payload)
+
+    def test_reporting_config_rejects_insecure_endpoint_and_secret_keys(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.dict(
+                build.os.environ,
+                {"ISRC_REPORT_PROXY_URL": "http://reports.example.test/isrc"},
+                clear=False,
+            ):
+                with self.assertRaises(RuntimeError):
+                    build._resolve_reporting_runtime_config(root)
+
+            config_dir = root / "resources"
+            config_dir.mkdir()
+            (config_dir / "reporting.json").write_text(
+                json.dumps(
+                    {
+                        "proxy_url": "https://reports.example.test/isrc",
+                        "repository": "owner/repo",
+                        "github_token": "must-not-ship",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(build.os.environ, {"ISRC_REPORT_PROXY_URL": ""}, clear=False):
+                with self.assertRaises(RuntimeError, msg="must not contain credentials"):
+                    build._resolve_reporting_runtime_config(root)
+
+    def test_missing_reporting_config_is_non_fatal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.dict(build.os.environ, {"ISRC_REPORT_PROXY_URL": ""}, clear=False):
+                resolved = build._resolve_reporting_runtime_config(root)
+
+        self.assertIsNone(resolved.path)
+        self.assertEqual(resolved.kind, "missing")
+        self.assertIn("enable automatic report submission", resolved.detail)
+
+
 class CommandConstructionTests(unittest.TestCase):
     def test_windows_pyinstaller_command_uses_selected_executable_and_onefile(self):
         entry_script = Path("/project/ISRC_manager.py")
@@ -533,6 +593,28 @@ class CommandConstructionTests(unittest.TestCase):
         self.assertNotIn("--splash", cmd)
         self.assertIn("--add-data", cmd)
         self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
+
+    def test_pyinstaller_command_bundles_reporting_proxy_config_when_available(self):
+        entry_script = Path("/project/ISRC_manager.py")
+
+        with (
+            mock.patch.object(build, "_is_windows", return_value=False),
+            mock.patch.object(build, "_is_macos", return_value=False),
+        ):
+            cmd = build._pyinstaller_cmd(
+                pyinstaller_launcher=("pyinstaller",),
+                entry_script=entry_script,
+                app_name=build.PACKAGE_APP_NAME,
+                icon=None,
+                runtime_splash_asset=None,
+                reporting_config_asset="/project/build/generated_assets/reporting/reporting.json",
+            )
+
+        self.assertIn("--add-data", cmd)
+        self.assertIn(
+            "/project/build/generated_assets/reporting/reporting.json:resources",
+            cmd,
+        )
 
     def test_pyinstaller_command_bundles_keyring_backend_discovery(self):
         entry_script = Path("/project/ISRC_manager.py")

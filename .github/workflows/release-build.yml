@@ -163,11 +163,17 @@ jobs:
       - name: Build packaged application
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          ISRC_REPORT_PROXY_URL: ${{ secrets.ISRC_REPORT_PROXY_URL }}
+          ISRC_REPORT_REPOSITORY: ${{ github.repository }}
         run: python build.py
 
       - name: Build packaged application
         if: runner.os == 'Windows'
         shell: cmd
+        env:
+          ISRC_REPORT_PROXY_URL: ${{ secrets.ISRC_REPORT_PROXY_URL }}
+          ISRC_REPORT_REPOSITORY: ${{ github.repository }}
         run: python build.py
 
       - name: Validate release package

@@ -56,40 +56,39 @@ class ReleaseAutomationTests(unittest.TestCase):
         self.assertEqual(automation.releasable_commits(commits), ())
         self.assertIsNone(automation.classify_bump(commits))
 
-    def test_application_fingerprint_gates_automatic_bump(self):
-        commits = (
+    def test_production_code_fingerprint_gates_automatic_bump(self):
+        support_commits = (
             automation.CommitInfo(
                 sha="1",
-                subject="fix: adjust help copy",
-                files=("docs/help_content_notes.md",),
+                subject="test: refresh qualification evidence",
+                files=("tests/ui_qa/test_ui_pq_help_documentation.py",),
             ),
         )
-        small_app_change = automation.ApplicationChangeFingerprint(
-            changed_files=2,
-            added_lines=200,
-            deleted_lines=100,
+        production_commits = (
+            automation.CommitInfo(
+                sha="2",
+                subject="fix: repair crash reporting submission",
+                files=("isrc_manager/reporting/service.py",),
+            ),
         )
-        large_app_change = automation.ApplicationChangeFingerprint(
-            changed_files=4,
-            added_lines=700,
-            deleted_lines=350,
-        )
+        support_only = automation.ApplicationChangeFingerprint()
+        production_change = automation.ApplicationChangeFingerprint(changed_files=1, added_lines=1)
 
-        self.assertFalse(automation.should_create_release(commits, small_app_change))
-        self.assertTrue(automation.should_create_release(commits, large_app_change))
+        self.assertFalse(automation.should_create_release(support_commits, support_only))
+        self.assertTrue(automation.should_create_release(production_commits, production_change))
         self.assertIsNone(
             automation.build_release_plan(
                 "5.0.0",
-                commits,
-                fingerprint=small_app_change,
+                support_commits,
+                fingerprint=support_only,
                 require_release_gate=True,
             )
         )
         self.assertEqual(
             automation.build_release_plan(
                 "5.0.0",
-                commits,
-                fingerprint=large_app_change,
+                production_commits,
+                fingerprint=production_change,
                 require_release_gate=True,
             ).next_version,
             "5.0.1",
@@ -121,15 +120,21 @@ class ReleaseAutomationTests(unittest.TestCase):
         fingerprint = automation.parse_application_numstat(
             [
                 "12\t8\tisrc_manager/main_window.py",
+                "7\t3\tisrc_manager/qa/help_validation.py",
+                "4\t2\tisrc_manager/help_content.py",
+                "6\t2\tisrc_manager/version.py",
+                "1\t1\ttests/test_release_automation.py",
+                "5\t0\tdocs/release-builds.md",
+                "2\t2\tisrc_manager/reporting/service.py",
                 "-\t-\tisrc_manager/assets/logo.png",
                 "3\t0\tbuild.py",
             ]
         )
 
-        self.assertEqual(fingerprint.changed_files, 3)
-        self.assertEqual(fingerprint.added_lines, 15)
-        self.assertEqual(fingerprint.deleted_lines, 8)
-        self.assertEqual(fingerprint.touched_lines, 23)
+        self.assertEqual(fingerprint.changed_files, 4)
+        self.assertEqual(fingerprint.added_lines, 17)
+        self.assertEqual(fingerprint.deleted_lines, 10)
+        self.assertEqual(fingerprint.touched_lines, 27)
 
     def test_write_github_output_is_noop_without_output_path(self):
         with mock.patch.dict("os.environ", {}, clear=True):

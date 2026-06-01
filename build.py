@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import urllib.parse
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -52,6 +53,10 @@ VENV_DIR = ".venv"
 ICON_BASENAME = "app_logo"
 LEGACY_ICON_BASENAME = "icon"
 SPLASH_BASENAME = "splash"
+REPORTING_CONFIG_BASENAME = "reporting.json"
+REPORTING_PROXY_ENV = "ISRC_REPORT_PROXY_URL"
+REPORTING_REPOSITORY_ENV = "ISRC_REPORT_REPOSITORY"
+DEFAULT_REPORTING_REPOSITORY = "cosmowyn/ISRC-Catalog-Manager"
 SPLASH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 WINDOWS_ICON_EXTENSIONS = (".ico", ".png", ".jpg", ".jpeg", ".bmp")
 MACOS_ICON_EXTENSIONS = (".icns", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif")
@@ -762,6 +767,100 @@ def _stamp_runtime_splash_asset(
     )
 
 
+def _resolve_reporting_runtime_config(project_root: Path) -> ResolutionResult:
+    proxy_url = os.environ.get(REPORTING_PROXY_ENV, "").strip()
+    repository = os.environ.get(REPORTING_REPOSITORY_ENV, DEFAULT_REPORTING_REPOSITORY).strip()
+    if proxy_url:
+        _validate_reporting_proxy_url(proxy_url)
+        _validate_reporting_repository(repository)
+        output_dir = _generated_assets_dir(project_root) / "reporting"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / REPORTING_CONFIG_BASENAME
+        output_path.write_text(
+            json.dumps(
+                {
+                    "contains_credentials": False,
+                    "proxy_url": proxy_url,
+                    "repository": repository,
+                    "security_model": "public endpoint only; GitHub credentials stay server-side",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return ResolutionResult(
+            path=output_path.resolve(),
+            kind="generated",
+            source_label="environment",
+            detail="generated public report proxy endpoint config from build environment",
+        )
+
+    bundled_path = project_root / RESOURCES_DIRNAME / REPORTING_CONFIG_BASENAME
+    if bundled_path.is_file():
+        _validate_reporting_config_file(bundled_path)
+        return ResolutionResult(
+            path=bundled_path.resolve(),
+            kind="canonical",
+            source_label=RESOURCES_DIRNAME,
+            detail="selected bundled public report proxy endpoint config",
+        )
+
+    return ResolutionResult(
+        path=None,
+        kind="missing",
+        source_label="none",
+        detail=(
+            f"no report proxy config found; set {REPORTING_PROXY_ENV} during release builds "
+            "to enable automatic report submission"
+        ),
+    )
+
+
+def _validate_reporting_config_file(path: Path) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"Reporting config is not valid JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Reporting config must be a JSON object: {path}")
+
+    forbidden_keys = {
+        "access_token",
+        "client_secret",
+        "github_token",
+        "password",
+        "private_key",
+        "secret",
+        "token",
+    }
+    if forbidden_keys & {str(key).strip().lower() for key in payload}:
+        raise RuntimeError("Reporting config must not contain credentials or secrets.")
+
+    proxy_url = str(payload.get("proxy_url") or "").strip()
+    repository = str(payload.get("repository") or DEFAULT_REPORTING_REPOSITORY).strip()
+    if not proxy_url:
+        raise RuntimeError(f"Reporting config is missing proxy_url: {path}")
+    _validate_reporting_proxy_url(proxy_url)
+    _validate_reporting_repository(repository)
+
+
+def _validate_reporting_proxy_url(proxy_url: str) -> None:
+    parsed = urllib.parse.urlparse(proxy_url)
+    host = parsed.hostname or ""
+    if parsed.scheme == "https" and host:
+        return
+    if parsed.scheme == "http" and host in {"localhost", "127.0.0.1", "::1"}:
+        return
+    raise RuntimeError("Report proxy endpoint must use HTTPS unless it targets localhost.")
+
+
+def _validate_reporting_repository(repository: str) -> None:
+    if not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
+        raise RuntimeError("Report repository must be in owner/name form.")
+
+
 def _diag(name: str, value: str) -> None:
     print(f"[diag] {name}: {value}")
 
@@ -782,6 +881,7 @@ def _print_build_diagnostics(
     pyinstaller: PyInstallerSelection,
     icon: ResolutionResult,
     splash: ResolutionResult,
+    reporting_config: ResolutionResult,
 ) -> None:
     _diag("working directory", str(Path.cwd().resolve()))
     _diag("project root", str(project_root.resolve()))
@@ -799,6 +899,7 @@ def _print_build_diagnostics(
         _diag("pyinstaller fallback reason", pyinstaller.fallback_reason)
     _diag("icon", _format_resolution(icon, project_root))
     _diag("splash", _format_resolution(splash, project_root))
+    _diag("reporting config", _format_resolution(reporting_config, project_root))
 
 
 def _add_data_separator() -> str:
@@ -815,6 +916,7 @@ def _pyinstaller_cmd(
     app_name: str,
     icon: str | None,
     runtime_splash_asset: str | None,
+    reporting_config_asset: str | None = None,
 ) -> list[str]:
     cmd = [
         *pyinstaller_launcher,
@@ -847,6 +949,14 @@ def _pyinstaller_cmd(
             [
                 "--add-data",
                 _pyinstaller_add_data(runtime_splash_asset, "build_assets"),
+            ]
+        )
+
+    if reporting_config_asset:
+        cmd.extend(
+            [
+                "--add-data",
+                _pyinstaller_add_data(reporting_config_asset, RESOURCES_DIRNAME),
             ]
         )
 
@@ -1061,6 +1171,12 @@ def main() -> int:
         print(f"ERROR [splash]: {exc}")
         return 1
 
+    try:
+        reporting_config_result = _resolve_reporting_runtime_config(project_root)
+    except Exception as exc:
+        print(f"ERROR [reporting]: {exc}")
+        return 1
+
     _print_build_diagnostics(
         project_root,
         build_python,
@@ -1068,6 +1184,7 @@ def main() -> int:
         pyinstaller,
         icon_result,
         splash_result,
+        reporting_config_result,
     )
 
     cmd = _pyinstaller_cmd(
@@ -1076,6 +1193,9 @@ def main() -> int:
         app_name=PACKAGE_APP_NAME,
         icon=str(icon_result.path) if icon_result.path else None,
         runtime_splash_asset=str(splash_result.path) if splash_result.path else None,
+        reporting_config_asset=(
+            str(reporting_config_result.path) if reporting_config_result.path else None
+        ),
     )
 
     print("\nRunning:")

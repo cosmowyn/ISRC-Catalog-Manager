@@ -1,12 +1,16 @@
 import unittest
+from collections import Counter
 
 from isrc_manager.help_content import (
+    HELP_CHAPTER_SCREENSHOT_BASES,
     HELP_CHAPTERS,
     HELP_CHAPTERS_BY_ID,
+    HELP_SCREENSHOT_REFERENCES,
     HELP_SECTION_ORDER,
     help_section_for_chapter,
     iter_help_sections,
     render_help_html,
+    representative_screenshot_for_chapter,
 )
 
 
@@ -26,6 +30,27 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("application-updates", HELP_CHAPTERS_BY_ID)
         self.assertIn("soundcloud-publishing", HELP_CHAPTERS_BY_ID)
         self.assertIn("application-storage-admin", HELP_CHAPTERS_BY_ID)
+
+    def test_help_chapter_screenshot_mapping_uses_specific_ui_surfaces(self):
+        chapter_ids = {chapter.chapter_id for chapter in HELP_CHAPTERS}
+        screenshot_filenames = {reference.filename for reference in HELP_SCREENSHOT_REFERENCES}
+        base_counts = Counter(HELP_CHAPTER_SCREENSHOT_BASES.values())
+
+        self.assertEqual(set(HELP_CHAPTER_SCREENSHOT_BASES), chapter_ids)
+        self.assertFalse(set(HELP_CHAPTER_SCREENSHOT_BASES.values()) - screenshot_filenames)
+        self.assertLessEqual(base_counts["main_window.png"], 3)
+        self.assertGreaterEqual(len(base_counts), 24)
+        self.assertEqual(
+            representative_screenshot_for_chapter("add-data"), "add_track_workspace.png"
+        )
+        self.assertEqual(
+            representative_screenshot_for_chapter("soundcloud-publishing"),
+            "soundcloud_publish_dialog.png",
+        )
+        self.assertEqual(
+            representative_screenshot_for_chapter("accounting-royalties"),
+            "invoice_workspace.png",
+        )
 
     def test_rendered_help_contains_contents_index_and_anchors(self):
         html = render_help_html("Music Catalog Manager", "1.2.3")

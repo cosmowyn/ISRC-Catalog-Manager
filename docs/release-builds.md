@@ -19,11 +19,12 @@ The release workflow is `.github/workflows/release-build.yml` and runs only for 
 so tag pushes start release builds directly. In that path, the resolved tag is validated as
 SemVer-style before packaging.
 
-Documentation-only pushes, reruns, Help screenshot refresh commits, generated release metadata, and
-small application-code edits do not create a new version automatically. Automatic bumps require at
-least 1,000 touched lines in the configured application-code fingerprint paths. Maintainers can still
-request an explicit bump with commit markers such as `[bump version]`, `[version bump]`,
-`version-bump: true`, `release: true`, or `semver: patch|minor|major`.
+Documentation-only pushes, reruns, Help screenshot refresh commits, generated release metadata,
+tests, UI QA/PQ evidence, workflow-only edits, and release-automation maintenance do not create a new
+version automatically. Any real production-code change in the configured runtime/build fingerprint
+paths opens the automatic bump gate, even when the patch is small. Maintainers can still request an
+explicit bump with commit markers such as `[bump version]`, `[version bump]`, `version-bump: true`,
+`release: true`, or `semver: patch|minor|major`.
 
 ## Canonical Version Sync
 

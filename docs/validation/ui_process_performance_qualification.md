@@ -116,8 +116,9 @@ The strategy includes:
 - Generated-output qualification through deterministic JSON report, HTML document, CSV report, and
   PDF structural comparison artifacts.
 - Help documentation qualification through runtime inventory-to-manual coverage, required
-  workflow playbooks, chapter-depth checks, real UI screenshot references, and one current
-  screenshot embedded in every Help chapter.
+  workflow playbooks, chapter-depth checks, real dialog/workspace screenshot references, one current
+  screenshot embedded in every Help chapter, and SHA-256 uniqueness checks so duplicated placeholder
+  screenshots cannot pass.
 - Deviation recording for failures, missing coverage, incomplete automation, and unsupported test
   conditions.
 
@@ -263,8 +264,11 @@ The following remain pending and are intentionally recorded as deviations:
   any missing or shallow help coverage is a failing `UI-PQ-HELP-001` deviation until the help file
   is updated.
 - Every Help chapter must embed a screenshot from `docs/help/screenshots/chapter_<chapter_id>.png`.
-  The UI PQ suite refreshes these files from the current qualified UI screenshots before validating
-  the generated Help manual.
+  The UI PQ suite refreshes these files from the relevant current qualified UI dialog or workspace
+  before validating the generated Help manual.
+- Every Help screenshot file must have a unique SHA-256 byte hash. Duplicate image bytes are a
+  failing `UI-PQ-HELP-001` finding because they indicate placeholder reuse or an incorrectly
+  captured surface.
 - Evidence is generated for each executed test family.
 
 ## 10. Deviation Sheet Specification

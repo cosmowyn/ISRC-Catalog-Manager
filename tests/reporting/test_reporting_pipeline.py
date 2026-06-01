@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from isrc_manager.reporting import collectors
+from isrc_manager.reporting.config import ReportingConfiguration, load_reporting_configuration
 from isrc_manager.reporting.crash_detection import SessionMarkerStore, _record_from_mapping
 from isrc_manager.reporting.github import BackendProxySubmitter, ReportSubmissionResult
 from isrc_manager.reporting.models import ManualBugReportFields, ReportPayload, ReportSection
@@ -33,6 +34,69 @@ def _report_payload() -> ReportPayload:
         repository="owner/repo",
         sections=(ReportSection("Details", "Body"),),
     )
+
+
+def test_reporting_configuration_uses_environment_before_bundled_config(tmp_path) -> None:
+    resources = tmp_path / "bundle"
+    config_dir = resources / "resources"
+    config_dir.mkdir(parents=True)
+    (config_dir / "reporting.json").write_text(
+        json.dumps(
+            {
+                "proxy_url": "https://bundled.example.test/report",
+                "repository": "bundled/repo",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundled = load_reporting_configuration(environ={}, resource_root=resources)
+    overridden = load_reporting_configuration(
+        environ={
+            "ISRC_REPORT_PROXY_URL": "https://env.example.test/report",
+            "ISRC_REPORT_REPOSITORY": "env/repo",
+        },
+        resource_root=resources,
+    )
+    disabled = load_reporting_configuration(
+        environ={"ISRC_REPORT_PROXY_URL": ""},
+        resource_root=resources,
+    )
+
+    assert bundled == ReportingConfiguration(
+        repository="bundled/repo",
+        proxy_url="https://bundled.example.test/report",
+        source="bundled:resources/reporting.json",
+    )
+    assert overridden == ReportingConfiguration(
+        repository="env/repo",
+        proxy_url="https://env.example.test/report",
+        source="environment",
+    )
+    assert disabled.proxy_url == ""
+    assert disabled.source == "environment"
+
+
+def test_reporting_service_from_environment_uses_bundled_public_proxy_config(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        "isrc_manager.reporting.service.load_reporting_configuration",
+        lambda: ReportingConfiguration(
+            repository="owner/repo",
+            proxy_url="https://reports.example.test/submit",
+            source="bundled",
+        ),
+    )
+
+    service = ReportingService.from_environment(
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        app_version="5.0.0",
+    )
+
+    assert service.repository == "owner/repo"
+    assert service.submitter.endpoint_url == "https://reports.example.test/submit"
 
 
 def test_manual_report_is_sanitised_before_preview_and_pending_storage(tmp_path) -> None:
@@ -361,7 +425,8 @@ def test_proxy_submitter_requires_secure_endpoint() -> None:
     assert BackendProxySubmitter("http://localhost:8080/report").endpoint_url
     result = BackendProxySubmitter("").submit(_report_payload())
     assert not result.success
-    assert "No report proxy" in result.message
+    assert "No secure report proxy" in result.message
+    assert "ISRC_REPORT_PROXY_URL" in result.message
 
 
 def test_proxy_submitter_posts_structured_json_and_parses_response(monkeypatch) -> None:

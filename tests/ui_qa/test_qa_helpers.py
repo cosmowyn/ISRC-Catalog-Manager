@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.code_registry import CodeRegistryService
+from isrc_manager.help_content import HELP_SCREENSHOT_REFERENCES
 from isrc_manager.qa import assertions, commands, fixtures, scenarios
 from isrc_manager.qa.deviations import DeviationRecorder
 from isrc_manager.qa.evidence import EvidenceRecorder
+from isrc_manager.qa.help_validation import validate_help_coverage
 from isrc_manager.qa.inventory import UIInventoryItem
 from isrc_manager.qa.traceability import (
     TraceabilityEntry,
@@ -496,6 +498,17 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
 
     manifest = service.write_manifest()
     assert manifest.exists()
+
+
+def test_help_validation_rejects_duplicate_screenshot_hashes(tmp_path: Path) -> None:
+    duplicate_payload = b"same screenshot bytes"
+    for reference in HELP_SCREENSHOT_REFERENCES[:2]:
+        (tmp_path / reference.filename).write_bytes(duplicate_payload)
+
+    report = validate_help_coverage([], chapters=(), screenshot_dir=tmp_path)
+
+    assert report.duplicate_screenshot_hashes
+    assert any(finding.category == "screenshot-uniqueness" for finding in report.findings)
 
 
 def test_major_scenarios_fail_fast_without_required_window() -> None:

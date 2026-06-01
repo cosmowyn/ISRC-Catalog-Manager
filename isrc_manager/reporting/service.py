@@ -8,14 +8,13 @@ import os
 from pathlib import Path
 
 from .collectors import collect_recent_logs, collect_system_context, collect_traceback_files
+from .config import DEFAULT_REPOSITORY, load_reporting_configuration
 from .crash_detection import CrashSession, SessionMarkerStore
 from .github import BackendProxySubmitter, ReportSubmissionResult
 from .models import ManualBugReportFields, ReportPayload, ReportSection, utc_timestamp
 from .rate_limit import LocalReportRateLimiter
 from .sanitizer import ReportSanitizer
 from .storage import PendingReportStore
-
-DEFAULT_REPOSITORY = "cosmowyn/ISRC-Catalog-Manager"
 
 
 class ReportingService:
@@ -59,14 +58,13 @@ class ReportingService:
         app_version: str,
         logger: logging.Logger | None = None,
     ) -> ReportingService:
-        repository = os.environ.get("ISRC_REPORT_REPOSITORY", DEFAULT_REPOSITORY)
-        proxy_url = os.environ.get("ISRC_REPORT_PROXY_URL", "")
+        config = load_reporting_configuration()
         return cls(
             data_root=data_root,
             logs_dir=logs_dir,
             app_version=app_version,
-            repository=repository,
-            proxy_url=proxy_url,
+            repository=config.repository,
+            proxy_url=config.proxy_url,
             logger=logger,
         )
 
