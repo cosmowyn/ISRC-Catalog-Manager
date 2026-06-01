@@ -337,6 +337,56 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(report.status, VERIFICATION_STATUS_NO_WATERMARK)
         self.assertIn("stored source audio", " ".join(report.details))
 
+    def test_verify_file_rejects_likely_candidate_when_sidecar_points_to_clean_source(self):
+        _track_id, audio_path, _exported_path, sidecar_path, _result = self._export_fixture()
+        clean_copy = self.root / "exports" / "clean-source-with-sidecar.wav"
+        shutil.copy2(audio_path, clean_copy)
+        shutil.copy2(sidecar_path, clean_copy.with_suffix(".wav.authenticity.json"))
+        noisy_candidate = WatermarkExtractionResult(
+            status="insufficient",
+            key_id=self.default_key.key_id,
+            token=None,
+            mean_confidence=0.701,
+            sync_score=0.688,
+            group_agreement=0.701,
+            repeat_groups=4,
+            crc_ok=False,
+        )
+        reference_rejection = WatermarkExtractionResult(
+            status="none",
+            key_id=self.default_key.key_id,
+            token=None,
+            mean_confidence=0.0,
+            sync_score=0.0,
+            group_agreement=0.0,
+            repeat_groups=4,
+            crc_ok=False,
+        )
+
+        with (
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "extract_from_path",
+                return_value=noisy_candidate,
+            ),
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "verify_expected_token_against_reference",
+                return_value=reference_rejection,
+            ),
+            mock.patch.object(
+                self.audio_service.watermark_service,
+                "verify_expected_token",
+                return_value=noisy_candidate,
+            ),
+        ):
+            report = self.audio_service.verify_file(clean_copy)
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_NO_WATERMARK)
+        detail_text = "\n".join(report.details)
+        self.assertIn("exactly matched the stored source audio", detail_text)
+        self.assertIn("source, not an embedded watermark", detail_text)
+
     def test_verify_file_reports_reference_mismatch_when_fingerprint_check_fails(self):
         _track_id, _audio_path, exported_path, _sidecar_path, _result = self._export_fixture()
 

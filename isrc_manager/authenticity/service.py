@@ -264,6 +264,26 @@ def _watermark_token_from_payload(payload: dict[str, object]) -> WatermarkToken 
     return candidate_token
 
 
+def _payload_reference_audio_sha256(payload: dict[str, object]) -> str:
+    reference_audio = payload.get("reference_audio") or {}
+    if not isinstance(reference_audio, dict):
+        return ""
+    return str(reference_audio.get("sha256") or "").strip().lower()
+
+
+def _inspected_file_matches_payload_reference(
+    inspected_path: Path,
+    payload: dict[str, object],
+) -> bool:
+    reference_sha256 = _payload_reference_audio_sha256(payload)
+    if not reference_sha256:
+        return False
+    try:
+        return sha256_hex(inspected_path.read_bytes()).lower() == reference_sha256
+    except Exception:
+        return False
+
+
 class AuthenticityKeyService:
     """Owns Ed25519 public-key registry rows and local private-key files."""
 
@@ -2216,12 +2236,23 @@ class AudioAuthenticityService:
                 reference_guided_extraction is not None
                 and reference_guided_extraction.status == "none"
             )
+            inspected_is_exact_reference_audio = (
+                sidecar_payload_dict is not None
+                and _inspected_file_matches_payload_reference(inspected_path, sidecar_payload_dict)
+            )
             low_evidence_rejected_by_reference = (
                 reference_rejected_expected_token
                 and evidence_band is not None
                 and evidence_band.status == VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE
             )
-            if evidence_band is None or low_evidence_rejected_by_reference:
+            exact_reference_rejected_by_reference = (
+                reference_rejected_expected_token and inspected_is_exact_reference_audio
+            )
+            if (
+                evidence_band is None
+                or low_evidence_rejected_by_reference
+                or exact_reference_rejected_by_reference
+            ):
                 no_watermark_result = (
                     reference_guided_extraction
                     if reference_rejected_expected_token
@@ -2239,6 +2270,12 @@ class AudioAuthenticityService:
                     details.append(
                         "Reference-aware keyed comparison against the stored source audio did "
                         "not find the expected watermark energy."
+                    )
+                if exact_reference_rejected_by_reference:
+                    details.append(
+                        "The inspected file exactly matched the stored source audio referenced "
+                        "by the signed sidecar; the sidecar identifies the watermark source, not "
+                        "an embedded watermark in this clean file."
                     )
                 details.extend(analysis_details)
                 return AuthenticityVerificationReport(
