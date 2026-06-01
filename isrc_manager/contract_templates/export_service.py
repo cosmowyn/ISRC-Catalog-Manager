@@ -89,6 +89,24 @@ def _slugify(value: str, *, fallback: str) -> str:
     return cleaned or fallback
 
 
+def _use_headless_pdf_fallback() -> bool:
+    platform_name = getattr(QApplication, "platformName", None)
+    if not callable(platform_name):
+        return False
+    return (platform_name() or "").strip().lower() == "offscreen"
+
+
+def _render_file_to_pdf_with_text_document(source: Path, target: Path) -> None:
+    document = QTextDocument()
+    document.setHtml(source.read_text(encoding="utf-8"))
+    writer = QPdfWriter(str(target))
+    writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+    writer.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout.Unit.Millimeter)
+    document.print_(writer)
+    if not target.exists() or target.stat().st_size <= 0:
+        raise ContractTemplateExportError(f"Headless PDF fallback failed to write: {target}")
+
+
 class ContractTemplateExportError(RuntimeError):
     """Raised when a contract template draft cannot be resolved or exported."""
 
@@ -125,6 +143,9 @@ class QtWebEngineHtmlPdfAdapter:
         app = QApplication.instance() or QApplication([])
         del app
         target.parent.mkdir(parents=True, exist_ok=True)
+        if _use_headless_pdf_fallback():
+            _render_file_to_pdf_with_text_document(source, target)
+            return target
         page = QWebEnginePage()
         loop = QEventLoop()
         result: dict[str, object] = {"loaded": False, "printed": False}

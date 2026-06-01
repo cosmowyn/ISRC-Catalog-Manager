@@ -486,6 +486,7 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
         self._ensure_code_registry_tables()
+        self._ensure_invoicing_accounting_tables()
         self._ensure_track_import_repair_queue_table()
         self._ensure_contract_template_tables()
         self._ensure_authenticity_tables()
@@ -735,10 +736,17 @@ class DatabaseSchemaService:
             elif version == 42:
                 self._apply_migration(42, self._mig_42_to_43)
                 version = 43
+            elif version == 43:
+                self._apply_migration(43, self._mig_43_to_44)
+                version = 44
+            elif version == 44:
+                self._apply_migration(44, self._mig_44_to_45)
+                version = 45
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
         self._ensure_audio_waveform_cache_table()
+        self._ensure_invoicing_accounting_tables()
         self.conn.commit()
 
     def _mig_1_to_2(self) -> None:
@@ -1677,6 +1685,991 @@ class DatabaseSchemaService:
 
     def _mig_42_to_43(self) -> None:
         self._ensure_soundcloud_tables()
+
+    def _mig_43_to_44(self) -> None:
+        self._ensure_invoicing_accounting_tables()
+
+    def _mig_44_to_45(self) -> None:
+        self._ensure_invoicing_accounting_tables()
+
+    def _ensure_invoicing_accounting_tables(self) -> None:
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS AccountingAccounts (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                account_type TEXT NOT NULL,
+                normal_balance TEXT NOT NULL CHECK(normal_balance IN ('debit', 'credit')),
+                system_flag INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_accounts_type
+            ON AccountingAccounts(account_type, active, code)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS FinancialCommandLog (
+                command_key TEXT PRIMARY KEY,
+                command_type TEXT NOT NULL,
+                source_type TEXT,
+                source_id TEXT,
+                result_type TEXT,
+                result_id TEXT,
+                ledger_transaction_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'started',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                completed_at TEXT,
+                error_message TEXT
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_financial_command_log_source
+            ON FinancialCommandLog(source_type, source_id, command_type)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS AccountingTransactions (
+                id INTEGER PRIMARY KEY,
+                registry_entry_id INTEGER UNIQUE REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT,
+                transaction_number TEXT UNIQUE,
+                transaction_type TEXT NOT NULL,
+                posted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                reversal_of_transaction_id INTEGER REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                command_key TEXT UNIQUE REFERENCES FinancialCommandLog(command_key) ON DELETE RESTRICT,
+                idempotency_key TEXT UNIQUE,
+                created_by TEXT,
+                memo TEXT
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_transactions_type_posted
+            ON AccountingTransactions(transaction_type, posted_at DESC, id DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_transactions_reversal
+            ON AccountingTransactions(reversal_of_transaction_id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS AccountingEntries (
+                id INTEGER PRIMARY KEY,
+                transaction_id INTEGER NOT NULL REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                account_id INTEGER NOT NULL REFERENCES AccountingAccounts(id) ON DELETE RESTRICT,
+                party_id INTEGER REFERENCES Parties(id) ON DELETE RESTRICT,
+                debit_minor INTEGER,
+                credit_minor INTEGER,
+                currency TEXT NOT NULL,
+                vat_treatment TEXT,
+                vat_rate_basis_points INTEGER,
+                source_type TEXT,
+                source_id TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != ''),
+                CHECK(vat_rate_basis_points IS NULL OR vat_rate_basis_points >= 0),
+                CHECK(
+                    (
+                        debit_minor IS NOT NULL
+                        AND credit_minor IS NULL
+                        AND debit_minor >= 0
+                    )
+                    OR (
+                        credit_minor IS NOT NULL
+                        AND debit_minor IS NULL
+                        AND credit_minor >= 0
+                    )
+                )
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_entries_transaction
+            ON AccountingEntries(transaction_id, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_entries_account_currency
+            ON AccountingEntries(account_id, currency)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_entries_party_currency
+            ON AccountingEntries(party_id, currency)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_entries_vat
+            ON AccountingEntries(vat_treatment, vat_rate_basis_points, currency)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS AccountingTransactionLinks (
+                transaction_id INTEGER NOT NULL REFERENCES AccountingTransactions(id) ON DELETE CASCADE,
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                PRIMARY KEY (transaction_id, source_type, source_id, relation_type)
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounting_transaction_links_source
+            ON AccountingTransactionLinks(source_type, source_id, relation_type)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceCatalogItems (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                default_quantity_value INTEGER NOT NULL DEFAULT 1 CHECK(default_quantity_value > 0),
+                default_quantity_scale INTEGER NOT NULL DEFAULT 0 CHECK(default_quantity_scale >= 0),
+                default_unit_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(default_unit_price_minor >= 0),
+                default_vat_treatment TEXT NOT NULL DEFAULT 'standard',
+                default_vat_rate_basis_points INTEGER NOT NULL DEFAULT 0 CHECK(default_vat_rate_basis_points >= 0),
+                vat_country_code TEXT,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                category TEXT,
+                default_account_code TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        invoice_catalog_columns = self._table_columns("InvoiceCatalogItems")
+        if "default_quantity_value" not in invoice_catalog_columns:
+            self.cursor.execute(
+                "ALTER TABLE InvoiceCatalogItems ADD COLUMN default_quantity_value INTEGER NOT NULL DEFAULT 1 CHECK(default_quantity_value > 0)"
+            )
+        if "default_quantity_scale" not in invoice_catalog_columns:
+            self.cursor.execute(
+                "ALTER TABLE InvoiceCatalogItems ADD COLUMN default_quantity_scale INTEGER NOT NULL DEFAULT 0 CHECK(default_quantity_scale >= 0)"
+            )
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_catalog_items_active
+            ON InvoiceCatalogItems(active, category, name)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceTemplates (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                active_revision_id INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceTemplateRevisions (
+                id INTEGER PRIMARY KEY,
+                template_id INTEGER NOT NULL REFERENCES InvoiceTemplates(id) ON DELETE CASCADE,
+                revision_label TEXT,
+                source_filename TEXT NOT NULL,
+                managed_file_path TEXT,
+                html_content TEXT,
+                source_checksum_sha256 TEXT,
+                symbol_inventory_json TEXT,
+                validation_status TEXT NOT NULL DEFAULT 'pending',
+                validation_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_template_revisions_template
+            ON InvoiceTemplateRevisions(template_id, created_at DESC)
+            """)
+        invoice_template_revision_columns = self._table_columns("InvoiceTemplateRevisions")
+        if "html_content" not in invoice_template_revision_columns:
+            self.cursor.execute("ALTER TABLE InvoiceTemplateRevisions ADD COLUMN html_content TEXT")
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Invoices (
+                id INTEGER PRIMARY KEY,
+                draft_display_id TEXT UNIQUE,
+                invoice_registry_entry_id INTEGER UNIQUE REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT,
+                invoice_number TEXT UNIQUE,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                invoice_type TEXT NOT NULL,
+                document_status TEXT NOT NULL DEFAULT 'draft',
+                issue_date TEXT,
+                due_date TEXT,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                seller_vat_id_snapshot TEXT,
+                buyer_vat_id_snapshot TEXT,
+                vat_treatment_summary TEXT,
+                template_revision_id INTEGER REFERENCES InvoiceTemplateRevisions(id) ON DELETE SET NULL,
+                issued_ledger_transaction_id INTEGER UNIQUE REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                subtotal_minor INTEGER NOT NULL DEFAULT 0 CHECK(subtotal_minor >= 0),
+                vat_total_minor INTEGER NOT NULL DEFAULT 0 CHECK(vat_total_minor >= 0),
+                total_minor INTEGER NOT NULL DEFAULT 0 CHECK(total_minor >= 0),
+                idempotency_key TEXT UNIQUE,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != ''),
+                CHECK(document_status IN ('draft', 'issued', 'sent', 'voided', 'credited', 'cancelled'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoices_party_status
+            ON Invoices(party_id, document_status, issue_date DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoices_due_date
+            ON Invoices(due_date)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceLineItems (
+                id INTEGER PRIMARY KEY,
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE CASCADE,
+                catalog_item_id INTEGER REFERENCES InvoiceCatalogItems(id) ON DELETE SET NULL,
+                catalog_item_name_snapshot TEXT,
+                description TEXT NOT NULL,
+                quantity_value INTEGER NOT NULL CHECK(quantity_value > 0),
+                quantity_scale INTEGER NOT NULL DEFAULT 0 CHECK(quantity_scale >= 0),
+                unit_price_minor INTEGER NOT NULL CHECK(unit_price_minor >= 0),
+                vat_treatment TEXT NOT NULL DEFAULT 'standard',
+                vat_rate_basis_points INTEGER NOT NULL DEFAULT 0 CHECK(vat_rate_basis_points >= 0),
+                vat_country_code TEXT,
+                vat_reverse_charge_reason TEXT,
+                vat_exemption_reason TEXT,
+                net_amount_minor INTEGER NOT NULL CHECK(net_amount_minor >= 0),
+                vat_amount_minor INTEGER NOT NULL CHECK(vat_amount_minor >= 0),
+                gross_amount_minor INTEGER NOT NULL CHECK(gross_amount_minor >= 0),
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                ledger_account_code TEXT,
+                source_type TEXT,
+                source_id TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_line_items_invoice
+            ON InvoiceLineItems(invoice_id, sort_order, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_line_items_catalog
+            ON InvoiceLineItems(catalog_item_id)
+            """)
+        invoice_line_columns = self._table_columns("InvoiceLineItems")
+        if "ledger_account_code" not in invoice_line_columns:
+            self.cursor.execute("ALTER TABLE InvoiceLineItems ADD COLUMN ledger_account_code TEXT")
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceVatBreakdown (
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE CASCADE,
+                vat_treatment TEXT NOT NULL,
+                vat_rate_basis_points INTEGER NOT NULL DEFAULT 0 CHECK(vat_rate_basis_points >= 0),
+                taxable_amount_minor INTEGER NOT NULL CHECK(taxable_amount_minor >= 0),
+                vat_amount_minor INTEGER NOT NULL CHECK(vat_amount_minor >= 0),
+                gross_amount_minor INTEGER NOT NULL CHECK(gross_amount_minor >= 0),
+                currency TEXT NOT NULL,
+                PRIMARY KEY (invoice_id, vat_treatment, vat_rate_basis_points, currency),
+                CHECK(trim(currency) != '')
+            )
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoicePayments (
+                id INTEGER PRIMARY KEY,
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE RESTRICT,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                currency TEXT NOT NULL,
+                paid_at TEXT NOT NULL,
+                payment_method TEXT,
+                payment_reference TEXT,
+                ledger_transaction_id INTEGER UNIQUE REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                memo TEXT,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice
+            ON InvoicePayments(invoice_id, paid_at DESC, id DESC)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS CreditNotes (
+                id INTEGER PRIMARY KEY,
+                credit_note_registry_entry_id INTEGER UNIQUE REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT,
+                credit_note_number TEXT UNIQUE,
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE RESTRICT,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                reason TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'issued',
+                issue_date TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                subtotal_minor INTEGER NOT NULL CHECK(subtotal_minor >= 0),
+                vat_total_minor INTEGER NOT NULL CHECK(vat_total_minor >= 0),
+                total_minor INTEGER NOT NULL CHECK(total_minor >= 0),
+                ledger_transaction_id INTEGER UNIQUE REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_credit_notes_invoice
+            ON CreditNotes(invoice_id, issue_date DESC, id DESC)
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS CreditNoteLineAllocations (
+                id INTEGER PRIMARY KEY,
+                credit_note_id INTEGER NOT NULL REFERENCES CreditNotes(id) ON DELETE RESTRICT,
+                invoice_line_item_id INTEGER NOT NULL REFERENCES InvoiceLineItems(id) ON DELETE RESTRICT,
+                subtotal_minor INTEGER NOT NULL CHECK(subtotal_minor >= 0),
+                vat_minor INTEGER NOT NULL DEFAULT 0 CHECK(vat_minor >= 0),
+                total_minor INTEGER NOT NULL CHECK(total_minor >= 0),
+                currency TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != ''),
+                CHECK(total_minor = subtotal_minor + vat_minor),
+                UNIQUE(credit_note_id, invoice_line_item_id)
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_credit_note_line_allocations_line
+            ON CreditNoteLineAllocations(invoice_line_item_id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceManualSymbols (
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE CASCADE,
+                template_revision_id INTEGER REFERENCES InvoiceTemplateRevisions(id) ON DELETE CASCADE,
+                symbol_key TEXT NOT NULL,
+                value_text TEXT,
+                value_json TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (invoice_id, symbol_key)
+            )
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceTemplateResolvedSnapshots (
+                id INTEGER PRIMARY KEY,
+                invoice_id INTEGER NOT NULL REFERENCES Invoices(id) ON DELETE RESTRICT,
+                template_revision_id INTEGER REFERENCES InvoiceTemplateRevisions(id) ON DELETE RESTRICT,
+                resolved_values_json TEXT NOT NULL,
+                resolution_warnings_json TEXT,
+                rendered_html_content TEXT,
+                rendered_checksum_sha256 TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        invoice_snapshot_columns = self._table_columns("InvoiceTemplateResolvedSnapshots")
+        if "rendered_html_content" not in invoice_snapshot_columns:
+            self.cursor.execute(
+                "ALTER TABLE InvoiceTemplateResolvedSnapshots ADD COLUMN rendered_html_content TEXT"
+            )
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceOutputArtifacts (
+                id INTEGER PRIMARY KEY,
+                snapshot_id INTEGER NOT NULL REFERENCES InvoiceTemplateResolvedSnapshots(id) ON DELETE RESTRICT,
+                artifact_type TEXT NOT NULL,
+                output_path TEXT NOT NULL,
+                output_filename TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(size_bytes >= 0),
+                checksum_sha256 TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_snapshot
+            ON InvoiceOutputArtifacts(snapshot_id, artifact_type, id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RoyaltyCalculations (
+                id INTEGER PRIMARY KEY,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                contract_id INTEGER REFERENCES Contracts(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'calculated',
+                period_start TEXT,
+                period_end TEXT,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                net_payable_minor INTEGER NOT NULL DEFAULT 0 CHECK(net_payable_minor >= 0),
+                ledger_transaction_id INTEGER UNIQUE REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                idempotency_key TEXT UNIQUE,
+                context_snapshot_json TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(status IN ('calculated', 'reviewed', 'approved', 'posted', 'statement_generated', 'paid', 'corrected')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        royalty_calculation_columns = self._table_columns("RoyaltyCalculations")
+        if "contract_id" not in royalty_calculation_columns:
+            self.cursor.execute(
+                "ALTER TABLE RoyaltyCalculations ADD COLUMN contract_id INTEGER REFERENCES Contracts(id) ON DELETE SET NULL"
+            )
+        if "context_snapshot_json" not in royalty_calculation_columns:
+            self.cursor.execute(
+                "ALTER TABLE RoyaltyCalculations ADD COLUMN context_snapshot_json TEXT"
+            )
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RoyaltyCalculationLines (
+                id INTEGER PRIMARY KEY,
+                calculation_id INTEGER NOT NULL REFERENCES RoyaltyCalculations(id) ON DELETE CASCADE,
+                description TEXT NOT NULL,
+                net_payable_minor INTEGER NOT NULL CHECK(net_payable_minor >= 0),
+                source_type TEXT,
+                source_id TEXT,
+                contract_id INTEGER REFERENCES Contracts(id) ON DELETE SET NULL,
+                work_id INTEGER REFERENCES Works(id) ON DELETE SET NULL,
+                track_id INTEGER REFERENCES Tracks(id) ON DELETE SET NULL,
+                release_id INTEGER REFERENCES Releases(id) ON DELETE SET NULL,
+                right_id INTEGER REFERENCES RightsRecords(id) ON DELETE SET NULL,
+                ownership_interest_type TEXT,
+                ownership_interest_id INTEGER,
+                contract_royalty_term_id INTEGER,
+                source_event_id INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        royalty_line_columns = self._table_columns("RoyaltyCalculationLines")
+        royalty_line_additions = (
+            ("contract_id", "INTEGER REFERENCES Contracts(id) ON DELETE SET NULL"),
+            ("work_id", "INTEGER REFERENCES Works(id) ON DELETE SET NULL"),
+            ("track_id", "INTEGER REFERENCES Tracks(id) ON DELETE SET NULL"),
+            ("release_id", "INTEGER REFERENCES Releases(id) ON DELETE SET NULL"),
+            ("right_id", "INTEGER REFERENCES RightsRecords(id) ON DELETE SET NULL"),
+            ("ownership_interest_type", "TEXT"),
+            ("ownership_interest_id", "INTEGER"),
+            ("contract_royalty_term_id", "INTEGER"),
+            ("source_event_id", "INTEGER"),
+        )
+        for column_name, column_sql in royalty_line_additions:
+            if column_name not in royalty_line_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE RoyaltyCalculationLines ADD COLUMN {column_name} {column_sql}"
+                )
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RoyaltyStatements (
+                id INTEGER PRIMARY KEY,
+                statement_registry_entry_id INTEGER UNIQUE REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT,
+                statement_number TEXT UNIQUE,
+                calculation_id INTEGER NOT NULL REFERENCES RoyaltyCalculations(id) ON DELETE RESTRICT,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                status TEXT NOT NULL DEFAULT 'generated',
+                issue_date TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                total_minor INTEGER NOT NULL CHECK(total_minor >= 0),
+                idempotency_key TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ArtistPayouts (
+                id INTEGER PRIMARY KEY,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                royalty_calculation_id INTEGER REFERENCES RoyaltyCalculations(id) ON DELETE RESTRICT,
+                amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                currency TEXT NOT NULL,
+                paid_at TEXT NOT NULL,
+                payment_method TEXT,
+                payment_reference TEXT,
+                ledger_transaction_id INTEGER UNIQUE REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                memo TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        artist_payout_columns = self._table_columns("ArtistPayouts")
+        if "payment_method" not in artist_payout_columns:
+            self.cursor.execute("ALTER TABLE ArtistPayouts ADD COLUMN payment_method TEXT")
+        if "payment_reference" not in artist_payout_columns:
+            self.cursor.execute("ALTER TABLE ArtistPayouts ADD COLUMN payment_reference TEXT")
+        if "memo" not in artist_payout_columns:
+            self.cursor.execute("ALTER TABLE ArtistPayouts ADD COLUMN memo TEXT")
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_calculations_party_status
+            ON RoyaltyCalculations(party_id, status, updated_at DESC)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_lines_calculation
+            ON RoyaltyCalculationLines(calculation_id, sort_order, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_artist_payouts_party
+            ON ArtistPayouts(party_id, paid_at DESC, id DESC)
+            """)
+        self.cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_royalty_statements_calculation_unique
+            ON RoyaltyStatements(calculation_id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ContractRoyaltyTerms (
+                id INTEGER PRIMARY KEY,
+                contract_id INTEGER NOT NULL REFERENCES Contracts(id) ON DELETE CASCADE,
+                party_id INTEGER NOT NULL REFERENCES Parties(id) ON DELETE RESTRICT,
+                right_type TEXT,
+                royalty_basis TEXT NOT NULL DEFAULT 'net',
+                rate_basis_points INTEGER NOT NULL CHECK(rate_basis_points > 0),
+                territory TEXT,
+                effective_start TEXT,
+                effective_end TEXT,
+                source_document_id INTEGER REFERENCES ContractDocuments(id) ON DELETE SET NULL,
+                notes TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(royalty_basis IN ('gross', 'net')),
+                CHECK(active IN (0, 1))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_royalty_terms_contract
+            ON ContractRoyaltyTerms(contract_id, active, party_id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_royalty_terms_party
+            ON ContractRoyaltyTerms(party_id, active)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ContractRoyaltyTermScopes (
+                id INTEGER PRIMARY KEY,
+                term_id INTEGER NOT NULL REFERENCES ContractRoyaltyTerms(id) ON DELETE CASCADE,
+                scope_type TEXT NOT NULL,
+                scope_id INTEGER NOT NULL,
+                relation_type TEXT NOT NULL DEFAULT 'applies_to',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(scope_type IN (
+                    'work',
+                    'track',
+                    'release',
+                    'right',
+                    'work_ownership_interest',
+                    'recording_ownership_interest'
+                )),
+                UNIQUE(term_id, scope_type, scope_id, relation_type)
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contract_royalty_term_scopes_term
+            ON ContractRoyaltyTermScopes(term_id, scope_type, scope_id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RoyaltySourceEvents (
+                id INTEGER PRIMARY KEY,
+                source_type TEXT,
+                source_id TEXT,
+                contract_id INTEGER REFERENCES Contracts(id) ON DELETE SET NULL,
+                work_id INTEGER REFERENCES Works(id) ON DELETE SET NULL,
+                track_id INTEGER REFERENCES Tracks(id) ON DELETE SET NULL,
+                release_id INTEGER REFERENCES Releases(id) ON DELETE SET NULL,
+                event_date TEXT,
+                period_start TEXT,
+                period_end TEXT,
+                description TEXT NOT NULL,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                gross_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK(gross_amount_minor >= 0),
+                net_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK(net_amount_minor >= 0),
+                metadata_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != ''),
+                CHECK(gross_amount_minor > 0 OR net_amount_minor > 0)
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_source_events_contract
+            ON RoyaltySourceEvents(contract_id, period_start, period_end, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_source_events_work
+            ON RoyaltySourceEvents(work_id, period_start, period_end, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_source_events_track
+            ON RoyaltySourceEvents(track_id, period_start, period_end, id)
+            """)
+
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RoyaltyCalculationSourceLinks (
+                id INTEGER PRIMARY KEY,
+                calculation_id INTEGER NOT NULL REFERENCES RoyaltyCalculations(id) ON DELETE CASCADE,
+                calculation_line_id INTEGER REFERENCES RoyaltyCalculationLines(id) ON DELETE CASCADE,
+                source_event_id INTEGER REFERENCES RoyaltySourceEvents(id) ON DELETE RESTRICT,
+                contract_id INTEGER REFERENCES Contracts(id) ON DELETE SET NULL,
+                work_id INTEGER REFERENCES Works(id) ON DELETE SET NULL,
+                track_id INTEGER REFERENCES Tracks(id) ON DELETE SET NULL,
+                release_id INTEGER REFERENCES Releases(id) ON DELETE SET NULL,
+                right_id INTEGER REFERENCES RightsRecords(id) ON DELETE SET NULL,
+                ownership_interest_type TEXT,
+                ownership_interest_id INTEGER,
+                contract_royalty_term_id INTEGER REFERENCES ContractRoyaltyTerms(id) ON DELETE SET NULL,
+                relation_type TEXT NOT NULL DEFAULT 'royalty_source',
+                amount_minor INTEGER NOT NULL DEFAULT 0 CHECK(amount_minor >= 0),
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                CHECK(trim(currency) != '')
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_calculation_source_links_calculation
+            ON RoyaltyCalculationSourceLinks(calculation_id, calculation_line_id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_royalty_calculation_source_links_contract
+            ON RoyaltyCalculationSourceLinks(contract_id, source_event_id)
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_source_links_no_update_posted
+            BEFORE UPDATE ON RoyaltyCalculationSourceLinks
+            FOR EACH ROW
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=OLD.calculation_id)
+                 IN ('posted', 'statement_generated', 'paid', 'corrected')
+            BEGIN
+                SELECT RAISE(ABORT, 'Royalty calculation source links are immutable after posting');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_source_links_no_delete_posted
+            BEFORE DELETE ON RoyaltyCalculationSourceLinks
+            FOR EACH ROW
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=OLD.calculation_id)
+                 IN ('posted', 'statement_generated', 'paid', 'corrected')
+            BEGIN
+                SELECT RAISE(ABORT, 'Royalty calculation source links are immutable after posting');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_source_links_no_insert_posted
+            BEFORE INSERT ON RoyaltyCalculationSourceLinks
+            FOR EACH ROW
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=NEW.calculation_id)
+                 IN ('posted', 'statement_generated', 'paid', 'corrected')
+            BEGIN
+                SELECT RAISE(ABORT, 'Royalty calculation source links are immutable after posting');
+            END
+            """)
+
+        self._ensure_invoicing_accounting_triggers()
+        try:
+            from isrc_manager.invoicing.ledger_service import ensure_default_accounts
+
+            ensure_default_accounts(self.conn)
+        except Exception:
+            self.logger.exception("Could not seed default accounting accounts.")
+            raise
+
+    def _ensure_invoicing_accounting_triggers(self) -> None:
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_transactions_no_update
+            BEFORE UPDATE ON AccountingTransactions
+            BEGIN
+                SELECT RAISE(ABORT, 'AccountingTransactions are append-only (UPDATE forbidden)');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_transactions_no_delete
+            BEFORE DELETE ON AccountingTransactions
+            BEGIN
+                SELECT RAISE(ABORT, 'AccountingTransactions are append-only (DELETE forbidden)');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_no_update
+            BEFORE UPDATE ON AccountingEntries
+            BEGIN
+                SELECT RAISE(ABORT, 'AccountingEntries are append-only (UPDATE forbidden)');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_no_delete
+            BEFORE DELETE ON AccountingEntries
+            BEGIN
+                SELECT RAISE(ABORT, 'AccountingEntries are append-only (DELETE forbidden)');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoices_issued_number_no_update
+            BEFORE UPDATE OF invoice_number, invoice_registry_entry_id ON Invoices
+            WHEN OLD.invoice_number IS NOT NULL OR OLD.invoice_registry_entry_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice numbers are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoices_no_delete_issued
+            BEFORE DELETE ON Invoices
+            WHEN OLD.document_status != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoices cannot be hard-deleted');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_snapshots_no_update
+            BEFORE UPDATE ON InvoiceTemplateResolvedSnapshots
+            BEGIN
+                SELECT RAISE(ABORT, 'Invoice resolved snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_snapshots_no_delete
+            BEFORE DELETE ON InvoiceTemplateResolvedSnapshots
+            BEGIN
+                SELECT RAISE(ABORT, 'Invoice resolved snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_output_artifacts_no_update
+            BEFORE UPDATE ON InvoiceOutputArtifacts
+            BEGIN
+                SELECT RAISE(ABORT, 'Invoice output artifacts are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_output_artifacts_no_delete
+            BEFORE DELETE ON InvoiceOutputArtifacts
+            BEGIN
+                SELECT RAISE(ABORT, 'Invoice output artifacts are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_notes_issued_number_no_update
+            BEFORE UPDATE OF credit_note_number, credit_note_registry_entry_id ON CreditNotes
+            WHEN OLD.credit_note_number IS NOT NULL OR OLD.credit_note_registry_entry_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued credit note numbers are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_notes_no_delete
+            BEFORE DELETE ON CreditNotes
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit notes cannot be hard-deleted');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_notes_no_update_after_post
+            BEFORE UPDATE ON CreditNotes
+            WHEN OLD.ledger_transaction_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted credit notes are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_no_update
+            BEFORE UPDATE ON CreditNoteLineAllocations
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit note line allocations are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_no_delete
+            BEFORE DELETE ON CreditNoteLineAllocations
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit note line allocations are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_invoice_match
+            BEFORE INSERT ON CreditNoteLineAllocations
+            WHEN NOT EXISTS (
+                SELECT 1
+                FROM CreditNotes cn
+                INNER JOIN InvoiceLineItems line ON line.id=NEW.invoice_line_item_id
+                WHERE cn.id=NEW.credit_note_id
+                  AND cn.invoice_id=line.invoice_id
+                  AND cn.currency=NEW.currency
+                  AND line.currency=NEW.currency
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit note line allocation must match invoice and currency');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_no_overcredit_subtotal
+            BEFORE INSERT ON CreditNoteLineAllocations
+            WHEN NEW.subtotal_minor > (
+                SELECT line.net_amount_minor
+                       - COALESCE((
+                            SELECT SUM(existing.subtotal_minor)
+                            FROM CreditNoteLineAllocations existing
+                            INNER JOIN CreditNotes existing_note
+                                ON existing_note.id=existing.credit_note_id
+                            WHERE existing.invoice_line_item_id=NEW.invoice_line_item_id
+                              AND existing_note.status='issued'
+                         ), 0)
+                FROM InvoiceLineItems line
+                WHERE line.id=NEW.invoice_line_item_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit note line allocation exceeds remaining line subtotal');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_no_overcredit_vat
+            BEFORE INSERT ON CreditNoteLineAllocations
+            WHEN NEW.vat_minor > (
+                SELECT line.vat_amount_minor
+                       - COALESCE((
+                            SELECT SUM(existing.vat_minor)
+                            FROM CreditNoteLineAllocations existing
+                            INNER JOIN CreditNotes existing_note
+                                ON existing_note.id=existing.credit_note_id
+                            WHERE existing.invoice_line_item_id=NEW.invoice_line_item_id
+                              AND existing_note.status='issued'
+                         ), 0)
+                FROM InvoiceLineItems line
+                WHERE line.id=NEW.invoice_line_item_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Credit note line allocation exceeds remaining line VAT');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_payments_no_update_after_post
+            BEFORE UPDATE ON InvoicePayments
+            WHEN OLD.ledger_transaction_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted invoice payments are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_payments_no_delete
+            BEFORE DELETE ON InvoicePayments
+            BEGIN
+                SELECT RAISE(ABORT, 'Invoice payments cannot be hard-deleted');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_artist_payouts_no_update_after_post
+            BEFORE UPDATE ON ArtistPayouts
+            WHEN OLD.ledger_transaction_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted artist payouts are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_artist_payouts_no_delete
+            BEFORE DELETE ON ArtistPayouts
+            BEGIN
+                SELECT RAISE(ABORT, 'Artist payouts cannot be hard-deleted');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_insert_after_draft
+            BEFORE INSERT ON InvoiceLineItems
+            WHEN (SELECT document_status FROM Invoices WHERE id=NEW.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice line snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_update_after_draft
+            BEFORE UPDATE ON InvoiceLineItems
+            WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice line snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_delete_after_draft
+            BEFORE DELETE ON InvoiceLineItems
+            WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice line snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_vat_breakdown_no_insert_after_draft
+            BEFORE INSERT ON InvoiceVatBreakdown
+            WHEN (SELECT document_status FROM Invoices WHERE id=NEW.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice VAT snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_vat_breakdown_no_update_after_draft
+            BEFORE UPDATE ON InvoiceVatBreakdown
+            WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice VAT snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_invoice_vat_breakdown_no_delete_after_draft
+            BEFORE DELETE ON InvoiceVatBreakdown
+            WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+            BEGIN
+                SELECT RAISE(ABORT, 'Issued invoice VAT snapshots are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_statements_no_update
+            BEFORE UPDATE ON RoyaltyStatements
+            BEGIN
+                SELECT RAISE(ABORT, 'Royalty statements are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_statements_no_delete
+            BEFORE DELETE ON RoyaltyStatements
+            BEGIN
+                SELECT RAISE(ABORT, 'Royalty statements cannot be hard-deleted');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_lines_no_mutation_after_review
+            BEFORE UPDATE ON RoyaltyCalculationLines
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=OLD.calculation_id)
+                 NOT IN ('calculated', 'reviewed')
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted royalty calculation lines are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_lines_no_insert_after_review
+            BEFORE INSERT ON RoyaltyCalculationLines
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=NEW.calculation_id)
+                 NOT IN ('calculated', 'reviewed')
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted royalty calculation lines are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_royalty_lines_no_delete_after_review
+            BEFORE DELETE ON RoyaltyCalculationLines
+            WHEN (SELECT status FROM RoyaltyCalculations WHERE id=OLD.calculation_id)
+                 NOT IN ('calculated', 'reviewed')
+            BEGIN
+                SELECT RAISE(ABORT, 'Posted royalty calculation lines are immutable');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_transaction_links_no_update
+            BEFORE UPDATE ON AccountingTransactionLinks
+            BEGIN
+                SELECT RAISE(ABORT, 'Accounting transaction links are append-only');
+            END
+            """)
+        self.cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_accounting_transaction_links_no_delete
+            BEFORE DELETE ON AccountingTransactionLinks
+            BEGIN
+                SELECT RAISE(ABORT, 'Accounting transaction links are append-only');
+            END
+            """)
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")

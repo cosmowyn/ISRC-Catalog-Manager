@@ -20,6 +20,7 @@ from isrc_manager.integrations.soundcloud.models import (
     SoundCloudPublishOptions,
     SoundCloudPublishPlanItem,
     SoundCloudPublishPlanResult,
+    SoundCloudTokenKind,
     SoundCloudTrackMetadataPayload,
 )
 from isrc_manager.integrations.soundcloud.oauth import SoundCloudOAuthService
@@ -46,6 +47,18 @@ class FakeSecureBackend:
 
     def delete_password(self, service_name, account_key):
         self.values.pop((service_name, account_key), None)
+
+
+def _save_session_bundle_for_token_kind(
+    account_key: str,
+    *,
+    access_token: str = "a",
+    refresh_token: str = "r",
+) -> SoundCloudTokenKind:
+    return SoundCloudTokenStore(prefer_persistent=False).save_bundle(
+        account_key,
+        SoundCloudOAuthTokenBundle(access_token=access_token, refresh_token=refresh_token),
+    )
 
 
 class FakeOAuthApiClient:
@@ -332,10 +345,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:stale",
                 token_store_key="soundcloud:user:stale",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:stale",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:stale"),
                 account_payload={"id": 88, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -406,10 +416,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:lookup",
                 token_store_key="soundcloud:user:lookup",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:lookup",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:lookup"),
                 account_payload={
                     "id": "555",
                     "username": "Lookup Artist",
@@ -428,13 +435,17 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             assert active is not None
             assert by_id is not None
             self.assertEqual(active.username, "Lookup Artist")
+            self.assertEqual(active.permalink_url, "https://soundcloud.com/lookup")
+            self.assertEqual(active.avatar_url, "https://img.invalid/avatar.png")
             self.assertEqual(by_id.soundcloud_user_id, "555")
+            self.assertEqual(by_id.permalink_url, "https://soundcloud.com/lookup")
 
             repo.record_token_refresh(
                 account_id,
-                token_kind=SoundCloudTokenStore().save_bundle(
+                token_kind=_save_session_bundle_for_token_kind(
                     "soundcloud:user:lookup",
-                    SoundCloudOAuthTokenBundle(access_token="new", refresh_token="new-r"),
+                    access_token="new",
+                    refresh_token="new-r",
                 ),
                 scope="upload write",
                 token_expires_at="2100-01-01T00:00:00+00:00",
@@ -454,9 +465,10 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:lookup",
                 token_store_key="soundcloud:user:lookup",
-                token_kind=SoundCloudTokenStore().save_bundle(
+                token_kind=_save_session_bundle_for_token_kind(
                     "soundcloud:user:lookup",
-                    SoundCloudOAuthTokenBundle(access_token="a2", refresh_token="r2"),
+                    access_token="a2",
+                    refresh_token="r2",
                 ),
                 account_payload={"id": "555", "username": "Lookup Artist"},
                 scope="upload",
@@ -582,7 +594,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
     def test_refresh_failure_does_not_retry_stale_token(self):
         conn = _init_conn()
         try:
-            token_store = SoundCloudTokenStore()
+            token_store = SoundCloudTokenStore(prefer_persistent=False)
             repo = SoundCloudSQLiteRepository(conn)
             api = FakeOAuthApiClient()
             api.refresh_error = SoundCloudAPIError("refresh failed", status_code=401)
@@ -617,10 +629,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:edge-actions",
                 token_store_key="soundcloud:user:edge-actions",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:edge-actions",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:edge-actions"),
                 account_payload={"id": 15, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -697,10 +706,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:1",
                 token_store_key="soundcloud:user:1",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:1",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:1"),
                 account_payload={"id": 1, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -748,10 +754,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:refresh-failure",
                 token_store_key="soundcloud:user:refresh-failure",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:refresh-failure",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:refresh-failure"),
                 account_payload={"id": 16, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -793,10 +796,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:fetch-upload",
                 token_store_key="soundcloud:user:fetch-upload",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:fetch-upload",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:fetch-upload"),
                 account_payload={"id": 10, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -837,10 +837,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:fetch-update",
                 token_store_key="soundcloud:user:fetch-update",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:fetch-update",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:fetch-update"),
                 account_payload={"id": 11, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -919,10 +916,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:rich-warning",
                 token_store_key="soundcloud:user:rich-warning",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:rich-warning",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:rich-warning"),
                 account_payload={"id": 14, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -964,10 +958,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:early-failure",
                 token_store_key="soundcloud:user:early-failure",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:early-failure",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:early-failure"),
                 account_payload={"id": 12, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -1014,10 +1005,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:2",
                 token_store_key="soundcloud:user:2",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:2",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:2"),
                 account_payload={"id": 2, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -1068,10 +1056,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:3",
                 token_store_key="soundcloud:user:3",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:3",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:3"),
                 account_payload={"id": 3, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,
@@ -1106,10 +1091,7 @@ class SoundCloudExecutionPersistenceTests(unittest.TestCase):
             account_id = repo.upsert_connected_account(
                 account_key="soundcloud:user:4",
                 token_store_key="soundcloud:user:4",
-                token_kind=SoundCloudTokenStore().save_bundle(
-                    "soundcloud:user:4",
-                    SoundCloudOAuthTokenBundle(access_token="a", refresh_token="r"),
-                ),
+                token_kind=_save_session_bundle_for_token_kind("soundcloud:user:4"),
                 account_payload={"id": 4, "username": "Publisher"},
                 scope="upload",
                 token_expires_at=None,

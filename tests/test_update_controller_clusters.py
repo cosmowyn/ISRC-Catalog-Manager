@@ -208,6 +208,7 @@ def test_handle_update_check_result_routes_statuses(monkeypatch) -> None:
 
 
 def test_start_update_check_handles_manual_task_edges(monkeypatch) -> None:
+    monkeypatch.setattr(update_controller, "_root_sys", lambda: SimpleNamespace(frozen=True))
     messages = _MessageBox()
     monkeypatch.setattr(update_controller, "_message_box", lambda: messages)
     action = SimpleNamespace(setEnabled=mock.Mock())
@@ -254,7 +255,8 @@ def test_start_update_check_handles_manual_task_edges(monkeypatch) -> None:
     action.setEnabled.assert_has_calls([mock.call(False), mock.call(True)])
 
 
-def test_start_update_check_logs_automatic_failures() -> None:
+def test_start_update_check_logs_automatic_failures(monkeypatch) -> None:
+    monkeypatch.setattr(update_controller, "_root_sys", lambda: SimpleNamespace(frozen=True))
     events: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _submit_background_task(**kwargs):
@@ -281,3 +283,24 @@ def test_start_update_check_logs_automatic_failures() -> None:
             {"level": logging.INFO, "error": "offline"},
         )
     ]
+
+
+def test_start_update_check_skips_source_builds(monkeypatch) -> None:
+    monkeypatch.setattr(update_controller, "_root_sys", lambda: SimpleNamespace(frozen=False))
+    action = SimpleNamespace(setEnabled=mock.Mock())
+    app = SimpleNamespace(
+        check_for_updates_action=action,
+        update_preferences=SimpleNamespace(ignored_version=mock.Mock(return_value="1.2.2")),
+        _app_version_text=mock.Mock(return_value="1.2.3"),
+        _build_update_checker=mock.Mock(),
+        _submit_background_task=mock.Mock(return_value="task-id"),
+    )
+
+    update_controller._start_update_check(app, manual=False)
+    update_controller._start_update_check(app, manual=True)
+
+    app._submit_background_task.assert_not_called()
+    app._build_update_checker.assert_not_called()
+    app._app_version_text.assert_not_called()
+    app.update_preferences.ignored_version.assert_not_called()
+    action.setEnabled.assert_not_called()

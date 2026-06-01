@@ -23,6 +23,9 @@ VERIFICATION_STATUS_SIGNATURE_INVALID = "signature_invalid"
 VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH = "manifest_found_reference_mismatch"
 VERIFICATION_STATUS_NO_WATERMARK = "no_watermark_detected"
 VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT = "unsupported_format_or_insufficient_confidence"
+VERIFICATION_STATUS_WATERMARK_MATCH_VERIFIED = "watermark_match_verified"
+VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY = "watermark_match_likely"
+VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE = "watermark_match_low_confidence"
 
 
 @dataclass(slots=True)

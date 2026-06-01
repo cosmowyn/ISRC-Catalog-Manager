@@ -43,6 +43,23 @@ class ForensicsDialogsTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_export_dialog_can_fix_recipient_for_soundcloud_workflow(self):
+        dialog = ForensicExportDialog(
+            format_labels=[("wav", "WAV")],
+            fixed_recipient_label="SoundCloud",
+            share_label_caption="SoundCloud Label",
+            share_label_placeholder="Optional upload label",
+            parent=None,
+        )
+        try:
+            self.assertTrue(dialog.recipient_edit.isReadOnly())
+            dialog.recipient_edit.setText("Edited")
+            dialog.share_edit.setText("  Public upload  ")
+            self.assertEqual(dialog.recipient_label(), "SoundCloud")
+            self.assertEqual(dialog.share_label(), "Public upload")
+        finally:
+            dialog.close()
+
     def test_inspection_dialog_formats_optional_fields_and_confidence(self):
         report = ForensicInspectionReport(
             status="ok",

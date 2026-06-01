@@ -244,6 +244,8 @@ def _build_update_checker(self) -> UpdateChecker:
 
 
 def _start_update_check(self, *, manual: bool) -> None:
+    if not getattr(_root_sys(), "frozen", False):
+        return
     action = getattr(self, "check_for_updates_action", None)
     if manual and action is not None:
         action.setEnabled(False)

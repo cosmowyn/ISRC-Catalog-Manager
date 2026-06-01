@@ -685,6 +685,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+Shift+T", "Meta+Alt+Shift+T"),
     )
     workspace_create_menu.addAction(app.contract_template_workspace_action)
+    app.invoice_workspace_action = app._create_action(
+        "Invoice Workspace…",
+        slot=app.open_invoice_workspace,
+        shortcuts=("Ctrl+Alt+Shift+B", "Meta+Alt+Shift+B"),
+    )
+    workspace_create_menu.addAction(app.invoice_workspace_action)
     app.rights_matrix_action = app._create_action(
         "Rights Matrix…",
         slot=app.open_rights_matrix,
@@ -748,6 +754,17 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     app.soundcloud_publish_action.setToolTip(app.soundcloud_publish_action.statusTip())
     publish_menu.addAction(app.soundcloud_publish_action)
+    app.soundcloud_forensic_export_action = app._create_action(
+        "SoundCloud Forensic Upload Copy…",
+        slot=app.export_soundcloud_forensic_watermarked_audio,
+    )
+    app.soundcloud_forensic_export_action.setStatusTip(
+        "Export SoundCloud-ready forensic upload copies with recipient fixed to SoundCloud and public profile trace metadata."
+    )
+    app.soundcloud_forensic_export_action.setToolTip(
+        app.soundcloud_forensic_export_action.statusTip()
+    )
+    publish_menu.addAction(app.soundcloud_forensic_export_action)
     audio_menu = catalog_menu.addMenu("Audio")
     audio_ingest_menu = audio_menu.addMenu("Import & Attach")
     audio_export_menu = audio_menu.addMenu("Delivery & Conversion")
@@ -851,7 +868,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.export_forensic_watermarked_audio,
     )
     app.export_forensic_watermarked_audio_action.setStatusTip(
-        "Recipient-specific lossy delivery export with catalog metadata, a forensic watermark, derivative lineage, and optional ZIP packaging."
+        "Recipient-specific delivery export with catalog metadata, a forensic watermark, derivative lineage, and optional ZIP packaging."
     )
     app.export_forensic_watermarked_audio_action.setToolTip(
         app.export_forensic_watermarked_audio_action.statusTip()
@@ -1081,6 +1098,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+L", "Meta+Alt+L"),
     )
     help_menu.addAction(app.application_log_action)
+
+    app.report_bug_action = app._create_action(
+        "Report a Bug…",
+        slot=app.open_bug_report_dialog,
+    )
+    help_menu.addAction(app.report_bug_action)
 
     help_menu.addSeparator()
 

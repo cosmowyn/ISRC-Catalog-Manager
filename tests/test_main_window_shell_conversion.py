@@ -124,12 +124,24 @@ class MainWindowShellConversionTests(unittest.TestCase):
                 help_texts.index("Check for Updates…"),
                 help_texts.index("Diagnostics…"),
             )
+            self.assertIn("Report a Bug…", help_texts)
+            self.assertLess(
+                help_texts.index("Application Log…"),
+                help_texts.index("Report a Bug…"),
+            )
+            self.assertLess(
+                help_texts.index("Report a Bug…"), help_texts.index("Open Logs Folder…")
+            )
 
             shell.check_for_updates_action.trigger()
+            shell.report_bug_action.trigger()
             self.app.processEvents()
 
             self.assertTrue(
                 any(name == "check_for_updates" for name, _args, _kwargs in shell._triggered)
+            )
+            self.assertTrue(
+                any(name == "open_bug_report_dialog" for name, _args, _kwargs in shell._triggered)
             )
         finally:
             shell.close()

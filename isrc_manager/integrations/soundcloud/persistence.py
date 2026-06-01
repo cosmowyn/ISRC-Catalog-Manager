@@ -45,6 +45,8 @@ class SoundCloudAccountRecord:
     connection_status: str
     soundcloud_user_id: str | None = None
     username: str | None = None
+    permalink_url: str | None = None
+    avatar_url: str | None = None
     scope: str | None = None
     token_expires_at: str | None = None
 
@@ -63,7 +65,8 @@ class SoundCloudSQLiteRepository:
         row = self._fetch_one(
             """
             SELECT id, account_key, token_store_key, token_kind, connection_status,
-                   soundcloud_user_id, username, scope, token_expires_at
+                   soundcloud_user_id, username, permalink_url, avatar_url, scope,
+                   token_expires_at
             FROM SoundCloudAccounts
             WHERE connection_status='connected'
             ORDER BY updated_at DESC, id DESC
@@ -77,7 +80,8 @@ class SoundCloudSQLiteRepository:
         row = self._fetch_one(
             """
             SELECT id, account_key, token_store_key, token_kind, connection_status,
-                   soundcloud_user_id, username, scope, token_expires_at
+                   soundcloud_user_id, username, permalink_url, avatar_url, scope,
+                   token_expires_at
             FROM SoundCloudAccounts
             WHERE id=?
             """,
@@ -96,6 +100,8 @@ class SoundCloudSQLiteRepository:
             connection_status=str(row["connection_status"] or ""),
             soundcloud_user_id=_text(row.get("soundcloud_user_id")),
             username=_text(row.get("username")),
+            permalink_url=_text(row.get("permalink_url")),
+            avatar_url=_text(row.get("avatar_url")),
             scope=_text(row.get("scope")),
             token_expires_at=_text(row.get("token_expires_at")),
         )

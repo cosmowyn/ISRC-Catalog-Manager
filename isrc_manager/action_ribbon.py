@@ -56,9 +56,16 @@ def _action_ribbon_text_button_height(app, widget: QToolButton) -> int:
         widget.setToolButtonStyle(original_style)
 
 
+def _action_ribbon_button_object_name(action_id: str) -> str:
+    suffix = "".join(part.capitalize() for part in str(action_id).split("_") if part)
+    return f"actionRibbonButton{suffix or 'Unnamed'}"
+
+
 def _configure_action_ribbon_button_widget(app, action_id: str, widget, spec: dict) -> None:
     if widget is None:
         return
+    if isinstance(widget, QToolButton):
+        widget.setObjectName(_action_ribbon_button_object_name(action_id))
     widget.setProperty("role", "actionRibbonButton")
     widget.setToolTip(app._action_ribbon_button_tooltip(spec))
     if action_id == "media_player" and isinstance(widget, QToolButton):
@@ -358,7 +365,7 @@ def _initialize_action_ribbon_registry(app):
             "id": "forensic_export_audio",
             "label": "Forensic Watermarked Audio",
             "category": "Catalog",
-            "description": "Export recipient-specific lossy delivery copies for leak tracing with catalog metadata, final hashing, derivative lineage, and forensic export registration.",
+            "description": "Export recipient-specific forensic delivery copies for leak tracing with catalog metadata, final hashing, derivative lineage, and forensic export registration.",
             "action": app.export_forensic_watermarked_audio_action,
         },
         {
@@ -748,8 +755,14 @@ def _rebuild_action_ribbon_toolbar(app):
     toolbar.addAction(app.customize_action_ribbon_action)
     customize_widget = toolbar.widgetForAction(app.customize_action_ribbon_action)
     if customize_widget is not None:
-        customize_widget.setProperty("role", "actionRibbonButton")
-        customize_widget.setToolTip("Choose which quick actions appear in the top action ribbon.")
+        app._configure_action_ribbon_button_widget(
+            "customize_action_ribbon",
+            customize_widget,
+            {
+                "label": "Customize Action Ribbon",
+                "description": "Choose which quick actions appear in the top action ribbon.",
+            },
+        )
 
 
 def _apply_action_ribbon_configuration(app, action_ids: list[str], visible: bool):

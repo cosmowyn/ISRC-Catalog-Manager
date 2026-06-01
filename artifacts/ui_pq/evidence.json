@@ -1,0 +1,747 @@
+[
+  {
+    "data": {
+      "inventory_count": 413,
+      "inventory_path": "artifacts/ui_pq/ui_inventory.json",
+      "traceability_rows": 413
+    },
+    "message": "Runtime UI inventory and traceability matrix were generated.",
+    "status": "passed",
+    "test_id": "UI-PQ-INV-001",
+    "timestamp": "2026-06-01T13:16:37.177474+00:00"
+  },
+  {
+    "data": {
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpgoerl89d/qt-settings/AppLocalDataLocation/Database/default.db",
+      "menu_count": 38,
+      "window_title": "Music Catalog Manager"
+    },
+    "message": "Main window, menu bar, and QA database are reachable.",
+    "status": "passed",
+    "test_id": "UI-PQ-SMOKE-001",
+    "timestamp": "2026-06-01T13:16:37.177503+00:00"
+  },
+  {
+    "data": {
+      "action_count": 227,
+      "menu_count": 39
+    },
+    "message": "Runtime menu/action inventory was generated.",
+    "status": "passed",
+    "test_id": "UI-PQ-MENU-001",
+    "timestamp": "2026-06-01T13:16:37.177518+00:00"
+  },
+  {
+    "data": {
+      "comparison_count": 4,
+      "dialogs": [
+        {
+          "capture": {
+            "height": 520,
+            "name": "about_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+            "sample_count": 272,
+            "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+            "unique_sample_colors": 22,
+            "width": 720
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+            "actual_sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+            "baseline_created": false,
+            "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
+            "baseline_sha256": "9fd82b7e81341499084f8cf63d7948df44523103d5ebec1c01497bd7bc40d277",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 520,
+                "name": "about_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+                "sample_count": 272,
+                "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+                "unique_sample_colors": 22,
+                "width": 720
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0036730945821854912,
+                "changed_samples": 4,
+                "mean_channel_delta": 0.41735537190082644,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "about_dialog",
+            "passed": true,
+            "reason": "Screenshot is visually within the baseline tolerance."
+          },
+          "dialog": "about_dialog",
+          "object_name": "aboutDialog",
+          "window_title": "About Music Catalog Manager"
+        },
+        {
+          "capture": {
+            "height": 820,
+            "name": "help_contents_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+            "sample_count": 289,
+            "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+            "unique_sample_colors": 24,
+            "width": 1180
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+            "actual_sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+            "baseline_created": false,
+            "baseline_path": "artifacts/ui_pq/visual/baselines/help_contents_dialog.png",
+            "baseline_sha256": "6528a3171d4a55f7d6dc1d65babbf3065acee83ee86a8c96a3910b0cd0804bb2",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 820,
+                "name": "help_contents_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+                "sample_count": 289,
+                "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+                "unique_sample_colors": 24,
+                "width": 1180
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "help_contents_dialog",
+            "passed": true,
+            "reason": "Screenshot is visually within the baseline tolerance."
+          },
+          "dialog": "help_contents_dialog",
+          "object_name": "helpContentsDialog",
+          "window_title": "Help Contents"
+        }
+      ],
+      "main_window_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/screenshots/main_window.png",
+        "actual_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/main_window.png",
+        "baseline_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+        "comparison_type": "screenshot",
+        "details": {
+          "capture": {
+            "height": 800,
+            "name": "main_window",
+            "non_blank": true,
+            "path": "artifacts/ui_pq/visual/screenshots/main_window.png",
+            "sample_count": 272,
+            "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+            "unique_sample_colors": 9,
+            "width": 1506
+          },
+          "comparison_profile": {
+            "changed_sample_ratio": 0.0,
+            "changed_samples": 0,
+            "mean_channel_delta": 0.0,
+            "passed": true,
+            "same_size": true,
+            "sample_count": 1056,
+            "tolerance": {
+              "max_changed_sample_ratio": 0.35,
+              "max_mean_channel_delta": 6.0
+            }
+          }
+        },
+        "name": "main_window",
+        "passed": true,
+        "reason": "Screenshot is visually within the baseline tolerance."
+      },
+      "manifest_path": "artifacts/ui_pq/visual/visual_manifest.json",
+      "screenshot_count": 3,
+      "theme_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/actual/theme_payload_summary.json",
+        "actual_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/theme_payload_summary.json",
+        "baseline_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+        "comparison_type": "theme",
+        "details": {
+          "normalized_bytes": 9777
+        },
+        "name": "theme_payload_summary",
+        "passed": true,
+        "reason": "Artifact matches baseline."
+      }
+    },
+    "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed.",
+    "status": "passed",
+    "test_id": "UI-PQ-SET-001",
+    "timestamp": "2026-06-01T13:16:37.443451+00:00"
+  },
+  {
+    "data": {
+      "chapter_count": 42,
+      "chapter_screenshot_count": 42,
+      "copied_screenshot_count": 45,
+      "coverage_percent": 100.0,
+      "covered_count": 319,
+      "finding_count": 0,
+      "refreshed_chapter_screenshot_count": 42,
+      "report_path": "artifacts/ui_pq/help/help_coverage.json",
+      "requirement_count": 319,
+      "screenshot_count": 45,
+      "validated_help_manual_path": "artifacts/ui_pq/help/validated_help_manual.html",
+      "workflow_example_count": 7
+    },
+    "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references.",
+    "status": "passed",
+    "test_id": "UI-PQ-HELP-001",
+    "timestamp": "2026-06-01T13:16:37.487551+00:00"
+  },
+  {
+    "data": {
+      "add_track_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_add_track_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png"
+      },
+      "catalog_row_visible": true,
+      "creation_method": "add_track_panel.save_button.click",
+      "edit_method": "track_editor_dialog.save_changes",
+      "edit_track_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_edit_track_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_edit_track_dialog_populated.png"
+      },
+      "help_reference": {
+        "chapter_count": 42,
+        "chapter_screenshot_count": 42,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Create a First Single From Nothing"
+      },
+      "track_id": 1,
+      "work_id_from_add_track": 1
+    },
+    "message": "Track was created through Add Track UI and edited through Edit Track UI.",
+    "status": "passed",
+    "test_id": "UI-PQ-CAT-001",
+    "timestamp": "2026-06-01T13:16:37.780339+00:00"
+  },
+  {
+    "data": {
+      "help_reference": {
+        "chapter_count": 42,
+        "chapter_screenshot_count": 42,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Connect Parties, Works, Contracts, Rights, and Accounting"
+      },
+      "party_dialog_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_party_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_create_dialog_populated.png"
+      },
+      "party_id": 2,
+      "party_panel_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_party_manager_created_party_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png"
+      },
+      "party_visible": true,
+      "release_id": 1,
+      "release_panel_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png"
+      },
+      "release_visible": true,
+      "track_id": 1,
+      "work_dialog_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_work_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_create_dialog_populated.png"
+      },
+      "work_id": 2,
+      "work_panel_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_work_manager_created_work_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png"
+      },
+      "work_visible": true
+    },
+    "message": "Party, Work, and Release relationships were created or verified through manager UI.",
+    "status": "passed",
+    "test_id": "UI-PQ-REL-001",
+    "timestamp": "2026-06-01T13:16:38.110702+00:00"
+  },
+  {
+    "data": {
+      "contract_dialog_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_contract_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_create_dialog_populated.png"
+      },
+      "contract_id": 1,
+      "contract_panel_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_contract_manager_created_contract_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png"
+      },
+      "contract_visible": true,
+      "help_reference": {
+        "chapter_count": 42,
+        "chapter_screenshot_count": 42,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Connect Parties, Works, Contracts, Rights, and Accounting"
+      },
+      "release_id": 1,
+      "right_dialog_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_rights_matrix_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_create_dialog_populated.png"
+      },
+      "right_id": 1,
+      "right_visible": true,
+      "rights_panel_visual": {
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_rights_matrix_created_right_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png"
+      },
+      "track_id": 1,
+      "work_id": 2
+    },
+    "message": "Contract and Rights Matrix records were created through UI and verified in the database.",
+    "status": "passed",
+    "test_id": "UI-PQ-CON-001",
+    "timestamp": "2026-06-01T13:16:38.354668+00:00"
+  },
+  {
+    "data": {
+      "counts": {
+        "AccountingTransactions": 8,
+        "ArtistPayouts": 2,
+        "CreditNotes": 1,
+        "FinancialCommandLog": 9,
+        "InvoicePayments": 2,
+        "Invoices": 2,
+        "RoyaltyCalculations": 1,
+        "RoyaltyStatements": 1
+      },
+      "credit_note_id": 1,
+      "credit_note_number": "CN260001",
+      "credit_total_minor": 12100,
+      "credited_invoice_id": 2,
+      "credited_invoice_number": "INV260002",
+      "first_artist_payout_id": 1,
+      "first_payment_id": 1,
+      "help_reference": {
+        "chapter_count": 42,
+        "chapter_screenshot_count": 42,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Run the Accounting Ledger Lifecycle"
+      },
+      "invoice_party_id": 2,
+      "paid_invoice_id": 1,
+      "paid_invoice_number": "INV260001",
+      "party_ledger_balance_minor": 0,
+      "party_ledger_balances_minor": {
+        "invoice_party": 0,
+        "royalty_party": 0
+      },
+      "payment_total_minor": 12100,
+      "payout_total_minor": 15000,
+      "royalty_calculation_id": 1,
+      "royalty_ledger_transaction_id": 6,
+      "royalty_party_id": 1,
+      "royalty_statement_id": 1,
+      "royalty_statement_number": "ROY260001",
+      "service_layer_shortcuts": [],
+      "ui_control_path": "Invoice Workspace controls: Create Draft Invoice, Issue, Payment, Create Credit Note, Create Calculation, Approve / Post, Generate Statement, Record Payout, Refresh Reports.",
+      "visual_evidence": {
+        "accounting_credit_invoice_draft_created": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_draft_created.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png"
+        },
+        "accounting_credit_invoice_line_entry": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_line_entry.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png"
+        },
+        "accounting_credit_invoice_posted": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_posted.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png"
+        },
+        "accounting_credit_note_created": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_note_created.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png"
+        },
+        "accounting_invoice_posted": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_invoice_posted.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png"
+        },
+        "accounting_paid_invoice_draft_created": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_draft_created.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png"
+        },
+        "accounting_paid_invoice_line_entry": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_line_entry.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png"
+        },
+        "accounting_payment_entered": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payment_entered.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png"
+        },
+        "accounting_payout_created": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payout_created.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png"
+        },
+        "accounting_report_generated": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_report_generated.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png"
+        },
+        "accounting_royalty_calculation_created": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_calculation_created.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png"
+        },
+        "accounting_royalty_posted": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_posted.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png"
+        },
+        "accounting_royalty_statement_generated": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_statement_generated.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png"
+        }
+      },
+      "workflow_status": "fully_ui_led"
+    },
+    "message": "Invoice creation, invoice posting, payment entry, credit note creation, royalty statement generation, payout creation, report generation, and balanced ledger checks were executed through UI controls.",
+    "status": "passed",
+    "test_id": "UI-PQ-ACC-001",
+    "timestamp": "2026-06-01T13:16:39.559231+00:00"
+  },
+  {
+    "data": {
+      "account_id": 1,
+      "account_public_profile": {
+        "avatar_url": "https://images.example.test/ui-pq-avatar.jpg",
+        "id": "ui-pq-soundcloud",
+        "permalink_url": "https://soundcloud.com/ui-pq-profile",
+        "username": "UI PQ SoundCloud Profile"
+      },
+      "artwork_path": "artifacts/ui_pq/soundcloud-ui-pq-artwork.jpg",
+      "help_reference": {
+        "chapter_count": 42,
+        "chapter_screenshot_count": 42,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Prepare a SoundCloud Upload With a Forensic Trace"
+      },
+      "mocked_execution_boundary": "The live SoundCloud API call is replaced by a no-network publish runner invoked only by the dialog Publish button.",
+      "publication_id": 1,
+      "remote_url": "https://soundcloud.com/ui-pq-profile/ui-pq-qualification-track",
+      "remote_urn": "soundcloud:tracks:260531",
+      "run_id": 1,
+      "run_item_id": 1,
+      "sharing": "private",
+      "track_id": 1,
+      "ui_control_path": "SoundCloudPublishDialog controls: Use album selection, per-run metadata fields, Refresh preflight, Publish.",
+      "visual_evidence": {
+        "soundcloud_completion_ui": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_completion_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/soundcloud_completion_ui.png"
+        },
+        "soundcloud_preflight_ui": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_preflight_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/soundcloud_preflight_ui.png"
+        },
+        "soundcloud_progress_ui": {
+          "baseline_created": false,
+          "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_progress_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq/visual/screenshots/soundcloud_progress_ui.png"
+        }
+      },
+      "watermarked_audio_path": "artifacts/ui_pq/soundcloud-ui-pq-watermarked-upload.wav",
+      "workflow_status": "fully_ui_led",
+      "would_upload_audio": true
+    },
+    "message": "SoundCloud publish dialog options, private preflight, watermarked source, artwork, mocked publish action, progress UI, completion UI, run state, and no-secret storage were verified without network.",
+    "status": "passed",
+    "test_id": "UI-PQ-SC-001",
+    "timestamp": "2026-06-01T13:16:39.713518+00:00"
+  },
+  {
+    "data": {
+      "backup_integrity": "ok",
+      "backup_method": "backup_api",
+      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpgoerl89d/qt-settings/AppLocalDataLocation/backups/default_20260601_151639.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpgoerl89d/qt-settings/AppLocalDataLocation/Database/default.db",
+      "diagnostics_check_statuses": {
+        "Audio waveform cache": "ok",
+        "Backup artifacts": "ok",
+        "Custom-value integrity": "ok",
+        "Foreign-key consistency": "ok",
+        "History invariants": "ok",
+        "History snapshots": "ok",
+        "History storage budget": "ok",
+        "Legacy default-column custom fields": "ok",
+        "Managed files": "ok",
+        "SQLite integrity": "ok",
+        "Schema layout": "ok",
+        "Schema version": "ok",
+        "Storage layout": "ok"
+      },
+      "progress_message_count": 40,
+      "restore_integrity": "ok",
+      "restore_target": "artifacts/ui_pq/diagnostics-restore-target.db",
+      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpgoerl89d/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260601_151639.db",
+      "status_messages": [
+        "Collecting environment details...",
+        "Collected environment details.",
+        "Inspecting storage layout...",
+        "Inspected storage layout.",
+        "Checking schema version...",
+        "Checked schema version.",
+        "Inspecting schema layout...",
+        "Checking required database tables...",
+        "Checked required database tables.",
+        "Checking required track columns...",
+        "Checked required track columns.",
+        "Running SQLite integrity checks...",
+        "Finished SQLite integrity checks.",
+        "Checking foreign-key consistency...",
+        "Checked foreign-key consistency.",
+        "Checking custom-value integrity...",
+        "Checked custom-value integrity.",
+        "Checking cached waveform previews...",
+        "Checked cached waveform previews.",
+        "Checking legacy default-column custom fields...",
+        "Checked legacy default-column custom fields.",
+        "Checking managed files...",
+        "Checking managed album artwork references...",
+        "Checking managed license files...",
+        "Checked managed files.",
+        "Inspecting history snapshots and backups...",
+        "Collected history recovery-state issues.",
+        "Evaluated history snapshot artifacts.",
+        "Evaluated backup artifacts.",
+        "Evaluated history invariants.",
+        "Evaluated history storage budget.",
+        "Inspecting application-wide storage...",
+        "Discovered active profiles.",
+        "Collected managed-file references from default.db (1/1).",
+        "Audited managed media and document roots.",
+        "Audited history, backup, and session artifacts.",
+        "Audited update backups and installer cache.",
+        "Audited generated exports and log files.",
+        "Application-wide storage summary ready.",
+        "Inspected application-wide storage."
+      ]
+    },
+    "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed against the QA profile.",
+    "status": "passed",
+    "test_id": "UI-PQ-DIAG-001",
+    "timestamp": "2026-06-01T13:16:39.778168+00:00"
+  },
+  {
+    "data": {
+      "csv_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_report.csv",
+        "actual_sha256": "23abf080e5d64c78ac1821edba3d6929a75e34a662dc900d9f4aed64858504b4",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_generated_report.csv",
+        "baseline_sha256": "23abf080e5d64c78ac1821edba3d6929a75e34a662dc900d9f4aed64858504b4",
+        "comparison_type": "report",
+        "details": {
+          "normalized_bytes": 80
+        },
+        "name": "ui_pq_generated_report",
+        "passed": true,
+        "reason": "Artifact matches baseline."
+      },
+      "html_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_document.html",
+        "actual_sha256": "a00dbdacbbf33c98bae18b1504d456eb9849387204d9224d54c26d2a3f748734",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_generated_document.html",
+        "baseline_sha256": "a00dbdacbbf33c98bae18b1504d456eb9849387204d9224d54c26d2a3f748734",
+        "comparison_type": "generated_document",
+        "details": {
+          "normalized_bytes": 253
+        },
+        "name": "ui_pq_generated_document",
+        "passed": true,
+        "reason": "Artifact matches baseline."
+      },
+      "manifest_path": "artifacts/ui_pq/visual/generated_output_manifest.json",
+      "pdf_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_pdf_pdf_profile.json",
+        "actual_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_generated_pdf_pdf_profile.json",
+        "baseline_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+        "comparison_type": "pdf_profile",
+        "details": {
+          "normalized_bytes": 98
+        },
+        "name": "ui_pq_generated_pdf_pdf_profile",
+        "passed": true,
+        "reason": "Artifact matches baseline."
+      },
+      "pdf_path": "artifacts/ui_pq/visual/actual/ui_pq_generated_pdf.pdf",
+      "pdf_profile": {
+        "ends_with_eof": true,
+        "page_count": 1,
+        "sha256": "745e1fa97f9c6fc5405fae6b3814d35ee5de5fbbff73bf6e4d183ec61790733a",
+        "size_bytes": 13432,
+        "starts_with_pdf_header": true,
+        "valid": true
+      },
+      "report_comparison": {
+        "actual_path": "artifacts/ui_pq/visual/actual/ui_pq_report_summary.json",
+        "actual_sha256": "c604b2f15e9684beb979f88d108b008b17fa49707ae74a10c128b6c071c2983e",
+        "baseline_created": false,
+        "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_report_summary.json",
+        "baseline_sha256": "c604b2f15e9684beb979f88d108b008b17fa49707ae74a10c128b6c071c2983e",
+        "comparison_type": "report",
+        "details": {
+          "normalized_bytes": 544
+        },
+        "name": "ui_pq_report_summary",
+        "passed": true,
+        "reason": "Artifact matches baseline."
+      }
+    },
+    "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines.",
+    "status": "passed",
+    "test_id": "UI-PQ-IMP-001",
+    "timestamp": "2026-06-01T13:16:39.786413+00:00"
+  },
+  {
+    "data": {
+      "discovered_surface_count": 10,
+      "sample": [
+        "action:audio_authenticity_keys",
+        "action:authenticity_provenance",
+        "action:convert_external_audio_files",
+        "action:export_authentic_masters",
+        "action:export_catalog_audio_copies",
+        "action:export_forensic_watermarked_audio",
+        "action:export_provenance_copies",
+        "action:inspect_forensic_watermark",
+        "action:verify_audio_authenticity",
+        "menu:mainwindow_qmenu_28"
+      ]
+    },
+    "message": "Authenticity, watermark, and forensic verification workflow coverage.",
+    "status": "partial",
+    "test_id": "UI-PQ-AUTH-001",
+    "timestamp": "2026-06-01T13:16:39.786433+00:00"
+  },
+  {
+    "data": {
+      "discovered_surface_count": 10,
+      "sample": [
+        "action:audio",
+        "action:audio_file",
+        "action:audio_file:50",
+        "action:audio_file:66",
+        "action:bulk_attach_audio_files",
+        "button:audio_file_browse_button",
+        "button:audio_file_clear_button",
+        "field:audio_file_field",
+        "menu:mainwindow_qmenu_27",
+        "tab_page:adddatatabs_tab_4"
+      ]
+    },
+    "message": "Media player, audio attachment, conversion, and derivative ledger workflow coverage.",
+    "status": "partial",
+    "test_id": "UI-PQ-MEDIA-001",
+    "timestamp": "2026-06-01T13:16:39.786455+00:00"
+  }
+]

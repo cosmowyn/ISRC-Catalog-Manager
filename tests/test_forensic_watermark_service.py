@@ -62,6 +62,12 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         ):
             self.skipTest("ffmpeg with managed forensic MP3 support is required for this test.")
 
+    def _require_wav_forensic_support(self):
+        if not self.conversion_service.is_supported_target(
+            "wav", capability_group="managed_forensic"
+        ):
+            self.skipTest("ffmpeg with managed forensic WAV support is required for this test.")
+
     def test_forensic_export_reports_real_progress_stages_before_terminal_completion(self):
         self._require_mp3_forensic_support()
         track_id, _source_path = self.create_track_with_audio(
@@ -105,6 +111,46 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         )
         self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
         self.assertTrue(all("finished" not in message.lower() for message in messages))
+
+    def test_forensic_export_supports_soundcloud_safe_wav_delivery_copy(self):
+        self._require_wav_forensic_support()
+        track_id, _source_path = self.create_track_with_audio(
+            title="SoundCloud WAV Forensic Source",
+            artist_name="Moonwake",
+            album_title="SoundCloud Forensic Album",
+            duration_seconds=30,
+            seed=45,
+            suffix=".wav",
+        )
+
+        result = self.forensic_service.export(
+            ForensicExportRequest(
+                track_ids=[track_id],
+                output_dir=str(self.root / "soundcloud_wav_forensic"),
+                output_format="wav",
+                recipient_label="SoundCloud",
+                share_label=(
+                    "SoundCloud upload; username=Artist; "
+                    "profile_url=https://soundcloud.com/artist"
+                ),
+                profile_name="Test Profile",
+                embed_trace_metadata=True,
+            )
+        )
+
+        self.assertEqual(result.exported, 1)
+        output_path = Path(result.written_paths[0])
+        self.assertEqual(output_path.suffix.lower(), ".wav")
+        exported_tags = self.audio_tag_service.read_tags(output_path)
+        self.assertIn("Forensic Trace: SoundCloud upload", exported_tags.comments or "")
+        forensic_row = self.conn.execute("""
+            SELECT recipient_label, share_label, output_format, output_filename
+            FROM ForensicWatermarkExports
+            """).fetchone()
+        self.assertEqual(forensic_row[0], "SoundCloud")
+        self.assertIn("username=Artist", forensic_row[1])
+        self.assertEqual(forensic_row[2], "wav")
+        self.assertTrue(str(forensic_row[3]).endswith(".wav"))
 
     def test_single_forensic_export_writes_tags_hash_derivative_and_forensic_ledger(self):
         self._require_mp3_forensic_support()

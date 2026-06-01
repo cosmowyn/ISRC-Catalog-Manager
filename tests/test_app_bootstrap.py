@@ -447,8 +447,16 @@ class PackagedSmokeTests(unittest.TestCase):
         def install_message_filter():
             calls.append("message-filter")
 
+        def verify_dependencies():
+            calls.append("dependencies")
+
         with (
             mock.patch.object(packaged_smoke, "init_settings", side_effect=init_settings),
+            mock.patch.object(
+                packaged_smoke,
+                "verify_packaged_runtime_dependencies",
+                side_effect=verify_dependencies,
+            ) as verify_packaged_dependencies,
             mock.patch.object(packaged_smoke, "current_app_version", return_value="9.8.7"),
         ):
             result = packaged_smoke.run_packaged_smoke_test(
@@ -459,12 +467,28 @@ class PackagedSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertEqual(calls, ["settings", "message-filter"])
+        self.assertEqual(calls, ["settings", "dependencies", "message-filter"])
+        verify_packaged_dependencies.assert_called_once_with()
         self.assertIsNotNone(_FakeApplication._instance)
         self.assertEqual(_FakeApplication._instance.argv, ["app", "--extra"])
         self.assertEqual(_FakeApplication._instance.process_events_calls, 1)
         self.assertEqual(_FakeApplication._instance.quit_calls, 1)
         self.assertIn("9.8.7", output.getvalue())
+
+    def test_packaged_runtime_dependency_check_reports_missing_keyring(self):
+        if BOOTSTRAP_IMPORT_ERROR is not None:
+            raise unittest.SkipTest(f"Bootstrap helpers unavailable: {BOOTSTRAP_IMPORT_ERROR}")
+
+        with (
+            mock.patch.object(packaged_smoke.importlib.util, "find_spec", return_value=None),
+            mock.patch.object(
+                packaged_smoke.importlib.metadata,
+                "distribution",
+                side_effect=packaged_smoke.importlib.metadata.PackageNotFoundError,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "modules: keyring.*metadata: keyring"):
+                packaged_smoke.verify_packaged_runtime_dependencies()
 
 
 class AppWindowStatusTests(unittest.TestCase):

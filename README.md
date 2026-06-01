@@ -390,6 +390,7 @@ The build script follows a deterministic release workflow:
 - on Windows, prefer a repo-local `.venv\Scripts\pyinstaller.exe` when present before falling back to other PyInstaller launch methods
 - resolve packaged branding from `build_assets/icons/app_logo.*`
 - bundle the runtime splash asset from `build_assets/splash.*`
+- bundle the dynamic `keyring` runtime package, backend modules, and metadata needed for secure credential storage
 - build with PyInstaller using the platform policy in the script
 - stage the release artifact under `dist/release/`
 - create a compressed release package under `dist/release/packages/`
@@ -530,7 +531,7 @@ The current public version block below is maintained by `scripts/sync_version_do
 run by the production version-bump workflow after the canonical version changes.
 
 <!-- version:sync:start -->
-Current source release: `4.0.5` (`v4.0.5`).
+Current source release: `5.0.0` (`v5.0.0`).
 Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->
@@ -563,7 +564,9 @@ fails, the helper restores the backup and writes an install log in the update wo
 
 ## Support
 
-If you find a bug or want to improve the project, open an issue or pull request on GitHub. If the app has helped your catalog work, small donations are welcome through [PayPal](https://paypal.me/cosmowyn). The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
+If you find a bug or want to improve the project, open an issue or pull request on GitHub. The app also includes `Help > Report a Bug…`, which prepares a sanitised local preview before any crash or manual report is submitted or saved. See [docs/reporting.md](docs/reporting.md) for the reporting privacy model, proxy setup, and limitations.
+
+If the app has helped your catalog work, small donations are welcome through [PayPal](https://paypal.me/cosmowyn). The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
 
 ## License
 

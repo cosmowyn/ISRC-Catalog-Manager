@@ -28,7 +28,7 @@ version. The version-bump workflow updates that value first, then runs
 `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
-Current canonical source version: `4.0.5` (`v4.0.5`).
+Current canonical source version: `5.0.0` (`v5.0.0`).
 Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
 <!-- version:sync:end -->
@@ -86,6 +86,10 @@ python build.py
 `build.py` cleans stale local `build/` and `dist/`, runs PyInstaller, stages the platform output
 under `dist/release/`, creates an upload-ready archive under `dist/release/packages/`, and writes
 `dist/release_manifest.json`.
+
+SoundCloud credential storage imports Python `keyring` dynamically at runtime. The build command
+therefore explicitly includes `keyring`, collects `keyring.backends`, and copies `keyring`
+distribution metadata so the frozen app can discover safe OS keychain/keyring backends.
 
 Package names include:
 
@@ -148,4 +152,6 @@ python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release
 python build.py
 ```
 
-Local builds produce packages only for the current operating system.
+The packaged smoke entrypoint checks that the frozen binary includes the dynamic `keyring` module
+and its metadata before reporting success. Local builds produce packages only for the current
+operating system.

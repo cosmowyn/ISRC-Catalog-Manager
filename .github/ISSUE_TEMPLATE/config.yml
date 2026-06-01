@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ISRC Catalog Manager crash and bug reporting security model
+    url: https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/reporting.md
+    about: Review what app-generated reports include, redact, and require before submission.

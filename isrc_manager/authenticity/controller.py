@@ -438,7 +438,7 @@ def _pick_audio_authenticity_verification_file(self) -> Path | None:
         self,
         "Choose Audio File to Verify",
         "",
-        "Audio Files (*.wav *.flac *.aif *.aiff *.mp3 *.ogg *.oga *.opus *.m4a *.mp4 *.aac)",
+        "Audio Files (*.wav *.flac *.aif *.aiff *.mp3 *.ogg *.oga *.opus *.m4a *.mp4 *.aac);;All Files (*)",
     )
     if not chosen_path:
         return None

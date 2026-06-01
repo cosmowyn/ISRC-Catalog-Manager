@@ -1,4 +1,7 @@
 pyinstaller==6.20.0
+coverage[toml]==7.14.1
+pytest==9.0.3
+pytest-cov==7.1.0
 PySide6==6.11.1
 audioread==3.1.0
 pillow==12.2.0

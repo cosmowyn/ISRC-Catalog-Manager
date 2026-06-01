@@ -1299,6 +1299,7 @@ def _ensure_persistent_workspace_dock_shells(app) -> None:
             app._ensure_code_registry_workspace_dock,
             app._ensure_promo_code_ledger_dock,
             app._ensure_contract_template_workspace_dock,
+            app._ensure_invoice_workspace_dock,
             app._ensure_rights_matrix_dock,
             app._ensure_asset_registry_dock,
         ):

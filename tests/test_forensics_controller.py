@@ -5,7 +5,9 @@ from unittest import mock
 
 from isrc_manager.forensics.controller import (
     _root_attr,
+    _soundcloud_forensic_share_label,
     export_forensic_watermarked_audio,
+    export_soundcloud_forensic_watermarked_audio,
     inspect_forensic_watermark,
 )
 from isrc_manager.forensics.models import ForensicInspectionReport
@@ -99,7 +101,7 @@ class ForensicsControllerTests(unittest.TestCase):
         app._prompt_audio_conversion_format.assert_called_once_with(
             title="Export Forensic Watermarked Audio",
             prompt=(
-                "Choose the lossy forensic delivery output format. "
+                "Choose the forensic delivery output format. "
                 "These exports are recipient-specific leak-tracing copies, not signed authenticity masters."
             ),
             capability_group="managed_forensic",
@@ -108,7 +110,7 @@ class ForensicsControllerTests(unittest.TestCase):
         app._submit_background_bundle_task.assert_called_once_with(
             title="Export Forensic Watermarked Audio",
             description=(
-                "Converting selected catalog audio into lossy delivery copies, writing tags, embedding recipient-specific forensic watermarks, hashing final files, and registering forensic export lineage..."
+                "Converting selected catalog audio into delivery copies, writing tags, embedding recipient-specific forensic watermarks, hashing final files, and registering forensic export lineage..."
             ),
             task_fn=mock.ANY,
             kind="write",
@@ -164,6 +166,88 @@ class ForensicsControllerTests(unittest.TestCase):
             format_labels=[("mp3", "mp3 (lossy forensic delivery copy)")], parent=app
         )
         dialog_instance.exec.assert_called_once_with()
+
+    def test_soundcloud_share_label_uses_public_profile_without_secret_fields(self):
+        label = _soundcloud_forensic_share_label(
+            public_profile={
+                "username": "Cosmowyn Records",
+                "user_id": "42",
+                "profile_url": "https://soundcloud.com/cosmowyn",
+                "avatar_url": "https://i1.sndcdn.com/avatar.jpg",
+                "scope": "non-secret-but-not-public-profile-trace",
+                "token_store_key": "secret-ish",
+            },
+            upload_label="Forgiveness public upload",
+        )
+
+        self.assertIn("SoundCloud upload", label)
+        self.assertIn("label=Forgiveness public upload", label)
+        self.assertIn("username=Cosmowyn Records", label)
+        self.assertIn("user_id=42", label)
+        self.assertIn("profile_url=https://soundcloud.com/cosmowyn", label)
+        self.assertIn("avatar_url=https://i1.sndcdn.com/avatar.jpg", label)
+        self.assertNotIn("scope", label)
+        self.assertNotIn("token_store_key", label)
+
+    def test_export_soundcloud_forensic_audio_builds_fixed_recipient_request(self):
+        export_service = mock.Mock()
+        app = SimpleNamespace(
+            track_service=mock.Mock(),
+            forensic_export_service=export_service,
+            audio_conversion_service=mock.Mock(
+                capabilities=mock.Mock(
+                    return_value=SimpleNamespace(
+                        managed_forensic_targets=[
+                            SimpleNamespace(id="wav", label="WAV", lossy=False),
+                        ]
+                    )
+                )
+            ),
+            exports_dir=Path("/tmp"),
+            _audio_conversion_unavailable_message=mock.Mock(return_value=None),
+            _selected_track_ids_with_audio=mock.Mock(return_value=[7]),
+            _prompt_audio_conversion_format=mock.Mock(return_value="wav"),
+            _submit_background_bundle_task=mock.Mock(),
+            _scaled_progress_callback=mock.Mock(side_effect=lambda callback, **kwargs: callback),
+            _show_background_task_error=mock.Mock(),
+            _log_event=mock.Mock(),
+            _audit=mock.Mock(),
+            _audit_commit=mock.Mock(),
+            statusBar=mock.Mock(return_value=mock.Mock(showMessage=mock.Mock())),
+            _current_profile_name=mock.Mock(return_value="Profile"),
+        )
+        file_dialog = mock.Mock(getExistingDirectory=mock.Mock(return_value="/tmp/sc-out"))
+
+        with (
+            mock.patch("isrc_manager.forensics.controller.ForensicExportDialog", None),
+            mock.patch("isrc_manager.forensics.controller._file_dialog", return_value=file_dialog),
+            mock.patch("isrc_manager.forensics.controller._message_box", return_value=mock.Mock()),
+            mock.patch(
+                "isrc_manager.forensics.controller._soundcloud_account_public_profile",
+                return_value={
+                    "username": "Artist",
+                    "user_id": "55",
+                    "profile_url": "https://soundcloud.com/artist",
+                },
+            ),
+        ):
+            export_soundcloud_forensic_watermarked_audio(app)
+
+        app._submit_background_bundle_task.assert_called_once()
+        task_fn = app._submit_background_bundle_task.call_args.kwargs["task_fn"]
+        ctx = SimpleNamespace(
+            report_progress=mock.Mock(),
+            is_cancelled=mock.Mock(return_value=False),
+        )
+        task_fn(SimpleNamespace(forensic_export_service=export_service), ctx)
+        request = export_service.export.call_args.args[0]
+        self.assertEqual(request.track_ids, [7])
+        self.assertEqual(request.output_dir, "/tmp/sc-out")
+        self.assertEqual(request.output_format, "wav")
+        self.assertEqual(request.recipient_label, "SoundCloud")
+        self.assertTrue(request.embed_trace_metadata)
+        self.assertIn("username=Artist", request.share_label)
+        self.assertIn("profile_url=https://soundcloud.com/artist", request.share_label)
 
     def test_inspect_forensic_watermark_warns_when_service_missing(self):
         app = SimpleNamespace(forensic_export_service=None)

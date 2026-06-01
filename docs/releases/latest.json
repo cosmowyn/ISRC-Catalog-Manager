@@ -1,7 +1,7 @@
 {
-  "version": "4.0.5",
-  "released_at": "2026-05-31",
-  "summary": "Fix badge export and git push command in workflow",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v4.0.5.md",
+  "version": "5.0.0",
+  "released_at": "2026-06-01",
+  "summary": "Major reporting, qualification, SoundCloud forensic, and accounting workflow release",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v5.0.0.md",
   "minimum_supported_version": null
 }

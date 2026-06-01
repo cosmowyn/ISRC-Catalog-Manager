@@ -278,6 +278,23 @@ Any code change that is governed by existing tests must also update the correspo
 
 Agents must not leave tests stale after changing covered behaviour.
 
+All code changes must be governed by current QA/PQ tests.
+
+For every code change, agents must:
+
+- identify the relevant unit, integration, workflow, UI QA, and UI PQ coverage before editing;
+- update the governing QA/PQ tests when behaviour, workflow steps, evidence expectations,
+  traceability, generated outputs, or UI surfaces change;
+- add new QA/PQ coverage when the changed behaviour was not previously governed;
+- update UI PQ traceability, evidence expectations, and documentation when the change affects a
+  user-facing workflow, dialog, command, generated artifact, Help/manual surface, or qualification
+  status;
+- run the narrowest affected QA/PQ tests before broader validation.
+
+A code change is not complete merely because production code works locally. It is complete only
+when the relevant QA/PQ test coverage has been updated and executed, or when a truly non-behavioural
+change has been explicitly identified with the existing QA/PQ tests that still govern it.
+
 When changing covered code:
 
 - identify the tests that currently govern the changed behaviour;
@@ -438,6 +455,32 @@ Any CI change must preserve or improve validation strength.
 # Documentation Expectations
 
 When changing architecture, tests, workflows, packaging, or QA gates, update relevant documentation.
+
+When changing any user-visible feature, workflow, command, dialog, manager, generated output,
+setting, integration surface, or visible UI text, update the in-app Help manual in
+`isrc_manager/help_content.py` in the same change. The Help manual is product behaviour, not
+optional marketing copy.
+
+Help documentation requirements:
+
+- every feature/workflow visible in the runtime UI inventory must be explained in Help;
+- dependent workflows must include start-to-finish examples, prerequisites, expected outcomes,
+  related workflows, and troubleshooting notes;
+- every Help chapter must embed a current UI screenshot;
+- Help screenshots live in `docs/help/screenshots` and are refreshed by the UI PQ workflow;
+- `UI-PQ-HELP-001` must pass with 100% coverage and zero findings before a Help-affecting or
+  UI-affecting change is considered complete;
+- if a new feature adds or changes UI, the required tests must cover the Help update path as well
+  as the feature behaviour.
+
+Use this command to refresh and validate Help screenshots and coverage:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/ui_qa --no-cov
+```
+
+The same Help documentation gate is run in CI. Pushes to `main` also refresh the committed Help
+screenshots so the rendered manual stays aligned with the current application UI.
 
 Likely locations:
 
@@ -604,10 +647,12 @@ For every non-trivial task:
 3. Make a small plan.
 4. Apply focused changes.
 5. Add or update tests.
-6. Run the narrowest relevant tests first.
-7. Run broader validation as needed.
-8. Update documentation if the behaviour, architecture, or workflow changed.
-9. Report:
+6. Add or update the governing QA/PQ tests and traceability when the change affects a qualified
+   workflow or user-facing surface.
+7. Run the narrowest relevant tests first, including affected QA/PQ tests.
+8. Run broader validation as needed.
+9. Update documentation if the behaviour, architecture, workflow, QA gate, or PQ evidence changed.
+10. Report:
    - files changed
    - tests run
    - results
@@ -627,6 +672,7 @@ A change is complete only when:
 - no new root `ISRC_manager` imports are introduced
 - no vague helper/mixin dumping-ground modules are introduced
 - tests are meaningful
+- governing QA/PQ tests and traceability are updated for every changed behaviour or workflow
 - relevant validation commands pass
 - documentation is updated where needed
 - remaining limitations are explicitly documented

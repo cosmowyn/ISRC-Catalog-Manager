@@ -13,12 +13,26 @@ from isrc_manager.authenticity.models import (
     VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
     VERIFICATION_STATUS_VERIFIED,
     VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
+    VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY,
+    VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE,
     WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
     WatermarkExtractionResult,
     WatermarkToken,
 )
 from isrc_manager.releases import ReleasePayload, ReleaseTrackPlacement
 from tests._authenticity_support import AuthenticityWorkflowTestCase
+
+
+class _CopyingVerificationConversionService:
+    def __init__(self):
+        self.transcodes: list[tuple[Path, Path, str]] = []
+
+    def is_supported_target(self, format_id: str, **_kwargs) -> bool:
+        return str(format_id or "").strip().lower() == "wav"
+
+    def transcode(self, *, source_path: Path, destination_path: Path, target_id: str):
+        self.transcodes.append((Path(source_path), Path(destination_path), target_id))
+        shutil.copy2(source_path, destination_path)
 
 
 class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
@@ -248,6 +262,56 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(report.document_type, "direct_watermark")
         self.assertEqual(report.verification_basis, "reference_guided_direct")
 
+    def test_verify_file_converts_lossy_named_direct_watermark_for_analysis(self):
+        _track_id, _audio_path, exported_path, sidecar_path, _result = self._export_fixture()
+        candidate_path = self.root / "soundcloud-rip.mp3"
+        shutil.copy2(exported_path, candidate_path)
+        shutil.copy2(sidecar_path, candidate_path.with_suffix(".mp3.authenticity.json"))
+        conversion_service = _CopyingVerificationConversionService()
+        self.audio_service.conversion_service = conversion_service
+
+        report = self.audio_service.verify_file(candidate_path)
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_VERIFIED)
+        self.assertEqual(report.inspected_path, str(candidate_path))
+        self.assertTrue(conversion_service.transcodes)
+        self.assertTrue(
+            any("Analysis Conversion: MP3 decoded to WAV" in line for line in report.details)
+        )
+
+    def test_verify_file_reports_likely_match_for_degraded_direct_watermark_candidate(self):
+        candidate_path = self.write_audio_fixture(
+            "soundcloud-rip-roundtrip.wav",
+            duration_seconds=30,
+            seed=40,
+            suffix=".wav",
+        )
+        degraded_candidate = WatermarkExtractionResult(
+            status="insufficient",
+            key_id=self.default_key.key_id,
+            token=None,
+            mean_confidence=0.701,
+            sync_score=0.688,
+            group_agreement=0.701,
+            repeat_groups=4,
+            crc_ok=False,
+        )
+
+        with mock.patch.object(
+            self.audio_service.watermark_service,
+            "extract_from_path",
+            return_value=degraded_candidate,
+        ):
+            report = self.audio_service.verify_file(candidate_path)
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY)
+        self.assertIn("Likely watermark match found with 70.1% confidence", report.message)
+        detail_text = "\n".join(report.details)
+        self.assertIn("Evidence Band: Likely match", detail_text)
+        self.assertIn("Confidence: 70.1% (0.701)", detail_text)
+        self.assertIn("Sync Score: 68.8% (0.688)", detail_text)
+        self.assertIn("not as a clean negative", detail_text)
+
     def test_verify_file_reports_signature_invalid_when_manifest_signature_is_tampered(self):
         _track_id, _audio_path, exported_path, _sidecar_path, result = self._export_fixture()
         manifest_id = result.manifest_ids[0]
@@ -392,7 +456,15 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
             low_confidence_report = self.audio_service.verify_file(exported_path)
         self.assertEqual(
             low_confidence_report.status,
-            VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+            VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE,
+        )
+        self.assertIn(
+            "Low-confidence watermark candidate found with 63.0% confidence",
+            low_confidence_report.message,
+        )
+        self.assertIn(
+            "Evidence Band: Low-confidence candidate",
+            "\n".join(low_confidence_report.details),
         )
         self.assertIn(
             "Adjacent sidecar signature verified",

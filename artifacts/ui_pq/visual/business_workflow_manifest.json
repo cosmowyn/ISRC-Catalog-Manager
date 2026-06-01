@@ -1,0 +1,1221 @@
+{
+  "captures": [
+    {
+      "height": 800,
+      "name": "ui_pq_add_track_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
+      "sample_count": 272,
+      "sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+      "unique_sample_colors": 15,
+      "width": 1506
+    },
+    {
+      "height": 860,
+      "name": "ui_pq_edit_track_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_edit_track_dialog_populated.png",
+      "sample_count": 289,
+      "sha256": "3a47f842b2c6b0f0d0753df42c9a2241223be6ddb3a182290506952e701991c8",
+      "unique_sample_colors": 8,
+      "width": 760
+    },
+    {
+      "height": 700,
+      "name": "ui_pq_party_manager_create_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_create_dialog_populated.png",
+      "sample_count": 289,
+      "sha256": "7dd1331e63ac2d24583a5f6d8ac61ea4c7f95895ed51a1a4818e5206ca3596bb",
+      "unique_sample_colors": 2,
+      "width": 840
+    },
+    {
+      "height": 750,
+      "name": "ui_pq_party_manager_created_party_selected",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
+      "sample_count": 289,
+      "sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+      "unique_sample_colors": 17,
+      "width": 1174
+    },
+    {
+      "height": 780,
+      "name": "ui_pq_work_manager_create_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_create_dialog_populated.png",
+      "sample_count": 289,
+      "sha256": "2535227f9a8009b8d382fe33f8adfc5d2cc6b23008ce782808427c6092cfc8d6",
+      "unique_sample_colors": 7,
+      "width": 1020
+    },
+    {
+      "height": 1385,
+      "name": "ui_pq_work_manager_created_work_selected",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
+      "sample_count": 289,
+      "sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+      "unique_sample_colors": 15,
+      "width": 1174
+    },
+    {
+      "height": 1385,
+      "name": "ui_pq_release_browser_ui_created_release_selected",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
+      "sample_count": 289,
+      "sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+      "unique_sample_colors": 9,
+      "width": 1174
+    },
+    {
+      "height": 780,
+      "name": "ui_pq_contract_manager_create_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_create_dialog_populated.png",
+      "sample_count": 289,
+      "sha256": "7ebf7b86610d35383a7c16f33d0b473b5ac9b34bb5ebbc5960e3496ec9ec2a1a",
+      "unique_sample_colors": 9,
+      "width": 980
+    },
+    {
+      "height": 1385,
+      "name": "ui_pq_contract_manager_created_contract_selected",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
+      "sample_count": 289,
+      "sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+      "unique_sample_colors": 6,
+      "width": 1174
+    },
+    {
+      "height": 640,
+      "name": "ui_pq_rights_matrix_create_dialog_populated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_create_dialog_populated.png",
+      "sample_count": 272,
+      "sha256": "db30e178f551e21ba3e5b6a93014f6b6bd2903cca3ae8173c95b5a7d2cd63ef2",
+      "unique_sample_colors": 17,
+      "width": 820
+    },
+    {
+      "height": 1385,
+      "name": "ui_pq_rights_matrix_created_right_selected",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
+      "sample_count": 289,
+      "sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+      "unique_sample_colors": 3,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_paid_invoice_line_entry",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
+      "sample_count": 289,
+      "sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_paid_invoice_draft_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
+      "sample_count": 289,
+      "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_invoice_posted",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
+      "sample_count": 289,
+      "sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_payment_entered",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
+      "sample_count": 289,
+      "sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_credit_invoice_line_entry",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
+      "sample_count": 289,
+      "sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_credit_invoice_draft_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
+      "sample_count": 289,
+      "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_credit_invoice_posted",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
+      "sample_count": 289,
+      "sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+      "unique_sample_colors": 7,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_credit_note_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
+      "sample_count": 289,
+      "sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "unique_sample_colors": 6,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_royalty_calculation_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
+      "sample_count": 289,
+      "sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+      "unique_sample_colors": 10,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_royalty_posted",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
+      "sample_count": 289,
+      "sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+      "unique_sample_colors": 10,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_royalty_statement_generated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
+      "sample_count": 289,
+      "sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+      "unique_sample_colors": 10,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_payout_created",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
+      "sample_count": 289,
+      "sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+      "unique_sample_colors": 10,
+      "width": 1174
+    },
+    {
+      "height": 1567,
+      "name": "accounting_report_generated",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
+      "sample_count": 289,
+      "sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+      "unique_sample_colors": 11,
+      "width": 1174
+    },
+    {
+      "height": 780,
+      "name": "soundcloud_preflight_ui",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/soundcloud_preflight_ui.png",
+      "sample_count": 289,
+      "sha256": "756b19ab7ca0b2703fff2f324c69deed3e793e18e1bf242193c74a4e9e113ccf",
+      "unique_sample_colors": 13,
+      "width": 1788
+    },
+    {
+      "height": 780,
+      "name": "soundcloud_progress_ui",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/soundcloud_progress_ui.png",
+      "sample_count": 289,
+      "sha256": "702cf60557450e1d27328cfcd250d7068791cb0a8a3abf27954a84b71abbcd0c",
+      "unique_sample_colors": 14,
+      "width": 1788
+    },
+    {
+      "height": 780,
+      "name": "soundcloud_completion_ui",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/soundcloud_completion_ui.png",
+      "sample_count": 289,
+      "sha256": "a611023d9c7d6564e12e703c0092037251f9d65976d6f9cc94a9695ca4c60776",
+      "unique_sample_colors": 14,
+      "width": 1788
+    }
+  ],
+  "comparisons": [
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
+      "actual_sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_add_track_dialog_populated.png",
+      "baseline_sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 800,
+          "name": "ui_pq_add_track_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_add_track_dialog_populated.png",
+          "sample_count": 272,
+          "sha256": "e192ba98dc350bb64ae0df559afec24443790ea87c2df95ef6298a4e727643b8",
+          "unique_sample_colors": 15,
+          "width": 1506
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1056,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_add_track_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_edit_track_dialog_populated.png",
+      "actual_sha256": "3a47f842b2c6b0f0d0753df42c9a2241223be6ddb3a182290506952e701991c8",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_edit_track_dialog_populated.png",
+      "baseline_sha256": "3a47f842b2c6b0f0d0753df42c9a2241223be6ddb3a182290506952e701991c8",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 860,
+          "name": "ui_pq_edit_track_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_edit_track_dialog_populated.png",
+          "sample_count": 289,
+          "sha256": "3a47f842b2c6b0f0d0753df42c9a2241223be6ddb3a182290506952e701991c8",
+          "unique_sample_colors": 8,
+          "width": 760
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1156,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_edit_track_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_create_dialog_populated.png",
+      "actual_sha256": "7dd1331e63ac2d24583a5f6d8ac61ea4c7f95895ed51a1a4818e5206ca3596bb",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_party_manager_create_dialog_populated.png",
+      "baseline_sha256": "7dd1331e63ac2d24583a5f6d8ac61ea4c7f95895ed51a1a4818e5206ca3596bb",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 700,
+          "name": "ui_pq_party_manager_create_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_create_dialog_populated.png",
+          "sample_count": 289,
+          "sha256": "7dd1331e63ac2d24583a5f6d8ac61ea4c7f95895ed51a1a4818e5206ca3596bb",
+          "unique_sample_colors": 2,
+          "width": 840
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1122,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_party_manager_create_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
+      "actual_sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_party_manager_created_party_selected.png",
+      "baseline_sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 750,
+          "name": "ui_pq_party_manager_created_party_selected",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_party_manager_created_party_selected.png",
+          "sample_count": 289,
+          "sha256": "e08b1163f88985f8c3cacc226490d953464c0c0dd0666c605a68674a1d4bff41",
+          "unique_sample_colors": 17,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_party_manager_created_party_selected",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_create_dialog_populated.png",
+      "actual_sha256": "2535227f9a8009b8d382fe33f8adfc5d2cc6b23008ce782808427c6092cfc8d6",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_work_manager_create_dialog_populated.png",
+      "baseline_sha256": "2535227f9a8009b8d382fe33f8adfc5d2cc6b23008ce782808427c6092cfc8d6",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "ui_pq_work_manager_create_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_create_dialog_populated.png",
+          "sample_count": 289,
+          "sha256": "2535227f9a8009b8d382fe33f8adfc5d2cc6b23008ce782808427c6092cfc8d6",
+          "unique_sample_colors": 7,
+          "width": 1020
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_work_manager_create_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
+      "actual_sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_work_manager_created_work_selected.png",
+      "baseline_sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1385,
+          "name": "ui_pq_work_manager_created_work_selected",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_work_manager_created_work_selected.png",
+          "sample_count": 289,
+          "sha256": "888b60ed822d7477ac7930ef2d0a89bd1f3a64e2b087fc498903c4200d8b9a41",
+          "unique_sample_colors": 15,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_work_manager_created_work_selected",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
+      "actual_sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
+      "baseline_sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1385,
+          "name": "ui_pq_release_browser_ui_created_release_selected",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
+          "sample_count": 289,
+          "sha256": "5c5f5d36ed575ca548fb3fa3a2b04cc9e731d4cc78506cee0e12155a0a34c4ac",
+          "unique_sample_colors": 9,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_release_browser_ui_created_release_selected",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_create_dialog_populated.png",
+      "actual_sha256": "7ebf7b86610d35383a7c16f33d0b473b5ac9b34bb5ebbc5960e3496ec9ec2a1a",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_contract_manager_create_dialog_populated.png",
+      "baseline_sha256": "7ebf7b86610d35383a7c16f33d0b473b5ac9b34bb5ebbc5960e3496ec9ec2a1a",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "ui_pq_contract_manager_create_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_create_dialog_populated.png",
+          "sample_count": 289,
+          "sha256": "7ebf7b86610d35383a7c16f33d0b473b5ac9b34bb5ebbc5960e3496ec9ec2a1a",
+          "unique_sample_colors": 9,
+          "width": 980
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_contract_manager_create_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
+      "actual_sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_contract_manager_created_contract_selected.png",
+      "baseline_sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1385,
+          "name": "ui_pq_contract_manager_created_contract_selected",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png",
+          "sample_count": 289,
+          "sha256": "40509f038e3cf0423ddb25aaf022d62df1a8d5748f2990b6aba887f919e04fe6",
+          "unique_sample_colors": 6,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_contract_manager_created_contract_selected",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_create_dialog_populated.png",
+      "actual_sha256": "db30e178f551e21ba3e5b6a93014f6b6bd2903cca3ae8173c95b5a7d2cd63ef2",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_rights_matrix_create_dialog_populated.png",
+      "baseline_sha256": "db30e178f551e21ba3e5b6a93014f6b6bd2903cca3ae8173c95b5a7d2cd63ef2",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 640,
+          "name": "ui_pq_rights_matrix_create_dialog_populated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_create_dialog_populated.png",
+          "sample_count": 272,
+          "sha256": "db30e178f551e21ba3e5b6a93014f6b6bd2903cca3ae8173c95b5a7d2cd63ef2",
+          "unique_sample_colors": 17,
+          "width": 820
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1056,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_rights_matrix_create_dialog_populated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
+      "actual_sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_rights_matrix_created_right_selected.png",
+      "baseline_sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1385,
+          "name": "ui_pq_rights_matrix_created_right_selected",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png",
+          "sample_count": 289,
+          "sha256": "69226007c124302dd4adbaab3ffe1a1aaca2906d99c12f78a6f60f47ad4dff0b",
+          "unique_sample_colors": 3,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "ui_pq_rights_matrix_created_right_selected",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
+      "actual_sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_line_entry.png",
+      "baseline_sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_paid_invoice_line_entry",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
+          "sample_count": 289,
+          "sha256": "d96be11d996e4ac592c47153e122e352f4c764a7c0df0cb107c9d30c1c7c861f",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_paid_invoice_line_entry",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
+      "actual_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_draft_created.png",
+      "baseline_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_paid_invoice_draft_created",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
+          "sample_count": 289,
+          "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_paid_invoice_draft_created",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
+      "actual_sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_invoice_posted.png",
+      "baseline_sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_invoice_posted",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
+          "sample_count": 289,
+          "sha256": "cad2db634c2f0838ddad33b2ca50f415b2ed68c818b10cd592b9f587c0bf73b3",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_invoice_posted",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
+      "actual_sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payment_entered.png",
+      "baseline_sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_payment_entered",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
+          "sample_count": 289,
+          "sha256": "aa6a81c7490e114c7c58e7895fd4d8d70508acf5a55e88d457786f914baca404",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_payment_entered",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
+      "actual_sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_line_entry.png",
+      "baseline_sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_credit_invoice_line_entry",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
+          "sample_count": 289,
+          "sha256": "64fe05c47e22c1fd26257ec4eed6d34abc0ebbbe616b78953f5649f0eb41fa12",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_credit_invoice_line_entry",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
+      "actual_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_draft_created.png",
+      "baseline_sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_credit_invoice_draft_created",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
+          "sample_count": 289,
+          "sha256": "cdc97b4beb8d5ae7943588662ef60727827d982fe25f8b87e4093b591c5da4b6",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_credit_invoice_draft_created",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
+      "actual_sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_posted.png",
+      "baseline_sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_credit_invoice_posted",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
+          "sample_count": 289,
+          "sha256": "01e290424540ee3804a354a6325e72d29f69505df11a93ad6829e1dfc5b4e47e",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_credit_invoice_posted",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
+      "actual_sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_note_created.png",
+      "baseline_sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_credit_note_created",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
+          "sample_count": 289,
+          "sha256": "a38f31b54ac922fa564fa66d493860e54be51ae94a3aba948a26606b7659a76f",
+          "unique_sample_colors": 6,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_credit_note_created",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
+      "actual_sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_calculation_created.png",
+      "baseline_sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_royalty_calculation_created",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_calculation_created.png",
+          "sample_count": 289,
+          "sha256": "370250bdaa084f30bf7e988813f66854865fae3320d9c5570f385e8b18aa0019",
+          "unique_sample_colors": 10,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_royalty_calculation_created",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
+      "actual_sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_posted.png",
+      "baseline_sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_royalty_posted",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_posted.png",
+          "sample_count": 289,
+          "sha256": "59e2722d76cf25ecc386e126f7e897c932c411153b93399269795e11415954b2",
+          "unique_sample_colors": 10,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_royalty_posted",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
+      "actual_sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_royalty_statement_generated.png",
+      "baseline_sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_royalty_statement_generated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_royalty_statement_generated.png",
+          "sample_count": 289,
+          "sha256": "1243a66509504675c4d182a12fb15422a8fa968f7bf6e67d7d8c8a51d535b50a",
+          "unique_sample_colors": 10,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_royalty_statement_generated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
+      "actual_sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payout_created.png",
+      "baseline_sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_payout_created",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_payout_created.png",
+          "sample_count": 289,
+          "sha256": "ecb2d176196a89601dccbea54bfc914b4a716ccaf9c63e27d6a158045dd5ef99",
+          "unique_sample_colors": 10,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_payout_created",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
+      "actual_sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_report_generated.png",
+      "baseline_sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1567,
+          "name": "accounting_report_generated",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/accounting_report_generated.png",
+          "sample_count": 289,
+          "sha256": "6c3e6b55f0c884d1ee576705b7fc73a17025c2c5d11c8ee28fa5f33cc5e2942c",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "accounting_report_generated",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/soundcloud_preflight_ui.png",
+      "actual_sha256": "756b19ab7ca0b2703fff2f324c69deed3e793e18e1bf242193c74a4e9e113ccf",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_preflight_ui.png",
+      "baseline_sha256": "756b19ab7ca0b2703fff2f324c69deed3e793e18e1bf242193c74a4e9e113ccf",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "soundcloud_preflight_ui",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/soundcloud_preflight_ui.png",
+          "sample_count": 289,
+          "sha256": "756b19ab7ca0b2703fff2f324c69deed3e793e18e1bf242193c74a4e9e113ccf",
+          "unique_sample_colors": 13,
+          "width": 1788
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "soundcloud_preflight_ui",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/soundcloud_progress_ui.png",
+      "actual_sha256": "702cf60557450e1d27328cfcd250d7068791cb0a8a3abf27954a84b71abbcd0c",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_progress_ui.png",
+      "baseline_sha256": "702cf60557450e1d27328cfcd250d7068791cb0a8a3abf27954a84b71abbcd0c",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "soundcloud_progress_ui",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/soundcloud_progress_ui.png",
+          "sample_count": 289,
+          "sha256": "702cf60557450e1d27328cfcd250d7068791cb0a8a3abf27954a84b71abbcd0c",
+          "unique_sample_colors": 14,
+          "width": 1788
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "soundcloud_progress_ui",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/soundcloud_completion_ui.png",
+      "actual_sha256": "a611023d9c7d6564e12e703c0092037251f9d65976d6f9cc94a9695ca4c60776",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_completion_ui.png",
+      "baseline_sha256": "a611023d9c7d6564e12e703c0092037251f9d65976d6f9cc94a9695ca4c60776",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 780,
+          "name": "soundcloud_completion_ui",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/soundcloud_completion_ui.png",
+          "sample_count": 289,
+          "sha256": "a611023d9c7d6564e12e703c0092037251f9d65976d6f9cc94a9695ca4c60776",
+          "unique_sample_colors": 14,
+          "width": 1788
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "soundcloud_completion_ui",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    }
+  ]
+}

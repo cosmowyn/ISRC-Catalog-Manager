@@ -12,6 +12,7 @@ import pytest
 import isrc_manager.forensics.service as forensic_service_module
 from isrc_manager.forensics.models import (
     FORENSIC_STATUS_MATCH_FOUND,
+    FORENSIC_STATUS_MATCH_LIKELY,
     FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
     FORENSIC_STATUS_NOT_DETECTED,
     FORENSIC_STATUS_TOKEN_UNRESOLVED,
@@ -35,6 +36,8 @@ from isrc_manager.forensics.service import (
     _ResolutionCandidate,
     _sha256_for_file,
 )
+from isrc_manager.media.audio_formats import forensic_target_profiles
+from isrc_manager.tags import AudioTagData
 
 
 class _ContextConnection:
@@ -123,6 +126,17 @@ class _ForensicLedger:
         self, forensic_export_id: str, *, status: str, confidence: float | None
     ) -> None:
         self.verifications.append((forensic_export_id, status, confidence))
+
+
+class _MemoryTagService:
+    def __init__(self, initial: AudioTagData | None = None):
+        self.tag_data = initial or AudioTagData()
+
+    def read_tags(self, _path: Path) -> AudioTagData:
+        return self.tag_data
+
+    def write_tags(self, _path: Path, tag_data: AudioTagData) -> None:
+        self.tag_data = tag_data
 
 
 class _SourceHandle:
@@ -260,6 +274,33 @@ def test_forensic_service_helpers_normalize_names_hashes_and_progress(tmp_path: 
     assert progress == [(13, 27, "Working")]
 
 
+def test_forensic_target_profiles_include_soundcloud_safe_wave_and_lossy_formats() -> None:
+    target_ids = {profile.id for profile in forensic_target_profiles()}
+
+    assert {"wav", "mp3", "ogg", "opus", "m4a"} <= target_ids
+
+
+def test_forensic_trace_metadata_is_appended_to_export_comments(tmp_path: Path) -> None:
+    coordinator = _coordinator(tmp_path)
+    coordinator.tag_service = _MemoryTagService(AudioTagData(comments="Catalog note"))
+    target = tmp_path / "soundcloud.wav"
+    target.write_bytes(b"audio")
+
+    written, warning = coordinator._write_forensic_trace_metadata(
+        target,
+        trace_label=(
+            "SoundCloud upload; username=Artist; " "profile_url=https://soundcloud.com/artist"
+        ),
+    )
+
+    assert written is True
+    assert warning is None
+    assert coordinator.tag_service.tag_data.comments is not None
+    assert "Catalog note" in coordinator.tag_service.tag_data.comments
+    assert "Forensic Trace: SoundCloud upload" in coordinator.tag_service.tag_data.comments
+    assert "profile_url=https://soundcloud.com/artist" in coordinator.tag_service.tag_data.comments
+
+
 def test_forensic_ledger_round_trips_exports_candidates_and_verifications() -> None:
     conn = _ledger_connection()
     ledger = ForensicLedgerService(conn)
@@ -374,8 +415,8 @@ def test_embed_export_path_rejects_unsupported_delivery_format(tmp_path: Path) -
     with pytest.raises(ValueError, match="Unsupported forensic delivery output format"):
         service.embed_export_path(
             source_path=tmp_path / "source.wav",
-            destination_path=tmp_path / "dest.m4a",
-            output_format="m4a",
+            destination_path=tmp_path / "dest.wma",
+            output_format="wma",
             conversion_service=_ConversionService(),
             watermark_key=b"key",
             token=token,
@@ -437,11 +478,12 @@ def test_prepare_analysis_audio_converts_unsupported_files_and_rejects_without_d
     source = tmp_path / "candidate.mp3"
     source.write_bytes(b"mp3")
 
-    analysis = coordinator._prepare_analysis_audio(source, tmp_path)
+    analysis, details = coordinator._prepare_analysis_audio(source, tmp_path)
 
     assert analysis == tmp_path / "candidate.wav"
     assert analysis.read_bytes() == b"converted"
     assert coordinator.conversion_service.transcodes[-1] == (source, analysis, "wav")
+    assert "Analysis Conversion: MP3 decoded to WAV" in details[0]
 
     coordinator.conversion_service = _ConversionService(supported=False)
     with pytest.raises(ValueError, match="cannot be decoded"):
@@ -803,6 +845,8 @@ def test_inspect_file_reports_blind_token_match_and_records_verification(
         token=token,
         status="weak",
         mean_confidence=0.66,
+        sync_score=0.64,
+        group_agreement=0.60,
     )
     coordinator.forensic_ledger.token_record = _record()
 
@@ -812,6 +856,7 @@ def test_inspect_file_reports_blind_token_match_and_records_verification(
     assert report.resolution_basis == "blind_forensic_token"
     assert report.token_id == 77
     assert report.recipient_label == "Reviewer"
+    assert "Evidence Band: Low-confidence candidate" in report.details
     assert coordinator.forensic_ledger.verifications == [
         ("fwx-1", FORENSIC_STATUS_MATCH_LOW_CONFIDENCE, 0.66)
     ]
@@ -883,6 +928,43 @@ def test_inspect_file_uses_reference_guided_detected_match(tmp_path: Path) -> No
     assert report.exact_hash_match is False
     assert coordinator.forensic_ledger.verifications == [
         ("fwx-1", FORENSIC_STATUS_MATCH_FOUND, 0.91)
+    ]
+
+
+def test_inspect_file_reports_likely_reference_guided_match_at_degraded_scores(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    inspected = tmp_path / "candidate.mp3"
+    reference = tmp_path / "reference.wav"
+    inspected.write_bytes(b"candidate")
+    reference.write_bytes(b"reference")
+    coordinator.watermark_service.extract_from_path.return_value = SimpleNamespace(token=None)
+    coordinator._rebuild_reference_audio = mock.Mock(return_value=reference)
+    coordinator.forensic_ledger.candidates = [
+        _ResolutionCandidate(
+            record=_record(),
+            source_audio_sha256="source-sha",
+            source_lineage_ref="track-audio/42/source-sha",
+        )
+    ]
+    coordinator.watermark_service.verify_expected_token_against_reference.return_value = (
+        SimpleNamespace(
+            status="insufficient",
+            mean_confidence=0.72,
+            group_agreement=0.66,
+            sync_score=0.67,
+        )
+    )
+
+    report = coordinator.inspect_file(inspected)
+
+    assert report.status == FORENSIC_STATUS_MATCH_LIKELY
+    assert report.resolution_basis == "reference_guided_forensic"
+    assert "Evidence Band: Likely match" in report.details
+    assert any("Analysis Conversion: MP3 decoded to WAV" in line for line in report.details)
+    assert coordinator.forensic_ledger.verifications == [
+        ("fwx-1", FORENSIC_STATUS_MATCH_LIKELY, 0.72)
     ]
 
 

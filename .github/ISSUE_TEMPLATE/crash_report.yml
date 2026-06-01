@@ -1,0 +1,62 @@
+name: Crash report
+description: Report an unexpected application termination.
+title: "[Crash Report] "
+labels:
+  - bug
+  - crash-report
+  - user-report
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Crash reports are most useful when generated through the desktop app after restart.
+        The app detects an unclean previous session, sanitises logs locally, and shows the
+        exact Markdown payload before anything is submitted or saved.
+  - type: input
+    id: report-id
+    attributes:
+      label: Local report ID
+      description: Copy this from the app-generated crash report preview when available.
+      placeholder: "isrc-crash-..."
+    validations:
+      required: false
+  - type: input
+    id: app-version
+    attributes:
+      label: Application version
+      placeholder: "4.x.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: last-action
+    attributes:
+      label: Last action before the crash
+      description: Describe the visible workflow, dialog, or operation in progress.
+    validations:
+      required: true
+  - type: textarea
+    id: repeatability
+    attributes:
+      label: Repeatability
+      description: Can you reproduce it? If yes, list the exact UI steps.
+    validations:
+      required: false
+  - type: textarea
+    id: sanitised-report
+    attributes:
+      label: Sanitised crash report preview
+      description: Paste only the app-generated sanitised report preview. Do not paste raw logs.
+      render: text
+    validations:
+      required: false

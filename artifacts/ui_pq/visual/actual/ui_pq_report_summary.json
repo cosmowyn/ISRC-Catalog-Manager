@@ -1,0 +1,24 @@
+{
+  "database_path_present": true,
+  "event_statuses": {
+    "UI-PQ-ACC-001": "passed",
+    "UI-PQ-CAT-001": "passed",
+    "UI-PQ-CON-001": "passed",
+    "UI-PQ-DIAG-001": "passed",
+    "UI-PQ-HELP-001": "passed",
+    "UI-PQ-INV-001": "passed",
+    "UI-PQ-MENU-001": "passed",
+    "UI-PQ-REL-001": "passed",
+    "UI-PQ-SC-001": "passed",
+    "UI-PQ-SET-001": "passed",
+    "UI-PQ-SMOKE-001": "passed"
+  },
+  "qa_data": {
+    "contract_id": 1,
+    "party_id": 2,
+    "release_id": 1,
+    "right_id": 1,
+    "track_id": 1,
+    "work_id": 2
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "captures": [
+    {
+      "height": 800,
+      "name": "main_window",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/main_window.png",
+      "sample_count": 272,
+      "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+      "unique_sample_colors": 9,
+      "width": 1506
+    },
+    {
+      "height": 520,
+      "name": "about_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+      "sample_count": 272,
+      "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+      "unique_sample_colors": 22,
+      "width": 720
+    },
+    {
+      "height": 820,
+      "name": "help_contents_dialog",
+      "non_blank": true,
+      "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+      "sample_count": 289,
+      "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+      "unique_sample_colors": 24,
+      "width": 1180
+    }
+  ],
+  "comparisons": [
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/main_window.png",
+      "actual_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/main_window.png",
+      "baseline_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 800,
+          "name": "main_window",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/main_window.png",
+          "sample_count": 272,
+          "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+          "unique_sample_colors": 9,
+          "width": 1506
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1056,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "main_window",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+      "actual_sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
+      "baseline_sha256": "9fd82b7e81341499084f8cf63d7948df44523103d5ebec1c01497bd7bc40d277",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 520,
+          "name": "about_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
+          "sample_count": 272,
+          "sha256": "07bb07ddb3a3a3f5641d0d44c7a7399a89cf07fe6bd26a68e1e1fadf329ac3cd",
+          "unique_sample_colors": 22,
+          "width": 720
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0036730945821854912,
+          "changed_samples": 4,
+          "mean_channel_delta": 0.41735537190082644,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "about_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+      "actual_sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/help_contents_dialog.png",
+      "baseline_sha256": "6528a3171d4a55f7d6dc1d65babbf3065acee83ee86a8c96a3910b0cd0804bb2",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 820,
+          "name": "help_contents_dialog",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
+          "sample_count": 289,
+          "sha256": "255cd9d61d69c1e6460d5352cdf4ff66c95a92b43d0fbc8af85b59888d03b2fc",
+          "unique_sample_colors": 24,
+          "width": 1180
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "help_contents_dialog",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/actual/theme_payload_summary.json",
+      "actual_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/theme_payload_summary.json",
+      "baseline_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+      "comparison_type": "theme",
+      "details": {
+        "normalized_bytes": 9777
+      },
+      "name": "theme_payload_summary",
+      "passed": true,
+      "reason": "Artifact matches baseline."
+    }
+  ]
+}

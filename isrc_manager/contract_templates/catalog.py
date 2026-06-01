@@ -35,6 +35,8 @@ _NAMESPACE_ORDER = (
     "release",
     "work",
     "contract",
+    "invoice",
+    "royalty",
     "owner",
     "page",
     "current",
@@ -55,6 +57,8 @@ _SCOPE_POLICY_BY_NAMESPACE = {
     "release": "release_selection_required",
     "work": "work_selection_required",
     "contract": "contract_selection_required",
+    "invoice": "invoice_selection_required",
+    "royalty": "royalty_statement_selection_required",
     "owner": "owner_settings_context",
     "party": "party_selection_required",
     "right": "right_selection_required",
@@ -66,6 +70,8 @@ _SCOPE_ENTITY_BY_NAMESPACE = {
     "release": "release",
     "work": "work",
     "contract": "contract",
+    "invoice": "invoice",
+    "royalty": "royalty_statement",
     "owner": "owner",
     "party": "party",
     "right": "right",
@@ -315,6 +321,118 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
     ),
     _CatalogSeed("contract", "summary", "Summary", "text", "Contracts", "summary"),
     _CatalogSeed("contract", "notes", "Contract Notes", "text", "Contracts", "notes"),
+    _CatalogSeed("invoice", "number", "Invoice Number", "text", "Invoices", "invoice_number"),
+    _CatalogSeed("invoice", "issue_date", "Invoice Issue Date", "date", "Invoices", "issue_date"),
+    _CatalogSeed("invoice", "due_date", "Invoice Due Date", "date", "Invoices", "due_date"),
+    _CatalogSeed(
+        "invoice", "document_status", "Invoice Document Status", "text", "Invoices", "status"
+    ),
+    _CatalogSeed(
+        "invoice", "payment_status", "Invoice Payment Status", "text", "Invoices", "status"
+    ),
+    _CatalogSeed("invoice", "due_status", "Invoice Due Status", "text", "Invoices", "due_date"),
+    _CatalogSeed("invoice", "currency", "Invoice Currency", "text", "Invoices", "currency"),
+    _CatalogSeed("invoice", "subtotal", "Invoice Subtotal", "text", "Invoices", "subtotal_minor"),
+    _CatalogSeed(
+        "invoice", "vat_total", "Invoice VAT Total", "text", "Invoices", "vat_total_minor"
+    ),
+    _CatalogSeed("invoice", "total", "Invoice Total", "text", "Invoices", "total_minor"),
+    _CatalogSeed(
+        "invoice",
+        "outstanding_balance",
+        "Invoice Outstanding Balance",
+        "text",
+        "AccountingEntries",
+        None,
+    ),
+    _CatalogSeed("invoice", "lines", "Invoice Lines Table", "text", "InvoiceLineItems", None),
+    _CatalogSeed(
+        "invoice",
+        "vat_breakdown",
+        "Invoice VAT Breakdown Table",
+        "text",
+        "InvoiceVatBreakdown",
+        None,
+    ),
+    _CatalogSeed("invoice", "party_name", "Invoice Party Name", "text", "Parties", "display_name"),
+    _CatalogSeed(
+        "invoice", "party_legal_name", "Invoice Party Legal Name", "text", "Parties", "legal_name"
+    ),
+    _CatalogSeed("invoice", "party_address", "Invoice Party Address", "text", "Parties", None),
+    _CatalogSeed(
+        "invoice", "party_vat_number", "Invoice Party VAT Number", "text", "Parties", "vat_number"
+    ),
+    _CatalogSeed("invoice", "party_tax_id", "Invoice Party Tax ID", "text", "Parties", "tax_id"),
+    _CatalogSeed("invoice", "party_email", "Invoice Party Email", "text", "Parties", "email"),
+    _CatalogSeed(
+        "royalty",
+        "statement_number",
+        "Royalty Statement Number",
+        "text",
+        "RoyaltyStatements",
+        "statement_number",
+    ),
+    _CatalogSeed("royalty", "payee_name", "Royalty Payee Name", "text", "Parties", "display_name"),
+    _CatalogSeed(
+        "royalty", "contract_title", "Royalty Contract Title", "text", "Contracts", "title"
+    ),
+    _CatalogSeed(
+        "royalty",
+        "period_start",
+        "Royalty Period Start",
+        "date",
+        "RoyaltyCalculations",
+        "period_start",
+    ),
+    _CatalogSeed(
+        "royalty", "period_end", "Royalty Period End", "date", "RoyaltyCalculations", "period_end"
+    ),
+    _CatalogSeed(
+        "royalty",
+        "gross_royalty",
+        "Gross Royalty",
+        "text",
+        "RoyaltyCalculations",
+        "gross_royalty_minor",
+    ),
+    _CatalogSeed(
+        "royalty",
+        "deductions",
+        "Royalty Deductions",
+        "text",
+        "RoyaltyCalculations",
+        "deductions_minor",
+    ),
+    _CatalogSeed(
+        "royalty",
+        "advance_recouped",
+        "Advance Recouped",
+        "text",
+        "RoyaltyCalculations",
+        "advance_recouped_minor",
+    ),
+    _CatalogSeed(
+        "royalty",
+        "net_payable",
+        "Net Royalty Payable",
+        "text",
+        "RoyaltyCalculations",
+        "net_payable_minor",
+    ),
+    _CatalogSeed(
+        "royalty",
+        "payment_status",
+        "Royalty Payment Status",
+        "text",
+        "RoyaltyCalculations",
+        "status",
+    ),
+    _CatalogSeed(
+        "royalty", "calculation_id", "Royalty Calculation ID", "text", "RoyaltyCalculations", "id"
+    ),
+    _CatalogSeed(
+        "royalty", "statement_id", "Royalty Statement ID", "text", "RoyaltyStatements", "id"
+    ),
     _CatalogSeed(
         "owner",
         "legal_name",

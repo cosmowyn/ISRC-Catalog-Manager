@@ -13,8 +13,12 @@ from datetime import datetime
 from .models import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,
+    BUILTIN_CATEGORY_INVOICE_NUMBER,
+    BUILTIN_CATEGORY_LEDGER_TRANSACTION_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
     CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
@@ -32,9 +36,13 @@ from .models import (
     GENERATION_STRATEGY_SHA256,
     SUBJECT_KIND_CATALOG,
     SUBJECT_KIND_CONTRACT,
+    SUBJECT_KIND_CREDIT_NOTE,
     SUBJECT_KIND_GENERIC,
+    SUBJECT_KIND_INVOICE,
     SUBJECT_KIND_KEY,
+    SUBJECT_KIND_LEDGER_TRANSACTION,
     SUBJECT_KIND_LICENSE,
+    SUBJECT_KIND_ROYALTY_STATEMENT,
     CatalogIdentifierResolution,
     CodeIdentifierClassification,
     CodeIdentifierResolution,
@@ -84,6 +92,38 @@ _BUILTIN_CATEGORIES = (
         "generation_strategy": GENERATION_STRATEGY_SHA256,
         "prefix": "",
         "sort_order": 40,
+    },
+    {
+        "system_key": BUILTIN_CATEGORY_INVOICE_NUMBER,
+        "display_name": "Invoice Number",
+        "subject_kind": SUBJECT_KIND_INVOICE,
+        "generation_strategy": GENERATION_STRATEGY_SEQUENTIAL,
+        "prefix": "",
+        "sort_order": 50,
+    },
+    {
+        "system_key": BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,
+        "display_name": "Credit Note Number",
+        "subject_kind": SUBJECT_KIND_CREDIT_NOTE,
+        "generation_strategy": GENERATION_STRATEGY_SEQUENTIAL,
+        "prefix": "",
+        "sort_order": 60,
+    },
+    {
+        "system_key": BUILTIN_CATEGORY_LEDGER_TRANSACTION_NUMBER,
+        "display_name": "Ledger Transaction Number",
+        "subject_kind": SUBJECT_KIND_LEDGER_TRANSACTION,
+        "generation_strategy": GENERATION_STRATEGY_SEQUENTIAL,
+        "prefix": "",
+        "sort_order": 70,
+    },
+    {
+        "system_key": BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
+        "display_name": "Royalty Statement Number",
+        "subject_kind": SUBJECT_KIND_ROYALTY_STATEMENT,
+        "generation_strategy": GENERATION_STRATEGY_SEQUENTIAL,
+        "prefix": "",
+        "sort_order": 80,
     },
 )
 
@@ -2226,6 +2266,7 @@ class CodeRegistryService:
         category_id: int | None = None,
         system_key: str | None = None,
         created_via: str | None = "ui.generate",
+        cursor: sqlite3.Cursor | None = None,
     ) -> CodeRegistryEntryGenerationResult:
         category = self._category_or_raise(category_id=category_id, system_key=system_key)
         if category.generation_strategy != GENERATION_STRATEGY_SEQUENTIAL:
@@ -2239,6 +2280,31 @@ class CodeRegistryService:
                 f"Configure a prefix/namespace for '{category.display_name}' before generating values."
             )
         sequence_year = datetime.now().year % 100
+        if cursor is not None:
+            existing_row = cursor.execute(
+                """
+                SELECT COALESCE(MAX(sequence_number), 0)
+                FROM CodeRegistryEntries
+                WHERE category_id=? AND sequence_year=?
+                """,
+                (int(category.id), int(sequence_year)),
+            ).fetchone()
+            next_sequence = int(existing_row[0] or 0) + 1
+            if next_sequence > 9999:
+                raise ValueError(
+                    f"No free internal sequence remains for '{category.display_name}' in {sequence_year:02d}."
+                )
+            value = f"{prefix}{sequence_year:02d}{next_sequence:04d}"
+            entry = self._create_sequential_entry(
+                category=replace(category, normalized_prefix=prefix),
+                canonical_value=value,
+                sequence_year=sequence_year,
+                sequence_number=next_sequence,
+                entry_kind=ENTRY_KIND_GENERATED,
+                created_via=created_via,
+                cursor=cursor,
+            )
+            return CodeRegistryEntryGenerationResult(entry=entry, category=category)
         with self._immediate_transaction() as cur:
             existing_row = cur.execute(
                 """

@@ -24,12 +24,13 @@ from isrc_manager.file_storage import (
 from isrc_manager.media.audio_formats import audio_format_profile
 from isrc_manager.media.conversion import AudioConversionService
 from isrc_manager.media.derivatives import DerivativeLedgerService
-from isrc_manager.tags import AudioTagService, write_catalog_export_tags
+from isrc_manager.tags import AudioTagData, AudioTagService, write_catalog_export_tags
 
 from .models import (
     AUTHENTICITY_BASIS_FORENSIC_TRACE,
     DERIVATIVE_KIND_FORENSIC_WATERMARKED_COPY,
     FORENSIC_STATUS_MATCH_FOUND,
+    FORENSIC_STATUS_MATCH_LIKELY,
     FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
     FORENSIC_STATUS_NOT_DETECTED,
     FORENSIC_STATUS_TOKEN_UNRESOLVED,
@@ -56,7 +57,11 @@ if TYPE_CHECKING:
 
 _FORENSIC_STAGE_COUNT = 9
 _FORENSIC_INSPECTION_STAGE_COUNT = 4
-_LOSSY_FORENSIC_OUTPUT_IDS = frozenset({"mp3"})
+_LOSSY_FORENSIC_OUTPUT_IDS = frozenset({"mp3", "ogg", "opus", "m4a", "aac"})
+_FORENSIC_VERIFIED_CONFIDENCE_THRESHOLD = 0.85
+_FORENSIC_LIKELY_CONFIDENCE_THRESHOLD = 0.70
+_FORENSIC_LIKELY_SYNC_THRESHOLD = 0.65
+_FORENSIC_LOW_CONFIDENCE_THRESHOLD = 0.55
 
 
 @dataclass(slots=True)
@@ -75,6 +80,13 @@ class _ResolutionCandidate:
     record: ForensicExportRecord
     source_audio_sha256: str
     source_lineage_ref: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ForensicEvidenceBand:
+    status: str
+    label: str
+    message: str
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -147,6 +159,74 @@ def _report_stage(
     value = ((item_index - 1) * stage_count) + stage_index
     maximum = max(1, item_total * stage_count)
     progress_callback(value, maximum, message)
+
+
+def _score(value: object | None) -> float:
+    try:
+        return float(value or 0.0)
+    except TypeError, ValueError:
+        return 0.0
+
+
+def _classify_forensic_evidence(
+    *, confidence: float | None, sync_score: float | None
+) -> _ForensicEvidenceBand | None:
+    confidence_value = _score(confidence)
+    sync_value = _score(sync_score)
+    if confidence_value >= _FORENSIC_VERIFIED_CONFIDENCE_THRESHOLD:
+        return _ForensicEvidenceBand(
+            status=FORENSIC_STATUS_MATCH_FOUND,
+            label="Verified",
+            message=(
+                "Verified forensic watermark match. The extracted evidence is strong enough "
+                "to identify the managed forensic export record."
+            ),
+        )
+    if (
+        confidence_value >= _FORENSIC_LIKELY_CONFIDENCE_THRESHOLD
+        and sync_value >= _FORENSIC_LIKELY_SYNC_THRESHOLD
+    ):
+        return _ForensicEvidenceBand(
+            status=FORENSIC_STATUS_MATCH_LIKELY,
+            label="Likely match",
+            message=(
+                "Likely forensic watermark match. The evidence is consistent with a managed "
+                "export, but it is below the verified confidence band."
+            ),
+        )
+    if confidence_value >= _FORENSIC_LOW_CONFIDENCE_THRESHOLD:
+        return _ForensicEvidenceBand(
+            status=FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
+            label="Low-confidence candidate",
+            message=(
+                "Likely match - degraded lossy derivative. The watermark evidence is above "
+                "the database-indication floor, but the score is too low to call verified."
+            ),
+        )
+    return None
+
+
+def _forensic_evidence_detail_lines(
+    *,
+    band: _ForensicEvidenceBand | None,
+    confidence: float | None,
+    sync_score: float | None,
+    group_agreement: float | None = None,
+) -> list[str]:
+    lines = [
+        f"Evidence Band: {band.label if band is not None else 'Not found'}",
+        f"Confidence: {_score(confidence):.3f}",
+        f"Sync Score: {_score(sync_score):.3f}",
+    ]
+    if group_agreement is not None:
+        lines.append(f"Group Agreement: {_score(group_agreement):.3f}")
+    lines.extend(
+        [
+            "Thresholds: verified >= 0.850 confidence; likely match >= 0.700 confidence and >= 0.650 sync score; low-confidence candidate >= 0.550 confidence.",
+            "Interpretation: confidence above 0.500 is treated as evidence of a watermark candidate from the open profile database, not as a clean negative.",
+        ]
+    )
+    return lines
 
 
 class ForensicWatermarkService:
@@ -502,9 +582,9 @@ class ForensicExportCoordinator:
             result.append((record.key_id, derive_forensic_watermark_key(private_key)))
         return result
 
-    def _prepare_analysis_audio(self, source_path: Path, temp_dir: Path) -> Path:
+    def _prepare_analysis_audio(self, source_path: Path, temp_dir: Path) -> tuple[Path, list[str]]:
         if supported_forensic_audio_path(source_path):
-            return source_path
+            return source_path, []
         if not self.conversion_service.is_supported_target("wav"):
             raise ValueError(
                 "The selected file format cannot be decoded for forensic inspection on this system."
@@ -517,7 +597,11 @@ class ForensicExportCoordinator:
             destination_path=analysis_path,
             target_id="wav",
         )
-        return analysis_path
+        suffix = source_path.suffix.lower().lstrip(".") or "unknown"
+        return analysis_path, [
+            f"Analysis Conversion: {suffix.upper()} decoded to WAV for forensic inspection.",
+            "Conversion Note: lossy source material, stream rips, and transcoding can lower confidence and sync scores; conversion should not prevent watermark discovery.",
+        ]
 
     def _rebuild_reference_audio(
         self,
@@ -568,6 +652,10 @@ class ForensicExportCoordinator:
         confidence: float | None,
         resolution_basis: str,
         exact_hash_match: bool | None = None,
+        evidence_band: _ForensicEvidenceBand | None = None,
+        sync_score: float | None = None,
+        group_agreement: float | None = None,
+        analysis_details: list[str] | None = None,
         extra_details: list[str] | None = None,
     ) -> ForensicInspectionReport:
         details = [
@@ -575,6 +663,16 @@ class ForensicExportCoordinator:
             f"Batch ID: {record.batch_id}",
             f"Track ID: {record.track_id}",
         ]
+        details.extend(
+            _forensic_evidence_detail_lines(
+                band=evidence_band,
+                confidence=confidence,
+                sync_score=sync_score,
+                group_agreement=group_agreement,
+            )
+        )
+        if analysis_details:
+            details.extend(analysis_details)
         if record.derivative_export_id:
             details.append(f"Derivative Export ID: {record.derivative_export_id}")
         if record.recipient_label:
@@ -606,6 +704,32 @@ class ForensicExportCoordinator:
             resolution_basis=resolution_basis,
             details=details,
         )
+
+    def _write_forensic_trace_metadata(
+        self, path: Path, *, trace_label: str | None
+    ) -> tuple[bool, str | None]:
+        trace_text = _clean_text(trace_label)
+        if not trace_text:
+            return False, None
+        try:
+            try:
+                tag_data = self.tag_service.read_tags(path)
+            except Exception:
+                tag_data = AudioTagData()
+            trace_line = f"Forensic Trace: {trace_text}"
+            existing_comments = _clean_text(tag_data.comments)
+            if existing_comments:
+                tag_data.comments = (
+                    existing_comments
+                    if trace_line in existing_comments
+                    else f"{existing_comments}\n{trace_line}"
+                )
+            else:
+                tag_data.comments = trace_line
+            self.tag_service.write_tags(path, tag_data)
+        except Exception as exc:
+            return False, f"forensic trace metadata could not be written ({exc})"
+        return True, None
 
     def export(
         self,
@@ -749,6 +873,14 @@ class ForensicExportCoordinator:
                             warnings.append(
                                 f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
                             )
+                        if request.embed_trace_metadata:
+                            trace_embedded, trace_warning = self._write_forensic_trace_metadata(
+                                watermarked_path,
+                                trace_label=request.share_label or request.recipient_label,
+                            )
+                            metadata_embedded = metadata_embedded or trace_embedded
+                            if trace_warning:
+                                warnings.append(f"{snapshot.track_title}: {trace_warning}.")
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
@@ -950,7 +1082,9 @@ class ForensicExportCoordinator:
                     stage_count=_FORENSIC_INSPECTION_STAGE_COUNT,
                     message="Preparing inspection source…",
                 )
-                analysis_path = self._prepare_analysis_audio(inspected_path, temp_dir)
+                analysis_path, analysis_details = self._prepare_analysis_audio(
+                    inspected_path, temp_dir
+                )
             except Exception:
                 return ForensicInspectionReport(
                     status=FORENSIC_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
@@ -980,34 +1114,43 @@ class ForensicExportCoordinator:
                     extraction.token.binding_crc32,
                 )
                 if matched_record is not None:
-                    confidence = float(extraction.mean_confidence or 0.0)
-                    status = (
-                        FORENSIC_STATUS_MATCH_FOUND
-                        if extraction.status == "detected"
-                        else FORENSIC_STATUS_MATCH_LOW_CONFIDENCE
+                    confidence = _score(getattr(extraction, "mean_confidence", None))
+                    sync_score = _score(getattr(extraction, "sync_score", 1.0))
+                    group_agreement = _score(getattr(extraction, "group_agreement", 0.0))
+                    evidence_band = _classify_forensic_evidence(
+                        confidence=confidence,
+                        sync_score=sync_score,
                     )
+                    if evidence_band is None:
+                        evidence_band = _ForensicEvidenceBand(
+                            status=FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
+                            label="Low-confidence token candidate",
+                            message=(
+                                "A forensic watermark token resolved to the open profile, but "
+                                "the measured score stayed below the normal reporting threshold."
+                            ),
+                        )
                     exact_hash_match = (
                         bool(matched_record.output_sha256)
                         and matched_record.output_sha256 == original_sha256
                     )
                     self.forensic_ledger.record_verification(
                         matched_record.forensic_export_id,
-                        status=status,
+                        status=evidence_band.status,
                         confidence=confidence,
                     )
                     return self._match_report(
-                        status=status,
-                        message=(
-                            "A forensic watermark token was extracted and resolved to a managed "
-                            "forensic export record."
-                            if status == FORENSIC_STATUS_MATCH_FOUND
-                            else "A forensic watermark token candidate was found and resolved, but the confidence stayed below the strong-match threshold."
-                        ),
+                        status=evidence_band.status,
+                        message=evidence_band.message,
                         inspected_path=inspected_path,
                         record=matched_record,
                         confidence=confidence,
                         resolution_basis="blind_forensic_token",
                         exact_hash_match=exact_hash_match,
+                        evidence_band=evidence_band,
+                        sync_score=sync_score,
+                        group_agreement=group_agreement,
+                        analysis_details=analysis_details,
                     )
                 return ForensicInspectionReport(
                     status=FORENSIC_STATUS_TOKEN_UNRESOLVED,
@@ -1022,6 +1165,16 @@ class ForensicExportCoordinator:
                     details=[
                         f"Token ID: {extraction.token.token_id}",
                         f"Binding CRC32: {extraction.token.binding_crc32}",
+                        *_forensic_evidence_detail_lines(
+                            band=_classify_forensic_evidence(
+                                confidence=getattr(extraction, "mean_confidence", None),
+                                sync_score=getattr(extraction, "sync_score", None),
+                            ),
+                            confidence=getattr(extraction, "mean_confidence", None),
+                            sync_score=getattr(extraction, "sync_score", None),
+                            group_agreement=getattr(extraction, "group_agreement", None),
+                        ),
+                        *analysis_details,
                     ],
                 )
 
@@ -1035,14 +1188,21 @@ class ForensicExportCoordinator:
                 return self._match_report(
                     status=FORENSIC_STATUS_MATCH_FOUND,
                     message=(
-                        "The inspected file exactly matches a previously exported forensic copy "
-                        "from the derivative ledger."
+                        "Verified forensic watermark match. The inspected file exactly matches "
+                        "a previously exported forensic copy from the derivative ledger."
                     ),
                     inspected_path=inspected_path,
                     record=exact_hash_record,
                     confidence=1.0,
                     resolution_basis="exact_output_hash",
                     exact_hash_match=True,
+                    evidence_band=_classify_forensic_evidence(
+                        confidence=1.0,
+                        sync_score=1.0,
+                    ),
+                    sync_score=1.0,
+                    group_agreement=1.0,
+                    analysis_details=analysis_details,
                 )
 
             _report_stage(
@@ -1080,24 +1240,34 @@ class ForensicExportCoordinator:
                     )
                 except Exception:
                     continue
-                if result.status == "detected":
-                    confidence = float(result.mean_confidence or 0.0)
+                confidence = _score(getattr(result, "mean_confidence", None))
+                sync_score = _score(getattr(result, "sync_score", None))
+                group_agreement = _score(getattr(result, "group_agreement", None))
+                evidence_band = _classify_forensic_evidence(
+                    confidence=confidence,
+                    sync_score=sync_score,
+                )
+                if evidence_band is not None and evidence_band.status in {
+                    FORENSIC_STATUS_MATCH_FOUND,
+                    FORENSIC_STATUS_MATCH_LIKELY,
+                }:
                     self.forensic_ledger.record_verification(
                         candidate.record.forensic_export_id,
-                        status=FORENSIC_STATUS_MATCH_FOUND,
+                        status=evidence_band.status,
                         confidence=confidence,
                     )
                     return self._match_report(
-                        status=FORENSIC_STATUS_MATCH_FOUND,
-                        message=(
-                            "The inspected file matched a known forensic export after "
-                            "reference-guided watermark comparison."
-                        ),
+                        status=evidence_band.status,
+                        message=evidence_band.message,
                         inspected_path=inspected_path,
                         record=candidate.record,
                         confidence=confidence,
                         resolution_basis="reference_guided_forensic",
                         exact_hash_match=False,
+                        evidence_band=evidence_band,
+                        sync_score=sync_score,
+                        group_agreement=group_agreement,
+                        analysis_details=analysis_details,
                     )
                 if best_result is None or (
                     result.mean_confidence,
@@ -1119,40 +1289,49 @@ class ForensicExportCoordinator:
                 stage_count=_FORENSIC_INSPECTION_STAGE_COUNT,
                 message="Forensic inspection finished.",
             )
-            if (
-                best_candidate is not None
-                and best_result is not None
-                and best_result.status == "insufficient"
-            ):
-                confidence = float(best_result.mean_confidence or 0.0)
+            best_evidence_band = (
+                _classify_forensic_evidence(
+                    confidence=getattr(best_result, "mean_confidence", None),
+                    sync_score=getattr(best_result, "sync_score", None),
+                )
+                if best_result is not None
+                else None
+            )
+            if best_candidate is not None and best_result is not None and best_evidence_band:
+                confidence = _score(getattr(best_result, "mean_confidence", None))
                 self.forensic_ledger.record_verification(
                     best_candidate.record.forensic_export_id,
-                    status=FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
+                    status=best_evidence_band.status,
                     confidence=confidence,
                 )
                 return self._match_report(
-                    status=FORENSIC_STATUS_MATCH_LOW_CONFIDENCE,
-                    message=(
-                        "A likely forensic export match was found, but the watermark evidence "
-                        "did not meet the strong-match threshold."
-                    ),
+                    status=best_evidence_band.status,
+                    message=best_evidence_band.message,
                     inspected_path=inspected_path,
                     record=best_candidate.record,
                     confidence=confidence,
                     resolution_basis="reference_guided_forensic",
                     exact_hash_match=False,
-                    extra_details=[
-                        f"Sync Score: {best_result.sync_score:.3f}",
-                        f"Group Agreement: {best_result.group_agreement:.3f}",
-                    ],
+                    evidence_band=best_evidence_band,
+                    sync_score=getattr(best_result, "sync_score", None),
+                    group_agreement=getattr(best_result, "group_agreement", None),
+                    analysis_details=analysis_details,
                 )
             return ForensicInspectionReport(
                 status=FORENSIC_STATUS_NOT_DETECTED,
                 message=(
-                    "No resolvable forensic watermark was detected in the inspected audio with "
-                    "the current profile keys and export ledger."
+                    "Not found. No forensic watermark candidate reached the reporting threshold "
+                    "against the current profile keys and export ledger."
                 ),
                 inspected_path=str(inspected_path),
                 resolution_basis="no_match",
-                details=[],
+                details=[
+                    *_forensic_evidence_detail_lines(
+                        band=None,
+                        confidence=getattr(best_result, "mean_confidence", None),
+                        sync_score=getattr(best_result, "sync_score", None),
+                        group_agreement=getattr(best_result, "group_agreement", None),
+                    ),
+                    *analysis_details,
+                ],
             )

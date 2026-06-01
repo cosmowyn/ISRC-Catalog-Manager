@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest import mock
 
 try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QIcon
+    from PySide6.QtCore import Qt, QUrl
+    from PySide6.QtGui import QIcon, QImage, QTextDocument
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,
@@ -17,7 +17,10 @@ try:
     )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
+    QUrl = None
     QIcon = None
+    QImage = None
+    QTextDocument = None
     QApplication = None
     QDialog = None
     QDialogButtonBox = None
@@ -631,6 +634,42 @@ class AppDialogsTests(unittest.TestCase):
             dialog.update_button.click()
             self.assertTrue(dialog.install_requested())
             self.assertEqual(dialog.result(), QDialog.Accepted)
+        finally:
+            dialog.close()
+
+    def test_release_notes_dialog_hydrates_markdown_badge_images(self):
+        badge_url = (
+            "https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager?label=release"
+        )
+        badge_svg = (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="94" height="20">'
+            b'<rect width="94" height="20" fill="#44cc11"/></svg>'
+        )
+        with mock.patch(
+            "isrc_manager.app_dialogs._fetch_release_note_image_bytes",
+            return_value=("image/svg+xml", badge_svg),
+        ) as fetch_image:
+            dialog = ReleaseNotesDialog(
+                version="4.0.5",
+                released_at="2026-05-31",
+                summary="A badge release.",
+                release_notes_markdown=(
+                    "# Release Notes\n\n"
+                    f"[![Release]({badge_url})]"
+                    "(https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/v4.0.5)\n\n"
+                    "Details."
+                ),
+                allow_update_install=False,
+            )
+        try:
+            fetch_image.assert_called_once_with(badge_url)
+            resource = dialog.browser.document().resource(
+                QTextDocument.ImageResource,
+                QUrl(badge_url),
+            )
+            self.assertIsInstance(resource, QImage)
+            self.assertFalse(resource.isNull())
+            self.assertEqual(resource.size().height(), 20)
         finally:
             dialog.close()
 

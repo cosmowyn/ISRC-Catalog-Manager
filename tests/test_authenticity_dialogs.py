@@ -339,7 +339,7 @@ class AuthenticityDialogTests(unittest.TestCase):
             self.assertIn("Signature Valid: True", report_text)
             self.assertIn("Exact Hash Match: False", report_text)
             self.assertIn("Fingerprint Similarity: 0.923", report_text)
-            self.assertIn("Extraction Confidence: 0.812", report_text)
+            self.assertIn("Extraction Confidence: 81.2% (0.812)", report_text)
             self.assertIn("Sidecar: /tmp/a.sidecar.json", report_text)
             self.assertIn("Details:", report_text)
             self.assertIn("Extra 1", report_text)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
@@ -14,6 +16,8 @@ from isrc_manager.file_storage import (
     guess_mime_type,
     sanitize_export_basename,
 )
+from isrc_manager.media.audio_formats import format_label_for_audio
+from isrc_manager.media.conversion import AudioConversionService
 from isrc_manager.tags import (
     ArtworkPayload,
     AudioTagService,
@@ -48,13 +52,15 @@ from .models import (
     DOCUMENT_TYPE_PROVENANCE_LINEAGE,
     PROVENANCE_ONLY_SUFFIXES,
     SUPPORTED_AUTHENTICITY_SUFFIXES,
-    VERIFICATION_INPUT_SUFFIXES,
     VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
     VERIFICATION_STATUS_NO_WATERMARK,
     VERIFICATION_STATUS_SIGNATURE_INVALID,
     VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
     VERIFICATION_STATUS_VERIFIED,
     VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
+    VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY,
+    VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE,
+    VERIFICATION_STATUS_WATERMARK_MATCH_VERIFIED,
     WATERMARK_VERSION,
     WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
     WORKFLOW_KIND_AUTHENTICITY_MASTER,
@@ -83,6 +89,16 @@ PROVENANCE_LINEAGE_BASIS = "signed_derivative_of_verified_master"
 _AUTHENTICITY_PLAN_STAGE_COUNT = 1
 _AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT = 4
 _AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT = 4
+_AUTHENTICITY_VERIFIED_CONFIDENCE_THRESHOLD = 0.85
+_AUTHENTICITY_LIKELY_CONFIDENCE_THRESHOLD = 0.70
+_AUTHENTICITY_LIKELY_SYNC_THRESHOLD = 0.65
+_AUTHENTICITY_LOW_CONFIDENCE_THRESHOLD = 0.55
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthenticityEvidenceBand:
+    status: str
+    label: str
 
 
 def _album_package_dir_name(album_title: str | None) -> str:
@@ -111,6 +127,105 @@ def _report_progress_stage(
     if maximum is None:
         maximum = int(base_value) + max(1, item_total * stage_count)
     progress_callback(value, maximum, message)
+
+
+def _score(value: object | None) -> float:
+    try:
+        return float(value or 0.0)
+    except TypeError, ValueError:
+        return 0.0
+
+
+def _score_percent(value: object | None) -> str:
+    return f"{_score(value) * 100:.1f}%"
+
+
+def _classify_authenticity_evidence(
+    *, confidence: float | None, sync_score: float | None
+) -> _AuthenticityEvidenceBand | None:
+    confidence_value = _score(confidence)
+    sync_value = _score(sync_score)
+    if confidence_value >= _AUTHENTICITY_VERIFIED_CONFIDENCE_THRESHOLD:
+        return _AuthenticityEvidenceBand(
+            status=VERIFICATION_STATUS_WATERMARK_MATCH_VERIFIED,
+            label="Verified",
+        )
+    if (
+        confidence_value >= _AUTHENTICITY_LIKELY_CONFIDENCE_THRESHOLD
+        and sync_value >= _AUTHENTICITY_LIKELY_SYNC_THRESHOLD
+    ):
+        return _AuthenticityEvidenceBand(
+            status=VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY,
+            label="Likely match",
+        )
+    if confidence_value >= _AUTHENTICITY_LOW_CONFIDENCE_THRESHOLD:
+        return _AuthenticityEvidenceBand(
+            status=VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE,
+            label="Low-confidence candidate",
+        )
+    return None
+
+
+def _authenticity_evidence_message(
+    *, band: _AuthenticityEvidenceBand, confidence: float | None
+) -> str:
+    confidence_label = _score_percent(confidence)
+    if band.status == VERIFICATION_STATUS_WATERMARK_MATCH_VERIFIED:
+        return (
+            f"Verified watermark match found with {confidence_label} confidence. "
+            "The watermark evidence is strong, but this degraded copy still needs a resolved "
+            "manifest and signature path before it can be called fully signed-authentic."
+        )
+    if band.status == VERIFICATION_STATUS_WATERMARK_MATCH_LIKELY:
+        return (
+            f"Likely watermark match found with {confidence_label} confidence. "
+            "The inspected file contains watermark evidence consistent with the open profile; "
+            "lossy or streamed conversion likely degraded the signal below full signed-authentic "
+            "verification."
+        )
+    return (
+        f"Low-confidence watermark candidate found with {confidence_label} confidence. "
+        "Likely match - degraded lossy derivative; this is positive watermark evidence, "
+        "not a clean negative."
+    )
+
+
+def _authenticity_evidence_detail_lines(
+    *,
+    band: _AuthenticityEvidenceBand | None,
+    confidence: float | None,
+    sync_score: float | None,
+    group_agreement: float | None,
+    repeat_groups: int,
+    token_recovered: bool,
+) -> list[str]:
+    lines = [
+        f"Evidence Band: {band.label if band is not None else 'Not found'}",
+        f"Confidence: {_score_percent(confidence)} ({_score(confidence):.3f})",
+        f"Sync Score: {_score_percent(sync_score)} ({_score(sync_score):.3f})",
+        f"Group Agreement: {_score_percent(group_agreement)} ({_score(group_agreement):.3f})",
+        f"Repeat Groups: {repeat_groups}",
+        (
+            "Thresholds: verified >= 85.0% confidence; likely match >= 70.0% "
+            "confidence and >= 65.0% sync score; low-confidence candidate >= 55.0% "
+            "confidence."
+        ),
+        (
+            "Interpretation: confidence above 50.0% is treated as evidence of a "
+            "watermark candidate from the open profile database, not as a clean negative."
+        ),
+    ]
+    if token_recovered:
+        lines.append(
+            "Token Recovery: an expected watermark token was available for keyed comparison, "
+            "but the degraded audio did not meet the strict full-verification path."
+        )
+    else:
+        lines.append(
+            "Token Recovery: the exact watermark token was not cleanly recovered from this "
+            "degraded copy."
+        )
+    return lines
 
 
 def _signed_document_is_valid(document: dict[str, object]) -> bool:
@@ -1010,6 +1125,7 @@ class AudioAuthenticityService:
         watermark_service: AudioWatermarkService,
         tag_service: AudioTagService,
         app_version: str,
+        conversion_service: AudioConversionService | None = None,
     ):
         self.conn = conn
         self.key_service = key_service
@@ -1017,6 +1133,7 @@ class AudioAuthenticityService:
         self.watermark_service = watermark_service
         self.tag_service = tag_service
         self.app_version = app_version
+        self.conversion_service = conversion_service or AudioConversionService()
 
     @staticmethod
     def _normalized_text(value: object | None) -> str:
@@ -1151,6 +1268,33 @@ class AudioAuthenticityService:
         except Exception:
             return None
         return watermark_id if watermark_id > 0 else None
+
+    def _prepare_verification_audio(
+        self, inspected_path: Path, temp_dir: Path
+    ) -> tuple[Path, list[str]]:
+        if inspected_path.suffix.lower() in DIRECT_WATERMARK_SUFFIXES:
+            return inspected_path, []
+        if not self.conversion_service.is_supported_target("wav"):
+            raise ValueError(
+                "The selected file format cannot be decoded for authenticity verification on this system."
+            )
+        analysis_path = (
+            temp_dir / f"{sanitize_export_basename(inspected_path.stem or inspected_path.name)}.wav"
+        )
+        self.conversion_service.transcode(
+            source_path=inspected_path,
+            destination_path=analysis_path,
+            target_id="wav",
+        )
+        source_label = (
+            format_label_for_audio(inspected_path)
+            or inspected_path.suffix.lower().lstrip(".").upper()
+            or "selected audio"
+        )
+        return analysis_path, [
+            f"Analysis Conversion: {source_label} decoded to WAV for watermark verification.",
+            "Conversion Note: lossy source material, stream rips, and transcoding can lower confidence and sync scores; conversion should not prevent watermark discovery.",
+        ]
 
     def _build_signed_document(
         self,
@@ -1921,13 +2065,10 @@ class AudioAuthenticityService:
 
     def verify_file(self, path: str | Path) -> AuthenticityVerificationReport:
         inspected_path = Path(path)
-        if (
-            not inspected_path.exists()
-            or inspected_path.suffix.lower() not in VERIFICATION_INPUT_SUFFIXES
-        ):
+        if not inspected_path.exists():
             return AuthenticityVerificationReport(
                 status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
-                message="Verification currently supports direct WAV/FLAC/AIFF files and provenance-sidecar derivative formats.",
+                message="The selected audio file does not exist.",
                 inspected_path=str(inspected_path),
             )
 
@@ -1970,16 +2111,6 @@ class AudioAuthenticityService:
                 sidecar_path_str=sidecar_path_str,
             )
 
-        if inspected_path.suffix.lower() not in DIRECT_WATERMARK_SUFFIXES:
-            return AuthenticityVerificationReport(
-                status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
-                message="This format is only supported through signed provenance sidecars in this version.",
-                inspected_path=str(inspected_path),
-                sidecar_path=sidecar_path_str,
-                document_type=sidecar_document_type,
-                workflow_kind=sidecar_workflow_kind,
-            )
-
         extraction_keys = self.key_service.extraction_keys()
         if not extraction_keys:
             details: list[str] = []
@@ -1997,8 +2128,28 @@ class AudioAuthenticityService:
                 details=details,
             )
 
+        analysis_temp_root = tempfile.TemporaryDirectory(prefix="authenticity-verification-")
+        try:
+            analysis_path, analysis_details = self._prepare_verification_audio(
+                inspected_path, Path(analysis_temp_root.name)
+            )
+        except Exception:
+            analysis_temp_root.cleanup()
+            return AuthenticityVerificationReport(
+                status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+                message=(
+                    "The selected file could not be decoded into a WAV analysis copy for "
+                    "direct watermark verification with the current runtime."
+                ),
+                inspected_path=str(inspected_path),
+                sidecar_path=sidecar_path_str,
+                document_type=sidecar_document_type,
+                workflow_kind=sidecar_workflow_kind,
+                verification_basis="direct_watermark",
+            )
+
         extraction = self.watermark_service.extract_from_path(
-            inspected_path,
+            analysis_path,
             watermark_keys=extraction_keys,
         )
         reference_guided_extraction = None
@@ -2016,7 +2167,7 @@ class AudioAuthenticityService:
             if reference_selection is not None:
                 reference_guided_extraction = (
                     self.watermark_service.verify_expected_token_against_reference(
-                        inspected_path,
+                        analysis_path,
                         reference_path=reference_selection.source_path,
                         reference_bytes=reference_selection.source_bytes,
                         watermark_keys=extraction_keys,
@@ -2027,7 +2178,7 @@ class AudioAuthenticityService:
                     extraction = reference_guided_extraction
             if extraction.status != "detected" or extraction.token is None:
                 sidecar_guided_extraction = self.watermark_service.verify_expected_token(
-                    inspected_path,
+                    analysis_path,
                     watermark_keys=extraction_keys,
                     token=sidecar_token,
                 )
@@ -2057,24 +2208,42 @@ class AudioAuthenticityService:
                     candidate.sync_score,
                 ),
             )
-            if (
+            evidence_band = _classify_authenticity_evidence(
+                confidence=active_result.mean_confidence,
+                sync_score=active_result.sync_score,
+            )
+            reference_rejected_expected_token = (
                 reference_guided_extraction is not None
                 and reference_guided_extraction.status == "none"
-            ) or all(candidate.status == "none" for candidate in candidates):
-                details: list[str] = []
+            )
+            low_evidence_rejected_by_reference = (
+                reference_rejected_expected_token
+                and evidence_band is not None
+                and evidence_band.status == VERIFICATION_STATUS_WATERMARK_MATCH_LOW_CONFIDENCE
+            )
+            if evidence_band is None or low_evidence_rejected_by_reference:
                 no_watermark_result = (
                     reference_guided_extraction
-                    if reference_guided_extraction is not None
-                    and reference_guided_extraction.status == "none"
+                    if reference_rejected_expected_token
                     else active_result
+                )
+                details = _authenticity_evidence_detail_lines(
+                    band=None,
+                    confidence=active_result.mean_confidence,
+                    sync_score=active_result.sync_score,
+                    group_agreement=active_result.group_agreement,
+                    repeat_groups=active_result.repeat_groups,
+                    token_recovered=active_result.token is not None,
                 )
                 if reference_guided_extraction is not None and reference_selection is not None:
                     details.append(
-                        "Reference-aware keyed comparison against the stored source audio did not find the expected watermark energy."
+                        "Reference-aware keyed comparison against the stored source audio did "
+                        "not find the expected watermark energy."
                     )
+                details.extend(analysis_details)
                 return AuthenticityVerificationReport(
                     status=VERIFICATION_STATUS_NO_WATERMARK,
-                    message="No watermark was detected in the inspected audio.",
+                    message="No watermark match was found above the reporting threshold.",
                     inspected_path=str(inspected_path),
                     key_id=no_watermark_result.key_id,
                     extraction_confidence=no_watermark_result.mean_confidence,
@@ -2084,22 +2253,31 @@ class AudioAuthenticityService:
                     workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
                     details=details,
                 )
-            detail_lines = [
-                f"sync_score={active_result.sync_score:.3f}",
-                f"group_agreement={active_result.group_agreement:.3f}",
-                f"repeat_groups={active_result.repeat_groups}",
-            ]
+            detail_lines = _authenticity_evidence_detail_lines(
+                band=evidence_band,
+                confidence=active_result.mean_confidence,
+                sync_score=active_result.sync_score,
+                group_agreement=active_result.group_agreement,
+                repeat_groups=active_result.repeat_groups,
+                token_recovered=active_result.token is not None,
+            )
+            detail_lines.extend(analysis_details)
             if reference_guided_extraction is not None and reference_selection is not None:
                 detail_lines.append(
-                    "Reference-aware keyed verification against the stored source audio stayed below the detection threshold."
+                    "Reference-aware keyed verification against the stored source audio "
+                    "stayed below the strict full-verification threshold."
                 )
             elif sidecar_guided_extraction is not None:
                 detail_lines.append(
-                    "Adjacent sidecar signature verified, but direct keyed token recovery from the inspected audio stayed below the detection threshold."
+                    "Adjacent sidecar signature verified, but direct keyed token recovery from "
+                    "the inspected audio stayed below the strict full-verification threshold."
                 )
             return AuthenticityVerificationReport(
-                status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
-                message="A low-confidence watermark candidate was found, but it did not meet the verification threshold.",
+                status=evidence_band.status,
+                message=_authenticity_evidence_message(
+                    band=evidence_band,
+                    confidence=active_result.mean_confidence,
+                ),
                 inspected_path=str(inspected_path),
                 key_id=active_result.key_id,
                 extraction_confidence=active_result.mean_confidence,
@@ -2166,6 +2344,7 @@ class AudioAuthenticityService:
                 verification_basis="direct_watermark",
                 document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
                 workflow_kind=workflow_kind,
+                details=analysis_details,
             )
 
         canonical = manifest_bytes(payload)
@@ -2191,11 +2370,12 @@ class AudioAuthenticityService:
                 signature_valid=False,
                 extraction_confidence=extraction.mean_confidence,
                 sidecar_path=sidecar_path_str,
+                details=analysis_details,
             )
 
         import soundfile as sf
 
-        audio_data, sample_rate = sf.read(str(inspected_path), dtype="float32", always_2d=True)
+        audio_data, sample_rate = sf.read(str(analysis_path), dtype="float32", always_2d=True)
         fingerprint_score = fingerprint_similarity(
             reference_fingerprint_b64, audio_data, int(sample_rate)
         )
@@ -2211,6 +2391,7 @@ class AudioAuthenticityService:
             f"exact_hash_match={exact_hash_match}",
             f"fingerprint_similarity={fingerprint_score:.3f}",
         ]
+        details.extend(analysis_details)
         if reference_guided_extraction is not None and extraction is reference_guided_extraction:
             verification_basis = "reference_guided_direct"
         elif sidecar_guided_extraction is not None and extraction is sidecar_guided_extraction:

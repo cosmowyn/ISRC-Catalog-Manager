@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isrc-catalog-manager"
-version = "4.0.5"
+version = "5.0.0"
 description = "Desktop ISRC catalog manager for tracks, metadata, licensing, and exports."
 readme = "README.md"
 requires-python = ">=3.14.4"
@@ -69,10 +69,13 @@ packages = [
   "isrc_manager.integrations.soundcloud",
   "isrc_manager.forensics",
   "isrc_manager.history",
+  "isrc_manager.invoicing",
   "isrc_manager.media",
   "isrc_manager.parties",
   "isrc_manager.promo_codes",
   "isrc_manager.quality",
+  "isrc_manager.qa",
+  "isrc_manager.reporting",
   "isrc_manager.releases",
   "isrc_manager.rights",
   "isrc_manager.search",
@@ -205,4 +208,7 @@ addopts = [
   "--cov-report=html",
   "--cov-fail-under=90",
   "-q",
+]
+markers = [
+  "ui_pq: engineering UI process/performance qualification suite",
 ]

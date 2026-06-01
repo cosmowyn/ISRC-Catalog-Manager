@@ -321,7 +321,10 @@ class AuthenticityVerificationDialog(QDialog):
         if fingerprint_similarity is not None:
             detail_lines.append(f"Fingerprint Similarity: {fingerprint_similarity:.3f}")
         if extraction_confidence is not None:
-            detail_lines.append(f"Extraction Confidence: {extraction_confidence:.3f}")
+            detail_lines.append(
+                f"Extraction Confidence: {extraction_confidence * 100:.1f}% "
+                f"({extraction_confidence:.3f})"
+            )
         if sidecar_path:
             detail_lines.append(f"Sidecar: {sidecar_path}")
         if extra_details:

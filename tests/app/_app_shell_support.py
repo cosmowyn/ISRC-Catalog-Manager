@@ -1891,6 +1891,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Diagnostics…",
                 "Application Storage Admin…",
                 "Application Log…",
+                "Report a Bug…",
                 "Open Logs Folder…",
                 "Open Data Folder…",
             ],
@@ -2422,6 +2423,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             _shortcut_texts(self.window.manage_fields_action),
             {"Ctrl+Alt+Shift+M", "Meta+Alt+Shift+M"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.invoice_workspace_action),
+            {"Ctrl+Alt+Shift+B", "Meta+Alt+Shift+B"},
         )
         self.assertEqual(
             _shortcut_texts(self.window.col_width_action),
@@ -4571,6 +4576,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Contract Manager…",
                 "Code Registry Workspace…",
                 "Contract Template Workspace…",
+                "Invoice Workspace…",
                 "Rights Matrix…",
             ],
         )
@@ -7982,8 +7988,16 @@ class AppShellTestCase(unittest.TestCase):
             self.window.export_authenticity_provenance_audio_action.toolTip(),
         )
         self.assertIn(
-            "Recipient-specific lossy delivery export",
+            "Recipient-specific delivery export",
             self.window.export_forensic_watermarked_audio_action.toolTip(),
+        )
+        self.assertEqual(
+            self.window.soundcloud_forensic_export_action.text(),
+            "SoundCloud Forensic Upload Copy…",
+        )
+        self.assertIn(
+            "recipient fixed to SoundCloud",
+            self.window.soundcloud_forensic_export_action.toolTip(),
         )
         self.assertIn(
             "automatic catalog metadata embedding",

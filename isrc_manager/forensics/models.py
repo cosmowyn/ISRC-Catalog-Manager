@@ -12,6 +12,7 @@ DERIVATIVE_KIND_FORENSIC_WATERMARKED_COPY = "forensic_watermarked_copy"
 AUTHENTICITY_BASIS_FORENSIC_TRACE = "forensic_trace"
 
 FORENSIC_STATUS_MATCH_FOUND = "forensic_match_found"
+FORENSIC_STATUS_MATCH_LIKELY = "forensic_match_likely"
 FORENSIC_STATUS_MATCH_LOW_CONFIDENCE = "forensic_match_low_confidence"
 FORENSIC_STATUS_NOT_DETECTED = "forensic_watermark_not_detected"
 FORENSIC_STATUS_UNSUPPORTED_OR_INSUFFICIENT = "unsupported_format_or_insufficient_confidence"
@@ -55,6 +56,7 @@ class ForensicExportRequest:
     share_label: str | None = None
     profile_name: str | None = None
     key_id: str | None = None
+    embed_trace_metadata: bool = False
 
 
 @dataclass(slots=True)

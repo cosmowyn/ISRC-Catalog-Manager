@@ -284,6 +284,7 @@ class BackgroundAppServiceFactory:
                 watermark_service=audio_watermark_service,
                 tag_service=audio_tag_service,
                 app_version=_app_version_text(),
+                conversion_service=AudioConversionService(),
             )
             forensic_watermark_service = ForensicWatermarkService()
             forensic_export_service = ForensicExportCoordinator(

@@ -32,10 +32,14 @@ class ForensicExportDialog(QDialog):
         self,
         *,
         format_labels: list[tuple[str, str]],
+        fixed_recipient_label: str | None = None,
+        share_label_caption: str = "Share Label",
+        share_label_placeholder: str = "Optional share or campaign label",
         parent=None,
     ):
         super().__init__(parent)
         self._format_labels = list(format_labels)
+        self._fixed_recipient_label = str(fixed_recipient_label or "").strip() or None
         self.setWindowTitle("Export Forensic Watermarked Audio")
         _apply_standard_dialog_chrome(self, "forensicExportDialog")
 
@@ -47,13 +51,13 @@ class ForensicExportDialog(QDialog):
             self,
             title="Export Forensic Watermarked Audio",
             subtitle=(
-                "Create recipient-specific lossy delivery copies for leak tracing. "
+                "Create recipient-specific delivery copies for leak tracing. "
                 "These exports remain distinct from direct authenticity master exports."
             ),
         )
 
         summary = QLabel(
-            "The app will export the selected catalog audio to a lossy delivery format, write database metadata, embed a recipient-specific forensic watermark, hash the final file, register derivative lineage, and ZIP bulk exports."
+            "The app will export the selected catalog audio to the chosen delivery format, write database metadata, embed a recipient-specific forensic watermark, hash the final file, register derivative lineage, and ZIP bulk exports."
         )
         summary.setWordWrap(True)
         summary.setProperty("role", "secondary")
@@ -66,11 +70,16 @@ class ForensicExportDialog(QDialog):
             self.format_combo.addItem(label, format_id)
         self.recipient_edit = QLineEdit(self)
         self.share_edit = QLineEdit(self)
-        self.recipient_edit.setPlaceholderText("Optional recipient or reviewer label")
-        self.share_edit.setPlaceholderText("Optional share or campaign label")
+        if self._fixed_recipient_label:
+            self.recipient_edit.setText(self._fixed_recipient_label)
+            self.recipient_edit.setReadOnly(True)
+            self.recipient_edit.setToolTip("Fixed by this forensic export workflow.")
+        else:
+            self.recipient_edit.setPlaceholderText("Optional recipient or reviewer label")
+        self.share_edit.setPlaceholderText(share_label_placeholder)
         form.addRow("Output Format", self.format_combo)
         form.addRow("Recipient Label", self.recipient_edit)
-        form.addRow("Share Label", self.share_edit)
+        form.addRow(share_label_caption, self.share_edit)
         root.addLayout(form)
 
         note = QLabel(
@@ -95,6 +104,8 @@ class ForensicExportDialog(QDialog):
         return str(self.format_combo.currentData() or "").strip().lower() or None
 
     def recipient_label(self) -> str | None:
+        if self._fixed_recipient_label:
+            return self._fixed_recipient_label
         text = self.recipient_edit.text().strip()
         return text or None
 

@@ -1,0 +1,154 @@
+# Crash and Bug Reporting
+
+ISRC Catalog Manager supports privacy-safe crash reports and manual bug reports.
+
+## Security Model
+
+The desktop application does not ship a GitHub personal access token and does not store
+repository-write credentials in plaintext configuration. Issue creation is designed to use a
+server-side HTTPS report proxy configured with `ISRC_REPORT_PROXY_URL`. The proxy owns any GitHub
+credentials and must enforce:
+
+- request schema validation;
+- payload size limits;
+- server-side rate limits and spam protection;
+- accepted application versions/origins;
+- a fixed repository target;
+- a fixed allow-list of labels;
+- a second sanitisation pass before creating the GitHub issue.
+
+If `ISRC_REPORT_PROXY_URL` is not configured, reports are not submitted directly. The application
+saves the sanitised pending report under the local app data `reports/pending` folder.
+
+`ISRC_REPORT_REPOSITORY` can override the repository slug sent to a proxy. It defaults to
+`cosmowyn/ISRC-Catalog-Manager`.
+
+## GitHub Repository Configuration
+
+The repository is configured with structured issue forms under `.github/ISSUE_TEMPLATE`:
+
+- `bug_report.yml` creates `[Bug Report]` issues with `bug` and `user-report` labels;
+- `crash_report.yml` creates `[Crash Report]` issues with `bug`, `user-report`, and
+  `crash-report` labels;
+- `config.yml` disables blank issues so public manual reports follow a structured template.
+
+Create or update the labels with:
+
+```bash
+GH_TOKEN=<admin-or-maintainer-token> python3 scripts/configure_github_reporting.py \
+  --repo cosmowyn/ISRC-Catalog-Manager
+```
+
+The script only reads `GH_TOKEN` or `GITHUB_TOKEN` from the environment. It does not persist the
+token. For a dry run:
+
+```bash
+python3 scripts/configure_github_reporting.py --dry-run
+```
+
+## Proxy GitHub App Setup
+
+Use a GitHub App for production report submission.
+
+1. Create a GitHub App dedicated to ISRC Catalog Manager report submission.
+2. Grant repository permissions:
+   - Metadata: read-only;
+   - Issues: read and write.
+3. Do not grant Contents, Pull requests, Actions, Administration, Secrets, or Workflow access.
+4. Install the app only on `cosmowyn/ISRC-Catalog-Manager`.
+5. Generate a private key for the app and store it only in the proxy runtime secret store.
+6. Deploy a proxy that exposes a single HTTPS POST endpoint and uses the GitHub App installation
+   token server-side.
+
+The reference WSGI proxy contract lives in `isrc_manager.reporting.proxy`. It validates schema,
+repository, title prefix, accepted app versions when configured, fixed label allow-lists, payload
+size, sanitisation, and process-local rate limits before creating a GitHub issue. Production
+deployments should also enforce rate limits at the ingress/API gateway because client-side and
+process-local controls can be bypassed.
+
+Proxy deployment variables:
+
+```text
+GITHUB_APP_ID
+GITHUB_APP_INSTALLATION_ID
+GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_FILE
+ISRC_REPORT_PROXY_REPOSITORY=cosmowyn/ISRC-Catalog-Manager
+ISRC_REPORT_PROXY_ALLOWED_VERSIONS=4.0.0,4.0.1
+ISRC_REPORT_PROXY_MAX_BYTES=180000
+ISRC_REPORT_PROXY_PER_IP_HOUR_LIMIT=20
+```
+
+The desktop client should then be launched or packaged with:
+
+```text
+ISRC_REPORT_PROXY_URL=https://reports.example.com/isrc-catalog-manager
+ISRC_REPORT_REPOSITORY=cosmowyn/ISRC-Catalog-Manager
+```
+
+## Automatic Crash Detection
+
+On startup the app writes a runtime session marker under the app data `reports/runtime` folder. On
+clean shutdown that marker is closed cleanly. If the next startup finds a previous marker without a
+clean shutdown, the user is prompted before a crash report is generated for review.
+
+Crash reports may include:
+
+- application version and available build metadata;
+- operating system, Python, Qt, and PySide6 versions;
+- timestamp and last recorded app workflow event;
+- recent sanitised application logs;
+- recent sanitised traceback, exception, or faulthandler files when present.
+
+No crash report is sent without explicit user consent and a preview step.
+
+## Manual Bug Reports
+
+Users can open `Help > Report a Bug…`. The dialog collects:
+
+- summary;
+- description;
+- steps to reproduce;
+- expected behaviour;
+- actual behaviour;
+- optional sanitised recent logs;
+- optional technical system details.
+
+The user then sees the exact Markdown payload that will be submitted or saved. The report can be
+copied locally, cancelled, or submitted.
+
+## Privacy Behaviour
+
+All reports pass through `isrc_manager.reporting.sanitizer.ReportSanitizer` before preview and
+again before submission. The sanitiser redacts common high-risk patterns, including:
+
+- passwords, secrets, API keys, OAuth tokens, bearer tokens, and GitHub tokens;
+- connection strings;
+- private keys;
+- email addresses and phone numbers;
+- local usernames and absolute home-folder paths;
+- obvious SQL row content;
+- binary data.
+
+Reports must not include raw catalog databases, contract data, royalty data, private documents, or
+audio files. Users should describe private workflow symptoms rather than pasting private source
+records.
+
+## Abuse Protection
+
+The desktop app applies local rate limits before submission:
+
+- maximum reports per hour;
+- maximum reports per day;
+- duplicate report detection;
+- cooldown after repeated failed submissions;
+- payload size limits.
+
+Server-side controls remain mandatory for production GitHub issue creation because client-side rate
+limits can be bypassed.
+
+## Limitations
+
+The app cannot capture a report at the instant of a process crash. It detects an unclean prior
+session on the next startup. System event-log collection is intentionally conservative and currently
+limited to app-owned logs and app-owned traceback/exception files to avoid collecting private system
+data.

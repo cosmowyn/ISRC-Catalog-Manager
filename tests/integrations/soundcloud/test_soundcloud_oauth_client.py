@@ -405,6 +405,30 @@ class SoundCloudOAuthClientTests(unittest.TestCase):
         fresh_store = SoundCloudTokenStore(persistent_backend=backend)
         self.assertIsNone(fresh_store.load_bundle("acct"))
 
+    def test_token_store_prefer_session_does_not_read_keyring_when_available(self):
+        class FailingReadBackend(FakeSecureBackend):
+            def get_password(self, service_name: str, account_key: str):
+                raise RuntimeError("keyring should not be read in session-only mode")
+
+        backend = FailingReadBackend(available=True)
+        store = SoundCloudTokenStore(persistent_backend=backend, prefer_persistent=False)
+
+        token_kind = store.save_bundle(
+            "acct",
+            SoundCloudOAuthTokenBundle(access_token="session-a", refresh_token="session-r"),
+        )
+        loaded = store.load_bundle("acct")
+        secret_kind = store.save_client_secret("client-id", "session-secret")
+        loaded_secret = store.load_client_secret("client-id")
+
+        self.assertEqual(store.active_storage_mode, SoundCloudTokenKind.SESSION)
+        self.assertEqual(token_kind, SoundCloudTokenKind.SESSION)
+        self.assertEqual(secret_kind, SoundCloudTokenKind.SESSION)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.access_token, "session-a")
+        self.assertEqual(loaded_secret, "session-secret")
+        self.assertEqual(backend.values, {})
+
     def test_keychain_store_save_load_delete_through_fake_keyring(self):
         backend = FakeSecureBackend(available=True)
         store = KeychainSoundCloudTokenStore(backend=backend)

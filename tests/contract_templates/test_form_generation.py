@@ -296,6 +296,21 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
             auto_fields["{{db.contract.contract_number}}"].description or "",
         )
 
+    def test_symbol_catalog_exposes_invoice_and_royalty_database_symbols(self):
+        entries = {
+            entry.canonical_symbol: entry for entry in self.catalog_service.list_known_symbols()
+        }
+
+        invoice_number = entries["{{db.invoice.number}}"]
+        invoice_party = entries["{{db.invoice.party_name}}"]
+        royalty_net = entries["{{db.royalty.net_payable}}"]
+
+        self.assertEqual(invoice_number.scope_entity_type, "invoice")
+        self.assertEqual(invoice_number.scope_policy, "invoice_selection_required")
+        self.assertEqual(invoice_party.display_label, "Invoice Party Name")
+        self.assertEqual(royalty_net.scope_entity_type, "royalty_statement")
+        self.assertEqual(royalty_net.scope_policy, "royalty_statement_selection_required")
+
     def test_party_scope_fields_use_one_selector_and_fallback_party_labels(self):
         template = self._create_template()
         source_path = self.root / "party-form-generation.docx"

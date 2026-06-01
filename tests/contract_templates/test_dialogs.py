@@ -5225,7 +5225,10 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.panel._fill_preview_controller = preview_controller
         with mock.patch("isrc_manager.contract_templates.dialogs.QWebEngineView", None):
             self.panel.refresh_current_html_preview()
-        self.assertIn("Qt WebEngine is unavailable", self.panel.fill_preview_status_label.text())
+        self.assertEqual(
+            preview_controller.refreshes[-1],
+            ("Previewing current HTML draft state.", 0),
+        )
         self.panel._fill_preview_controller = None
         self.panel.fill_html_preview_view = None
 

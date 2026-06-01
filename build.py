@@ -56,6 +56,9 @@ SPLASH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 WINDOWS_ICON_EXTENSIONS = (".ico", ".png", ".jpg", ".jpeg", ".bmp")
 MACOS_ICON_EXTENSIONS = (".icns", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif")
 LINUX_ICON_EXTENSIONS = (".png", ".ico", ".icns")
+PYINSTALLER_HIDDEN_IMPORTS = ("keyring",)
+PYINSTALLER_COLLECT_SUBMODULES = ("keyring.backends",)
+PYINSTALLER_COPY_METADATA = ("keyring",)
 SPLASH_VERSION_FONT_SIZE = 12
 SPLASH_VERSION_COLOR = (186, 214, 245)
 SPLASH_VERSION_TEXT_GAP = 4
@@ -829,6 +832,15 @@ def _pyinstaller_cmd(
         cmd.append("--onefile")
     else:
         cmd.append("--onedir")
+
+    for module_name in PYINSTALLER_HIDDEN_IMPORTS:
+        cmd.extend(["--hidden-import", module_name])
+
+    for module_name in PYINSTALLER_COLLECT_SUBMODULES:
+        cmd.extend(["--collect-submodules", module_name])
+
+    for package_name in PYINSTALLER_COPY_METADATA:
+        cmd.extend(["--copy-metadata", package_name])
 
     if runtime_splash_asset:
         cmd.extend(

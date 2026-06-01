@@ -462,7 +462,7 @@ class SoundCloudTokenStore:
         return self.session_store.save_bundle(account_key, bundle)
 
     def load_bundle(self, account_key: str) -> SoundCloudOAuthTokenBundle | None:
-        if self.persistent_available:
+        if self.prefer_persistent and self.persistent_available:
             loaded = self.keychain_store.load_bundle(account_key)
             if loaded is not None:
                 return loaded
@@ -478,7 +478,7 @@ class SoundCloudTokenStore:
         return self.session_store.save_client_secret(client_id, client_secret)
 
     def load_client_secret(self, client_id: str) -> str | None:
-        if self.persistent_available:
+        if self.prefer_persistent and self.persistent_available:
             loaded = self.keychain_store.load_client_secret(client_id)
             if loaded:
                 return loaded

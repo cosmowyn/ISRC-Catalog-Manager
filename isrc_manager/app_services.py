@@ -274,6 +274,7 @@ def initialize_foreground_services(app: Any) -> None:
             watermark_service=app.audio_watermark_service,
             tag_service=app.audio_tag_service,
             app_version=app._app_version_text(),
+            conversion_service=app.audio_conversion_service,
         )
         if app.conn is not None
         and app.authenticity_key_service is not None

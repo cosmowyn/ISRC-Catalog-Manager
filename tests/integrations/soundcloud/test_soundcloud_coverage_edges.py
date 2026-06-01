@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import http.client
 import io
-import threading
 import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -832,27 +830,29 @@ def test_loopback_http_handler_accepts_only_configured_path() -> None:
         ("/wrong?code=nope", 404, None),
         ("/callback?code=ok&state=s", 200, "code=ok"),
     ]:
-        server = oauth_capture._LoopbackHTTPServer(
-            ("127.0.0.1", 0),
-            "http://127.0.0.1/callback",
+        server = SimpleNamespace(
+            redirect_uri="http://127.0.0.1/callback",
+            callback_url=None,
         )
-        host, port = server.server_address
-        thread = threading.Thread(target=server.handle_request, daemon=True)
-        thread.start()
-        conn = http.client.HTTPConnection(host, port, timeout=2)
-        try:
-            conn.request("GET", path)
-            response = conn.getresponse()
-            response.read()
-        finally:
-            conn.close()
-            thread.join(timeout=2)
-            server.server_close()
-        assert response.status == expected_status
+        handler = object.__new__(oauth_capture._LoopbackCallbackHandler)
+        handler.path = path
+        handler.server = server
+        handler.wfile = io.BytesIO()
+        statuses: list[int] = []
+        headers: list[tuple[str, str]] = []
+        handler.send_response = lambda status: statuses.append(status)
+        handler.send_header = lambda name, value: headers.append((name, value))
+        handler.end_headers = lambda: None
+
+        oauth_capture._LoopbackCallbackHandler.do_GET(handler)
+
+        assert statuses == [expected_status]
         if expected_callback is None:
             assert server.callback_url is None
         else:
             assert expected_callback in str(server.callback_url)
+            assert ("Content-Type", "text/html; charset=utf-8") in headers
+            assert b"authorization received" in handler.wfile.getvalue()
 
 
 def test_token_store_detection_keyring_adapter_and_error_edges(monkeypatch) -> None:

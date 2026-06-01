@@ -109,13 +109,18 @@ def _refresh_audio_conversion_action_states(self) -> None:
         else "External audio conversion requires ffmpeg."
     )
     forensic_message = (
-        "Export recipient-specific lossy delivery copies for leak tracing. This stays separate from signed authenticity master exports."
+        "Export recipient-specific forensic delivery copies for leak tracing. This stays separate from signed authenticity master exports."
         if forensic_available
         else (
             "Forensic watermark export requires an open profile, available conversion targets, and a local authenticity key."
             if self.track_service is not None
             else "Open a profile first."
         )
+    )
+    soundcloud_forensic_message = (
+        "Export SoundCloud-ready forensic upload copies with recipient fixed to SoundCloud and public profile trace metadata."
+        if forensic_available
+        else forensic_message
     )
     forensic_inspect_message = (
         "Inspect a suspicious file and attempt forensic watermark resolution against the open profile's export ledger."
@@ -126,6 +131,7 @@ def _refresh_audio_conversion_action_states(self) -> None:
         ("convert_selected_audio_action", managed_available, managed_message),
         ("convert_external_audio_files_action", external_available, external_message),
         ("export_forensic_watermarked_audio_action", forensic_available, forensic_message),
+        ("soundcloud_forensic_export_action", forensic_available, soundcloud_forensic_message),
         (
             "inspect_forensic_watermark_action",
             self.forensic_export_service is not None,

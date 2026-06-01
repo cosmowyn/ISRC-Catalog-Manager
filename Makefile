@@ -10,7 +10,7 @@ HEADLESS_TEST_ENV ?= QT_QPA_PLATFORM=offscreen CI=1 PYTHONUNBUFFERED=1
 
 CHECK_PATHS = ISRC_manager.py build.py isrc_manager scripts tests
 
-.PHONY: all-checks check fix compile lint format black format-check type-check test coverage
+.PHONY: all-checks check fix compile lint format black format-check type-check test coverage ui-pq help-docs
 
 all-checks: fix type-check coverage
 
@@ -47,3 +47,9 @@ test:
 
 coverage:
 	$(HEADLESS_TEST_ENV) $(PYTEST) --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=90
+
+ui-pq:
+	$(HEADLESS_TEST_ENV) $(PYTEST) -q tests/ui_qa --no-cov
+
+help-docs:
+	$(HEADLESS_TEST_ENV) $(PYTEST) -q tests/ui_qa/test_ui_pq_help_documentation.py --no-cov

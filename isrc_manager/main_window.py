@@ -269,6 +269,8 @@ from isrc_manager.constants import (
 )
 from isrc_manager.contract_templates import controller as contract_template_controller
 from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
+from isrc_manager.invoicing import controller as invoice_controller
+from isrc_manager.invoicing.workspace import InvoiceWorkspacePanel
 from isrc_manager.contracts import ContractPayload, ContractService
 from isrc_manager.contracts import controller as contract_controller
 from isrc_manager.contracts.dialogs import ContractBrowserPanel
@@ -338,7 +340,7 @@ from isrc_manager.forensics import (
 )
 from isrc_manager.forensics import controller as forensic_controller
 from isrc_manager.gs1_dialog import GS1MetadataDialog
-from isrc_manager.help_content import render_help_html
+from isrc_manager.help_content import copy_help_screenshots, render_help_html
 from isrc_manager.history import (
     HistoryCleanupBlockedError,
     HistoryManager,
@@ -465,6 +467,7 @@ from isrc_manager.quality.dialogs import QualityDashboardDialog
 from isrc_manager.quality.models import QualityIssue
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.quality import controller as quality_controller
+from isrc_manager.reporting import controller as reporting_controller
 from isrc_manager.releases import controller as release_controller
 from isrc_manager.releases import (
     ReleasePayload,
@@ -861,6 +864,9 @@ class App(QMainWindow):
 
         # --- Logging setup (daily human log + structured trace log) ---
         self._configure_logging()
+        self.reporting_service = None
+        self._pending_crash_report_session = None
+        reporting_controller.initialize_reporting(self)
         self._log_event(
             "app.start",
             "Application start",
@@ -1042,6 +1048,7 @@ class App(QMainWindow):
         )
         if startup_task_id is None:
             self._handle_startup_catalog_refresh_complete()
+        QTimer.singleShot(0, lambda: reporting_controller.prompt_for_pending_crash_report(self))
 
     def _report_startup_phase(
         self,
@@ -1618,6 +1625,7 @@ class App(QMainWindow):
         self._save_main_dock_state(sync=False)
         self.settings.sync()
         self._mark_update_backup_handoff_ready_on_close()
+        reporting_controller.mark_clean_shutdown(self)
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
 
@@ -1738,9 +1746,11 @@ class App(QMainWindow):
         if not getattr(self, "_logging_configured", False):
             self._bootstrap_log_buffer.append(("app", level, line, None))
             self._log_trace(event, message=message, level=level, **fields)
+            reporting_controller.record_app_event(self, event, message)
             return
         self.logger.log(level, line)
         self._log_trace(event, message=message, level=level, **fields)
+        reporting_controller.record_app_event(self, event, message)
 
     def _create_action(
         self,
@@ -1990,6 +2000,7 @@ class App(QMainWindow):
 
     def _ensure_help_file(self) -> Path:
         self.help_dir.mkdir(parents=True, exist_ok=True)
+        copy_help_screenshots(self.help_dir / "screenshots")
         html_text = self._help_html()
         try:
             current_text = self.help_file_path.read_text(encoding="utf-8")
@@ -2346,6 +2357,9 @@ class App(QMainWindow):
             prefer_trace=prefer_trace,
             scroll_to_latest=scroll_to_latest,
         ).exec()
+
+    def open_bug_report_dialog(self):
+        return reporting_controller.open_bug_report_dialog(self)
 
     def open_application_storage_admin_dialog(self):
         ApplicationStorageAdminDialog(self, parent=self).exec()
@@ -3685,6 +3699,9 @@ class App(QMainWindow):
             self, *args, **kwargs
         )
 
+    def _create_invoice_workspace_panel(self, *args, **kwargs):
+        return invoice_controller._create_invoice_workspace_panel(self, *args, **kwargs)
+
     def _create_rights_matrix_panel(self, *args, **kwargs):
         return rights_controller._create_rights_matrix_panel(self, *args, **kwargs)
 
@@ -3759,6 +3776,9 @@ class App(QMainWindow):
         return contract_template_controller._ensure_contract_template_workspace_dock(
             self, *args, **kwargs
         )
+
+    def _ensure_invoice_workspace_dock(self, *args, **kwargs):
+        return invoice_controller._ensure_invoice_workspace_dock(self, *args, **kwargs)
 
     def _ensure_rights_matrix_dock(self, *args, **kwargs):
         return rights_controller._ensure_rights_matrix_dock(self, *args, **kwargs)
@@ -6737,6 +6757,9 @@ class App(QMainWindow):
     def open_contract_template_workspace(self, *args, **kwargs):
         return contract_template_controller.open_contract_template_workspace(self, *args, **kwargs)
 
+    def open_invoice_workspace(self, *args, **kwargs):
+        return invoice_controller.open_invoice_workspace(self, *args, **kwargs)
+
     def open_rights_matrix(self, *args, **kwargs):
         return rights_controller.open_rights_matrix(self, *args, **kwargs)
 
@@ -7711,6 +7734,11 @@ class App(QMainWindow):
 
     def export_forensic_watermarked_audio(self, *args, **kwargs):
         return forensic_controller.export_forensic_watermarked_audio(self, *args, **kwargs)
+
+    def export_soundcloud_forensic_watermarked_audio(self, *args, **kwargs):
+        return forensic_controller.export_soundcloud_forensic_watermarked_audio(
+            self, *args, **kwargs
+        )
 
     def inspect_forensic_watermark(self, *args, **kwargs):
         return forensic_controller.inspect_forensic_watermark(self, *args, **kwargs)

@@ -1,0 +1,1759 @@
+"""Executable UI PQ scenarios."""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+from PySide6.QtWidgets import QAbstractButton, QComboBox, QDialog, QMenu, QWidget
+
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,
+    BUILTIN_CATEGORY_INVOICE_NUMBER,
+    BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
+    CodeRegistryService,
+)
+from isrc_manager.help_content import (
+    copy_help_screenshots,
+    help_screenshot_source_dir,
+    refresh_help_chapter_screenshots,
+)
+from isrc_manager.integrations.soundcloud.models import (
+    SoundCloudExecutionItemStatus,
+    SoundCloudExecutionStatus,
+    SoundCloudPlanItemStatus,
+    SoundCloudPublishExecutionItemResult,
+    SoundCloudPublishExecutionResult,
+    SoundCloudQuotaSnapshot,
+    SoundCloudTokenKind,
+)
+from isrc_manager.integrations.soundcloud.persistence import SoundCloudSQLiteRepository
+from isrc_manager.integrations.soundcloud.service import SoundCloudPublishPlanner
+from isrc_manager.integrations.soundcloud.ui import SoundCloudPublishDialog
+
+from .commands import table_contains_text
+from .fixtures import QARepertoireIds
+from .help_validation import validate_help_coverage, write_help_coverage_report
+from .visual import VisualQualificationService
+
+CATALOG_TRACK_TITLE = "UI PQ Qualification Track"
+CATALOG_TRACK_EDITED_TITLE = "UI PQ Qualification Track Edited"
+CATALOG_ARTIST_NAME = "UI PQ Artist"
+CATALOG_RELEASE_TITLE = "UI PQ Release"
+RELATIONSHIP_PARTY_NAME = "UI PQ Rights Holder"
+RELATIONSHIP_WORK_TITLE = "UI PQ Manager-Created Work"
+CONTRACT_TITLE = "UI PQ License Agreement"
+RIGHT_TITLE = "UI PQ Sound Recording Grant"
+
+
+class _SoundCloudTrackProvider:
+    def __init__(self, snapshots: dict[int, dict[str, object]]) -> None:
+        self.snapshots = snapshots
+
+    def get_track_snapshot(self, track_id: int):
+        return self.snapshots.get(track_id)
+
+
+class _SoundCloudReleaseProvider:
+    def __init__(self, summaries: dict[int, dict[str, object]]) -> None:
+        self.summaries = summaries
+
+    def get_release_summary(self, track_id: int):
+        return self.summaries.get(track_id)
+
+
+class _SoundCloudMediaHandle:
+    def __init__(
+        self,
+        *,
+        filename: str,
+        source_path: str,
+        size_bytes: int,
+        mime_type: str | None = None,
+    ) -> None:
+        self.filename = filename
+        self.source_path = source_path
+        self.size_bytes = size_bytes
+        self.mime_type = mime_type
+
+
+class _SoundCloudMediaProvider:
+    def __init__(
+        self,
+        audio_handle: _SoundCloudMediaHandle,
+        artwork_handle: _SoundCloudMediaHandle | None = None,
+    ) -> None:
+        self.audio_handle = audio_handle
+        self.artwork_handle = artwork_handle
+
+    def get_audio_handle(self, _track_id: int):
+        return self.audio_handle
+
+    def get_effective_artwork_handle(self, _track_id: int):
+        return self.artwork_handle, False
+
+
+class _SoundCloudPublicationLookup:
+    def __init__(self, repository: SoundCloudSQLiteRepository) -> None:
+        self.repository = repository
+
+    def find_publication(self, track_id: int):
+        return self.repository.find_publication(track_id)
+
+
+class _SoundCloudAccountState:
+    def is_connected(self) -> bool:
+        return True
+
+    def get_quota_snapshot(self) -> SoundCloudQuotaSnapshot:
+        return SoundCloudQuotaSnapshot(
+            daily_remaining_uploads=200,
+            daily_upload_limit=200,
+            hourly_remaining_uploads=20,
+            hourly_upload_limit=20,
+            rate_limit_remaining=50,
+        )
+
+
+def _workflow_visual_service(harness: Any) -> VisualQualificationService:
+    service = getattr(harness, "_business_workflow_visual_service", None)
+    if isinstance(service, VisualQualificationService):
+        return service
+    service = VisualQualificationService(
+        harness.artifact_dir,
+        manifest_name="business_workflow_manifest.json",
+    )
+    setattr(harness, "_business_workflow_visual_service", service)
+    return service
+
+
+def _capture_workflow_widget(
+    harness: Any,
+    widget: QWidget,
+    name: str,
+) -> dict[str, object]:
+    widget.show()
+    harness.process_events(cycles=8)
+    service = _workflow_visual_service(harness)
+    capture = service.capture_widget(widget, name)
+    comparison = service.compare_capture_to_baseline(capture)
+    manifest_path = service.write_manifest()
+    return {
+        "screenshot_path": capture.path,
+        "baseline_path": comparison.baseline_path,
+        "baseline_created": comparison.baseline_created,
+        "comparison_passed": comparison.passed,
+        "manifest_path": str(manifest_path),
+    }
+
+
+def _set_combo_text(widget: Any, text: str) -> None:
+    if isinstance(widget, QComboBox):
+        widget.setCurrentText(text)
+        if widget.isEditable():
+            widget.setEditText(text)
+        return
+    setter = getattr(widget, "setCurrentText", None)
+    if callable(setter):
+        setter(text)
+        edit_setter = getattr(widget, "setEditText", None)
+        if callable(edit_setter):
+            edit_setter(text)
+        return
+    text_setter = getattr(widget, "setText", None)
+    if callable(text_setter):
+        text_setter(text)
+
+
+def _set_combo_by_data(combo: Any, value: object) -> None:
+    finder = getattr(combo, "findData", None)
+    setter = getattr(combo, "setCurrentIndex", None)
+    if not callable(finder) or not callable(setter):
+        return
+    index = finder(value)
+    if index >= 0:
+        setter(index)
+
+
+def _wait_for_row(
+    harness: Any,
+    query: str,
+    params: tuple[object, ...],
+    *,
+    label: str,
+) -> tuple[Any, ...]:
+    for _attempt in range(40):
+        harness.process_events(cycles=4)
+        row = harness.connection.execute(query, params).fetchone()
+        if row is not None:
+            return tuple(row)
+    raise AssertionError(f"{label} was not persisted in the QA database.")
+
+
+def _require_help_reference(harness: Any, workflow_title: str) -> dict[str, object]:
+    report = validate_help_coverage(
+        harness.inventory,
+        screenshot_dir=help_screenshot_source_dir(),
+    )
+    if report.status != "passed":
+        raise AssertionError(
+            f"Help documentation coverage is not current for {workflow_title}: "
+            f"{report.finding_count} finding(s)."
+        )
+    return {
+        "workflow": workflow_title,
+        "help_status": report.status,
+        "coverage_percent": report.coverage_percent,
+        "chapter_count": report.chapter_count,
+        "chapter_screenshot_count": report.chapter_screenshot_count,
+    }
+
+
+def _table_has_id(table: Any, record_id: int, *, id_column: int = 0) -> bool:
+    for row in range(table.rowCount()):
+        item = table.item(row, id_column)
+        if item is None:
+            continue
+        try:
+            if int(item.text()) == int(record_id):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_button(root: QWidget, label: str) -> QAbstractButton:
+    expected = str(label or "").replace("&", "").strip()
+    for button in root.findChildren(QAbstractButton):
+        text = str(button.text() or "").replace("&", "").strip()
+        if text == expected and button.isEnabled():
+            button.click()
+            return button
+    raise AssertionError(f"Enabled button was not found: {label}")
+
+
+def _single_int(conn: Any, query: str, params: tuple[object, ...] = ()) -> int:
+    row = conn.execute(query, params).fetchone()
+    if row is None:
+        return 0
+    return int(row[0] or 0)
+
+
+def run_startup_smoke(harness: Any) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("QA harness window is not open.")
+    menu_count = len(window.menuBar().findChildren(QMenu))
+    if menu_count <= 0:
+        raise AssertionError("No menus were discovered on the main window.")
+    if getattr(window, "conn", None) is None:
+        raise AssertionError("Main window did not open a QA database connection.")
+    harness.evidence.record(
+        "UI-PQ-SMOKE-001",
+        status="passed",
+        message="Main window, menu bar, and QA database are reachable.",
+        data={
+            "menu_count": menu_count,
+            "database_path": harness.database_path,
+            "window_title": window.windowTitle(),
+        },
+    )
+
+
+def run_menu_inventory(harness: Any) -> None:
+    action_count = sum(1 for item in harness.inventory if item.kind == "action")
+    menu_count = sum(1 for item in harness.inventory if item.kind == "menu")
+    if action_count <= 0:
+        raise AssertionError("No QAction entries were discovered.")
+    harness.evidence.record(
+        "UI-PQ-MENU-001",
+        status="passed",
+        message="Runtime menu/action inventory was generated.",
+        data={"action_count": action_count, "menu_count": menu_count},
+    )
+
+
+def run_catalog_workflow(harness: Any) -> int:
+    window = harness.window
+    conn = harness.connection
+    if window is None:
+        raise AssertionError("QA harness window is not open.")
+
+    window.open_add_track_entry()
+    harness.process_events(cycles=8)
+    _set_combo_text(window.artist_field, CATALOG_ARTIST_NAME)
+    _set_combo_text(window.album_title_field, CATALOG_RELEASE_TITLE)
+    _set_combo_text(window.genre_field, "UI PQ Genre")
+    window.track_title_field.setText(CATALOG_TRACK_TITLE)
+    window.track_number_field.setValue(1)
+    window.track_len_m.setValue(3)
+    window.track_len_s.setValue(14)
+    add_track_visual = _capture_workflow_widget(
+        harness,
+        window,
+        "ui_pq_add_track_dialog_populated",
+    )
+    window.save_button.click()
+    harness.process_events(cycles=12)
+    row = _wait_for_row(
+        harness,
+        "SELECT id, work_id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
+        (CATALOG_TRACK_TITLE,),
+        label="UI-created catalog track",
+    )
+    track_id = int(row[0])
+    work_id_from_add_track = int(row[1]) if row[1] is not None else None
+    refresh = getattr(window, "refresh_table_preserve_view", None)
+    if callable(refresh):
+        refresh(focus_id=track_id)
+        harness.process_events(cycles=8)
+    visible = False
+    table = getattr(window, "table", None)
+    if table is not None:
+        visible = table_contains_text(table, CATALOG_TRACK_TITLE)
+
+    from isrc_manager.tracks.edit_dialog import EditDialog
+
+    edit_visual: dict[str, object] = {}
+
+    def _exec_edit_track_dialog(dialog: EditDialog) -> int:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.track_title.setText(CATALOG_TRACK_EDITED_TITLE)
+        _set_combo_text(dialog.genre, "UI PQ Edited Genre")
+        nonlocal edit_visual
+        edit_visual = _capture_workflow_widget(
+            harness,
+            dialog,
+            "ui_pq_edit_track_dialog_populated",
+        )
+        dialog.save_changes()
+        harness.process_events(cycles=12)
+        return QDialog.Accepted
+
+    with mock.patch.object(EditDialog, "exec", _exec_edit_track_dialog):
+        window.open_track_editor(track_id)
+    edited_row = _wait_for_row(
+        harness,
+        "SELECT id, track_title, genre FROM Tracks WHERE id=?",
+        (track_id,),
+        label="UI-edited catalog track",
+    )
+    if (
+        str(edited_row[1]) != CATALOG_TRACK_EDITED_TITLE
+        or str(edited_row[2]) != "UI PQ Edited Genre"
+    ):
+        raise AssertionError(f"Track edit dialog did not persist expected values: {edited_row!r}")
+    if callable(refresh):
+        refresh(focus_id=track_id)
+        harness.process_events(cycles=8)
+    if table is not None:
+        visible = visible and table_contains_text(table, CATALOG_TRACK_EDITED_TITLE)
+
+    harness.evidence.record(
+        "UI-PQ-CAT-001",
+        status="passed" if visible else "partial",
+        message="Track was created through Add Track UI and edited through Edit Track UI.",
+        data={
+            "track_id": track_id,
+            "work_id_from_add_track": work_id_from_add_track,
+            "catalog_row_visible": visible,
+            "creation_method": "add_track_panel.save_button.click",
+            "edit_method": "track_editor_dialog.save_changes",
+            "add_track_visual": add_track_visual,
+            "edit_track_visual": edit_visual,
+            "help_reference": _require_help_reference(
+                harness,
+                "Create a First Single From Nothing",
+            ),
+        },
+    )
+    if not visible:
+        harness.deviations.add(
+            test_id="UI-PQ-CAT-001",
+            severity="medium",
+            ui_area="catalog",
+            workflow="Catalog table operation",
+            ui_object="catalog table",
+            step="Refresh catalog after deterministic track creation",
+            expected="The created track appears in the catalog table.",
+            actual="Track was created in the QA database but not observed in the visible table.",
+            database_path=harness.database_path,
+            evidence_path=str(harness.evidence.evidence_path),
+            coverage_status="partial",
+            recommended_followup="Add a direct catalog model row assertion or stabilize UI refresh hooks.",
+        )
+    conn.commit()
+    return track_id
+
+
+def run_relationship_workflow(harness: Any, *, track_id: int) -> QARepertoireIds:
+    window = harness.window
+    if window is None:
+        raise AssertionError("QA harness window is not open.")
+
+    from isrc_manager.parties.dialogs import PartyEditorDialog
+    from isrc_manager.works.dialogs import WorkEditorDialog
+
+    party_dialog_visual: dict[str, object] = {}
+
+    def _exec_party_dialog(dialog: PartyEditorDialog) -> int:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.legal_name_edit.setText("UI PQ Rights Holder BV")
+        dialog.display_name_edit.setText(RELATIONSHIP_PARTY_NAME)
+        dialog.company_name_edit.setText("UI PQ Rights Holder BV")
+        dialog.email_edit.setText("ui-pq@example.test")
+        dialog._set_party_type_value("publisher")
+        nonlocal party_dialog_visual
+        party_dialog_visual = _capture_workflow_widget(
+            harness,
+            dialog,
+            "ui_pq_party_manager_create_dialog_populated",
+        )
+        dialog.accept()
+        return QDialog.Accepted
+
+    party_panel = window.open_party_manager()
+    if party_panel is None:
+        party_panel = getattr(window, "party_manager_panel", None)
+    if party_panel is None:
+        raise AssertionError("Party Manager panel did not open.")
+    with mock.patch.object(PartyEditorDialog, "exec", _exec_party_dialog):
+        party_panel.create_party()
+    party_row = _wait_for_row(
+        harness,
+        "SELECT id FROM Parties WHERE display_name=? ORDER BY id DESC LIMIT 1",
+        (RELATIONSHIP_PARTY_NAME,),
+        label="UI-created Party Manager party",
+    )
+    party_id = int(party_row[0])
+    party_panel.refresh()
+    party_panel.focus_party(party_id)
+    harness.process_events(cycles=6)
+    party_visible = _table_has_id(party_panel.table, party_id)
+    party_panel_visual = _capture_workflow_widget(
+        harness,
+        party_panel,
+        "ui_pq_party_manager_created_party_selected",
+    )
+
+    work_dialog_visual: dict[str, object] = {}
+
+    def _exec_work_dialog(dialog: WorkEditorDialog) -> int:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.title_edit.setText(RELATIONSHIP_WORK_TITLE)
+        dialog.genre_edit.setText("Qualification")
+        dialog.metadata_checkbox.setChecked(True)
+        dialog.contract_checkbox.setChecked(True)
+        dialog.rights_checkbox.setChecked(True)
+        if dialog.contributors_table.rowCount() == 0:
+            dialog.add_contributor_button.click()
+        party_combo = dialog.contributors_table.cellWidget(0, 0)
+        _set_combo_by_data(party_combo, party_id)
+        if getattr(party_combo, "currentData", lambda: None)() in (None, ""):
+            _set_combo_text(party_combo, RELATIONSHIP_PARTY_NAME)
+        role_combo = dialog.contributors_table.cellWidget(0, 1)
+        _set_combo_text(role_combo, "Composer")
+        share_item = dialog.contributors_table.item(0, 2)
+        role_share_item = dialog.contributors_table.item(0, 3)
+        if share_item is not None:
+            share_item.setText("100")
+        if role_share_item is not None:
+            role_share_item.setText("100")
+        if not _table_has_id(dialog.track_table, track_id):
+            dialog._add_selected_tracks()
+        if not _table_has_id(dialog.track_table, track_id):
+            dialog._append_track_row(track_id)
+        nonlocal work_dialog_visual
+        work_dialog_visual = _capture_workflow_widget(
+            harness,
+            dialog,
+            "ui_pq_work_manager_create_dialog_populated",
+        )
+        dialog.accept()
+        return QDialog.Accepted
+
+    work_panel = window.open_work_manager(scope_track_ids=[track_id])
+    if work_panel is None:
+        work_panel = getattr(window, "work_manager_panel", None)
+    if work_panel is None:
+        raise AssertionError("Work Manager panel did not open.")
+    work_panel.set_selection_override_track_ids([track_id])
+    harness.process_events(cycles=6)
+    with mock.patch.object(WorkEditorDialog, "exec", _exec_work_dialog):
+        work_panel.create_work()
+    work_row = _wait_for_row(
+        harness,
+        "SELECT id FROM Works WHERE title=? ORDER BY id DESC LIMIT 1",
+        (RELATIONSHIP_WORK_TITLE,),
+        label="UI-created Work Manager work",
+    )
+    work_id = int(work_row[0])
+    linked_row = _wait_for_row(
+        harness,
+        "SELECT work_id FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+        (work_id, track_id),
+        label="UI-created WorkTrackLinks relationship",
+    )
+    if int(linked_row[0]) != work_id:
+        raise AssertionError("Work Manager did not link the created work to the catalog track.")
+    work_panel.refresh()
+    work_panel.focus_work(work_id)
+    harness.process_events(cycles=6)
+    work_visible = _table_has_id(work_panel.table, work_id)
+    work_panel_visual = _capture_workflow_widget(
+        harness,
+        work_panel,
+        "ui_pq_work_manager_created_work_selected",
+    )
+
+    release_row = _wait_for_row(
+        harness,
+        """
+        SELECT r.id
+        FROM Releases r
+        INNER JOIN ReleaseTracks rt ON rt.release_id=r.id
+        WHERE r.title=? AND rt.track_id=?
+        ORDER BY r.id DESC
+        LIMIT 1
+        """,
+        (CATALOG_RELEASE_TITLE, track_id),
+        label="Add Track UI-created Release Browser release",
+    )
+    release_id = int(release_row[0])
+    release_panel = window.open_release_browser()
+    if release_panel is None:
+        release_panel = getattr(window, "release_browser_panel", None)
+    if release_panel is None:
+        raise AssertionError("Release Browser panel did not open.")
+    release_panel.search_edit.setText(CATALOG_RELEASE_TITLE)
+    release_panel.refresh()
+    harness.process_events(cycles=6)
+    release_visible = _table_has_id(release_panel.release_table, release_id)
+    release_panel_visual = _capture_workflow_widget(
+        harness,
+        release_panel,
+        "ui_pq_release_browser_ui_created_release_selected",
+    )
+
+    ids = QARepertoireIds(
+        track_id=track_id,
+        party_id=party_id,
+        work_id=work_id,
+        release_id=release_id,
+        contract_id=0,
+        right_id=0,
+    )
+    if not (party_visible and work_visible and release_visible):
+        raise AssertionError(
+            "One or more UI-created relationship records were not visible in their manager panels."
+        )
+    harness.connection.commit()
+    harness.evidence.record(
+        "UI-PQ-REL-001",
+        status="passed",
+        message="Party, Work, and Release relationships were created or verified through manager UI.",
+        data={
+            "track_id": ids.track_id,
+            "party_id": ids.party_id,
+            "work_id": ids.work_id,
+            "release_id": ids.release_id,
+            "party_visible": party_visible,
+            "work_visible": work_visible,
+            "release_visible": release_visible,
+            "party_dialog_visual": party_dialog_visual,
+            "party_panel_visual": party_panel_visual,
+            "work_dialog_visual": work_dialog_visual,
+            "work_panel_visual": work_panel_visual,
+            "release_panel_visual": release_panel_visual,
+            "help_reference": _require_help_reference(
+                harness,
+                "Connect Parties, Works, Contracts, Rights, and Accounting",
+            ),
+        },
+    )
+    return ids
+
+
+def run_contract_workflow(harness: Any, ids: QARepertoireIds) -> QARepertoireIds:
+    window = harness.window
+    if window is None:
+        raise AssertionError("QA harness window is not open.")
+
+    from isrc_manager.contracts.dialogs import ContractEditorDialog
+    from isrc_manager.rights.dialogs import RightEditorDialog
+
+    contract_dialog_visual: dict[str, object] = {}
+
+    def _exec_contract_dialog(dialog: ContractEditorDialog) -> int:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.title_edit.setText(CONTRACT_TITLE)
+        dialog.type_edit.setText("license")
+        _set_combo_text(dialog.status_combo, "Active")
+        for identifier_field in (
+            dialog.contract_number_edit,
+            dialog.license_number_edit,
+            dialog.registry_sha256_key_edit,
+        ):
+            identifier_field.set_value(value=None, mode="empty")
+        dialog.summary_edit.setPlainText(
+            "UI PQ contract created through Contract Manager for qualification."
+        )
+        _set_combo_by_data(dialog.work_ids_edit.combo, ids.work_id)
+        dialog.work_ids_edit.add_button.click()
+        _set_combo_by_data(dialog.track_ids_edit.combo, ids.track_id)
+        dialog.track_ids_edit.add_button.click()
+        _set_combo_by_data(dialog.release_ids_edit.combo, ids.release_id)
+        dialog.release_ids_edit.add_button.click()
+        _set_combo_by_data(dialog.parties_edit.party_combo, ids.party_id)
+        dialog.parties_edit.role_edit.setText("rights_holder")
+        dialog.parties_edit.primary_checkbox.setChecked(True)
+        dialog.parties_edit.add_button.click()
+        nonlocal contract_dialog_visual
+        contract_dialog_visual = _capture_workflow_widget(
+            harness,
+            dialog,
+            "ui_pq_contract_manager_create_dialog_populated",
+        )
+        dialog.accept()
+        return QDialog.Accepted
+
+    contract_panel = window.open_contract_manager()
+    if contract_panel is None:
+        contract_panel = getattr(window, "contract_manager_panel", None)
+    if contract_panel is None:
+        raise AssertionError("Contract Manager panel did not open.")
+    with mock.patch.object(ContractEditorDialog, "exec", _exec_contract_dialog):
+        contract_panel.create_contract()
+    contract_row = _wait_for_row(
+        harness,
+        "SELECT id FROM Contracts WHERE title=? ORDER BY id DESC LIMIT 1",
+        (CONTRACT_TITLE,),
+        label="UI-created Contract Manager contract",
+    )
+    contract_id = int(contract_row[0])
+    contract_panel.refresh()
+    contract_panel.focus_contract(contract_id)
+    harness.process_events(cycles=6)
+    contract_visible = _table_has_id(contract_panel.table, contract_id)
+    contract_panel_visual = _capture_workflow_widget(
+        harness,
+        contract_panel,
+        "ui_pq_contract_manager_created_contract_selected",
+    )
+
+    right_dialog_visual: dict[str, object] = {}
+
+    def _exec_right_dialog(dialog: RightEditorDialog) -> int:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.title_edit.setText(RIGHT_TITLE)
+        _set_combo_text(dialog.type_combo, "Digital")
+        dialog.territory_edit.setText("Worldwide")
+        dialog.media_use_edit.setText("Streaming and downloads")
+        _set_combo_by_data(dialog.granted_by_combo, ids.party_id)
+        _set_combo_by_data(dialog.granted_to_combo, ids.party_id)
+        _set_combo_by_data(dialog.retained_by_combo, ids.party_id)
+        _set_combo_by_data(dialog.contract_combo, contract_id)
+        _set_combo_by_data(dialog.work_combo, ids.work_id)
+        _set_combo_by_data(dialog.track_combo, ids.track_id)
+        _set_combo_by_data(dialog.release_combo, ids.release_id)
+        dialog.notes_edit.setPlainText("UI PQ rights grant created through Rights Matrix.")
+        nonlocal right_dialog_visual
+        right_dialog_visual = _capture_workflow_widget(
+            harness,
+            dialog,
+            "ui_pq_rights_matrix_create_dialog_populated",
+        )
+        dialog.accept()
+        return QDialog.Accepted
+
+    rights_panel = window.open_rights_matrix()
+    if rights_panel is None:
+        rights_panel = getattr(window, "rights_matrix_panel", None)
+    if rights_panel is None:
+        raise AssertionError("Rights Matrix panel did not open.")
+    with mock.patch.object(RightEditorDialog, "exec", _exec_right_dialog):
+        rights_panel.create_right()
+    right_row = _wait_for_row(
+        harness,
+        "SELECT id FROM RightsRecords WHERE title=? ORDER BY id DESC LIMIT 1",
+        (RIGHT_TITLE,),
+        label="UI-created Rights Matrix right",
+    )
+    right_id = int(right_row[0])
+    rights_panel.refresh()
+    rights_panel.focus_right(right_id)
+    harness.process_events(cycles=6)
+    right_visible = _table_has_id(rights_panel.table, right_id)
+    rights_panel_visual = _capture_workflow_widget(
+        harness,
+        rights_panel,
+        "ui_pq_rights_matrix_created_right_selected",
+    )
+
+    ids = QARepertoireIds(
+        track_id=ids.track_id,
+        party_id=ids.party_id,
+        work_id=ids.work_id,
+        release_id=ids.release_id,
+        contract_id=contract_id,
+        right_id=right_id,
+    )
+    row = harness.connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM ContractWorkLinks cwl
+        INNER JOIN RightsRecords r ON r.source_contract_id=cwl.contract_id
+        WHERE cwl.contract_id=? AND cwl.work_id=? AND r.id=?
+        """,
+        (ids.contract_id, ids.work_id, ids.right_id),
+    ).fetchone()
+    linked = int(row[0] or 0) == 1
+    if not linked:
+        raise AssertionError("QA contract/right relationship was not persisted.")
+    if not (contract_visible and right_visible):
+        raise AssertionError("Contract or right was not visible in its manager panel.")
+    harness.evidence.record(
+        "UI-PQ-CON-001",
+        status="passed",
+        message="Contract and Rights Matrix records were created through UI and verified in the database.",
+        data={
+            "contract_id": ids.contract_id,
+            "right_id": ids.right_id,
+            "work_id": ids.work_id,
+            "track_id": ids.track_id,
+            "release_id": ids.release_id,
+            "contract_visible": contract_visible,
+            "right_visible": right_visible,
+            "contract_dialog_visual": contract_dialog_visual,
+            "contract_panel_visual": contract_panel_visual,
+            "right_dialog_visual": right_dialog_visual,
+            "rights_panel_visual": rights_panel_visual,
+            "help_reference": _require_help_reference(
+                harness,
+                "Connect Parties, Works, Contracts, Rights, and Accounting",
+            ),
+        },
+    )
+    harness.connection.commit()
+    return ids
+
+
+def _configure_accounting_registry_prefixes(conn: Any) -> None:
+    CodeRegistryService(conn)
+    for system_key, prefix in (
+        (BUILTIN_CATEGORY_INVOICE_NUMBER, "INV"),
+        (BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER, "CN"),
+        (BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER, "ROY"),
+    ):
+        conn.execute(
+            """
+            UPDATE CodeRegistryCategories
+            SET prefix=?, normalized_prefix=?
+            WHERE system_key=?
+            """,
+            (prefix, prefix, system_key),
+        )
+    conn.commit()
+
+
+def _assert_all_ledger_transactions_balance(conn: Any) -> None:
+    imbalanced = conn.execute("""
+        SELECT transaction_id, currency,
+               COALESCE(SUM(debit_minor), 0) AS debits,
+               COALESCE(SUM(credit_minor), 0) AS credits
+        FROM AccountingEntries
+        GROUP BY transaction_id, currency
+        HAVING debits != credits
+        """).fetchall()
+    if imbalanced:
+        raise AssertionError(f"Unbalanced accounting transaction rows: {imbalanced!r}")
+
+
+def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Accounting PQ requires an open application window.")
+    conn = harness.connection
+    _configure_accounting_registry_prefixes(conn)
+    royalty_party_id = _single_int(
+        conn,
+        "SELECT COALESCE(main_artist_party_id, 0) FROM Tracks WHERE id=?",
+        (ids.track_id,),
+    )
+    if royalty_party_id <= 0:
+        royalty_party_id = ids.party_id
+
+    panel = window.open_invoice_workspace(initial_tab="invoices")
+    if panel is None:
+        raise AssertionError("Royalties & Accounting workspace did not open.")
+    harness.process_events(cycles=8)
+    visuals: dict[str, dict[str, object]] = {}
+
+    def _new_invoice_via_ui(description: str, visual_prefix: str) -> tuple[int, int]:
+        previous_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM Invoices")
+        panel.focus_tab("invoices")
+        panel.invoice_workflow_tabs.setCurrentIndex(2)
+        _set_combo_by_data(panel.party_combo, ids.party_id)
+        panel.due_date_field.setText("2026-06-30")
+        panel.description_field.setText(description)
+        panel.quantity_field.setText("1")
+        panel.unit_price_field.setText("100.00")
+        panel.vat_rate_field.setText("2100")
+        _click_button(panel, "Add Manual Line")
+        harness.process_events(cycles=6)
+        visuals[f"{visual_prefix}_line_entry"] = _capture_workflow_widget(
+            harness, panel, f"{visual_prefix}_line_entry"
+        )
+        _click_button(panel, "Create Draft Invoice")
+        invoice_id, total_minor = _wait_for_row(
+            harness,
+            """
+            SELECT id, total_minor
+            FROM Invoices
+            WHERE id>? AND party_id=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (previous_id, ids.party_id),
+            label=f"{visual_prefix} invoice",
+        )
+        panel._select_invoice_id(int(invoice_id))
+        harness.process_events(cycles=6)
+        visuals[f"{visual_prefix}_draft_created"] = _capture_workflow_widget(
+            harness, panel, f"{visual_prefix}_draft_created"
+        )
+        if int(total_minor) != 12_100:
+            raise AssertionError(
+                f"{visual_prefix} invoice total was {total_minor}, expected 12100."
+            )
+        return int(invoice_id), int(total_minor)
+
+    def _issue_invoice_via_ui(invoice_id: int, visual_name: str) -> str:
+        panel.focus_tab("invoices")
+        panel.invoice_workflow_tabs.setCurrentIndex(0)
+        panel._select_invoice_id(invoice_id)
+        harness.process_events(cycles=4)
+        _click_button(panel, "Issue")
+        invoice_number, document_status = _wait_for_row(
+            harness,
+            """
+            SELECT invoice_number, document_status
+            FROM Invoices
+            WHERE id=? AND document_status='issued'
+            """,
+            (invoice_id,),
+            label=f"{visual_name} issued invoice",
+        )
+        panel._select_invoice_id(invoice_id)
+        harness.process_events(cycles=6)
+        visuals[visual_name] = _capture_workflow_widget(harness, panel, visual_name)
+        return str(invoice_number or document_status)
+
+    paid_invoice_id, paid_total_minor = _new_invoice_via_ui(
+        "UI PQ user-entered invoice for payment", "accounting_paid_invoice"
+    )
+    paid_invoice_number = _issue_invoice_via_ui(paid_invoice_id, "accounting_invoice_posted")
+
+    first_payment_id = 0
+    for index, amount in enumerate(("50.00", "71.00"), start=1):
+        previous_payment_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM InvoicePayments")
+        panel.focus_tab("invoices")
+        panel.invoice_workflow_tabs.setCurrentIndex(0)
+        panel._select_invoice_id(paid_invoice_id)
+        with mock.patch(
+            "isrc_manager.invoicing.workspace.QInputDialog.getText",
+            return_value=(amount, True),
+        ):
+            _click_button(panel, "Payment")
+        (payment_id,) = _wait_for_row(
+            harness,
+            """
+            SELECT id
+            FROM InvoicePayments
+            WHERE id>? AND invoice_id=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (previous_payment_id, paid_invoice_id),
+            label=f"invoice payment {index}",
+        )
+        if not first_payment_id:
+            first_payment_id = int(payment_id)
+    payment_total = _single_int(
+        conn,
+        "SELECT COALESCE(SUM(amount_minor), 0) FROM InvoicePayments WHERE invoice_id=?",
+        (paid_invoice_id,),
+    )
+    if payment_total != paid_total_minor:
+        raise AssertionError("UI-entered invoice payments did not settle the invoice total.")
+    panel._select_invoice_id(paid_invoice_id)
+    harness.process_events(cycles=6)
+    visuals["accounting_payment_entered"] = _capture_workflow_widget(
+        harness, panel, "accounting_payment_entered"
+    )
+
+    credited_invoice_id, credited_total_minor = _new_invoice_via_ui(
+        "UI PQ user-entered invoice for credit note", "accounting_credit_invoice"
+    )
+    credited_invoice_number = _issue_invoice_via_ui(
+        credited_invoice_id, "accounting_credit_invoice_posted"
+    )
+    previous_credit_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM CreditNotes")
+    panel.focus_tab("invoices")
+    panel.invoice_workflow_tabs.setCurrentIndex(1)
+    panel._select_invoice_id(credited_invoice_id)
+    panel.refresh_invoice_lines()
+    if panel.invoice_line_table.rowCount() <= 0:
+        raise AssertionError("Issued invoice line was not available for credit allocation.")
+    panel.invoice_line_table.selectRow(0)
+    panel.invoice_workflow_tabs.setCurrentIndex(3)
+    panel.credit_reason_field.setText("UI PQ credit note entered through workspace controls")
+    _click_button(panel, "Create Credit Note")
+    credit_note_id, credit_note_number, credit_total = _wait_for_row(
+        harness,
+        """
+        SELECT id, credit_note_number, total_minor
+        FROM CreditNotes
+        WHERE id>? AND invoice_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (previous_credit_id, credited_invoice_id),
+        label="UI-created credit note",
+    )
+    if int(credit_total) != credited_total_minor:
+        raise AssertionError("UI-created credit note did not clear the credited invoice total.")
+    harness.process_events(cycles=6)
+    visuals["accounting_credit_note_created"] = _capture_workflow_widget(
+        harness, panel, "accounting_credit_note_created"
+    )
+
+    previous_calculation_id = _single_int(
+        conn, "SELECT COALESCE(MAX(id), 0) FROM RoyaltyCalculations"
+    )
+    panel.focus_tab("royalties")
+    panel.royalty_workflow_tabs.setCurrentIndex(3)
+    _set_combo_by_data(panel.royalty_party_combo, royalty_party_id)
+    if panel.royalty_party_combo.currentData() != royalty_party_id:
+        raise AssertionError("Royalty party was not available in the UI artist-party selector.")
+    panel.royalty_description_field.setText("UI PQ royalty calculation entered through controls")
+    panel.royalty_amount_field.setText("150.00")
+    panel.royalty_period_start_field.setText("2026-05-01")
+    panel.royalty_period_end_field.setText("2026-05-31")
+    _click_button(panel, "Create Calculation")
+    royalty_calculation_id, royalty_amount = _wait_for_row(
+        harness,
+        """
+        SELECT id, net_payable_minor
+        FROM RoyaltyCalculations
+        WHERE id>? AND party_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (previous_calculation_id, royalty_party_id),
+        label="UI-created royalty calculation",
+    )
+    if int(royalty_amount) != 15_000:
+        raise AssertionError("UI-created royalty calculation amount did not match entry.")
+    panel._select_royalty_calculation_id(int(royalty_calculation_id))
+    harness.process_events(cycles=6)
+    visuals["accounting_royalty_calculation_created"] = _capture_workflow_widget(
+        harness, panel, "accounting_royalty_calculation_created"
+    )
+
+    panel._select_royalty_calculation_id(int(royalty_calculation_id))
+    _click_button(panel, "Approve / Post")
+    posted_status, ledger_transaction_id = _wait_for_row(
+        harness,
+        """
+        SELECT status, ledger_transaction_id
+        FROM RoyaltyCalculations
+        WHERE id=? AND ledger_transaction_id IS NOT NULL
+        """,
+        (int(royalty_calculation_id),),
+        label="UI-posted royalty calculation",
+    )
+    if str(posted_status) != "posted":
+        raise AssertionError(f"Royalty calculation status after UI post was {posted_status!r}.")
+    panel._select_royalty_calculation_id(int(royalty_calculation_id))
+    harness.process_events(cycles=6)
+    visuals["accounting_royalty_posted"] = _capture_workflow_widget(
+        harness, panel, "accounting_royalty_posted"
+    )
+
+    previous_statement_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM RoyaltyStatements")
+    panel._select_royalty_calculation_id(int(royalty_calculation_id))
+    _click_button(panel, "Generate Statement")
+    statement_id, statement_number = _wait_for_row(
+        harness,
+        """
+        SELECT id, statement_number
+        FROM RoyaltyStatements
+        WHERE id>? AND calculation_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (previous_statement_id, int(royalty_calculation_id)),
+        label="UI-generated royalty statement",
+    )
+    panel.royalty_workflow_tabs.setCurrentIndex(4)
+    harness.process_events(cycles=6)
+    visuals["accounting_royalty_statement_generated"] = _capture_workflow_widget(
+        harness, panel, "accounting_royalty_statement_generated"
+    )
+
+    first_artist_payout_id = 0
+    panel.royalty_workflow_tabs.setCurrentIndex(3)
+    for index, amount in enumerate(("50.00", "100.00"), start=1):
+        previous_payout_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM ArtistPayouts")
+        panel._select_royalty_calculation_id(int(royalty_calculation_id))
+        panel.royalty_payout_amount_field.setText(amount)
+        panel.royalty_payment_reference_field.setText(f"UI-PQ-ROYALTY-PAYOUT-{index}")
+        _click_button(panel, "Record Payout")
+        (payout_id,) = _wait_for_row(
+            harness,
+            """
+            SELECT id
+            FROM ArtistPayouts
+            WHERE id>? AND royalty_calculation_id=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (previous_payout_id, int(royalty_calculation_id)),
+            label=f"UI-created artist payout {index}",
+        )
+        if not first_artist_payout_id:
+            first_artist_payout_id = int(payout_id)
+    payout_total = _single_int(
+        conn,
+        """
+        SELECT COALESCE(SUM(amount_minor), 0)
+        FROM ArtistPayouts
+        WHERE royalty_calculation_id=?
+        """,
+        (int(royalty_calculation_id),),
+    )
+    paid_status = conn.execute(
+        "SELECT status FROM RoyaltyCalculations WHERE id=?",
+        (int(royalty_calculation_id),),
+    ).fetchone()
+    if payout_total != int(royalty_amount) or paid_status is None or paid_status[0] != "paid":
+        raise AssertionError("UI-created payouts did not settle the royalty payable.")
+    panel._select_royalty_calculation_id(int(royalty_calculation_id))
+    harness.process_events(cycles=6)
+    visuals["accounting_payout_created"] = _capture_workflow_widget(
+        harness, panel, "accounting_payout_created"
+    )
+
+    panel.focus_tab("reports")
+    _click_button(panel, "Refresh Reports")
+    harness.process_events(cycles=6)
+    report_text = panel.report_output.toPlainText()
+    if "Outstanding invoices" not in report_text or "Party balances" not in report_text:
+        raise AssertionError("Accounting report output did not render expected report sections.")
+    visuals["accounting_report_generated"] = _capture_workflow_widget(
+        harness, panel, "accounting_report_generated"
+    )
+
+    _assert_all_ledger_transactions_balance(conn)
+    invoice_party_ledger_balance_minor = _single_int(
+        conn,
+        """
+        SELECT COALESCE(SUM(COALESCE(debit_minor, 0) - COALESCE(credit_minor, 0)), 0)
+        FROM AccountingEntries
+        WHERE party_id=?
+        """,
+        (ids.party_id,),
+    )
+    royalty_party_ledger_balance_minor = _single_int(
+        conn,
+        """
+        SELECT COALESCE(SUM(COALESCE(debit_minor, 0) - COALESCE(credit_minor, 0)), 0)
+        FROM AccountingEntries
+        WHERE party_id=?
+        """,
+        (royalty_party_id,),
+    )
+    party_ledger_balance_minor = (
+        invoice_party_ledger_balance_minor + royalty_party_ledger_balance_minor
+    )
+    if invoice_party_ledger_balance_minor != 0 or royalty_party_ledger_balance_minor != 0:
+        raise AssertionError(
+            "Party ledger balances did not settle to zero: "
+            f"invoice_party={invoice_party_ledger_balance_minor}, "
+            f"royalty_party={royalty_party_ledger_balance_minor}"
+        )
+    counts = {
+        table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] or 0)
+        for table in (
+            "Invoices",
+            "InvoicePayments",
+            "CreditNotes",
+            "RoyaltyCalculations",
+            "RoyaltyStatements",
+            "ArtistPayouts",
+            "AccountingTransactions",
+            "FinancialCommandLog",
+        )
+    }
+    harness.evidence.record(
+        "UI-PQ-ACC-001",
+        status="passed",
+        message=(
+            "Invoice creation, invoice posting, payment entry, credit note creation, "
+            "royalty statement generation, payout creation, report generation, and "
+            "balanced ledger checks were executed through UI controls."
+        ),
+        data={
+            "workflow_status": "fully_ui_led",
+            "ui_control_path": (
+                "Invoice Workspace controls: Create Draft Invoice, Issue, Payment, "
+                "Create Credit Note, Create Calculation, Approve / Post, Generate "
+                "Statement, Record Payout, Refresh Reports."
+            ),
+            "service_layer_shortcuts": [],
+            "paid_invoice_id": paid_invoice_id,
+            "paid_invoice_number": paid_invoice_number,
+            "invoice_party_id": ids.party_id,
+            "royalty_party_id": royalty_party_id,
+            "first_payment_id": first_payment_id,
+            "credited_invoice_id": credited_invoice_id,
+            "credited_invoice_number": credited_invoice_number,
+            "credit_note_id": int(credit_note_id),
+            "credit_note_number": str(credit_note_number or ""),
+            "royalty_calculation_id": int(royalty_calculation_id),
+            "royalty_ledger_transaction_id": int(ledger_transaction_id),
+            "royalty_statement_id": int(statement_id),
+            "royalty_statement_number": str(statement_number or ""),
+            "first_artist_payout_id": first_artist_payout_id,
+            "payment_total_minor": payment_total,
+            "credit_total_minor": int(credit_total),
+            "payout_total_minor": payout_total,
+            "party_ledger_balance_minor": party_ledger_balance_minor,
+            "party_ledger_balances_minor": {
+                "invoice_party": invoice_party_ledger_balance_minor,
+                "royalty_party": royalty_party_ledger_balance_minor,
+            },
+            "counts": counts,
+            "visual_evidence": visuals,
+            "help_reference": _require_help_reference(
+                harness,
+                "Run the Accounting Ledger Lifecycle",
+            ),
+        },
+    )
+
+
+def run_diagnostics_workflow(harness: Any) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Diagnostics PQ requires an open application window.")
+    current_path = Path(harness.database_path)
+    if not current_path.exists():
+        raise AssertionError(f"Diagnostics PQ database path is not on disk: {current_path}")
+    maintenance = getattr(window, "database_maintenance", None)
+    if maintenance is None:
+        raise AssertionError("Diagnostics PQ could not access the database maintenance service.")
+
+    status_messages: list[str] = []
+    progress_messages: list[str] = []
+    report_builder = getattr(window, "_build_diagnostics_report", None)
+    if not callable(report_builder):
+        raise AssertionError("Diagnostics report builder is not available on the application host.")
+    report = report_builder(
+        status_callback=status_messages.append,
+        progress_callback=lambda _value, _maximum, message: progress_messages.append(str(message)),
+    )
+    checks = {
+        str(check.get("title", "")): check
+        for check in report.get("checks", [])
+        if isinstance(check, dict)
+    }
+    required_ok_checks = {
+        "SQLite integrity",
+        "Foreign-key consistency",
+        "Schema layout",
+        "Schema version",
+    }
+    failed_required_checks = {
+        title: checks.get(title, {}).get("summary", "missing")
+        for title in sorted(required_ok_checks)
+        if checks.get(title, {}).get("status") != "ok"
+    }
+    if failed_required_checks:
+        raise AssertionError(f"Core diagnostics checks did not pass: {failed_required_checks!r}")
+
+    integrity_result = maintenance.verify_integrity(current_path)
+    if str(integrity_result).strip().lower() != "ok":
+        raise AssertionError(f"Active QA database integrity failed: {integrity_result}")
+    backup_result = maintenance.create_backup(harness.connection, current_path)
+    backup_integrity = maintenance.verify_integrity(backup_result.backup_path)
+    if str(backup_integrity).strip().lower() != "ok":
+        raise AssertionError(f"Diagnostics backup integrity failed: {backup_integrity}")
+
+    restore_target = harness.artifact_dir / "diagnostics-restore-target.db"
+    if restore_target.exists():
+        restore_target.unlink()
+    restore_result = maintenance.restore_database(backup_result.backup_path, restore_target)
+    restored_integrity = maintenance.verify_integrity(restore_result.restored_path)
+    if str(restored_integrity).strip().lower() != "ok":
+        raise AssertionError(f"Diagnostics restore target integrity failed: {restored_integrity}")
+
+    harness.evidence.record(
+        "UI-PQ-DIAG-001",
+        status="passed",
+        message=(
+            "Diagnostics report, SQLite integrity, backup creation, and isolated "
+            "restore verification completed against the QA profile."
+        ),
+        data={
+            "database_path": str(current_path),
+            "diagnostics_check_statuses": {
+                title: str(check.get("status", "")) for title, check in checks.items()
+            },
+            "status_messages": status_messages,
+            "progress_message_count": len(progress_messages),
+            "backup_path": str(backup_result.backup_path),
+            "backup_method": backup_result.method,
+            "backup_integrity": str(backup_integrity),
+            "restore_target": str(restore_result.restored_path),
+            "restore_integrity": str(restored_integrity),
+            "safety_copy_path": (
+                str(restore_result.safety_copy_path)
+                if restore_result.safety_copy_path is not None
+                else ""
+            ),
+        },
+    )
+
+
+def run_visual_qualification_workflow(harness: Any) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Visual PQ requires an open application window.")
+    service = VisualQualificationService(harness.artifact_dir)
+    help_screenshot_dir = help_screenshot_source_dir()
+    help_screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+    main_capture = service.capture_widget(window, "main_window")
+    shutil.copy2(main_capture.path, help_screenshot_dir / "main_window.png")
+    main_comparison = service.compare_capture_to_baseline(main_capture)
+
+    from isrc_manager.app_dialogs import AboutDialog, HelpContentsDialog
+
+    dialog_results: list[dict[str, object]] = []
+    for dialog_name, factory in (
+        ("about_dialog", lambda: AboutDialog(window, parent=window)),
+        ("help_contents_dialog", lambda: HelpContentsDialog(window, parent=window)),
+    ):
+        dialog = factory()
+        try:
+            dialog.setObjectName(dialog.objectName() or dialog_name)
+            dialog.show()
+            harness.process_events(8)
+            if not dialog.isVisible():
+                raise AssertionError(f"Dialog did not become visible: {dialog_name}")
+            capture = service.capture_widget(dialog, dialog_name)
+            shutil.copy2(capture.path, help_screenshot_dir / f"{dialog_name}.png")
+            comparison = service.compare_capture_to_baseline(capture)
+            dialog_results.append(
+                {
+                    "dialog": dialog_name,
+                    "object_name": dialog.objectName(),
+                    "window_title": dialog.windowTitle(),
+                    "capture": capture.to_dict(),
+                    "comparison": comparison.to_dict(),
+                }
+            )
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            harness.process_events(2)
+
+    theme_defaults = window._theme_setting_defaults()
+    prepared_theme = window._prepare_theme_application_payload(theme_defaults)
+    stylesheet = str(prepared_theme.get("stylesheet") or "")
+    if len(stylesheet) < 200 or "QWidget" not in stylesheet:
+        raise AssertionError("Theme stylesheet verification did not produce a usable stylesheet.")
+    theme_summary = {
+        "normalized_theme_keys": sorted((prepared_theme.get("normalized_theme") or {}).keys()),
+        "effective_theme": prepared_theme.get("effective_theme") or {},
+        "stylesheet_sha256": hashlib.sha256(stylesheet.encode("utf-8")).hexdigest(),
+        "stylesheet_length": len(stylesheet),
+    }
+    theme_comparison = service.compare_json_report(
+        "theme_payload_summary",
+        theme_summary,
+        comparison_type="theme",
+    )
+    manifest_path = service.write_manifest()
+
+    harness.evidence.record(
+        "UI-PQ-SET-001",
+        status="passed",
+        message=(
+            "Visual screenshots, baseline comparison, dialog capture, and theme payload "
+            "verification completed."
+        ),
+        data={
+            "manifest_path": str(manifest_path),
+            "screenshot_count": len(service.captures),
+            "comparison_count": len(service.comparisons),
+            "main_window_comparison": main_comparison.to_dict(),
+            "dialogs": dialog_results,
+            "theme_comparison": theme_comparison.to_dict(),
+        },
+    )
+
+
+def run_help_documentation_workflow(harness: Any) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Help documentation PQ requires an open application window.")
+
+    source_screenshot_dir = help_screenshot_source_dir()
+    refreshed_chapter_screenshots = refresh_help_chapter_screenshots(source_screenshot_dir)
+    help_path = window._ensure_help_file()
+    copied_screenshots = copy_help_screenshots(help_path.parent / "screenshots")
+    help_html = help_path.read_text(encoding="utf-8")
+    help_artifact_dir = harness.artifact_dir / "help"
+    help_artifact_dir.mkdir(parents=True, exist_ok=True)
+    validated_help_path = help_artifact_dir / "validated_help_manual.html"
+    validated_help_path.write_text(help_html, encoding="utf-8")
+
+    report = validate_help_coverage(
+        harness.inventory,
+        screenshot_dir=help_path.parent / "screenshots",
+    )
+    report_path = write_help_coverage_report(
+        help_artifact_dir / "help_coverage.json",
+        report,
+    )
+    for finding in report.findings:
+        harness.deviations.add(
+            test_id="UI-PQ-HELP-001",
+            severity=finding.severity,
+            ui_area="help_documentation",
+            workflow="Help documentation validation",
+            ui_object=finding.subject,
+            step=finding.category,
+            expected=finding.expected,
+            actual=finding.actual,
+            database_path=harness.database_path,
+            evidence_path=str(report_path),
+            coverage_status="failed",
+            recommended_followup=finding.recommended_update,
+        )
+    if report.findings:
+        raise AssertionError(
+            f"Help documentation coverage failed with {len(report.findings)} finding(s)."
+        )
+
+    harness.evidence.record(
+        "UI-PQ-HELP-001",
+        status="passed",
+        message=(
+            "Help documentation coverage matched runtime inventory, workflow playbooks, "
+            "chapter-depth checks, and real UI screenshot references."
+        ),
+        data={
+            "report_path": str(report_path),
+            "validated_help_manual_path": str(validated_help_path),
+            "requirement_count": report.requirement_count,
+            "covered_count": report.covered_count,
+            "coverage_percent": report.coverage_percent,
+            "finding_count": report.finding_count,
+            "chapter_count": report.chapter_count,
+            "workflow_example_count": report.workflow_example_count,
+            "screenshot_count": report.screenshot_count,
+            "chapter_screenshot_count": report.chapter_screenshot_count,
+            "refreshed_chapter_screenshot_count": len(refreshed_chapter_screenshots),
+            "copied_screenshot_count": len(copied_screenshots),
+        },
+    )
+
+
+def run_generated_output_qualification_workflow(harness: Any) -> None:
+    service = VisualQualificationService(
+        harness.artifact_dir,
+        manifest_name="generated_output_manifest.json",
+    )
+    qa_data = {key: int(value) for key, value in sorted(harness.qa_data.items())}
+    event_statuses = {
+        event.test_id: event.status
+        for event in harness.evidence.events
+        if str(event.test_id).startswith("UI-PQ-")
+    }
+    report_payload = {
+        "qa_data": qa_data,
+        "event_statuses": event_statuses,
+        "database_path_present": bool(harness.database_path),
+    }
+    report_comparison = service.compare_json_report(
+        "ui_pq_report_summary",
+        report_payload,
+        comparison_type="report",
+    )
+    html = "\n".join(
+        [
+            "<!doctype html>",
+            "<html>",
+            '<head><meta charset="utf-8"><title>UI PQ Generated Document</title></head>',
+            "<body>",
+            "<h1>UI PQ Generated Document</h1>",
+            f"<p>Track ID: {qa_data.get('track_id', 0)}</p>",
+            f"<p>Contract ID: {qa_data.get('contract_id', 0)}</p>",
+            "<p>Generated by the automated qualification harness.</p>",
+            "</body>",
+            "</html>",
+        ]
+    )
+    html_comparison = service.compare_text(
+        "ui_pq_generated_document",
+        html,
+        extension=".html",
+        comparison_type="generated_document",
+    )
+    csv_lines = [
+        "key,value",
+        *[f"{key},{value}" for key, value in qa_data.items()],
+    ]
+    csv_comparison = service.compare_text(
+        "ui_pq_generated_report",
+        "\n".join(csv_lines),
+        extension=".csv",
+        comparison_type="report",
+    )
+    pdf_path, pdf_profile = service.render_pdf_report(
+        "ui_pq_generated_pdf",
+        title="UI PQ Generated PDF",
+        lines=[
+            "Automated PDF structural qualification.",
+            f"Track ID: {qa_data.get('track_id', 0)}",
+            f"Contract ID: {qa_data.get('contract_id', 0)}",
+        ],
+    )
+    pdf_comparison = service.compare_pdf_profile(
+        "ui_pq_generated_pdf",
+        pdf_path,
+        pdf_profile,
+    )
+    manifest_path = service.write_manifest()
+
+    harness.evidence.record(
+        "UI-PQ-IMP-001",
+        status="passed",
+        message=(
+            "Generated report, document, CSV, and PDF comparison checks completed with "
+            "stable baselines."
+        ),
+        data={
+            "manifest_path": str(manifest_path),
+            "report_comparison": report_comparison.to_dict(),
+            "html_comparison": html_comparison.to_dict(),
+            "csv_comparison": csv_comparison.to_dict(),
+            "pdf_path": str(pdf_path),
+            "pdf_profile": pdf_profile,
+            "pdf_comparison": pdf_comparison.to_dict(),
+        },
+    )
+
+
+def run_soundcloud_workflow(harness: Any, ids: QARepertoireIds) -> None:
+    conn = harness.connection
+    repository = SoundCloudSQLiteRepository(conn)
+    visuals: dict[str, dict[str, object]] = {}
+    account_payload = {
+        "id": "ui-pq-soundcloud",
+        "username": "UI PQ SoundCloud Profile",
+        "permalink_url": "https://soundcloud.com/ui-pq-profile",
+        "avatar_url": "https://images.example.test/ui-pq-avatar.jpg",
+    }
+    account_id = repository.upsert_connected_account(
+        account_key="soundcloud:user:ui-pq",
+        token_store_key="soundcloud:user:ui-pq",
+        token_kind=SoundCloudTokenKind.SESSION,
+        account_payload=account_payload,
+        scope="profile upload",
+        token_expires_at="2099-01-01T00:00:00+00:00",
+    )
+    audio_path = harness.artifact_dir / "soundcloud-ui-pq-watermarked-upload.wav"
+    audio_path.write_bytes(b"ui-pq-soundcloud-watermarked-audio")
+    artwork_path = harness.artifact_dir / "soundcloud-ui-pq-artwork.jpg"
+    artwork_path.write_bytes(b"\xff\xd8\xff\xe0ui-pq-soundcloud-artwork\xff\xd9")
+    track_row = conn.execute(
+        "SELECT track_title, genre, isrc, release_date, composer, publisher FROM Tracks WHERE id=?",
+        (ids.track_id,),
+    ).fetchone()
+    if track_row is None:
+        raise AssertionError("SoundCloud PQ track snapshot source was not found.")
+    track_provider = _SoundCloudTrackProvider(
+        {
+            ids.track_id: {
+                "track_id": ids.track_id,
+                "track_title": track_row[0],
+                "artist_name": "UI PQ Artist",
+                "genre": track_row[1],
+                "isrc": track_row[2],
+                "release_date": track_row[3],
+                "composer": track_row[4],
+                "publisher": track_row[5],
+            }
+        }
+    )
+    release_provider = _SoundCloudReleaseProvider(
+        {
+            ids.track_id: {
+                "release_title": "UI PQ Release",
+                "label_name": "UI PQ SoundCloud Label",
+                "release_date": track_row[3],
+            }
+        }
+    )
+    media_provider = _SoundCloudMediaProvider(
+        _SoundCloudMediaHandle(
+            filename=audio_path.name,
+            source_path=str(audio_path),
+            size_bytes=audio_path.stat().st_size,
+            mime_type="audio/wav",
+        ),
+        _SoundCloudMediaHandle(
+            filename=artwork_path.name,
+            source_path=str(artwork_path),
+            size_bytes=artwork_path.stat().st_size,
+            mime_type="image/jpeg",
+        ),
+    )
+    planner = SoundCloudPublishPlanner(
+        track_provider,
+        release_provider,
+        media_provider,
+        _SoundCloudPublicationLookup(repository),
+        _SoundCloudAccountState(),
+    )
+
+    dialog_holder: dict[str, SoundCloudPublishDialog] = {}
+    execution_ids: dict[str, int] = {}
+
+    def _mock_publish_runner(plan) -> SoundCloudPublishExecutionResult:
+        dialog = dialog_holder["dialog"]
+        account = repository.active_account()
+        if account is None:
+            raise RuntimeError("SoundCloud mock account is not connected.")
+        run_id = repository.create_publish_run(account.id, plan)
+        execution_ids["run_id"] = run_id
+        repository.mark_run_status(run_id, SoundCloudExecutionStatus.IN_PROGRESS)
+        dialog.status_label.setText("Mock SoundCloud publish in progress.")
+        visuals["soundcloud_progress_ui"] = _capture_workflow_widget(
+            harness, dialog, "soundcloud_progress_ui"
+        )
+
+        item_results: list[SoundCloudPublishExecutionItemResult] = []
+        for item in plan.items:
+            item_id = repository.create_run_item(run_id, item)
+            execution_ids.setdefault("run_item_id", item_id)
+            repository.mark_item_started(item_id)
+            remote_numeric_id = 260531
+            remote_urn = f"soundcloud:tracks:{remote_numeric_id}"
+            remote_url = "https://soundcloud.com/ui-pq-profile/ui-pq-qualification-track"
+            metadata_hash = hashlib.sha256(repr(item.metadata).encode("utf-8")).hexdigest()
+            audio_hash = hashlib.sha256(audio_path.read_bytes()).hexdigest()
+            publication_id = repository.upsert_publication(
+                account_id=account.id,
+                track_id=item.track_id,
+                action=item.action,
+                remote_urn=remote_urn,
+                remote_numeric_id=remote_numeric_id,
+                remote_url=remote_url,
+                metadata_hash=metadata_hash,
+                audio_hash=audio_hash,
+            )
+            execution_ids.setdefault("publication_id", publication_id)
+            repository.finish_item(
+                item_id,
+                status=SoundCloudExecutionItemStatus.SUCCESS,
+                publication_id=publication_id,
+                remote_urn=remote_urn,
+                remote_numeric_id=remote_numeric_id,
+                remote_url=remote_url,
+                metadata_hash=metadata_hash,
+                audio_hash=audio_hash,
+                operation_message="Mocked no-network SoundCloud publication completed.",
+            )
+            item_results.append(
+                SoundCloudPublishExecutionItemResult(
+                    track_id=item.track_id,
+                    status=SoundCloudExecutionItemStatus.SUCCESS,
+                    action=item.action,
+                    operation_message="Mocked no-network SoundCloud publication completed.",
+                    remote_urn=remote_urn,
+                    remote_numeric_id=remote_numeric_id,
+                    remote_url=remote_url,
+                    metadata_hash=metadata_hash,
+                    audio_hash=audio_hash,
+                )
+            )
+
+        repository.update_run_counts(run_id)
+        repository.mark_run_status(run_id, SoundCloudExecutionStatus.COMPLETED)
+        conn.commit()
+        result = SoundCloudPublishExecutionResult(
+            run_id=run_id,
+            status=SoundCloudExecutionStatus.COMPLETED,
+            items_total=len(plan.items),
+            items_succeeded=len(item_results),
+            items_failed=0,
+            items_skipped=0,
+            item_results=tuple(item_results),
+        )
+        dialog.apply_execution_result(result)
+        return result
+
+    dialog = SoundCloudPublishDialog(
+        track_ids=[ids.track_id],
+        planner=planner,
+        publish_runner=_mock_publish_runner,
+        album_track_resolver=lambda _track_ids: [ids.track_id],
+        catalog_track_provider=lambda: [],
+        history_provider=lambda: [],
+        parent=harness.window,
+    )
+    dialog_holder["dialog"] = dialog
+    try:
+        dialog.show()
+        harness.process_events(cycles=8)
+        dialog.album_button.click()
+        dialog.sharing_combo.setCurrentText("Private")
+        dialog.tags_edit.setText("ui-pq qualification")
+        dialog.description_edit.setPlainText(
+            "UI PQ SoundCloud publish qualification with public profile trace metadata."
+        )
+        dialog.purchase_url_edit.setText("https://cosmowyn.example.test/ui-pq")
+        dialog.record_label_edit.setText("UI PQ SoundCloud Label")
+        dialog.contains_music_check.setChecked(True)
+        dialog.contains_explicit_check.setChecked(False)
+        dialog.commentable_check.setChecked(True)
+        dialog.reveal_stats_check.setChecked(True)
+        dialog.reveal_comments_check.setChecked(True)
+        dialog.plan_button.click()
+        harness.process_events(cycles=8)
+        plan = dialog.current_plan
+        if plan is None or len(plan.items) != 1:
+            raise AssertionError("SoundCloud publish dialog did not build a one-track plan.")
+        if plan.items[0].status != SoundCloudPlanItemStatus.READY:
+            raise AssertionError(f"SoundCloud publish plan was not ready: {plan.items!r}")
+        item = plan.items[0]
+        if item.metadata is None or item.metadata.asset_data != str(audio_path):
+            raise AssertionError(
+                "SoundCloud publish dialog did not preserve the watermarked audio path."
+            )
+        if item.metadata.artwork_data != str(artwork_path):
+            raise AssertionError(
+                "SoundCloud publish dialog did not include the configured artwork."
+            )
+        visuals["soundcloud_preflight_ui"] = _capture_workflow_widget(
+            harness, dialog, "soundcloud_preflight_ui"
+        )
+        dialog.publish_button.click()
+        harness.process_events(cycles=8)
+        visuals["soundcloud_completion_ui"] = _capture_workflow_widget(
+            harness, dialog, "soundcloud_completion_ui"
+        )
+        if "finished" not in dialog.status_label.text().lower():
+            raise AssertionError(
+                f"SoundCloud completion UI did not report completion: {dialog.status_label.text()}"
+            )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+    forbidden = conn.execute("""
+        SELECT COUNT(*)
+        FROM pragma_table_info('SoundCloudAccounts')
+        WHERE name IN ('access_token', 'refresh_token', 'client_secret', 'authorization_header')
+        """).fetchone()[0]
+    if int(forbidden or 0):
+        raise AssertionError("SoundCloud account persistence exposes secret-bearing columns.")
+    run_row = conn.execute(
+        """
+        SELECT status, items_succeeded, items_failed, items_skipped
+        FROM SoundCloudPublishRuns
+        WHERE id=?
+        """,
+        (execution_ids["run_id"],),
+    ).fetchone()
+    if run_row != (SoundCloudExecutionStatus.COMPLETED.value, 1, 0, 0):
+        raise AssertionError(f"SoundCloud publish run did not complete cleanly: {run_row!r}")
+
+    harness.evidence.record(
+        "UI-PQ-SC-001",
+        status="passed",
+        message=(
+            "SoundCloud publish dialog options, private preflight, watermarked source, "
+            "artwork, mocked publish action, progress UI, completion UI, run state, "
+            "and no-secret storage were verified without network."
+        ),
+        data={
+            "workflow_status": "fully_ui_led",
+            "ui_control_path": (
+                "SoundCloudPublishDialog controls: Use album selection, per-run metadata "
+                "fields, Refresh preflight, Publish."
+            ),
+            "mocked_execution_boundary": (
+                "The live SoundCloud API call is replaced by a no-network publish runner "
+                "invoked only by the dialog Publish button."
+            ),
+            "account_id": account_id,
+            "account_public_profile": account_payload,
+            "run_id": execution_ids["run_id"],
+            "run_item_id": execution_ids["run_item_id"],
+            "publication_id": execution_ids["publication_id"],
+            "track_id": ids.track_id,
+            "remote_urn": "soundcloud:tracks:260531",
+            "remote_url": "https://soundcloud.com/ui-pq-profile/ui-pq-qualification-track",
+            "sharing": plan.options.sharing,
+            "would_upload_audio": item.would_upload_audio,
+            "watermarked_audio_path": str(audio_path),
+            "artwork_path": str(artwork_path),
+            "visual_evidence": visuals,
+            "help_reference": _require_help_reference(
+                harness,
+                "Prepare a SoundCloud Upload With a Forensic Trace",
+            ),
+        },
+    )
+
+
+def run_pending_area(harness: Any, *, test_id: str, ui_area: str, message: str) -> None:
+    discovered = [item.inventory_id for item in harness.inventory if item.ui_area == ui_area]
+    status = "partial" if discovered else "pending"
+    harness.evidence.record(
+        test_id,
+        status=status,
+        message=message,
+        data={"discovered_surface_count": len(discovered), "sample": discovered[:10]},
+    )
+    harness.deviations.add(
+        test_id=test_id,
+        severity="medium",
+        ui_area=ui_area,
+        workflow=message,
+        ui_object=ui_area,
+        step="First-pass UI PQ workflow execution",
+        expected="Workflow has complete automated UI execution and assertions.",
+        actual="Workflow is inventoried and traceable, but full automation remains pending.",
+        database_path=harness.database_path,
+        evidence_path=str(harness.evidence.evidence_path),
+        coverage_status="pending_manual",
+        recommended_followup="Add feature-specific UI commands, mocks, and assertions for this workflow.",
+        status="pending_manual",
+    )

@@ -24,6 +24,12 @@ def _completed_process(args, returncode=0, stdout="", stderr=""):
     )
 
 
+def _option_values(command, option):
+    return [
+        value for index, value in enumerate(command[1:], start=1) if command[index - 1] == option
+    ]
+
+
 class BuildMetadataTests(unittest.TestCase):
     def test_project_version_reads_from_pyproject(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -527,6 +533,25 @@ class CommandConstructionTests(unittest.TestCase):
         self.assertNotIn("--splash", cmd)
         self.assertIn("--add-data", cmd)
         self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
+
+    def test_pyinstaller_command_bundles_keyring_backend_discovery(self):
+        entry_script = Path("/project/ISRC_manager.py")
+
+        with (
+            mock.patch.object(build, "_is_windows", return_value=False),
+            mock.patch.object(build, "_is_macos", return_value=False),
+        ):
+            cmd = build._pyinstaller_cmd(
+                pyinstaller_launcher=("pyinstaller",),
+                entry_script=entry_script,
+                app_name=build.PACKAGE_APP_NAME,
+                icon=None,
+                runtime_splash_asset=None,
+            )
+
+        self.assertIn("keyring", _option_values(cmd, "--hidden-import"))
+        self.assertIn("keyring.backends", _option_values(cmd, "--collect-submodules"))
+        self.assertIn("keyring", _option_values(cmd, "--copy-metadata"))
 
     def test_macos_pyinstaller_command_keeps_runtime_splash_without_bootloader_splash(self):
         entry_script = Path("/project/ISRC_manager.py")

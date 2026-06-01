@@ -288,8 +288,9 @@ class UpdateUiIntegrationTests(unittest.TestCase):
 
         fake_app = _FakeApp()
 
-        app_module.App._start_update_check(fake_app, manual=False)
-        app_module.App._start_update_check(fake_app, manual=True)
+        with mock.patch.object(app_module.sys, "frozen", True, create=True):
+            app_module.App._start_update_check(fake_app, manual=False)
+            app_module.App._start_update_check(fake_app, manual=True)
 
         self.assertEqual(
             fake_app.checker.calls,

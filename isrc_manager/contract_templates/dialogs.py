@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from functools import partial
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QTextBrowser,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -59,6 +61,9 @@ try:
     from PySide6.QtWebEngineCore import QWebEnginePage
     from PySide6.QtWebEngineWidgets import QWebEngineView
 except ImportError:  # pragma: no cover - environment-specific fallback
+    QWebEnginePage = None
+    QWebEngineView = None
+if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":
     QWebEnginePage = None
     QWebEngineView = None
 
@@ -94,6 +99,13 @@ from .models import (
     ContractTemplateRevisionRecord,
     build_contract_template_indexed_selection_key,
 )
+
+
+def _use_headless_html_preview_fallback() -> bool:
+    platform_name = getattr(QApplication, "platformName", None)
+    if not callable(platform_name):
+        return False
+    return (platform_name() or "").strip().lower() == "offscreen"
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -245,6 +257,48 @@ class _ContractTemplatePreviewPage(QWebEnginePage if QWebEnginePage is not None 
             )
             return False
         return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+
+
+class _FallbackHtmlPreviewView(QTextBrowser):
+    """Headless-safe HTML preview surface matching the WebEngine view API subset."""
+
+    loadFinished = Signal(bool)
+    zoom_percent_changed = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._zoom_percent = 100
+        self._url = QUrl()
+        self.setObjectName("contractTemplateHtmlPreviewView")
+        self.setProperty("role", "workspaceCanvas")
+        self.setOpenExternalLinks(False)
+
+    def mark_programmatic_reload(self) -> None:
+        return
+
+    def current_zoom_percent(self) -> int:
+        return int(self._zoom_percent)
+
+    def set_zoom_percent(self, percent: int, *, user_initiated: bool = False) -> None:
+        del user_initiated
+        self._zoom_percent = max(10, min(1000, int(percent)))
+        self.zoom_percent_changed.emit(int(self._zoom_percent))
+
+    def reset_to_fit(self) -> None:
+        self.set_zoom_percent(100, user_initiated=False)
+
+    def url(self) -> QUrl:
+        return QUrl(self._url)
+
+    def load(self, url: QUrl) -> None:
+        self._url = QUrl(url)
+        path = Path(url.toLocalFile())
+        try:
+            self.setHtml(path.read_text(encoding="utf-8"))
+        except Exception:
+            QTimer.singleShot(0, lambda: self.loadFinished.emit(False))
+            return
+        QTimer.singleShot(0, lambda: self.loadFinished.emit(True))
 
 
 class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None else QWidget):
@@ -1873,7 +1927,7 @@ class _FillHtmlPreviewController(QWidget):
 
     def request_refresh(self, *, reason: str, delay_ms: int = 180) -> None:
         view = self.panel.fill_html_preview_view
-        if view is None or QWebEngineView is None:
+        if view is None or (QWebEngineView is None and not _use_headless_html_preview_fallback()):
             self._debug_preview_log(
                 "preview_controller.request_refresh.skipped",
                 reason=str(reason or ""),
@@ -2186,8 +2240,12 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _dispose_fill_html_preview_runtime(self) -> None:
         self._fill_preview_rebuild_pending = False
         if self._fill_preview_controller is not None:
-            self._fill_preview_controller.cleanup()
-            self._fill_preview_controller.deleteLater()
+            cleanup = getattr(self._fill_preview_controller, "cleanup", None)
+            if callable(cleanup):
+                cleanup()
+            delete_later = getattr(self._fill_preview_controller, "deleteLater", None)
+            if callable(delete_later):
+                delete_later()
             self._fill_preview_controller = None
         self._destroy_fill_html_preview_view()
 
@@ -2213,13 +2271,17 @@ class ContractTemplateWorkspacePanel(QWidget):
         view.deleteLater()
 
     def _create_fill_html_preview_view(self) -> None:
-        if QWebEngineView is None:
+        if QWebEngineView is None and not _use_headless_html_preview_fallback():
             self.fill_html_preview_view = None
             return
         if not isinstance(self._fill_preview_surface, QWidget) or self._fill_preview_layout is None:
             self.fill_html_preview_view = None
             return
-        view = _InteractiveHtmlPreviewView(self._fill_preview_surface)
+        view = (
+            _FallbackHtmlPreviewView(self._fill_preview_surface)
+            if _use_headless_html_preview_fallback()
+            else _InteractiveHtmlPreviewView(self._fill_preview_surface)
+        )
         view.setObjectName("contractTemplateHtmlPreviewView")
         view.setMinimumHeight(420)
         view.zoom_percent_changed.connect(
@@ -2260,14 +2322,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         QTimer.singleShot(0, self._rebuild_fill_html_preview_runtime)
 
     def _prepare_fill_html_preview_for_window_transition(self, floating: bool) -> None:
-        if QWebEngineView is None:
+        if QWebEngineView is None and not _use_headless_html_preview_fallback():
             return
         self._dispose_fill_html_preview_runtime()
         if isinstance(self.fill_preview_zoom_label, QLabel):
             self.fill_preview_zoom_label.setText("100%")
 
     def _finalize_fill_html_preview_after_window_transition(self, floating: bool) -> None:
-        if QWebEngineView is None:
+        if QWebEngineView is None and not _use_headless_html_preview_fallback():
             return
         self._schedule_fill_html_preview_runtime_rebuild()
 
@@ -3384,7 +3446,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_preview_host = host
         self._fill_preview_surface = preview_surface
         self._fill_preview_layout = preview_layout
-        if QWebEngineView is not None:
+        if QWebEngineView is not None or _use_headless_html_preview_fallback():
             fit_preview_button.clicked.connect(self._reset_fill_html_preview_to_fit)
             zoom_out_button.clicked.connect(lambda: self._step_fill_html_preview_zoom(-10))
             zoom_in_button.clicked.connect(lambda: self._step_fill_html_preview_zoom(10))
@@ -4287,7 +4349,9 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "Open a profile to preview HTML contract template drafts."
             )
             return
-        if QWebEngineView is None or self.fill_html_preview_view is None:
+        if self.fill_html_preview_view is None or (
+            QWebEngineView is None and not _use_headless_html_preview_fallback()
+        ):
             self.fill_preview_status_label.setText(
                 "Qt WebEngine is unavailable, so the HTML working-draft preview cannot be shown."
             )

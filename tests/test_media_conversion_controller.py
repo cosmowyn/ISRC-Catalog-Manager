@@ -55,6 +55,7 @@ def test_refresh_audio_conversion_action_states_sets_tooltips_and_foreground_ser
         convert_selected_audio_action=_Action(),
         convert_external_audio_files_action=_Action(),
         export_forensic_watermarked_audio_action=_Action(),
+        soundcloud_forensic_export_action=_Action(),
         inspect_forensic_watermark_action=_Action(),
     )
     monkeypatch.setattr(
@@ -71,6 +72,8 @@ def test_refresh_audio_conversion_action_states_sets_tooltips_and_foreground_ser
     assert "Utility conversion only" in app.convert_external_audio_files_action.tool_tip
     assert app.export_forensic_watermarked_audio_action.enabled is True
     assert "leak tracing" in app.export_forensic_watermarked_audio_action.status_tip
+    assert app.soundcloud_forensic_export_action.enabled is True
+    assert "recipient fixed to SoundCloud" in app.soundcloud_forensic_export_action.status_tip
     assert app.inspect_forensic_watermark_action.enabled is True
     assert configured == [app]
 
@@ -82,12 +85,14 @@ def test_refresh_audio_conversion_action_states_sets_tooltips_and_foreground_ser
         convert_selected_audio_action=_Action(),
         convert_external_audio_files_action=_Action(),
         export_forensic_watermarked_audio_action=_Action(),
+        soundcloud_forensic_export_action=_Action(),
         inspect_forensic_watermark_action=_Action(),
         _audio_conversion_unavailable_message=lambda: "ffmpeg is missing",
     )
     conversion._refresh_audio_conversion_action_states(unavailable)
     assert unavailable.convert_selected_audio_action.enabled is False
     assert unavailable.convert_selected_audio_action.status_tip == "ffmpeg is missing"
+    assert unavailable.soundcloud_forensic_export_action.enabled is False
     assert unavailable.inspect_forensic_watermark_action.enabled is False
 
 

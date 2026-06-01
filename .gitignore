@@ -15,6 +15,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 coverage.xml
+coverage_*.json
 
 # macOS junk
 .DS_Store
@@ -26,4 +27,5 @@ demo/.runtime/
 .coverage
 .coverage.*
 coverage.json
+coverage_*.json
 htmlcov/

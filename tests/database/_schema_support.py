@@ -1935,8 +1935,12 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     {
                         "catalog_number",
                         "contract_number",
+                        "credit_note_number",
+                        "invoice_number",
+                        "ledger_transaction_number",
                         "license_number",
                         "registry_sha256_key",
+                        "royalty_statement_number",
                     },
                 )
                 self.assertEqual(

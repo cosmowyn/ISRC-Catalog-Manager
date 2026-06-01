@@ -1,0 +1,30 @@
+import json
+from pathlib import Path
+
+from isrc_manager.qa.assertions import require_artifact
+
+
+def test_ui_pq_help_documentation_is_fully_validated(ui_pq_harness):
+    event = next(
+        event for event in ui_pq_harness.evidence.events if event.test_id == "UI-PQ-HELP-001"
+    )
+    assert event.status == "passed"
+    assert event.data["finding_count"] == 0
+    assert event.data["coverage_percent"] == 100.0
+    assert event.data["workflow_example_count"] >= 7
+    assert event.data["chapter_screenshot_count"] == event.data["chapter_count"]
+    assert event.data["refreshed_chapter_screenshot_count"] == event.data["chapter_count"]
+    assert event.data["screenshot_count"] >= event.data["chapter_count"] + 3
+    report_path = Path(event.data["report_path"])
+    validated_help_path = Path(event.data["validated_help_manual_path"])
+    require_artifact(report_path)
+    require_artifact(validated_help_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["chapter_screenshot_count"] == report["chapter_count"]
+    assert not report["findings"]
+    help_html = validated_help_path.read_text(encoding="utf-8")
+    for chapter_id in report["chapter_ids"]:
+        assert f"screenshots/chapter_{chapter_id}.png" in help_html
+    assert not any(
+        deviation.test_id == "UI-PQ-HELP-001" for deviation in ui_pq_harness.deviations.deviations
+    )
