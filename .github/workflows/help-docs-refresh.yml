@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   CI: "1"
@@ -83,15 +84,37 @@ jobs:
             docs/help/screenshots
           if-no-files-found: error
 
-      - name: Commit refreshed screenshots on main
+      - name: Open refreshed screenshot pull request on main
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! git diff --quiet -- docs/help/screenshots; then
+            branch="automation/help-screenshots"
+            body_file="$(mktemp)"
+            cat > "$body_file" <<'EOF'
+          Automated Help screenshot refresh from the latest main-branch UI PQ run.
+
+          This PR keeps the committed Help manual screenshots aligned with the real application UI while preserving the repository rule that all main-branch changes must enter through pull requests.
+          EOF
+
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add docs/help/screenshots
-            git commit -m "Refresh help screenshots [skip ci]"
-            if ! git push; then
-              echo "::warning::Help screenshots were refreshed, but branch protection blocked the workflow push. Use the uploaded help-documentation-pq artifact or commit the refreshed screenshots from a pull request."
+            git commit -m "Refresh help screenshots"
+            git push --force origin "HEAD:${branch}"
+
+            if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh pr edit "$branch" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "Refresh Help screenshots" \
+                --body-file "$body_file"
+            else
+              gh pr create \
+                --repo "$GITHUB_REPOSITORY" \
+                --base main \
+                --head "$branch" \
+                --title "Refresh Help screenshots" \
+                --body-file "$body_file"
             fi
           fi
