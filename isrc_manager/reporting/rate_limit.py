@@ -6,6 +6,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
+from typing import Any
+
+COUNTED_FAILURE_KINDS = frozenset({"submission", "proxy-rate-limit"})
+DEFAULT_FAILURE_KIND = "submission"
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,11 @@ class LocalReportRateLimiter:
         now = time() if now is None else float(now)
         state = self._load_state()
         timestamps = self._recent(state.get("submissions", []), now=now, window=24 * 60 * 60)
-        failures = self._recent(state.get("failures", []), now=now, window=60 * 60)
+        failures = self._recent_counted_failures(
+            state.get("failures", []),
+            now=now,
+            window=60 * 60,
+        )
         duplicate_seen_at = float(state.get("deduplication", {}).get(deduplication_key, 0) or 0)
 
         if duplicate_seen_at and now - duplicate_seen_at < self.duplicate_window_seconds:
@@ -75,11 +83,17 @@ class LocalReportRateLimiter:
         state["failures"] = []
         self._write_state(state)
 
-    def record_failure(self, *, now: float | None = None) -> None:
+    def record_failure(
+        self,
+        *,
+        kind: str = DEFAULT_FAILURE_KIND,
+        now: float | None = None,
+    ) -> None:
         now = time() if now is None else float(now)
         state = self._load_state()
-        state["failures"] = self._recent(
-            [*state.get("failures", []), now],
+        failure_kind = str(kind or DEFAULT_FAILURE_KIND).strip() or DEFAULT_FAILURE_KIND
+        state["failures"] = self._recent_failure_records(
+            [*self._failure_records(state.get("failures", [])), {"at": now, "kind": failure_kind}],
             now=now,
             window=60 * 60,
         )
@@ -117,3 +131,56 @@ class LocalReportRateLimiter:
             if 0 <= now - timestamp <= window:
                 recent.append(timestamp)
         return sorted(recent)
+
+    @staticmethod
+    def _failure_records(values: object) -> list[dict[str, Any]]:
+        if not isinstance(values, list):
+            return []
+        records: list[dict[str, Any]] = []
+        for value in values:
+            if isinstance(value, dict):
+                records.append(value)
+                continue
+            try:
+                timestamp = float(value)
+            except Exception:
+                continue
+            records.append({"at": timestamp, "kind": "legacy"})
+        return records
+
+    @classmethod
+    def _recent_failure_records(
+        cls,
+        values: object,
+        *,
+        now: float,
+        window: float,
+    ) -> list[dict[str, Any]]:
+        recent = []
+        for record in cls._failure_records(values):
+            try:
+                timestamp = float(record.get("at", 0) or 0)
+            except Exception:
+                continue
+            if 0 <= now - timestamp <= window:
+                recent.append(
+                    {
+                        "at": timestamp,
+                        "kind": str(record.get("kind") or DEFAULT_FAILURE_KIND),
+                    }
+                )
+        return sorted(recent, key=lambda record: float(record["at"]))
+
+    @classmethod
+    def _recent_counted_failures(
+        cls,
+        values: object,
+        *,
+        now: float,
+        window: float,
+    ) -> list[float]:
+        return [
+            float(record["at"])
+            for record in cls._recent_failure_records(values, now=now, window=window)
+            if str(record.get("kind") or "") in COUNTED_FAILURE_KINDS
+        ]

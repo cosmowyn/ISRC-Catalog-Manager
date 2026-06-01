@@ -1,0 +1,6 @@
+{
+  "contains_credentials": false,
+  "proxy_url": "https://reports.cosmowyn.com/index.php",
+  "repository": "cosmowyn/ISRC-Catalog-Manager",
+  "security_model": "public endpoint only; GitHub credentials stay server-side"
+}

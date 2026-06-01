@@ -77,6 +77,16 @@ def test_reporting_configuration_uses_environment_before_bundled_config(tmp_path
     assert disabled.source == "environment"
 
 
+def test_default_reporting_configuration_uses_committed_public_proxy() -> None:
+    config = load_reporting_configuration(environ={})
+
+    assert config == ReportingConfiguration(
+        repository="cosmowyn/ISRC-Catalog-Manager",
+        proxy_url="https://reports.cosmowyn.com/index.php",
+        source="bundled:resources/reporting.json",
+    )
+
+
 def test_reporting_service_from_environment_uses_bundled_public_proxy_config(
     monkeypatch, tmp_path
 ) -> None:
@@ -269,6 +279,27 @@ def test_rate_limiter_blocks_duplicates_hourly_limits_and_failure_cooldown(tmp_p
     assert "cooldown" in decision.reason.lower()
 
 
+def test_rate_limiter_ignores_configuration_and_legacy_failures(tmp_path) -> None:
+    limiter = LocalReportRateLimiter(
+        tmp_path / "rate.json",
+        failure_cooldown_seconds=600,
+        failure_threshold=2,
+    )
+
+    limiter.state_path.write_text('{"failures": [5000, 5100]}', encoding="utf-8")
+    assert limiter.check(deduplication_key="legacy", now=5_101).allowed
+
+    limiter.record_failure(kind="configuration", now=5_200)
+    limiter.record_failure(kind="validation", now=5_300)
+    assert limiter.check(deduplication_key="configuration", now=5_301).allowed
+
+    limiter.record_failure(kind="submission", now=5_400)
+    limiter.record_failure(kind="proxy-rate-limit", now=5_500)
+    decision = limiter.check(deduplication_key="submission", now=5_501)
+    assert not decision.allowed
+    assert "cooldown" in decision.reason.lower()
+
+
 def test_collectors_sanitise_context_logs_tracebacks_and_file_errors(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -427,6 +458,22 @@ def test_proxy_submitter_requires_secure_endpoint() -> None:
     assert not result.success
     assert "No secure report proxy" in result.message
     assert "ISRC_REPORT_PROXY_URL" in result.message
+
+
+def test_service_does_not_cool_down_after_missing_proxy_configuration(tmp_path: Path) -> None:
+    service = ReportingService(
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        app_version="5.0.0",
+        repository="owner/repo",
+        proxy_url="",
+    )
+
+    results = [service.submit_or_save(_report_payload()) for _ in range(4)]
+
+    assert all(not result.success for result in results)
+    assert all("No secure report proxy" in result.message for result in results)
+    assert all("cooldown" not in result.message.lower() for result in results)
 
 
 def test_proxy_submitter_posts_structured_json_and_parses_response(monkeypatch) -> None:

@@ -544,6 +544,19 @@ class ReportingConfigResolutionTests(unittest.TestCase):
         self.assertEqual(resolved.kind, "missing")
         self.assertIn("enable automatic report submission", resolved.detail)
 
+    def test_repository_bundled_reporting_config_is_public_and_selected(self):
+        with mock.patch.dict(build.os.environ, {"ISRC_REPORT_PROXY_URL": ""}, clear=False):
+            resolved = build._resolve_reporting_runtime_config(build.PROJECT_ROOT)
+
+        payload = json.loads(Path(resolved.path).read_text(encoding="utf-8"))
+
+        self.assertEqual(resolved.kind, "canonical")
+        self.assertEqual(payload["proxy_url"], "https://reports.cosmowyn.com/index.php")
+        self.assertEqual(payload["repository"], "cosmowyn/ISRC-Catalog-Manager")
+        self.assertIs(payload["contains_credentials"], False)
+        self.assertNotIn("github_token", payload)
+        self.assertNotIn("token", payload)
+
 
 class CommandConstructionTests(unittest.TestCase):
     def test_windows_pyinstaller_command_uses_selected_executable_and_onefile(self):

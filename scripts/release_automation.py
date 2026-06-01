@@ -51,6 +51,7 @@ PRODUCTION_CODE_PATHS = (
     "build.py",
     "icon_factory.py",
     "isrc_manager/",
+    "resources/",
 )
 PRODUCTION_CODE_EXCLUDED_FILES = {
     "isrc_manager/help_content.py",

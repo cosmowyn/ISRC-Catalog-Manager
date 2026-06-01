@@ -22,9 +22,10 @@ SemVer-style before packaging.
 Documentation-only pushes, reruns, Help screenshot refresh commits, generated release metadata,
 tests, UI QA/PQ evidence, workflow-only edits, and release-automation maintenance do not create a new
 version automatically. Any real production-code change in the configured runtime/build fingerprint
-paths opens the automatic bump gate, even when the patch is small. Maintainers can still request an
-explicit bump with commit markers such as `[bump version]`, `[version bump]`, `version-bump: true`,
-`release: true`, or `semver: patch|minor|major`.
+paths opens the automatic bump gate, even when the patch is small. The fingerprint includes shipped
+runtime resources because bundled resources change application behaviour for users. Maintainers can
+still request an explicit bump with commit markers such as `[bump version]`, `[version bump]`,
+`version-bump: true`, `release: true`, or `semver: patch|minor|major`.
 
 ## Canonical Version Sync
 

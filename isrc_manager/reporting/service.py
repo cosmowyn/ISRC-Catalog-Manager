@@ -198,7 +198,7 @@ class ReportingService:
             self.logger.info("Submitted report %s", sanitized_report.report_id)
             return result
 
-        self.rate_limiter.record_failure()
+        self.rate_limiter.record_failure(kind=self._submission_failure_kind(result))
         reference = self.pending_store.save(sanitized_report)
         self.logger.info("Saved pending report %s", sanitized_report.report_id)
         return ReportSubmissionResult(
@@ -231,6 +231,15 @@ class ReportingService:
             schema_version=report.schema_version,
             sanitized=True,
         )
+
+    def _submission_failure_kind(self, result: ReportSubmissionResult) -> str:
+        if not getattr(self.submitter, "endpoint_url", ""):
+            return "configuration"
+        if result.status_code == 429:
+            return "proxy-rate-limit"
+        if "exceeds the configured payload limit" in result.message.lower():
+            return "validation"
+        return "submission"
 
     def _diagnostic_file_sections(self, *, include_logs: bool) -> list[ReportSection]:
         sections: list[ReportSection] = []

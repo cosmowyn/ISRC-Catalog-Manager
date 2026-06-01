@@ -156,8 +156,12 @@ The desktop app applies local rate limits before submission:
 - maximum reports per hour;
 - maximum reports per day;
 - duplicate report detection;
-- cooldown after repeated failed submissions;
+- cooldown after repeated failed proxy submissions or proxy rate-limit responses;
 - payload size limits.
+
+Missing local proxy configuration and local validation failures are saved as pending reports without
+consuming the submission-failure cooldown. This keeps the app abuse-resistant without locking out a
+user after the report proxy has just been configured.
 
 Server-side controls remain mandatory for production GitHub issue creation because client-side rate
 limits can be bypassed.

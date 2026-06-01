@@ -127,14 +127,15 @@ class ReleaseAutomationTests(unittest.TestCase):
                 "5\t0\tdocs/release-builds.md",
                 "2\t2\tisrc_manager/reporting/service.py",
                 "-\t-\tisrc_manager/assets/logo.png",
+                "2\t0\tresources/reporting.json",
                 "3\t0\tbuild.py",
             ]
         )
 
-        self.assertEqual(fingerprint.changed_files, 4)
-        self.assertEqual(fingerprint.added_lines, 17)
+        self.assertEqual(fingerprint.changed_files, 5)
+        self.assertEqual(fingerprint.added_lines, 19)
         self.assertEqual(fingerprint.deleted_lines, 10)
-        self.assertEqual(fingerprint.touched_lines, 27)
+        self.assertEqual(fingerprint.touched_lines, 29)
 
     def test_write_github_output_is_noop_without_output_path(self):
         with mock.patch.dict("os.environ", {}, clear=True):
