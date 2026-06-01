@@ -5,8 +5,10 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -117,4 +119,7 @@ jobs:
                 --title "Refresh Help screenshots" \
                 --body-file "$body_file"
             fi
+
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+            gh workflow run help-docs-refresh.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
           fi
