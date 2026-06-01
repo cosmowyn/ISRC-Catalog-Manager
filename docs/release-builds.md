@@ -34,7 +34,7 @@ updates that value first, then runs `scripts/sync_version_docs.py` to align the 
 markers, `RELEASE_NOTES.md`, and `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
-Current canonical source version: `5.0.1` (`v5.0.1`).
+Current canonical source version: `5.0.2` (`v5.0.2`).
 Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
 <!-- version:sync:end -->
