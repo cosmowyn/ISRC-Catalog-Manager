@@ -4,11 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_run:
-    workflows:
-      - Version Bump
-    types:
-      - completed
 
 permissions:
   contents: write
@@ -41,34 +36,11 @@ jobs:
       - name: Resolve tag to build
         id: resolve
         shell: bash
-        env:
-          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
-            if [ "$WORKFLOW_RUN_CONCLUSION" != "success" ]; then
-              echo "Version Bump did not complete successfully; skipping release build."
-              echo "should_release=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            if [ "$WORKFLOW_RUN_HEAD_BRANCH" != "main" ]; then
-              echo "Version Bump completed for '$WORKFLOW_RUN_HEAD_BRANCH', not main; skipping."
-              echo "should_release=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            git fetch --force origin main --tags
-            git checkout --force origin/main
-            version="$(
-              python -c 'import json; from pathlib import Path; print(str(json.loads(Path("docs/releases/latest.json").read_text(encoding="utf-8"))["version"]).strip())'
-            )"
-            tag="v${version}"
-          else
-            tag="$GITHUB_REF_NAME"
-            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || git fetch --force origin --tags
-          fi
+          tag="$GITHUB_REF_NAME"
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || git fetch --force origin --tags
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
             echo "Release builds only publish SemVer-style vX.Y.Z tags; got '$tag'." >&2
@@ -78,16 +50,6 @@ jobs:
           if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "Resolved release tag does not exist: $tag" >&2
             exit 1
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
-            tag_sha="$(git rev-list -n 1 "$tag")"
-            main_sha="$(git rev-parse HEAD)"
-            if [ "$tag_sha" != "$main_sha" ]; then
-              echo "Latest release tag $tag does not point at the current main tip; skipping."
-              echo "should_release=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
           fi
 
           echo "Resolved release tag: $tag"
