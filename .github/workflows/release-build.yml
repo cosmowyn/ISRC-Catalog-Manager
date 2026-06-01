@@ -59,7 +59,7 @@ jobs:
               exit 0
             fi
 
-            git fetch origin main --tags
+            git fetch --force origin main --tags
             git checkout --force origin/main
             version="$(
               python -c 'import json; from pathlib import Path; print(str(json.loads(Path("docs/releases/latest.json").read_text(encoding="utf-8"))["version"]).strip())'
@@ -67,7 +67,7 @@ jobs:
             tag="v${version}"
           else
             tag="$GITHUB_REF_NAME"
-            git fetch origin "$tag" --tags || git fetch origin --tags
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || git fetch --force origin --tags
           fi
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
