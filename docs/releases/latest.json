@@ -1,7 +1,7 @@
 {
-  "version": "5.0.4",
+  "version": "5.1.0",
   "released_at": "2026-06-02",
-  "summary": "Improve help manual layout and release badges",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v5.0.4.md",
+  "summary": "Add QA/PQ dashboard history and help refinements",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v5.1.0.md",
   "minimum_supported_version": null
 }
