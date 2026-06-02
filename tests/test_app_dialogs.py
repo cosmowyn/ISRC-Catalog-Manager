@@ -673,6 +673,38 @@ class AppDialogsTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_release_notes_dialog_uses_local_badge_fallback_when_shields_fetch_fails(self):
+        badge_url = (
+            "https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager?label=release"
+        )
+        with mock.patch(
+            "isrc_manager.app_dialogs._fetch_release_note_image_bytes",
+            return_value=None,
+        ) as fetch_image:
+            dialog = ReleaseNotesDialog(
+                version="5.0.3",
+                released_at="2026-06-01",
+                summary="A badge release.",
+                release_notes_markdown=(
+                    "# Release Notes\n\n"
+                    f"[![Release]({badge_url})]"
+                    "(https://github.com/cosmowyn/ISRC-Catalog-Manager/releases/tag/v5.0.3)\n\n"
+                    "Details."
+                ),
+                allow_update_install=False,
+            )
+        try:
+            fetch_image.assert_called_once_with(badge_url)
+            resource = dialog.browser.document().resource(
+                QTextDocument.ImageResource,
+                QUrl(badge_url),
+            )
+            self.assertIsInstance(resource, QImage)
+            self.assertFalse(resource.isNull())
+            self.assertGreater(resource.size().width(), resource.size().height())
+        finally:
+            dialog.close()
+
     def test_diagnostics_dialog_uses_async_loader(self):
         host = _DiagnosticsDialogHost()
         dialog = DiagnosticsDialog(host)

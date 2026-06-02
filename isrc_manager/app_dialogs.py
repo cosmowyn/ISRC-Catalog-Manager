@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from PySide6.QtCore import QByteArray, QSize, Qt, QUrl
 from PySide6.QtGui import (
@@ -54,7 +54,12 @@ from PySide6.QtWidgets import (
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
 from isrc_manager.external_launch import open_external_url
-from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, iter_help_sections
+from isrc_manager.help_content import (
+    HELP_CHAPTERS_BY_ID,
+    HELP_SECTION_SUMMARIES,
+    help_section_toc_title,
+    iter_help_sections,
+)
 from isrc_manager.storage_sizes import format_storage_bytes
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
@@ -185,16 +190,96 @@ def _release_note_image_from_bytes(content_type: str, data: bytes) -> QImage | N
     return image
 
 
-def _hydrate_release_note_image_resources(browser: QTextBrowser, markdown: str) -> None:
+def _shields_badge_color(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    palette = {
+        "blue": "#007ec6",
+        "blueviolet": "#8a2be2",
+        "brightgreen": "#4c1",
+        "green": "#97ca00",
+        "grey": "#555555",
+        "gray": "#555555",
+        "informational": "#007ec6",
+        "lightgrey": "#9f9f9f",
+        "lightgray": "#9f9f9f",
+        "orange": "#fe7d37",
+        "red": "#e05d44",
+        "success": "#4c1",
+        "yellow": "#dfb317",
+        "yellowgreen": "#a4a61d",
+    }
+    if normalized.startswith("%23"):
+        normalized = f"#{normalized[3:]}"
+    if normalized.startswith("#") and len(normalized) in {4, 7}:
+        return normalized
+    return palette.get(normalized, "#007ec6")
+
+
+def _split_shields_badge_segment(segment: str) -> list[str]:
+    sentinel = "\0"
+    clean_segment = unquote(str(segment or "")).replace("--", sentinel)
+    return [part.replace(sentinel, "-") for part in clean_segment.split("-")]
+
+
+def _fallback_release_note_badge_image(url: str, version_text: str = "") -> QImage | None:
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme != "https" or parsed.netloc.lower() != "img.shields.io":
+        return None
+    path_parts = [part for part in parsed.path.split("/") if part]
+    query = parse_qs(parsed.query)
+    label = (query.get("label") or [""])[0].strip()
+    message = ""
+    color = "#007ec6"
+
+    if len(path_parts) >= 2 and path_parts[0] == "badge":
+        badge_parts = _split_shields_badge_segment(path_parts[1])
+        if len(badge_parts) >= 2:
+            label = label or badge_parts[0]
+            message = "-".join(badge_parts[1:-1]) if len(badge_parts) > 2 else badge_parts[1]
+            if len(badge_parts) > 2:
+                color = _shields_badge_color(badge_parts[-1])
+    elif path_parts[:3] == ["github", "v", "tag"]:
+        label = label or "release"
+        message = str(version_text or "").strip() or "latest"
+        color = "#007ec6"
+    else:
+        label = label or "status"
+        message = str(version_text or "").strip() or "available"
+
+    label = label or "status"
+    message = message or str(version_text or "").strip() or "available"
+    label_width = max(36, min(180, 7 * len(label) + 10))
+    message_width = max(36, min(220, 7 * len(message) + 10))
+    width = label_width + message_width
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="20" role="img" aria-label="{html.escape(label)}: {html.escape(message)}">
+<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+<clipPath id="r"><rect width="{width}" height="20" rx="3" fill="#fff"/></clipPath>
+<g clip-path="url(#r)"><rect width="{label_width}" height="20" fill="#555"/><rect x="{label_width}" width="{message_width}" height="20" fill="{color}"/><rect width="{width}" height="20" fill="url(#s)"/></g>
+<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="11">
+<text x="{label_width / 2:.1f}" y="15" fill="#010101" fill-opacity=".3">{html.escape(label)}</text><text x="{label_width / 2:.1f}" y="14">{html.escape(label)}</text>
+<text x="{label_width + message_width / 2:.1f}" y="15" fill="#010101" fill-opacity=".3">{html.escape(message)}</text><text x="{label_width + message_width / 2:.1f}" y="14">{html.escape(message)}</text>
+</g>
+</svg>"""
+    return _svg_release_note_image(svg.encode("utf-8"))
+
+
+def _hydrate_release_note_image_resources(
+    browser: QTextBrowser,
+    markdown: str,
+    *,
+    version_text: str = "",
+) -> None:
     document = browser.document()
     hydrated = False
     for url in _iter_release_note_image_urls(markdown):
         if not _is_hydratable_release_note_image_url(url):
             continue
+        image = None
         payload = _fetch_release_note_image_bytes(url)
-        if payload is None:
-            continue
-        image = _release_note_image_from_bytes(*payload)
+        if payload is not None:
+            image = _release_note_image_from_bytes(*payload)
+        if image is None or image.isNull():
+            image = _fallback_release_note_badge_image(url, version_text)
         if image is None or image.isNull():
             continue
         document.addResource(QTextDocument.ImageResource, QUrl(url), image)
@@ -2507,7 +2592,11 @@ class ReleaseNotesDialog(QDialog):
             markdown = "\n".join(fallback_lines)
         if hasattr(self.browser, "setMarkdown"):
             self.browser.setMarkdown(markdown)
-            _hydrate_release_note_image_resources(self.browser, markdown)
+            _hydrate_release_note_image_resources(
+                self.browser,
+                markdown,
+                version_text=version,
+            )
         else:
             self.browser.setPlainText(markdown)
 
@@ -2628,7 +2717,9 @@ class HelpContentsDialog(QDialog):
         self.chapter_list.blockSignals(True)
         self.chapter_list.clear()
         visible_sections = []
-        for section_title, section_chapters in iter_help_sections():
+        for section_index, (section_title, section_chapters) in enumerate(
+            iter_help_sections(), start=1
+        ):
             matched_chapters = []
             for chapter in section_chapters:
                 haystack = " ".join(
@@ -2638,13 +2729,15 @@ class HelpContentsDialog(QDialog):
                     continue
                 matched_chapters.append(chapter)
             if matched_chapters:
-                visible_sections.append((section_title, matched_chapters))
+                visible_sections.append((section_index, section_title, matched_chapters))
 
-        for section_title, section_chapters in visible_sections:
-            heading = QListWidgetItem(section_title)
+        for section_index, section_title, section_chapters in visible_sections:
+            section_heading = help_section_toc_title(section_index, section_title)
+            heading = QListWidgetItem(section_heading)
             heading.setData(Qt.UserRole + 1, "sectionHeader")
             heading.setFlags(Qt.ItemFlag.NoItemFlags)
-            heading.setToolTip(f"{section_title} chapters")
+            section_summary = HELP_SECTION_SUMMARIES.get(section_title, "")
+            heading.setToolTip(section_summary or f"{section_title} chapters")
             self.chapter_list.addItem(heading)
             for chapter in section_chapters:
                 item = QListWidgetItem(chapter.title)

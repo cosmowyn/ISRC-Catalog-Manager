@@ -36,6 +36,9 @@ class HelpScreenshot:
     caption: str
 
 
+HELP_SCREENSHOT_MAX_WIDTH_PERCENT = 67
+
+
 def help_chapter_screenshot_filename(chapter_id: str) -> str:
     return f"chapter_{str(chapter_id).strip().replace('/', '_')}.png"
 
@@ -394,10 +397,12 @@ def _screenshot_figure(reference: HelpScreenshot) -> str:
     alt_text = escape(reference.alt_text)
     caption = escape(reference.caption)
     return f"""
-        <figure class="help-screenshot">
-          <img src="screenshots/{filename}" alt="{alt_text}">
-          <figcaption><strong>{title}</strong>: {caption}</figcaption>
-        </figure>
+        <div class="help-screenshot">
+          <p class="help-screenshot-image">
+            <img src="screenshots/{filename}" alt="{alt_text}">
+          </p>
+          <p class="help-screenshot-caption"><strong>{title}</strong>: {caption}</p>
+        </div>
         """
 
 
@@ -1934,61 +1939,81 @@ def _write_chapter_screenshot(
 
 
 HELP_SECTION_ORDER: tuple[str, ...] = (
-    "Quick Start",
-    "Daily Workflows",
-    "Deep Dives",
-    "Operations & Recovery",
-    "Settings & Reference",
+    "Getting Started",
+    "Catalog Entry and Editing",
+    "Catalog Review and Media",
+    "Releases and Registries",
+    "Repertoire, Rights, and Assets",
+    "Import, Export, and Storage",
+    "Publishing and Authenticity",
+    "Operations and Recovery",
+    "Settings and Reference",
 )
 
+HELP_SECTION_SUMMARIES: dict[str, str] = {
+    "Getting Started": "Orientation, profiles, shortcuts, and end-to-end workflow examples.",
+    "Catalog Entry and Editing": "The track, album, table, editing, and custom-field workflows used for daily catalog maintenance.",
+    "Catalog Review and Media": "Media attachment, audio tags, playback, and cleanup surfaces around existing catalog rows.",
+    "Releases and Registries": "Product records, internal codes, promo-code tracking, search, GS1, and date metadata.",
+    "Repertoire, Rights, and Assets": "Works, parties, contracts, rights, deliverables, and accounting context.",
+    "Import, Export, and Storage": "Exchange formats, template conversion, import decisions, and attachment storage modes.",
+    "Publishing and Authenticity": "SoundCloud publishing, forensic delivery, watermarking, and authenticity review.",
+    "Operations and Recovery": "Background tasks, quality checks, history, diagnostics, logs, storage cleanup, and updates.",
+    "Settings and Reference": "Application settings, themes, action ribbon customization, and support reference.",
+}
+
 HELP_SECTION_MAP: dict[str, str] = {
-    "overview": "Quick Start",
-    "main-window": "Quick Start",
-    "keyboard-shortcuts": "Quick Start",
-    "visual-ui-reference": "Quick Start",
-    "workflow-playbooks": "Quick Start",
-    "profiles": "Quick Start",
-    "add-data": "Daily Workflows",
-    "album-entry": "Daily Workflows",
-    "catalog-table": "Daily Workflows",
-    "custom-columns": "Daily Workflows",
-    "edit-entry": "Daily Workflows",
-    "audio-tags": "Daily Workflows",
-    "bulk-audio-attach": "Daily Workflows",
-    "releases": "Daily Workflows",
-    "code-registry": "Daily Workflows",
-    "promo-code-ledger": "Daily Workflows",
-    "global-search": "Daily Workflows",
-    "assets-deliverables": "Daily Workflows",
-    "accounting-royalties": "Daily Workflows",
-    "media-preview": "Daily Workflows",
-    "soundcloud-publishing": "Daily Workflows",
-    "repertoire-knowledge": "Deep Dives",
-    "contract-templates": "Deep Dives",
-    "storage-modes": "Deep Dives",
-    "exchange-formats": "Deep Dives",
-    "import-workflows": "Deep Dives",
-    "conversion": "Deep Dives",
-    "catalog-managers": "Deep Dives",
-    "audio-authenticity": "Deep Dives",
-    "gs1-metadata": "Deep Dives",
-    "metadata-dates": "Deep Dives",
-    "background-tasks": "Operations & Recovery",
-    "quality-dashboard": "Operations & Recovery",
-    "history": "Operations & Recovery",
-    "diagnostics": "Operations & Recovery",
-    "application-log": "Operations & Recovery",
-    "application-storage-admin": "Operations & Recovery",
-    "application-updates": "Operations & Recovery",
-    "settings": "Settings & Reference",
-    "theme-settings": "Settings & Reference",
-    "layout-action-ribbon": "Settings & Reference",
-    "about": "Settings & Reference",
+    "overview": "Getting Started",
+    "main-window": "Getting Started",
+    "keyboard-shortcuts": "Getting Started",
+    "visual-ui-reference": "Getting Started",
+    "workflow-playbooks": "Getting Started",
+    "profiles": "Getting Started",
+    "add-data": "Catalog Entry and Editing",
+    "album-entry": "Catalog Entry and Editing",
+    "catalog-table": "Catalog Entry and Editing",
+    "custom-columns": "Catalog Entry and Editing",
+    "edit-entry": "Catalog Entry and Editing",
+    "audio-tags": "Catalog Review and Media",
+    "bulk-audio-attach": "Catalog Review and Media",
+    "media-preview": "Catalog Review and Media",
+    "catalog-managers": "Catalog Review and Media",
+    "releases": "Releases and Registries",
+    "code-registry": "Releases and Registries",
+    "promo-code-ledger": "Releases and Registries",
+    "global-search": "Releases and Registries",
+    "gs1-metadata": "Releases and Registries",
+    "metadata-dates": "Releases and Registries",
+    "repertoire-knowledge": "Repertoire, Rights, and Assets",
+    "contract-templates": "Repertoire, Rights, and Assets",
+    "assets-deliverables": "Repertoire, Rights, and Assets",
+    "accounting-royalties": "Repertoire, Rights, and Assets",
+    "storage-modes": "Import, Export, and Storage",
+    "exchange-formats": "Import, Export, and Storage",
+    "import-workflows": "Import, Export, and Storage",
+    "conversion": "Import, Export, and Storage",
+    "audio-authenticity": "Publishing and Authenticity",
+    "soundcloud-publishing": "Publishing and Authenticity",
+    "background-tasks": "Operations and Recovery",
+    "quality-dashboard": "Operations and Recovery",
+    "history": "Operations and Recovery",
+    "diagnostics": "Operations and Recovery",
+    "application-log": "Operations and Recovery",
+    "application-storage-admin": "Operations and Recovery",
+    "application-updates": "Operations and Recovery",
+    "settings": "Settings and Reference",
+    "theme-settings": "Settings and Reference",
+    "layout-action-ribbon": "Settings and Reference",
+    "about": "Settings and Reference",
 }
 
 
 def help_section_for_chapter(chapter_id: str) -> str:
-    return HELP_SECTION_MAP.get(chapter_id, "Settings & Reference")
+    return HELP_SECTION_MAP.get(chapter_id, "Settings and Reference")
+
+
+def help_section_toc_title(section_index: int, section_title: str) -> str:
+    return f"Part {section_index}: {section_title}"
 
 
 def iter_help_sections(chapters: tuple[HelpChapter, ...] | list[HelpChapter] | None = None):
@@ -2018,7 +2043,9 @@ def render_help_html(
     keyword_map: dict[str, list[HelpChapter]] = {}
     chapter_blocks = []
 
-    for section_title, section_chapters in iter_help_sections():
+    for section_index, (section_title, section_chapters) in enumerate(
+        iter_help_sections(), start=1
+    ):
         items = []
         for chapter in section_chapters:
             items.append(
@@ -2029,16 +2056,23 @@ def render_help_html(
             chapter_screenshot = _screenshot_figure(help_chapter_screenshot_reference(chapter))
             chapter_blocks.append(f"""
                 <section class='chapter' id='{escape(chapter.chapter_id)}'>
-                  <p class='section-label'>{escape(section_title)}</p>
+                  <p class='section-label'>{escape(help_section_toc_title(section_index, section_title))}</p>
                   <h2>{escape(chapter.title)}</h2>
                   <p class='summary'>{escape(chapter.summary)}</p>
                   {chapter_screenshot}
                   {chapter.content_html}
                 </section>
                 """)
+        section_summary = HELP_SECTION_SUMMARIES.get(section_title, "")
+        summary_html = (
+            f"<p class='toc-section-summary'>{escape(section_summary)}</p>"
+            if section_summary
+            else ""
+        )
         toc_sections.append(f"""
             <section class="toc-section">
-              <h3>{escape(section_title)}</h3>
+              <h3>{escape(help_section_toc_title(section_index, section_title))}</h3>
+              {summary_html}
               <ol>
                 {"".join(items)}
               </ol>
@@ -2135,24 +2169,37 @@ def render_help_html(
     .toc-section h3 {{
       margin-bottom: 0.35rem;
     }}
+    .toc-section-summary {{
+      color: {summary_fg};
+      margin: 0 0 0.5rem 0;
+    }}
     .toc-section ol {{
       margin-top: 0;
     }}
-    figure.help-screenshot {{
+    .help-screenshot {{
+      clear: both;
+      display: block;
       margin: 1rem 0;
       padding: 10px;
       border: 1px solid {panel_border};
       border-radius: 8px;
       background: {body_bg};
+      text-align: center;
     }}
-    figure.help-screenshot img {{
+    .help-screenshot-image {{
+      margin: 0;
+      text-align: center;
+    }}
+    .help-screenshot img {{
       display: block;
-      max-width: 100%;
+      max-width: {HELP_SCREENSHOT_MAX_WIDTH_PERCENT}%;
       height: auto;
+      margin-left: auto;
+      margin-right: auto;
       border: 1px solid {panel_border};
       border-radius: 6px;
     }}
-    figure.help-screenshot figcaption {{
+    .help-screenshot-caption {{
       margin-top: 0.55rem;
       color: {summary_fg};
       font-size: 0.95rem;

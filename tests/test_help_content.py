@@ -5,9 +5,12 @@ from isrc_manager.help_content import (
     HELP_CHAPTER_SCREENSHOT_BASES,
     HELP_CHAPTERS,
     HELP_CHAPTERS_BY_ID,
+    HELP_SCREENSHOT_MAX_WIDTH_PERCENT,
     HELP_SCREENSHOT_REFERENCES,
     HELP_SECTION_ORDER,
+    HELP_SECTION_SUMMARIES,
     help_section_for_chapter,
+    help_section_toc_title,
     iter_help_sections,
     render_help_html,
     representative_screenshot_for_chapter,
@@ -59,12 +62,23 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Keyword Index", html)
         self.assertIn("Version 1.2.3", html)
         self.assertNotIn("SF Pro Text", html)
-        self.assertIn("Quick Start", html)
-        self.assertIn("Deep Dives", html)
+        self.assertIn("Part 1: Getting Started", html)
+        self.assertIn("Part 5: Repertoire, Rights, and Assets", html)
 
         for chapter in HELP_CHAPTERS:
             self.assertIn(f"id='{chapter.chapter_id}'", html)
             self.assertIn(f"href='#{chapter.chapter_id}'", html)
+
+    def test_rendered_help_uses_controlled_screenshot_blocks(self):
+        html = render_help_html("Music Catalog Manager", "1.2.3")
+
+        self.assertNotIn("<figure", html)
+        self.assertNotIn("figcaption", html)
+        self.assertIn('<div class="help-screenshot">', html)
+        self.assertIn('class="help-screenshot-image"', html)
+        self.assertIn('class="help-screenshot-caption"', html)
+        self.assertIn(f"max-width: {HELP_SCREENSHOT_MAX_WIDTH_PERCENT}%;", html)
+        self.assertIn("clear: both;", html)
 
     def test_rendered_help_can_follow_theme_palette(self):
         html = render_help_html(
@@ -121,23 +135,27 @@ class HelpContentTests(unittest.TestCase):
             HELP_CHAPTERS_BY_ID["import-workflows"].content_html,
         )
 
-    def test_help_chapters_are_grouped_into_layered_sections(self):
+    def test_help_chapters_are_grouped_into_subject_sections(self):
         grouped = list(iter_help_sections())
 
         self.assertEqual(grouped[0][0], HELP_SECTION_ORDER[0])
+        self.assertEqual(set(HELP_SECTION_SUMMARIES), set(HELP_SECTION_ORDER))
+        self.assertEqual(help_section_toc_title(1, grouped[0][0]), "Part 1: Getting Started")
         grouped_ids = {
             section: {chapter.chapter_id for chapter in chapters} for section, chapters in grouped
         }
-        self.assertIn("overview", grouped_ids["Quick Start"])
-        self.assertIn("keyboard-shortcuts", grouped_ids["Quick Start"])
-        self.assertIn("code-registry", grouped_ids["Daily Workflows"])
-        self.assertIn("soundcloud-publishing", grouped_ids["Daily Workflows"])
-        self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
-        self.assertIn("conversion", grouped_ids["Deep Dives"])
-        self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
-        self.assertIn("application-storage-admin", grouped_ids["Operations & Recovery"])
-        self.assertIn("application-updates", grouped_ids["Operations & Recovery"])
-        self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")
+        self.assertIn("overview", grouped_ids["Getting Started"])
+        self.assertIn("keyboard-shortcuts", grouped_ids["Getting Started"])
+        self.assertIn("edit-entry", grouped_ids["Catalog Entry and Editing"])
+        self.assertIn("media-preview", grouped_ids["Catalog Review and Media"])
+        self.assertIn("code-registry", grouped_ids["Releases and Registries"])
+        self.assertIn("repertoire-knowledge", grouped_ids["Repertoire, Rights, and Assets"])
+        self.assertIn("conversion", grouped_ids["Import, Export, and Storage"])
+        self.assertIn("soundcloud-publishing", grouped_ids["Publishing and Authenticity"])
+        self.assertIn("diagnostics", grouped_ids["Operations and Recovery"])
+        self.assertIn("application-storage-admin", grouped_ids["Operations and Recovery"])
+        self.assertIn("application-updates", grouped_ids["Operations and Recovery"])
+        self.assertEqual(help_section_for_chapter("theme-settings"), "Settings and Reference")
 
     def test_keyboard_shortcuts_chapter_lists_primary_shortcuts(self):
         chapter = HELP_CHAPTERS_BY_ID["keyboard-shortcuts"]
