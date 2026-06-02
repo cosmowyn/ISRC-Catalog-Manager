@@ -31,6 +31,7 @@ This `docs/` directory is the repository-side companion to that help surface. It
 - [Undo, History, and Snapshots](undo_redo_strategy.md): recovery model, snapshots, backups, and retention
 - [Release Notes](../RELEASE_NOTES.md): latest automated release TL;DR and release metadata source
 - [Release Build Automation](release-builds.md): tag-triggered GitHub release packaging, checksums, and in-app update manifest flow
+- [QA/QC and UI PQ Dashboard](validation/): live validation dashboard entry point for GitHub Pages and local docs browsing
 
 ## Customization
 

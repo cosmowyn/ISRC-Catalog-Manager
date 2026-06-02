@@ -47,6 +47,9 @@ class PublicDocsTests(unittest.TestCase):
         dashboard = (repo_root / "docs" / "validation" / "qa_pq_dashboard.html").read_text(
             encoding="utf-8"
         )
+        dashboard_entrypoint = (repo_root / "docs" / "validation" / "index.html").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("QA/QC and UI PQ Dashboard", dashboard)
         self.assertIn('id="initial-dashboard-data"', dashboard)
@@ -66,6 +69,8 @@ class PublicDocsTests(unittest.TestCase):
         self.assertNotIn("<script src=", dashboard)
         self.assertNotIn("https://", dashboard)
         self.assertNotIn("http://", dashboard)
+        self.assertIn("qa_pq_dashboard.html", dashboard_entrypoint)
+        self.assertIn('rel="canonical"', dashboard_entrypoint)
 
         match = re.search(
             r'<script id="initial-dashboard-data" type="application/json">\s*(\{.*?\})\s*</script>',
