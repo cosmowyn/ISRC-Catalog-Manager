@@ -47,7 +47,10 @@ class PublicDocsTests(unittest.TestCase):
         readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("[![QA/PQ Dashboard]", readme)
-        self.assertIn("https://img.shields.io/badge/QA%2FPQ-dashboard-live-success", readme)
+        self.assertIn(
+            "https://img.shields.io/static/v1?label=QA%2FPQ&message=dashboard%20live&color=success",
+            readme,
+        )
         self.assertIn("https://cosmowyn.github.io/ISRC-Catalog-Manager/validation/", readme)
 
     def test_qa_pq_dashboard_is_static_and_artifact_backed(self):
@@ -74,9 +77,11 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("../../coverage.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/evidence.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/deviations.csv", dashboard)
+        self.assertIn("raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/", dashboard)
+        self.assertIn("coverage.json is not published", dashboard)
+        self.assertIn("Could not load published artifacts", dashboard)
+        self.assertNotIn("python3 -m http.server", dashboard)
         self.assertNotIn("<script src=", dashboard)
-        self.assertNotIn("https://", dashboard)
-        self.assertNotIn("http://", dashboard)
         self.assertIn("qa_pq_dashboard.html", dashboard_entrypoint)
         self.assertIn('rel="canonical"', dashboard_entrypoint)
 

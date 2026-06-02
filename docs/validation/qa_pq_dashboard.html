@@ -1063,6 +1063,7 @@
       generated: "../../artifacts/ui_pq/visual/generated_output_manifest.json",
       history: "qa_pq_history.csv"
     };
+    const rawGithubBase = "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/";
 
     const initialData = JSON.parse(document.getElementById("initial-dashboard-data").textContent);
     let dashboardData = initialData;
@@ -1661,7 +1662,8 @@
     }
 
     function snapshotFromArtifacts(files) {
-      const coverage = files.coverage;
+      const coverage = files.coverage || {};
+      const fallbackCoverage = dashboardData.coverage || initialData.coverage || {};
       const measuredFiles = Object.entries(coverage.files || {})
         .map(([path, info]) => {
           const summary = info.summary || {};
@@ -1692,18 +1694,18 @@
         generatedAt: new Date().toISOString(),
         history: files.history || [],
         coverage: {
-          timestamp: coverage.meta?.timestamp || "",
-          linePercent: Number(totals.percent_covered || 0),
-          statementPercent: Number(totals.percent_statements_covered || totals.percent_covered || 0),
-          branchPercent: Number(totals.percent_branches_covered || 0),
-          coveredLines: Number(totals.covered_lines || 0),
-          statements: Number(totals.num_statements || 0),
-          missingLines: Number(totals.missing_lines || 0),
-          coveredBranches: Number(totals.covered_branches || 0),
-          missingBranches: Number(totals.missing_branches || 0),
-          filesMeasured: measuredFiles.length,
-          lowestFiles,
-          coverageWins
+          timestamp: coverage.meta?.timestamp || fallbackCoverage.timestamp || "",
+          linePercent: Number(totals.percent_covered ?? fallbackCoverage.linePercent ?? 0),
+          statementPercent: Number(totals.percent_statements_covered ?? totals.percent_covered ?? fallbackCoverage.statementPercent ?? 0),
+          branchPercent: Number(totals.percent_branches_covered ?? fallbackCoverage.branchPercent ?? 0),
+          coveredLines: Number(totals.covered_lines ?? fallbackCoverage.coveredLines ?? 0),
+          statements: Number(totals.num_statements ?? fallbackCoverage.statements ?? 0),
+          missingLines: Number(totals.missing_lines ?? fallbackCoverage.missingLines ?? 0),
+          coveredBranches: Number(totals.covered_branches ?? fallbackCoverage.coveredBranches ?? 0),
+          missingBranches: Number(totals.missing_branches ?? fallbackCoverage.missingBranches ?? 0),
+          filesMeasured: measuredFiles.length || fallbackCoverage.filesMeasured || 0,
+          lowestFiles: measuredFiles.length ? lowestFiles : fallbackCoverage.lowestFiles || [],
+          coverageWins: measuredFiles.length ? coverageWins : fallbackCoverage.coverageWins || []
         },
         pq: {
           eventCount: events.length,
@@ -1746,17 +1748,32 @@
       };
     }
 
+    function artifactUrl(path) {
+      if (window.location.hostname.endsWith("github.io") && path.startsWith("../../")) {
+        return rawGithubBase + path.replace("../../", "");
+      }
+      return path;
+    }
+
     async function fetchText(path) {
-      const response = await fetch(path);
+      const response = await fetch(artifactUrl(path));
       if (!response.ok) throw new Error(`${path} returned ${response.status}`);
       return response.text();
+    }
+
+    async function fetchOptionalJson(path) {
+      try {
+        return await fetchText(path).then(JSON.parse);
+      } catch (error) {
+        return null;
+      }
     }
 
     async function loadLiveArtifacts() {
       els.loadState.textContent = "Loading artifact files...";
       try {
         const [coverage, evidence, help, deviations, traceability, visual, business, generated, history] = await Promise.all([
-          fetchText(artifactPaths.coverage).then(JSON.parse),
+          fetchOptionalJson(artifactPaths.coverage),
           fetchText(artifactPaths.evidence).then(JSON.parse),
           fetchText(artifactPaths.help).then(JSON.parse),
           fetchText(artifactPaths.deviations).then(parseCsv),
@@ -1767,10 +1784,12 @@
           fetchText(artifactPaths.history).then(parseCsv).catch(() => initialData.history || [])
         ]);
         dashboardData = snapshotFromArtifacts({coverage, evidence, help, deviations, traceability, visual, business, generated, history});
-        els.loadState.textContent = "Loaded live artifacts. If you opened the HTML by file path and this worked, your browser allows local relative fetches.";
+        els.loadState.textContent = coverage
+          ? "Loaded live artifacts."
+          : "Loaded published UI/PQ artifacts. Coverage uses the embedded snapshot because coverage.json is not published.";
         render();
       } catch (error) {
-        els.loadState.textContent = `Could not load live artifacts: ${error.message}. The embedded snapshot is still shown. Serve the repo with python3 -m http.server for live reload.`;
+        els.loadState.textContent = `Could not load published artifacts: ${error.message}. The embedded snapshot is still shown.`;
       }
     }
 
