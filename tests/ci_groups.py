@@ -240,6 +240,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_media_waveform_clusters",
         "tests.test_main_window_shell_settings_transfer",
         "tests.test_public_docs",
+        "tests.test_qa_pq_history",
         "tests.test_quality_dialogs",
         "tests.test_promo_codes_dialogs",
         "tests.test_qss_autocomplete",
