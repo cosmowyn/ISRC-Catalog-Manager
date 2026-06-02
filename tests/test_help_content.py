@@ -3,12 +3,14 @@ from collections import Counter
 
 from isrc_manager.help_content import (
     HELP_CHAPTER_SCREENSHOT_BASES,
+    HELP_CHAPTER_SCREENSHOT_EXEMPT_IDS,
     HELP_CHAPTERS,
     HELP_CHAPTERS_BY_ID,
     HELP_SCREENSHOT_MAX_WIDTH_PERCENT,
     HELP_SCREENSHOT_REFERENCES,
     HELP_SECTION_ORDER,
     HELP_SECTION_SUMMARIES,
+    help_chapter_requires_screenshot,
     help_section_for_chapter,
     help_section_toc_title,
     iter_help_sections,
@@ -33,16 +35,22 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("application-updates", HELP_CHAPTERS_BY_ID)
         self.assertIn("soundcloud-publishing", HELP_CHAPTERS_BY_ID)
         self.assertIn("application-storage-admin", HELP_CHAPTERS_BY_ID)
+        self.assertNotIn("visual-ui-reference", HELP_CHAPTERS_BY_ID)
 
     def test_help_chapter_screenshot_mapping_uses_specific_ui_surfaces(self):
         chapter_ids = {chapter.chapter_id for chapter in HELP_CHAPTERS}
+        screenshot_required_ids = chapter_ids - HELP_CHAPTER_SCREENSHOT_EXEMPT_IDS
         screenshot_filenames = {reference.filename for reference in HELP_SCREENSHOT_REFERENCES}
         base_counts = Counter(HELP_CHAPTER_SCREENSHOT_BASES.values())
 
-        self.assertEqual(set(HELP_CHAPTER_SCREENSHOT_BASES), chapter_ids)
+        self.assertEqual(set(HELP_CHAPTER_SCREENSHOT_BASES), screenshot_required_ids)
         self.assertFalse(set(HELP_CHAPTER_SCREENSHOT_BASES.values()) - screenshot_filenames)
         self.assertLessEqual(base_counts["main_window.png"], 3)
         self.assertGreaterEqual(len(base_counts), 24)
+        self.assertFalse(help_chapter_requires_screenshot("overview"))
+        self.assertFalse(help_chapter_requires_screenshot("main-window"))
+        self.assertFalse(help_chapter_requires_screenshot("keyboard-shortcuts"))
+        self.assertTrue(help_chapter_requires_screenshot("add-data"))
         self.assertEqual(
             representative_screenshot_for_chapter("add-data"), "add_track_workspace.png"
         )
@@ -61,9 +69,12 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Table of Contents", html)
         self.assertIn("Keyword Index", html)
         self.assertIn("Version 1.2.3", html)
+        self.assertIn('id="top"', html)
+        self.assertIn('href="#contents"', html)
         self.assertNotIn("SF Pro Text", html)
         self.assertIn("Part 1: Getting Started", html)
         self.assertIn("Part 5: Repertoire, Rights, and Assets", html)
+        self.assertNotIn("Visual UI Reference", html)
 
         for chapter in HELP_CHAPTERS:
             self.assertIn(f"id='{chapter.chapter_id}'", html)
@@ -79,6 +90,12 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn('class="help-screenshot-caption"', html)
         self.assertIn(f"max-width: {HELP_SCREENSHOT_MAX_WIDTH_PERCENT}%;", html)
         self.assertIn("clear: both;", html)
+        self.assertIn("chapter-lead-with-media", html)
+        self.assertIn("Back to Table of Contents", html)
+        self.assertNotIn("screenshots/chapter_overview.png", html)
+        self.assertNotIn("screenshots/chapter_main-window.png", html)
+        self.assertNotIn("screenshots/chapter_keyboard-shortcuts.png", html)
+        self.assertIn("screenshots/chapter_add-data.png", html)
 
     def test_rendered_help_can_follow_theme_palette(self):
         html = render_help_html(
@@ -192,6 +209,7 @@ class HelpContentTests(unittest.TestCase):
         cleanup = HELP_CHAPTERS_BY_ID["catalog-managers"]
         diagnostics = HELP_CHAPTERS_BY_ID["diagnostics"]
         settings = HELP_CHAPTERS_BY_ID["settings"]
+        application_log = HELP_CHAPTERS_BY_ID["application-log"]
 
         self.assertEqual(cleanup.title, "Catalog Cleanup")
         self.assertIn("Diagnostics", cleanup.content_html)
@@ -204,6 +222,15 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("OS keychain/keyring availability", settings.content_html)
         self.assertIn("Aeon Cosmowyn", settings.content_html)
         self.assertIn("GTIN contracts CSV", settings.content_html)
+        self.assertIn("Automatic Reporting", application_log.content_html)
+        self.assertIn(
+            "unfrozen development runs skip this startup crash-report check",
+            application_log.content_html,
+        )
+        self.assertIn("Submit Report", application_log.content_html)
+        self.assertIn("resources/reporting.json", application_log.content_html)
+        self.assertIn("report proxy", application_log.content_html)
+        self.assertIn("reports folder", application_log.content_html)
 
     def test_media_preview_help_documents_audio_player_capabilities(self):
         chapter = HELP_CHAPTERS_BY_ID["media-preview"]

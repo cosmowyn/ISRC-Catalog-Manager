@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.code_registry import CodeRegistryService
-from isrc_manager.help_content import HELP_SCREENSHOT_REFERENCES
+from isrc_manager.help_content import (
+    iter_help_chapter_screenshot_references,
+)
 from isrc_manager.qa import assertions, commands, fixtures, scenarios
 from isrc_manager.qa.deviations import DeviationRecorder
 from isrc_manager.qa.evidence import EvidenceRecorder
@@ -426,7 +428,12 @@ def test_scenario_low_level_helpers_cover_success_and_error_edges(monkeypatch) -
         scenarios,
         "validate_help_coverage",
         lambda *_args, **_kwargs: SimpleNamespace(
-            status="passed", coverage_percent=100, chapter_count=1, chapter_screenshot_count=1
+            status="passed",
+            coverage_percent=100,
+            chapter_count=1,
+            chapter_screenshot_count=1,
+            chapter_screenshot_required_count=1,
+            chapter_screenshot_exempt_count=0,
         ),
     )
     assert scenarios._require_help_reference(harness, "Workflow")["help_status"] == "passed"
@@ -502,10 +509,11 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
 
 def test_help_validation_rejects_duplicate_screenshot_hashes(tmp_path: Path) -> None:
     duplicate_payload = b"same screenshot bytes"
-    for reference in HELP_SCREENSHOT_REFERENCES[:2]:
+    references = tuple(iter_help_chapter_screenshot_references())[:2]
+    for reference in references:
         (tmp_path / reference.filename).write_bytes(duplicate_payload)
 
-    report = validate_help_coverage([], chapters=(), screenshot_dir=tmp_path)
+    report = validate_help_coverage([], screenshot_dir=tmp_path)
 
     assert report.duplicate_screenshot_hashes
     assert any(finding.category == "screenshot-uniqueness" for finding in report.findings)

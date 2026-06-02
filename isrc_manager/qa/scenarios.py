@@ -304,6 +304,8 @@ def _require_help_reference(harness: Any, workflow_title: str) -> dict[str, obje
         "coverage_percent": report.coverage_percent,
         "chapter_count": report.chapter_count,
         "chapter_screenshot_count": report.chapter_screenshot_count,
+        "chapter_screenshot_required_count": report.chapter_screenshot_required_count,
+        "chapter_screenshot_exempt_count": report.chapter_screenshot_exempt_count,
     }
 
 
@@ -1702,6 +1704,10 @@ def run_help_documentation_workflow(harness: Any) -> None:
             "workflow_example_count": report.workflow_example_count,
             "screenshot_count": report.screenshot_count,
             "chapter_screenshot_count": report.chapter_screenshot_count,
+            "chapter_screenshot_required_count": report.chapter_screenshot_required_count,
+            "chapter_screenshot_exempt_count": report.chapter_screenshot_exempt_count,
+            "chapter_screenshot_required_ids": report.chapter_screenshot_required_ids,
+            "chapter_screenshot_exempt_ids": report.chapter_screenshot_exempt_ids,
             "unique_screenshot_hash_count": report.unique_screenshot_hash_count,
             "duplicate_screenshot_hash_count": len(report.duplicate_screenshot_hashes),
             "refreshed_chapter_screenshot_count": len(refreshed_chapter_screenshots),

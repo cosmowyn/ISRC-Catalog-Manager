@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import re
 import unittest
 from pathlib import Path
@@ -39,6 +41,63 @@ class PublicDocsTests(unittest.TestCase):
 
         self.assertIn("primary user-facing manual", docs_hub)
         self.assertIn("integrated manual", readme)
+
+    def test_qa_pq_dashboard_is_static_and_artifact_backed(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        dashboard = (repo_root / "docs" / "validation" / "qa_pq_dashboard.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("QA/QC and UI PQ Dashboard", dashboard)
+        self.assertIn('id="initial-dashboard-data"', dashboard)
+        self.assertIn('id="chartGrid"', dashboard)
+        self.assertIn('id="historyGraph"', dashboard)
+        self.assertIn('id="historyGranularity"', dashboard)
+        self.assertIn("renderHistory", dashboard)
+        self.assertIn("reloadArtifactsButton", dashboard)
+        self.assertIn("renderCharts", dashboard)
+        self.assertIn("conic-gradient", dashboard)
+        self.assertIn("stacked-graph", dashboard)
+        self.assertIn("qa_pq_history.csv", dashboard)
+        self.assertIn("../../coverage.json", dashboard)
+        self.assertIn("../../artifacts/ui_pq/evidence.json", dashboard)
+        self.assertIn("../../artifacts/ui_pq/deviations.csv", dashboard)
+        self.assertNotIn("<script src=", dashboard)
+        self.assertNotIn("https://", dashboard)
+        self.assertNotIn("http://", dashboard)
+
+        match = re.search(
+            r'<script id="initial-dashboard-data" type="application/json">\s*(\{.*?\})\s*</script>',
+            dashboard,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Dashboard must include parseable embedded data")
+        snapshot = json.loads(match.group(1))
+
+        self.assertGreaterEqual(snapshot["coverage"]["linePercent"], 0)
+        self.assertGreaterEqual(snapshot["coverage"]["branchPercent"], 0)
+        self.assertTrue(snapshot["coverage"]["lowestFiles"])
+        self.assertIn(
+            "UI-PQ-HELP-001",
+            {event["testId"] for event in snapshot["pq"]["events"]},
+        )
+        self.assertTrue(snapshot["pq"]["visualManifests"])
+        self.assertTrue(snapshot["history"])
+
+    def test_qa_pq_history_csv_has_dashboard_columns(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        history_path = repo_root / "docs" / "validation" / "qa_pq_history.csv"
+
+        with history_path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertTrue(rows)
+        self.assertIn("timestamp", rows[0])
+        self.assertIn("app_loc", rows[0])
+        self.assertIn("app_loc_delta", rows[0])
+        self.assertIn("total_coverage", rows[0])
+        self.assertIn("failed_tests", rows[0])
+        self.assertIn("total_deviations", rows[0])
 
 
 if __name__ == "__main__":

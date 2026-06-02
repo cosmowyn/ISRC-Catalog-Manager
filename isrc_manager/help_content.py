@@ -37,6 +37,13 @@ class HelpScreenshot:
 
 
 HELP_SCREENSHOT_MAX_WIDTH_PERCENT = 67
+HELP_CHAPTER_SCREENSHOT_EXEMPT_IDS = frozenset(
+    {
+        "overview",
+        "main-window",
+        "keyboard-shortcuts",
+    }
+)
 
 
 def help_chapter_screenshot_filename(chapter_id: str) -> str:
@@ -362,8 +369,22 @@ def iter_help_screenshot_references(
     chapters: tuple[HelpChapter, ...] | list[HelpChapter] | None = None,
 ):
     yield from HELP_SCREENSHOT_REFERENCES
+    yield from iter_help_chapter_screenshot_references(chapters)
+
+
+def help_chapter_requires_screenshot(chapter_id: str) -> bool:
+    return (
+        str(chapter_id) not in HELP_CHAPTER_SCREENSHOT_EXEMPT_IDS
+        and str(chapter_id) in HELP_CHAPTER_SCREENSHOT_BASES
+    )
+
+
+def iter_help_chapter_screenshot_references(
+    chapters: tuple[HelpChapter, ...] | list[HelpChapter] | None = None,
+):
     for chapter in chapters or HELP_CHAPTERS:
-        yield help_chapter_screenshot_reference(chapter)
+        if help_chapter_requires_screenshot(chapter.chapter_id):
+            yield help_chapter_screenshot_reference(chapter)
 
 
 def help_screenshot_source_dir() -> Path:
@@ -572,25 +593,6 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Manage Custom Columns</strong>: <code>Ctrl+Alt+Shift+M</code> / <code>Cmd+Option+Shift+M</code></li>
         </ul>
         <p>Some actions intentionally stay menu-only or context-menu-only. That usually means the action is highly local to the current selection, already has a direct manipulation gesture such as double-click, would require a shortcut that conflicts with a more important global workflow, or requires a deliberate review step such as SoundCloud publishing.</p>
-        """,
-    ),
-    HelpChapter(
-        chapter_id="visual-ui-reference",
-        title="Visual UI Reference",
-        summary="Screenshot-backed orientation for the real application surfaces used by the help and UI qualification workflow.",
-        keywords=(
-            "screenshots",
-            "visual reference",
-            "real ui",
-            "main workspace",
-            "help screenshot",
-            "about screenshot",
-            "ui qualification",
-        ),
-        content_html=f"""
-        <p>This chapter anchors the written manual to real application screenshots. The images are generated from the actual PySide user interface used during qualification, not from mockups. They are included so a first-time user can connect the words in this manual to the surfaces they will see in the app.</p>
-        {render_screenshot_gallery()}
-        <p>If a screenshot looks different from the current application after a feature changes, the documentation validation workflow must be run again and the screenshot set must be refreshed. That keeps Help honest: the manual should describe the current product, not a past version of it.</p>
         """,
     ),
     HelpChapter(
@@ -1611,6 +1613,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "troubleshooting",
             "open log folder",
             "report a bug",
+            "automatic reporting",
+            "auto reporting",
+            "report proxy",
+            "reporting.json",
             "crash report",
             "bug report",
             "sanitised logs",
@@ -1626,7 +1632,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Report a Bug…</strong>: opens a manual report workflow that collects your summary, description, reproduction steps, expected result, and actual result, then shows a sanitised preview before anything is submitted.</li>
         </ul>
         <p>Use logs together with Diagnostics when you need to understand what happened during imports, restores, settings changes, publishing, conversion, or file-management actions. The readable log is usually enough for normal support notes. The trace log is more detailed and is useful when a background task, update check, SoundCloud workflow, or repair action needs a precise event trail.</p>
-        <p>If the previous app session ended without a clean shutdown, startup asks whether you want to review a crash report. Crash and manual bug reports use the same pipeline: the app builds a structured GitHub issue, sanitises the payload locally, shows the exact Markdown preview, lets you copy it, and only submits after you press <strong>Submit Report</strong>. Installed release builds can submit without GitHub login only when they include a public HTTPS report proxy endpoint; the app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. If no secure report proxy is configured or the app is offline, the report is saved under the app data reports folder for later review. Repeated real proxy submission failures can trigger a short cooldown, but missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
+        <h3>Automatic Reporting</h3>
+        <p>Automatic reporting means a packaged app build can detect that the previous session ended without a clean shutdown and offer to prepare a crash report the next time it starts. Source-tree and unfrozen development runs skip this startup crash-report check so normal code restarts do not create repeated prompts. The app does not send reports silently. In packaged builds, startup asks whether you want to review the crash report, then opens the same privacy-safe report workflow used by <strong>Help &gt; Report a Bug…</strong>.</p>
+        <ul>
+          <li><strong>Crash detection</strong>: an unclean shutdown can seed a crash report with app version, platform, recent safe log context, and the detected failure state.</li>
+          <li><strong>Manual reports</strong>: <strong>Report a Bug…</strong> collects your summary, description, reproduction steps, expected result, and actual result.</li>
+          <li><strong>Preview first</strong>: both paths build a structured GitHub issue, sanitise the payload locally, show the exact Markdown preview, and let you copy it before submission.</li>
+          <li><strong>Submit Report</strong>: submission happens only after you press this button. If a configured report proxy accepts the payload, it can create the GitHub issue for you without requiring a local GitHub login.</li>
+          <li><strong>Local fallback</strong>: if no secure proxy is configured, the app is offline, the proxy is rate-limited, or submission fails, the sanitised report is saved under the app data reports folder for later review.</li>
+        </ul>
+        <p>Installed release builds can include a public HTTPS report proxy endpoint through the bundled <code>resources/reporting.json</code> file. That file is generated from release configuration and must not contain credentials; it only tells the app where the server-side reporting endpoint lives. Environment configuration can override the bundled file for development or support testing. The app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. Repeated real proxy submission failures can trigger a short cooldown, but missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
         <p>The sanitiser redacts tokens, passwords, API keys, connection strings, email addresses, phone numbers, local user names, and private home-folder paths. Reports must not be used to send catalog databases, raw royalty or contract data, private documents, or audio files. If a workflow depends on sensitive catalog records, describe the steps and visible symptoms rather than pasting private source data.</p>
         <p>Do not edit logs as a way to fix the catalog. Logs are evidence. If a log points to a database, managed-file, or settings problem, use the relevant workflow to repair the source issue and then keep the log as the explanation of what happened.</p>
         """,
@@ -1823,10 +1838,6 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
 )
 
 HELP_CHAPTER_SCREENSHOT_BASES: dict[str, str] = {
-    "overview": "main_window.png",
-    "main-window": "main_window.png",
-    "keyboard-shortcuts": "help_contents_dialog.png",
-    "visual-ui-reference": "help_contents_dialog.png",
     "workflow-playbooks": "help_contents_dialog.png",
     "profiles": "main_window.png",
     "background-tasks": "diagnostics_dialog.png",
@@ -1883,6 +1894,8 @@ def refresh_help_chapter_screenshots(
     target_dir.mkdir(parents=True, exist_ok=True)
     refreshed: list[Path] = []
     for chapter in chapters or HELP_CHAPTERS:
+        if not help_chapter_requires_screenshot(chapter.chapter_id):
+            continue
         source_path = target_dir / representative_screenshot_for_chapter(chapter.chapter_id)
         if not source_path.exists():
             continue
@@ -1966,7 +1979,6 @@ HELP_SECTION_MAP: dict[str, str] = {
     "overview": "Getting Started",
     "main-window": "Getting Started",
     "keyboard-shortcuts": "Getting Started",
-    "visual-ui-reference": "Getting Started",
     "workflow-playbooks": "Getting Started",
     "profiles": "Getting Started",
     "add-data": "Catalog Entry and Editing",
@@ -2053,14 +2065,29 @@ def render_help_html(
             )
             for keyword in chapter.keywords:
                 keyword_map.setdefault(keyword.lower(), []).append(chapter)
-            chapter_screenshot = _screenshot_figure(help_chapter_screenshot_reference(chapter))
+            if help_chapter_requires_screenshot(chapter.chapter_id):
+                chapter_screenshot = _screenshot_figure(help_chapter_screenshot_reference(chapter))
+                chapter_lead = f"""
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>{escape(chapter.summary)}</p>
+                    </div>
+                    {chapter_screenshot}
+                  </div>
+                  """
+            else:
+                chapter_lead = f"""
+                  <div class='chapter-lead'>
+                    <p class='summary'>{escape(chapter.summary)}</p>
+                  </div>
+                  """
             chapter_blocks.append(f"""
                 <section class='chapter' id='{escape(chapter.chapter_id)}'>
                   <p class='section-label'>{escape(help_section_toc_title(section_index, section_title))}</p>
                   <h2>{escape(chapter.title)}</h2>
-                  <p class='summary'>{escape(chapter.summary)}</p>
-                  {chapter_screenshot}
+                  {chapter_lead}
                   {chapter.content_html}
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
                 """)
         section_summary = HELP_SECTION_SUMMARIES.get(section_title, "")
@@ -2107,7 +2134,7 @@ def render_help_html(
         str(palette.get("font_family") or "").replace('"', '\\"').strip() or fallback_body_font
     )
     font_family_css = f'"{body_font}", sans-serif'
-    return f"""<!DOCTYPE html>
+    html_document = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -2134,7 +2161,7 @@ def render_help_html(
     .hero, .panel, .chapter {{
       background: {panel_bg};
       border: 1px solid {panel_border};
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 18px 20px;
       margin-bottom: 18px;
       box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
@@ -2142,6 +2169,18 @@ def render_help_html(
     .hero p, .panel p, .chapter p {{ margin: 0.55em 0; }}
     .version {{ color: {version_fg}; margin-top: 0; }}
     ul {{ margin-top: 0.4em; }}
+    .chapter-lead {{
+      margin: 0.5rem 0 1rem;
+    }}
+    .chapter-lead-with-media {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 42%);
+      gap: 16px;
+      align-items: start;
+    }}
+    .chapter-lead-text {{
+      min-width: 0;
+    }}
     table {{
       border-collapse: collapse;
       width: 100%;
@@ -2204,9 +2243,49 @@ def render_help_html(
       color: {summary_fg};
       font-size: 0.95rem;
     }}
+    .chapter-lead .help-screenshot {{
+      clear: none;
+      margin: 0;
+    }}
+    .chapter-lead .help-screenshot img {{
+      max-width: 100%;
+    }}
+    .chapter-top-link {{
+      border-top: 1px solid {panel_border};
+      margin-top: 1rem;
+      padding-top: 0.7rem;
+      text-align: right;
+    }}
+    .back-to-toc {{
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 20;
+      display: inline-block;
+      padding: 8px 12px;
+      border: 1px solid {panel_border};
+      border-radius: 8px;
+      background: {panel_bg};
+      color: {link_fg};
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.12);
+    }}
+    @media (max-width: 900px) {{
+      .chapter-lead-with-media {{
+        grid-template-columns: 1fr;
+      }}
+      .chapter-lead .help-screenshot img {{
+        max-width: {HELP_SCREENSHOT_MAX_WIDTH_PERCENT}%;
+      }}
+      .back-to-toc {{
+        position: static;
+        margin: 0 0 1rem auto;
+      }}
+    }}
   </style>
 </head>
 <body>
+  <a id="top"></a>
+  <a class="back-to-toc" href="#contents">Back to TOC</a>
   <section class="hero">
     <h1>{escape(app_name)} Help</h1>
     {version_line}
@@ -2231,3 +2310,4 @@ def render_help_html(
 </body>
 </html>
 """
+    return "\n".join(line.rstrip() for line in html_document.splitlines()) + "\n"

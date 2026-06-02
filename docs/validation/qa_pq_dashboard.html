@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ISRC Catalog Manager QA/QC and PQ Dashboard</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --ink: #17202c;
+      --muted: #5f6f83;
+      --panel: #ffffff;
+      --line: #d9e1ec;
+      --blue: #2764d8;
+      --green: #17845f;
+      --amber: #a16207;
+      --red: #bd2b38;
+      --slate: #2f3d50;
+      --soft-blue: #e8f0ff;
+      --soft-green: #e7f7ef;
+      --soft-amber: #fff4d6;
+      --soft-red: #fde8eb;
+      --shadow: 0 12px 30px rgba(31, 45, 61, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    header {
+      background: #17202c;
+      color: #ffffff;
+      border-bottom: 1px solid #0e1520;
+    }
+
+    .header-inner,
+    main {
+      width: min(1440px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 22px 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2vw, 2.35rem);
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 6px 0 0;
+      color: #ced7e4;
+      max-width: 850px;
+      overflow-wrap: anywhere;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      background: #ffffff;
+      color: #17202c;
+      border-radius: 8px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 680;
+      min-height: 38px;
+    }
+
+    .button.secondary {
+      background: transparent;
+      color: #ffffff;
+    }
+
+    main {
+      padding: 20px 0 34px;
+    }
+
+    .status-strip {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 16px;
+      margin-bottom: 18px;
+      align-items: stretch;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      letter-spacing: 0;
+    }
+
+    .source-line {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.92rem;
+      min-width: 0;
+    }
+
+    .source-line span {
+      min-width: 0;
+    }
+
+    .source-line code {
+      color: var(--ink);
+      background: #eef2f7;
+      border-radius: 6px;
+      padding: 2px 5px;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    .load-state {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .history-panel {
+      margin-bottom: 18px;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 16px 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .history-header h2 {
+      margin-bottom: 4px;
+    }
+
+    .history-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .history-controls label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .history-controls input,
+    .history-controls select {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      padding: 6px 8px;
+      min-width: 130px;
+    }
+
+    .trend-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 0 16px 12px;
+    }
+
+    .trend-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcff;
+      min-width: 0;
+    }
+
+    .trend-label {
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .trend-value {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 4px;
+      font-size: 1.34rem;
+      font-weight: 780;
+    }
+
+    .trend-arrow {
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 0.86rem;
+      font-weight: 780;
+      border: 1px solid var(--line);
+      background: #eef2f7;
+      color: var(--muted);
+    }
+
+    .trend-arrow.good {
+      color: var(--green);
+      background: var(--soft-green);
+      border-color: #b8e3d0;
+    }
+
+    .trend-arrow.bad {
+      color: var(--red);
+      background: var(--soft-red);
+      border-color: #efbcc4;
+    }
+
+    .trend-note {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-top: 2px;
+    }
+
+    .history-graph-wrap {
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+      padding: 12px 16px 16px;
+    }
+
+    .history-graph {
+      width: 100%;
+      height: 260px;
+      display: block;
+    }
+
+    .history-empty {
+      display: grid;
+      min-height: 210px;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .history-legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .history-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .kpi {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 128px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .kpi-label {
+      color: var(--muted);
+      font-size: 0.83rem;
+      text-transform: uppercase;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+    }
+
+    .kpi-value {
+      font-size: 2rem;
+      font-weight: 780;
+      letter-spacing: 0;
+      margin: 6px 0;
+    }
+
+    .kpi-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      font-weight: 720;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .pill.pass {
+      background: var(--soft-green);
+      color: var(--green);
+      border-color: #b8e3d0;
+    }
+
+    .pill.partial {
+      background: var(--soft-amber);
+      color: var(--amber);
+      border-color: #f1d38c;
+    }
+
+    .pill.fail {
+      background: var(--soft-red);
+      color: var(--red);
+      border-color: #efbcc4;
+    }
+
+    .pill.info {
+      background: var(--soft-blue);
+      color: var(--blue);
+      border-color: #bdd0fb;
+    }
+
+    .progress {
+      height: 9px;
+      border-radius: 999px;
+      background: #e8edf4;
+      overflow: hidden;
+      margin: 8px 0 3px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0;
+      background: var(--green);
+      border-radius: inherit;
+      transition: width 220ms ease;
+    }
+
+    .progress-fill.warn {
+      background: var(--amber);
+    }
+
+    .progress-fill.bad {
+      background: var(--red);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .donut-card {
+      display: grid;
+      gap: 12px;
+      min-height: 244px;
+    }
+
+    .donut-layout {
+      display: grid;
+      grid-template-columns: 132px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+
+    .donut {
+      position: relative;
+      width: 132px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: #e8edf4;
+      box-shadow: inset 0 0 0 1px rgba(23, 32, 44, 0.08);
+    }
+
+    .donut::after {
+      content: "";
+      position: absolute;
+      inset: 22px;
+      border-radius: 50%;
+      background: var(--panel);
+      box-shadow: inset 0 0 0 1px rgba(23, 32, 44, 0.08);
+    }
+
+    .donut-value {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      font-size: 1.34rem;
+      font-weight: 780;
+      letter-spacing: 0;
+      text-align: center;
+    }
+
+    .donut-meta {
+      min-width: 0;
+    }
+
+    .donut-subtitle {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .legend {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .legend li {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      color: var(--slate);
+      font-size: 0.9rem;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    .legend-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .legend-value {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .stacked-graph {
+      display: flex;
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e8edf4;
+      box-shadow: inset 0 0 0 1px rgba(23, 32, 44, 0.06);
+    }
+
+    .stacked-segment {
+      min-width: 0;
+      transition: width 220ms ease;
+    }
+
+    .chart-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 76px;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .bar-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--slate);
+      font-size: 0.92rem;
+    }
+
+    .bar-value {
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.9rem;
+    }
+
+    .table-tools {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .table-tools input,
+    .table-tools select {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 8px 10px;
+      color: var(--ink);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #f8fafc;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    tbody tr:hover {
+      background: #f8fbff;
+    }
+
+    .table-wrap {
+      max-height: 430px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .mono {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.88rem;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 20px;
+      text-align: center;
+    }
+
+    .small {
+      font-size: 0.86rem;
+      color: var(--muted);
+    }
+
+    .wins-list,
+    .attention-list {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .wins-list li,
+    .attention-list li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+    }
+
+    .artifact-paths {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .artifact-paths li {
+      color: var(--muted);
+      background: #f7f9fc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      min-width: 0;
+    }
+
+    .artifact-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+      margin-bottom: 3px;
+      text-transform: uppercase;
+    }
+
+    .artifact-paths code {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1120px) {
+      .kpi-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .trend-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 860px) {
+      .header-inner,
+      .status-strip,
+      .grid-2,
+      .kpi-grid,
+      .chart-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .header-actions {
+        justify-content: flex-start;
+      }
+
+      .artifact-paths {
+        grid-template-columns: 1fr;
+      }
+
+      .history-controls {
+        justify-content: stretch;
+        width: 100%;
+      }
+
+      .history-controls label,
+      .history-controls input,
+      .history-controls select {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .header-inner,
+      main {
+        width: calc(100% - 48px);
+        max-width: 1440px;
+      }
+
+      .header-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .source-line {
+        display: grid;
+        gap: 6px;
+      }
+
+      .source-line span {
+        display: block;
+      }
+
+      .trend-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .history-graph {
+        height: 230px;
+      }
+
+      .donut-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>QA/QC and UI PQ Dashboard</h1>
+        <p class="subtitle">Compact product qualification view for ISRC Catalog Manager test coverage, UI process qualification, visual baselines, deviations, and current wins.</p>
+      </div>
+      <div class="header-actions">
+        <button id="reloadArtifactsButton" class="button">Reload artifacts</button>
+        <button id="resetSnapshotButton" class="button secondary">Use embedded snapshot</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="status-strip">
+      <section class="section">
+        <h2>Current Snapshot</h2>
+        <div class="source-line" id="snapshotSource"></div>
+        <p class="load-state" id="loadState">Ready.</p>
+      </section>
+      <section class="section">
+        <h2>Artifact Inputs</h2>
+        <ul class="artifact-paths">
+          <li title="coverage.json"><span class="artifact-label">Coverage</span><code>coverage.json</code></li>
+          <li title="artifacts/ui_pq/evidence.json"><span class="artifact-label">PQ Evidence</span><code>artifacts/ui_pq/evidence.json</code></li>
+          <li title="artifacts/ui_pq/help/help_coverage.json"><span class="artifact-label">Help Gate</span><code>artifacts/ui_pq/help/help_coverage.json</code></li>
+          <li title="artifacts/ui_pq/deviations.csv"><span class="artifact-label">Deviations</span><code>artifacts/ui_pq/deviations.csv</code></li>
+          <li title="artifacts/ui_pq/traceability_matrix.csv"><span class="artifact-label">Traceability</span><code>artifacts/ui_pq/traceability_matrix.csv</code></li>
+          <li title="artifacts/ui_pq/visual/*_manifest.json"><span class="artifact-label">Visual Baselines</span><code>artifacts/ui_pq/visual/*_manifest.json</code></li>
+          <li title="docs/validation/qa_pq_history.csv"><span class="artifact-label">History</span><code>docs/validation/qa_pq_history.csv</code></li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="section history-panel">
+      <div class="history-header">
+        <div>
+          <h2>Historic Trend</h2>
+          <p class="small">Default view shows the latest seven-day window. Lines are normalized so coverage, fails, deviations, and code size can share one compact graph.</p>
+        </div>
+        <div class="history-controls">
+          <label>
+            Range
+            <select id="historyRange">
+              <option value="7d" selected>Last 7 days</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label>
+            Group
+            <select id="historyGranularity">
+              <option value="hour">Per hour</option>
+              <option value="day">Per day</option>
+              <option value="week" selected>Per week</option>
+              <option value="month">Per month</option>
+            </select>
+          </label>
+          <label>
+            From
+            <input id="historyStart" type="date">
+          </label>
+          <label>
+            To
+            <input id="historyEnd" type="date">
+          </label>
+        </div>
+      </div>
+      <div class="trend-strip" id="historyTrendCards"></div>
+      <div class="history-graph-wrap">
+        <div id="historyGraph"></div>
+        <div class="history-legend" id="historyLegend"></div>
+      </div>
+    </section>
+
+    <section class="kpi-grid" id="kpiGrid"></section>
+    <section class="chart-grid" id="chartGrid" aria-label="QA and PQ charts"></section>
+
+    <div class="grid-3">
+      <section class="section">
+        <h2>Coverage Wins</h2>
+        <ul class="wins-list" id="coverageWins"></ul>
+      </section>
+      <section class="section">
+        <h2>Needs Coverage Attention</h2>
+        <ul class="attention-list" id="coverageAttention"></ul>
+      </section>
+      <section class="section">
+        <h2>Qualification Status Mix</h2>
+        <div class="chart-list" id="statusMix"></div>
+      </section>
+    </div>
+
+    <div class="grid-2">
+      <section class="section">
+        <h2>UI PQ Events</h2>
+        <div class="table-tools">
+          <input id="eventSearch" type="search" placeholder="Filter events">
+          <select id="eventFilter">
+            <option value="all">All statuses</option>
+            <option value="passed">Passed</option>
+            <option value="partial">Partial</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>Status</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody id="eventRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Deviation Queue</h2>
+        <div class="table-tools">
+          <input id="deviationSearch" type="search" placeholder="Filter deviations">
+          <select id="deviationFilter">
+            <option value="all">All statuses</option>
+            <option value="open">Open</option>
+            <option value="pending_manual">Pending manual</option>
+            <option value="resolved">Resolved</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Area</th>
+                <th>Status</th>
+                <th>Follow-up</th>
+              </tr>
+            </thead>
+            <tbody id="deviationRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="grid-2">
+      <section class="section">
+        <h2>Lowest Coverage Files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Line %</th>
+                <th>Branch %</th>
+                <th>Missing</th>
+              </tr>
+            </thead>
+            <tbody id="coverageRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Visual and Generated Artifact Checks</h2>
+        <div class="chart-list" id="visualRows"></div>
+      </section>
+    </div>
+  </main>
+
+  <script id="initial-dashboard-data" type="application/json">
+{
+  "sourceLabel": "Embedded snapshot from local artifacts",
+  "generatedAt": "2026-06-02",
+  "history": [
+    {
+      "timestamp": "2026-06-02T18:22:14Z",
+      "source": "local-seed",
+      "branch": "main",
+      "commit_sha": "e358726a6e9ff1a07a3c39c99529fd65ae389cce",
+      "app_loc": 183406,
+      "app_loc_delta": 0,
+      "total_coverage": 90.0119,
+      "statement_coverage": 92.6514,
+      "branch_coverage": 81.0187,
+      "total_tests": 14,
+      "passed_tests": 12,
+      "failed_tests": 0,
+      "partial_tests": 2,
+      "total_deviations": 54,
+      "open_deviations": 0,
+      "pending_manual_deviations": 54,
+      "traceability_rows": 413,
+      "traceability_covered": 361,
+      "visual_checks_total": 64,
+      "visual_checks_failed": 0
+    }
+  ],
+  "coverage": {
+    "timestamp": "2026-06-01T15:14:23.860911",
+    "linePercent": 90.01,
+    "statementPercent": 92.65,
+    "branchPercent": 81.02,
+    "coveredLines": 78649,
+    "statements": 84887,
+    "missingLines": 6238,
+    "coveredBranches": 20185,
+    "missingBranches": 4729,
+    "filesMeasured": 295,
+    "lowestFiles": [
+      {"path": "isrc_manager/draggable_label.py", "percent": 30.36, "branch": 0.0, "missing": 27, "statements": 44},
+      {"path": "isrc_manager/contracts/controller.py", "percent": 54.1, "branch": 25.0, "missing": 22, "statements": 53},
+      {"path": "isrc_manager/forensics/controller.py", "percent": 59.35, "branch": 58.62, "missing": 63, "statements": 156},
+      {"path": "isrc_manager/invoicing/catalog_service.py", "percent": 64.38, "branch": 44.44, "missing": 16, "statements": 55},
+      {"path": "isrc_manager/media/waveform_cache_controller.py", "percent": 65.65, "branch": 54.76, "missing": 26, "statements": 89},
+      {"path": "isrc_manager/conversion/adapters/xlsx.py", "percent": 68.53, "branch": 56.76, "missing": 47, "statements": 177},
+      {"path": "isrc_manager/contract_templates/formatting.py", "percent": 73.63, "branch": 71.43, "missing": 16, "statements": 63},
+      {"path": "isrc_manager/catalog_table/context_menu.py", "percent": 73.97, "branch": 53.23, "missing": 47, "statements": 230},
+      {"path": "isrc_manager/theme_controller.py", "percent": 74.26, "branch": 55.0, "missing": 51, "statements": 243},
+      {"path": "isrc_manager/custom_fields/controller.py", "percent": 74.47, "branch": 63.16, "missing": 44, "statements": 206},
+      {"path": "isrc_manager/action_ribbon.py", "percent": 74.48, "branch": 55.13, "missing": 51, "statements": 259},
+      {"path": "isrc_manager/diagnostics_progress.py", "percent": 74.7, "branch": 50.0, "missing": 17, "statements": 75}
+    ],
+    "coverageWins": [
+      {"path": "isrc_manager/history/manager.py", "percent": 96.07, "branch": 92.29, "missing": 37, "statements": 1613},
+      {"path": "isrc_manager/tracks/edit_dialog.py", "percent": 98.05, "branch": 94.05, "missing": 8, "statements": 1167},
+      {"path": "isrc_manager/main_window_shell.py", "percent": 95.64, "branch": 67.11, "missing": 24, "statements": 1049},
+      {"path": "isrc_manager/conversion/dialogs.py", "percent": 95.12, "branch": 85.05, "missing": 28, "statements": 1016},
+      {"path": "isrc_manager/application_settings_dialog.py", "percent": 95.98, "branch": 86.88, "missing": 23, "statements": 934},
+      {"path": "isrc_manager/code_registry/workspace.py", "percent": 96.97, "branch": 86.92, "missing": 10, "statements": 762},
+      {"path": "isrc_manager/releases/dialogs.py", "percent": 98.26, "branch": 93.83, "missing": 6, "statements": 758},
+      {"path": "isrc_manager/media/equalizer.py", "percent": 96.31, "branch": 89.41, "missing": 15, "statements": 724}
+    ]
+  },
+  "pq": {
+    "eventCount": 14,
+    "eventStatusCounts": {"passed": 12, "partial": 2},
+    "events": [
+      {"testId": "UI-PQ-INV-001", "status": "passed", "message": "Runtime UI inventory and traceability matrix were generated."},
+      {"testId": "UI-PQ-SMOKE-001", "status": "passed", "message": "Main window, menu bar, and QA database are reachable."},
+      {"testId": "UI-PQ-MENU-001", "status": "passed", "message": "Runtime menu/action inventory was generated."},
+      {"testId": "UI-PQ-SET-001", "status": "passed", "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed."},
+      {"testId": "UI-PQ-HELP-001", "status": "passed", "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references."},
+      {"testId": "UI-PQ-CAT-001", "status": "passed", "message": "Track was created through Add Track UI and edited through Edit Track UI."},
+      {"testId": "UI-PQ-REL-001", "status": "passed", "message": "Party, Work, and Release relationships were created or verified through manager UI."},
+      {"testId": "UI-PQ-CON-001", "status": "passed", "message": "Contract and Rights Matrix records were created through UI and verified in the database."},
+      {"testId": "UI-PQ-ACC-001", "status": "passed", "message": "Invoice, payment, credit note, royalty statement, payout, report, and ledger checks were executed through UI controls."},
+      {"testId": "UI-PQ-SC-001", "status": "passed", "message": "SoundCloud publish dialog and no-network publish boundary were verified."},
+      {"testId": "UI-PQ-DIAG-001", "status": "passed", "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed."},
+      {"testId": "UI-PQ-IMP-001", "status": "passed", "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines."},
+      {"testId": "UI-PQ-AUTH-001", "status": "partial", "message": "Authenticity, watermark, and forensic verification workflow coverage."},
+      {"testId": "UI-PQ-MEDIA-001", "status": "partial", "message": "Media player, audio attachment, conversion, and derivative ledger workflow coverage."}
+    ],
+    "help": {
+      "status": "passed",
+      "coverage_percent": 100.0,
+      "finding_count": 0,
+      "chapter_count": 41,
+      "chapter_screenshot_required_count": 38,
+      "chapter_screenshot_exempt_count": 3,
+      "workflow_example_count": 7
+    },
+    "deviationCount": 54,
+    "deviationStatusCounts": {"pending_manual": 54},
+    "deviationSeverityCounts": {"medium": 54},
+    "topDeviations": [
+      {"id": "UI-PQ-DEV-0001", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_and_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
+      {"id": "UI-PQ-DEV-0002", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
+      {"id": "UI-PQ-DEV-0006", "testId": "UI-PQ-AUTH-001", "severity": "medium", "area": "authenticity", "object": "action:audio_authenticity_keys", "status": "pending_manual", "followup": "synthetic audio fixture automation pending"},
+      {"id": "UI-PQ-DEV-0030", "testId": "UI-PQ-MEDIA-001", "severity": "medium", "area": "media_audio", "object": "action:bulk_attach_audio_files", "status": "pending_manual", "followup": "codec-stable media fixture coverage pending"}
+    ],
+    "traceabilityRows": 413,
+    "traceabilityStatusCounts": {"covered": 361, "pending_manual": 52},
+    "automationStatusCounts": {"automated": 361, "pending": 52},
+    "visualManifests": [
+      {"path": "artifacts/ui_pq/visual/visual_manifest.json", "captures": 32, "comparisons": 33, "passed": 33, "failed": 0},
+      {"path": "artifacts/ui_pq/visual/business_workflow_manifest.json", "captures": 27, "comparisons": 27, "passed": 27, "failed": 0},
+      {"path": "artifacts/ui_pq/visual/generated_output_manifest.json", "captures": 0, "comparisons": 4, "passed": 4, "failed": 0}
+    ]
+  }
+}
+  </script>
+
+  <script>
+    const artifactPaths = {
+      coverage: "../../coverage.json",
+      evidence: "../../artifacts/ui_pq/evidence.json",
+      help: "../../artifacts/ui_pq/help/help_coverage.json",
+      deviations: "../../artifacts/ui_pq/deviations.csv",
+      traceability: "../../artifacts/ui_pq/traceability_matrix.csv",
+      visual: "../../artifacts/ui_pq/visual/visual_manifest.json",
+      business: "../../artifacts/ui_pq/visual/business_workflow_manifest.json",
+      generated: "../../artifacts/ui_pq/visual/generated_output_manifest.json",
+      history: "qa_pq_history.csv"
+    };
+
+    const initialData = JSON.parse(document.getElementById("initial-dashboard-data").textContent);
+    let dashboardData = initialData;
+
+    const chartColors = {
+      pass: "var(--green)",
+      warn: "var(--amber)",
+      fail: "var(--red)",
+      info: "var(--blue)",
+      neutral: "#e8edf4"
+    };
+
+    const historyMetrics = [
+      {key: "total_coverage", label: "Coverage", color: "#17845f", unit: "%", direction: "up"},
+      {key: "failed_tests", label: "Fails", color: "#bd2b38", unit: "", direction: "down"},
+      {key: "total_deviations", label: "Deviations", color: "#a16207", unit: "", direction: "down"},
+      {key: "app_loc", label: "App LOC", color: "#2764d8", unit: "", direction: "neutral"}
+    ];
+
+    const els = {
+      kpiGrid: document.getElementById("kpiGrid"),
+      chartGrid: document.getElementById("chartGrid"),
+      historyTrendCards: document.getElementById("historyTrendCards"),
+      historyGraph: document.getElementById("historyGraph"),
+      historyLegend: document.getElementById("historyLegend"),
+      historyRange: document.getElementById("historyRange"),
+      historyGranularity: document.getElementById("historyGranularity"),
+      historyStart: document.getElementById("historyStart"),
+      historyEnd: document.getElementById("historyEnd"),
+      source: document.getElementById("snapshotSource"),
+      loadState: document.getElementById("loadState"),
+      coverageWins: document.getElementById("coverageWins"),
+      coverageAttention: document.getElementById("coverageAttention"),
+      statusMix: document.getElementById("statusMix"),
+      eventRows: document.getElementById("eventRows"),
+      deviationRows: document.getElementById("deviationRows"),
+      coverageRows: document.getElementById("coverageRows"),
+      visualRows: document.getElementById("visualRows"),
+      eventSearch: document.getElementById("eventSearch"),
+      eventFilter: document.getElementById("eventFilter"),
+      deviationSearch: document.getElementById("deviationSearch"),
+      deviationFilter: document.getElementById("deviationFilter")
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function fmtPercent(value) {
+      const number = Number(value || 0);
+      const fractionDigits = number % 1 ? 2 : 0;
+      return `${number.toLocaleString(undefined, {
+        maximumFractionDigits: fractionDigits,
+        minimumFractionDigits: fractionDigits > 0 ? 1 : 0
+      })}%`;
+    }
+
+    function fmtNumber(value) {
+      return Number(value || 0).toLocaleString();
+    }
+
+    function statusClass(status) {
+      const clean = String(status || "").toLowerCase();
+      if (clean.includes("pass") || clean.includes("covered") || clean.includes("automated")) {
+        return "pass";
+      }
+      if (clean.includes("fail") || clean.includes("open")) {
+        return "fail";
+      }
+      if (clean.includes("partial") || clean.includes("pending")) {
+        return "partial";
+      }
+      return "info";
+    }
+
+    function barClass(value) {
+      if (value < 75) return "bad";
+      if (value < 90) return "warn";
+      return "";
+    }
+
+    function statusBarClass(status, percent) {
+      const clean = String(status || "").toLowerCase();
+      if (clean.includes("fail") || clean.includes("open")) return "bad";
+      if (clean.includes("partial") || clean.includes("pending")) return "warn";
+      return barClass(percent);
+    }
+
+    function pct(value, total) {
+      return total ? Math.max(0, Math.min(100, (Number(value || 0) / total) * 100)) : 0;
+    }
+
+    function historyRows(rows) {
+      return (rows || []).map((row) => {
+        const date = new Date(row.timestamp);
+        if (Number.isNaN(date.getTime())) return null;
+        const normalized = {...row, date};
+        historyMetrics.forEach((metric) => {
+          normalized[metric.key] = Number(row[metric.key] || 0);
+        });
+        normalized.app_loc_delta = Number(row.app_loc_delta || 0);
+        return normalized;
+      }).filter(Boolean).sort((a, b) => a.date - b.date);
+    }
+
+    function dateInputValue(date) {
+      return date.toISOString().slice(0, 10);
+    }
+
+    function setDefaultHistoryRange(rows) {
+      if (!rows.length || els.historyStart.value || els.historyEnd.value) return;
+      const end = rows[rows.length - 1].date;
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - 7);
+      els.historyStart.value = dateInputValue(start);
+      els.historyEnd.value = dateInputValue(end);
+    }
+
+    function historyRange(rows) {
+      if (!rows.length) return {start: new Date(), end: new Date()};
+      if (els.historyRange.value === "custom" && els.historyStart.value && els.historyEnd.value) {
+        const start = new Date(`${els.historyStart.value}T00:00:00Z`);
+        const end = new Date(`${els.historyEnd.value}T23:59:59Z`);
+        return {start, end};
+      }
+      const end = rows[rows.length - 1].date;
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - 7);
+      return {start, end};
+    }
+
+    function bucketDate(date, granularity) {
+      const bucket = new Date(date);
+      if (granularity === "hour") {
+        bucket.setUTCMinutes(0, 0, 0);
+      } else if (granularity === "day") {
+        bucket.setUTCHours(0, 0, 0, 0);
+      } else if (granularity === "month") {
+        bucket.setUTCDate(1);
+        bucket.setUTCHours(0, 0, 0, 0);
+      } else {
+        const weekday = (bucket.getUTCDay() + 6) % 7;
+        bucket.setUTCDate(bucket.getUTCDate() - weekday);
+        bucket.setUTCHours(0, 0, 0, 0);
+      }
+      return bucket;
+    }
+
+    function aggregateHistory(rows) {
+      const {start, end} = historyRange(rows);
+      const granularity = els.historyGranularity.value;
+      const buckets = new Map();
+      rows.filter((row) => row.date >= start && row.date <= end).forEach((row) => {
+        const bucket = bucketDate(row.date, granularity);
+        buckets.set(bucket.toISOString(), {...row, bucket});
+      });
+      return Array.from(buckets.values()).sort((a, b) => a.bucket - b.bucket);
+    }
+
+    function metricValue(metric, value) {
+      if (metric.unit === "%") return fmtPercent(value);
+      return fmtNumber(value);
+    }
+
+    function trend(metric, rows) {
+      const latest = rows[rows.length - 1];
+      const previous = rows[rows.length - 2];
+      if (!latest || !previous) {
+        return {arrow: "→", className: "", note: "No prior point"};
+      }
+      const delta = Number(latest[metric.key] || 0) - Number(previous[metric.key] || 0);
+      if (!delta) {
+        return {arrow: "→", className: "", note: "Stale"};
+      }
+      const arrow = delta > 0 ? "↑" : "↓";
+      if (metric.direction === "neutral") {
+        return {
+          arrow,
+          className: "",
+          note: `${delta > 0 ? "+" : ""}${fmtNumber(delta)} since prior`
+        };
+      }
+      const improves = metric.direction === "up" ? delta > 0 : delta < 0;
+      return {
+        arrow,
+        className: improves ? "good" : "bad",
+        note: `${delta > 0 ? "+" : ""}${metricValue(metric, delta)} since prior`
+      };
+    }
+
+    function renderHistoryTrendCards(rows) {
+      const latest = rows[rows.length - 1];
+      els.historyTrendCards.innerHTML = historyMetrics.map((metric) => {
+        const indicator = trend(metric, rows);
+        return `
+          <article class="trend-card">
+            <div class="trend-label">${escapeHtml(metric.label)}</div>
+            <div class="trend-value">
+              <span>${escapeHtml(latest ? metricValue(metric, latest[metric.key]) : "-")}</span>
+              <span class="trend-arrow ${indicator.className}">${indicator.arrow}</span>
+            </div>
+            <div class="trend-note">${escapeHtml(indicator.note)}</div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderHistoryGraph(rows) {
+      const points = aggregateHistory(rows);
+      if (!points.length) {
+        els.historyGraph.innerHTML = '<div class="history-empty">No QA/PQ history rows in the selected range.</div>';
+        els.historyLegend.innerHTML = "";
+        return;
+      }
+      const width = 1000;
+      const height = 260;
+      const margin = {top: 18, right: 22, bottom: 34, left: 44};
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const xFor = (index) => margin.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
+      const lines = historyMetrics.map((metric) => {
+        const values = points.map((row) => Number(row[metric.key] || 0));
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const yFor = (value) => {
+          if (min === max) return margin.top + plotHeight / 2;
+          return margin.top + plotHeight - ((value - min) / (max - min)) * plotHeight;
+        };
+        const pathPoints = values.map((value, index) => `${xFor(index).toFixed(2)},${yFor(value).toFixed(2)}`).join(" ");
+        const circles = values.map((value, index) => `<circle cx="${xFor(index).toFixed(2)}" cy="${yFor(value).toFixed(2)}" r="4" fill="${metric.color}"><title>${escapeHtml(metric.label)} ${escapeHtml(metricValue(metric, value))}</title></circle>`).join("");
+        return `
+          ${points.length > 1 ? `<polyline points="${pathPoints}" fill="none" stroke="${metric.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></polyline>` : ""}
+          ${circles}
+        `;
+      }).join("");
+      const gridLines = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+        const y = margin.top + ratio * plotHeight;
+        return `<line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#d9e1ec" stroke-width="1"></line>`;
+      }).join("");
+      const firstLabel = points[0].bucket.toISOString().slice(0, 10);
+      const lastLabel = points[points.length - 1].bucket.toISOString().slice(0, 10);
+      els.historyGraph.innerHTML = `
+        <svg class="history-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historic QA and PQ trend graph">
+          <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" rx="8"></rect>
+          ${gridLines}
+          <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${width - margin.right}" y2="${margin.top + plotHeight}" stroke="#9aa8ba"></line>
+          <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" stroke="#9aa8ba"></line>
+          ${lines}
+          <text x="${margin.left}" y="${height - 10}" fill="#5f6f83" font-size="13">${escapeHtml(firstLabel)}</text>
+          <text x="${width - margin.right}" y="${height - 10}" fill="#5f6f83" font-size="13" text-anchor="end">${escapeHtml(lastLabel)}</text>
+          <text x="${margin.left}" y="14" fill="#5f6f83" font-size="13">Normalized KPI movement</text>
+        </svg>
+      `;
+      els.historyLegend.innerHTML = historyMetrics.map((metric) => `
+        <span><span class="legend-dot" style="background: ${metric.color}"></span>${escapeHtml(metric.label)}</span>
+      `).join("");
+    }
+
+    function renderHistory(data) {
+      const rows = historyRows(data.history || []);
+      setDefaultHistoryRange(rows);
+      renderHistoryTrendCards(rows);
+      renderHistoryGraph(rows);
+    }
+
+    function donutBackground(parts) {
+      const total = parts.reduce((sum, part) => sum + Number(part.value || 0), 0);
+      if (!total) return chartColors.neutral;
+      let cursor = 0;
+      const segments = parts.map((part) => {
+        const start = cursor;
+        cursor += pct(part.value, total);
+        return `${part.color} ${start}% ${cursor}%`;
+      });
+      return `conic-gradient(${segments.join(", ")})`;
+    }
+
+    function renderLegend(parts) {
+      const total = parts.reduce((sum, part) => sum + Number(part.value || 0), 0);
+      return parts.map((part) => `
+        <li>
+          <span class="legend-dot" style="background: ${part.color}"></span>
+          <span class="legend-label" title="${escapeHtml(part.label)}">${escapeHtml(part.label)}</span>
+          <span class="legend-value">${fmtNumber(part.value)} ${total ? `(${fmtPercent(pct(part.value, total))})` : ""}</span>
+        </li>
+      `).join("");
+    }
+
+    function renderStackedGraph(parts) {
+      const total = parts.reduce((sum, part) => sum + Number(part.value || 0), 0);
+      return `
+        <div class="stacked-graph" aria-hidden="true">
+          ${parts.map((part) => `<span class="stacked-segment" style="background: ${part.color}; width: ${pct(part.value, total)}%"></span>`).join("")}
+        </div>
+      `;
+    }
+
+    function renderDonutCard(card) {
+      return `
+        <article class="section donut-card">
+          <h2>${escapeHtml(card.title)}</h2>
+          <div class="donut-layout">
+            <div class="donut" style="background: ${donutBackground(card.parts)}" role="img" aria-label="${escapeHtml(card.ariaLabel)}">
+              <span class="donut-value">${escapeHtml(card.value)}</span>
+            </div>
+            <div class="donut-meta">
+              <p class="donut-subtitle">${escapeHtml(card.subtitle)}</p>
+              <ul class="legend">${renderLegend(card.parts)}</ul>
+            </div>
+          </div>
+          ${renderStackedGraph(card.parts)}
+        </article>
+      `;
+    }
+
+    function renderCharts(data) {
+      const c = data.coverage;
+      const pq = data.pq;
+      const eventCounts = pq.eventStatusCounts || {};
+      const traceCounts = pq.traceabilityStatusCounts || {};
+      const deviationCounts = pq.deviationStatusCounts || {};
+      const visualPassed = (pq.visualManifests || []).reduce((sum, item) => sum + Number(item.passed || 0), 0);
+      const visualFailed = (pq.visualManifests || []).reduce((sum, item) => sum + Number(item.failed || 0), 0);
+      const statementPercent = Number(c.statementPercent || pct(c.coveredLines || 0, c.statements || 0));
+      const branchCovered = Number(c.branchPercent || 0);
+      const coveredBranches = Number(c.coveredBranches || branchCovered);
+      const missingBranches = Number(c.missingBranches || Math.max(0, 100 - branchCovered));
+      const coveredLines = Number(c.coveredLines || 0);
+      const missingLines = Number(c.missingLines || 0);
+      const cards = [
+        {
+          title: "Statement Coverage",
+          value: fmtPercent(statementPercent),
+          subtitle: "Covered versus missing measured statement lines.",
+          ariaLabel: `Statement coverage ${fmtPercent(statementPercent)}`,
+          parts: [
+            {label: "Covered", value: coveredLines, color: chartColors.pass},
+            {label: "Missing", value: missingLines, color: chartColors.warn}
+          ]
+        },
+        {
+          title: "Branch Coverage Split",
+          value: fmtPercent(branchCovered),
+          subtitle: "Covered branch paths versus remaining branch gaps.",
+          ariaLabel: `Branch coverage ${fmtPercent(branchCovered)}`,
+          parts: [
+            {label: "Covered", value: coveredBranches, color: chartColors.pass},
+            {label: "Missing", value: missingBranches, color: chartColors.warn}
+          ]
+        },
+        {
+          title: "PQ Outcome Mix",
+          value: `${fmtNumber(eventCounts.passed || 0)}/${fmtNumber(pq.eventCount || 0)}`,
+          subtitle: "Automated UI process qualification event result mix.",
+          ariaLabel: "UI process qualification outcome mix",
+          parts: [
+            {label: "Passed", value: eventCounts.passed || 0, color: chartColors.pass},
+            {label: "Partial", value: eventCounts.partial || 0, color: chartColors.warn},
+            {label: "Failed", value: eventCounts.failed || 0, color: chartColors.fail}
+          ]
+        },
+        {
+          title: "Traceability Coverage",
+          value: fmtPercent(pct(traceCounts.covered || 0, pq.traceabilityRows || 0)),
+          subtitle: "Runtime UI inventory covered by automated or qualified evidence.",
+          ariaLabel: "Traceability coverage",
+          parts: [
+            {label: "Covered", value: traceCounts.covered || 0, color: chartColors.pass},
+            {label: "Pending manual", value: traceCounts.pending_manual || 0, color: chartColors.warn}
+          ]
+        },
+        {
+          title: "Deviation Status",
+          value: fmtNumber(pq.deviationCount || 0),
+          subtitle: "Open qualification follow-ups grouped by status.",
+          ariaLabel: "Deviation queue status mix",
+          parts: [
+            {label: "Pending manual", value: deviationCounts.pending_manual || 0, color: chartColors.warn},
+            {label: "Open", value: deviationCounts.open || 0, color: chartColors.fail},
+            {label: "Resolved", value: deviationCounts.resolved || 0, color: chartColors.pass}
+          ]
+        },
+        {
+          title: "Visual Checks",
+          value: `${fmtNumber(visualPassed)}/${fmtNumber(visualPassed + visualFailed)}`,
+          subtitle: "Screenshot, workflow, and generated-output baseline comparisons.",
+          ariaLabel: "Visual comparison pass rate",
+          parts: [
+            {label: "Passed", value: visualPassed, color: chartColors.pass},
+            {label: "Failed", value: visualFailed, color: chartColors.fail}
+          ]
+        }
+      ];
+      els.chartGrid.innerHTML = cards.map(renderDonutCard).join("");
+    }
+
+    function renderKpis(data) {
+      const c = data.coverage;
+      const pq = data.pq;
+      const help = pq.help || {};
+      const coveredTrace = pq.traceabilityStatusCounts?.covered || 0;
+      const pendingTrace = pq.traceabilityStatusCounts?.pending_manual || 0;
+      const tracePct = pq.traceabilityRows
+        ? Math.round((coveredTrace / pq.traceabilityRows) * 1000) / 10
+        : 0;
+      const visualPassed = (pq.visualManifests || []).reduce((sum, item) => sum + Number(item.passed || 0), 0);
+      const visualFailed = (pq.visualManifests || []).reduce((sum, item) => sum + Number(item.failed || 0), 0);
+      const statementPct = Number(c.statementPercent || pct(c.coveredLines || 0, c.statements || 0));
+      const cards = [
+        ["Overall Coverage", fmtPercent(c.linePercent), `${fmtPercent(statementPct)} statement-only coverage`, c.linePercent],
+        ["Branch Coverage", fmtPercent(c.branchPercent), `${fmtNumber(c.coveredBranches)} covered, ${fmtNumber(c.missingBranches)} missing`, c.branchPercent],
+        ["UI PQ Events", `${pq.eventStatusCounts?.passed || 0}/${pq.eventCount}`, `${pq.eventStatusCounts?.partial || 0} partial, ${pq.eventStatusCounts?.failed || 0} failed`, pq.eventCount ? ((pq.eventStatusCounts?.passed || 0) / pq.eventCount) * 100 : 0],
+        ["Help Coverage", fmtPercent(help.coverage_percent), `${help.chapter_screenshot_required_count || 0} screenshots, ${help.finding_count || 0} findings`, help.coverage_percent || 0],
+        ["Traceability", fmtPercent(tracePct), `${coveredTrace} covered, ${pendingTrace} pending`, tracePct],
+        ["Visual Checks", `${visualPassed}/${visualPassed + visualFailed}`, `${visualFailed} failed comparisons`, visualFailed ? 50 : 100]
+      ];
+
+      els.kpiGrid.innerHTML = cards.map(([label, value, note, pct]) => `
+        <article class="kpi">
+          <div>
+            <div class="kpi-label">${escapeHtml(label)}</div>
+            <div class="kpi-value">${escapeHtml(value)}</div>
+            <div class="progress"><div class="progress-fill ${barClass(Number(pct))}" style="width: ${Math.max(0, Math.min(100, Number(pct || 0)))}%"></div></div>
+          </div>
+          <div class="kpi-note">${escapeHtml(note)}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderList(target, items, valueKey = "percent") {
+      target.innerHTML = (items || []).map((item) => `
+        <li>
+          <span class="mono">${escapeHtml(item.path || item.object || item.id)}</span>
+          <span class="pill ${statusClass(Number(item[valueKey]) >= 90 ? "passed" : "partial")}">${escapeHtml(valueKey === "percent" ? fmtPercent(item[valueKey]) : item[valueKey])}</span>
+        </li>
+      `).join("") || '<li class="empty">No rows available.</li>';
+    }
+
+    function renderStatusMix(data) {
+      const rows = [
+        ["PQ events passed", data.pq.eventStatusCounts?.passed || 0, data.pq.eventCount || 0, "passed"],
+        ["PQ events partial", data.pq.eventStatusCounts?.partial || 0, data.pq.eventCount || 0, "partial"],
+        ["Traceability covered", data.pq.traceabilityStatusCounts?.covered || 0, data.pq.traceabilityRows || 0, "covered"],
+        ["Traceability pending", data.pq.traceabilityStatusCounts?.pending_manual || 0, data.pq.traceabilityRows || 0, "pending"],
+        ["Deviation queue", data.pq.deviationCount || 0, data.pq.deviationCount || 1, "pending"]
+      ];
+
+      els.statusMix.innerHTML = rows.map(([label, value, total, status]) => {
+        const pct = total ? Math.round((value / total) * 1000) / 10 : 0;
+        return `
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">${escapeHtml(label)}</div>
+              <div class="progress"><div class="progress-fill ${statusBarClass(status, pct)}" style="width: ${Math.min(100, pct)}%"></div></div>
+            </div>
+            <div class="bar-value">${value}/${total}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderEvents(data) {
+      const query = els.eventSearch.value.trim().toLowerCase();
+      const filter = els.eventFilter.value;
+      const rows = (data.pq.events || []).filter((event) => {
+        const haystack = `${event.testId} ${event.status} ${event.message}`.toLowerCase();
+        return (!query || haystack.includes(query)) && (filter === "all" || event.status === filter);
+      });
+      els.eventRows.innerHTML = rows.map((event) => `
+        <tr>
+          <td class="mono">${escapeHtml(event.testId)}</td>
+          <td><span class="pill ${statusClass(event.status)}">${escapeHtml(event.status)}</span></td>
+          <td>${escapeHtml(event.message)}</td>
+        </tr>
+      `).join("") || '<tr><td colspan="3" class="empty">No matching events.</td></tr>';
+    }
+
+    function renderDeviations(data) {
+      const query = els.deviationSearch.value.trim().toLowerCase();
+      const filter = els.deviationFilter.value;
+      const rows = (data.pq.topDeviations || []).filter((deviation) => {
+        const haystack = `${deviation.id} ${deviation.testId} ${deviation.area} ${deviation.object} ${deviation.followup} ${deviation.status}`.toLowerCase();
+        return (!query || haystack.includes(query)) && (filter === "all" || deviation.status === filter);
+      });
+      els.deviationRows.innerHTML = rows.map((deviation) => `
+        <tr>
+          <td class="mono">${escapeHtml(deviation.id)}</td>
+          <td>${escapeHtml(deviation.area)}<div class="small mono">${escapeHtml(deviation.object)}</div></td>
+          <td><span class="pill ${statusClass(deviation.status)}">${escapeHtml(deviation.status)}</span></td>
+          <td>${escapeHtml(deviation.followup)}</td>
+        </tr>
+      `).join("") || '<tr><td colspan="4" class="empty">No matching deviations in the dashboard sample.</td></tr>';
+    }
+
+    function renderCoverageTable(data) {
+      els.coverageRows.innerHTML = (data.coverage.lowestFiles || []).map((file) => `
+        <tr>
+          <td class="mono">${escapeHtml(file.path)}</td>
+          <td>${fmtPercent(file.percent)}</td>
+          <td>${fmtPercent(file.branch)}</td>
+          <td>${Number(file.missing || 0).toLocaleString()}</td>
+        </tr>
+      `).join("") || '<tr><td colspan="4" class="empty">No coverage rows available.</td></tr>';
+    }
+
+    function renderVisualRows(data) {
+      els.visualRows.innerHTML = (data.pq.visualManifests || []).map((manifest) => {
+        const total = Number(manifest.comparisons || 0);
+        const passed = Number(manifest.passed || 0);
+        const pct = total ? Math.round((passed / total) * 1000) / 10 : 100;
+        return `
+          <div class="bar-row">
+            <div>
+              <div class="bar-label mono">${escapeHtml(manifest.path)}</div>
+              <div class="progress"><div class="progress-fill ${manifest.failed ? "bad" : ""}" style="width: ${pct}%"></div></div>
+              <div class="small">${manifest.captures} captures, ${manifest.comparisons} comparisons</div>
+            </div>
+            <div class="bar-value">${manifest.passed}/${manifest.comparisons}</div>
+          </div>
+        `;
+      }).join("") || '<div class="empty">No visual manifest rows available.</div>';
+    }
+
+    function render(data = dashboardData) {
+      els.source.innerHTML = `
+        <span class="pill info">${escapeHtml(data.sourceLabel || "Snapshot")}</span>
+        <span>Coverage timestamp <code>${escapeHtml(data.coverage.timestamp || "unknown")}</code></span>
+        <span>Generated <code>${escapeHtml(data.generatedAt || "unknown")}</code></span>
+      `;
+      renderHistory(data);
+      renderKpis(data);
+      renderCharts(data);
+      renderList(els.coverageWins, data.coverage.coverageWins || []);
+      renderList(els.coverageAttention, data.coverage.lowestFiles || []);
+      renderStatusMix(data);
+      renderEvents(data);
+      renderDeviations(data);
+      renderCoverageTable(data);
+      renderVisualRows(data);
+    }
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let cell = "";
+      let quoted = false;
+      for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+        const next = text[index + 1];
+        if (quoted && char === '"' && next === '"') {
+          cell += '"';
+          index += 1;
+        } else if (char === '"') {
+          quoted = !quoted;
+        } else if (!quoted && char === ",") {
+          row.push(cell);
+          cell = "";
+        } else if (!quoted && (char === "\n" || char === "\r")) {
+          if (char === "\r" && next === "\n") index += 1;
+          row.push(cell);
+          if (row.some((value) => value.length)) rows.push(row);
+          row = [];
+          cell = "";
+        } else {
+          cell += char;
+        }
+      }
+      row.push(cell);
+      if (row.some((value) => value.length)) rows.push(row);
+      const headers = rows.shift() || [];
+      return rows.map((values) => Object.fromEntries(headers.map((header, i) => [header, values[i] || ""])));
+    }
+
+    function countBy(rows, key) {
+      return rows.reduce((counts, row) => {
+        const value = row[key] || "unknown";
+        counts[value] = (counts[value] || 0) + 1;
+        return counts;
+      }, {});
+    }
+
+    function summarizeManifest(path, manifest) {
+      const comparisons = manifest.comparisons || [];
+      return {
+        path,
+        captures: (manifest.captures || []).length,
+        comparisons: comparisons.length,
+        passed: comparisons.filter((item) => item.passed).length,
+        failed: comparisons.filter((item) => !item.passed).length
+      };
+    }
+
+    function snapshotFromArtifacts(files) {
+      const coverage = files.coverage;
+      const measuredFiles = Object.entries(coverage.files || {})
+        .map(([path, info]) => {
+          const summary = info.summary || {};
+          return {
+            path,
+            percent: Number(summary.percent_covered || 0),
+            branch: Number(summary.percent_branches_covered || 0),
+            missing: Number(summary.missing_lines || 0),
+            statements: Number(summary.num_statements || 0)
+          };
+        })
+        .filter((file) => file.statements > 0);
+      const lowestFiles = measuredFiles
+        .slice()
+        .sort((a, b) => a.percent - b.percent || b.statements - a.statements)
+        .slice(0, 12);
+      const coverageWins = measuredFiles
+        .filter((file) => file.percent >= 95)
+        .sort((a, b) => b.statements - a.statements)
+        .slice(0, 8);
+      const events = files.evidence || [];
+      const deviations = files.deviations || [];
+      const traceability = files.traceability || [];
+      const totals = coverage.totals || {};
+
+      return {
+        sourceLabel: "Live artifacts loaded",
+        generatedAt: new Date().toISOString(),
+        history: files.history || [],
+        coverage: {
+          timestamp: coverage.meta?.timestamp || "",
+          linePercent: Number(totals.percent_covered || 0),
+          statementPercent: Number(totals.percent_statements_covered || totals.percent_covered || 0),
+          branchPercent: Number(totals.percent_branches_covered || 0),
+          coveredLines: Number(totals.covered_lines || 0),
+          statements: Number(totals.num_statements || 0),
+          missingLines: Number(totals.missing_lines || 0),
+          coveredBranches: Number(totals.covered_branches || 0),
+          missingBranches: Number(totals.missing_branches || 0),
+          filesMeasured: measuredFiles.length,
+          lowestFiles,
+          coverageWins
+        },
+        pq: {
+          eventCount: events.length,
+          eventStatusCounts: countBy(events, "status"),
+          events: events.map((event) => ({
+            testId: event.test_id,
+            status: event.status,
+            message: event.message
+          })),
+          help: {
+            status: files.help.status,
+            coverage_percent: files.help.coverage_percent,
+            finding_count: files.help.finding_count,
+            chapter_count: files.help.chapter_count,
+            chapter_screenshot_required_count: files.help.chapter_screenshot_required_count,
+            chapter_screenshot_exempt_count: files.help.chapter_screenshot_exempt_count,
+            workflow_example_count: files.help.workflow_example_count
+          },
+          deviationCount: deviations.length,
+          deviationStatusCounts: countBy(deviations, "status"),
+          deviationSeverityCounts: countBy(deviations, "severity"),
+          topDeviations: deviations.slice(0, 60).map((row) => ({
+            id: row.deviation_id,
+            testId: row.test_id,
+            severity: row.severity,
+            area: row.ui_area,
+            object: row.ui_object,
+            status: row.status,
+            followup: row.recommended_followup
+          })),
+          traceabilityRows: traceability.length,
+          traceabilityStatusCounts: countBy(traceability, "coverage_status"),
+          automationStatusCounts: countBy(traceability, "automation_status"),
+          visualManifests: [
+            summarizeManifest(artifactPaths.visual, files.visual),
+            summarizeManifest(artifactPaths.business, files.business),
+            summarizeManifest(artifactPaths.generated, files.generated)
+          ]
+        }
+      };
+    }
+
+    async function fetchText(path) {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+      return response.text();
+    }
+
+    async function loadLiveArtifacts() {
+      els.loadState.textContent = "Loading artifact files...";
+      try {
+        const [coverage, evidence, help, deviations, traceability, visual, business, generated, history] = await Promise.all([
+          fetchText(artifactPaths.coverage).then(JSON.parse),
+          fetchText(artifactPaths.evidence).then(JSON.parse),
+          fetchText(artifactPaths.help).then(JSON.parse),
+          fetchText(artifactPaths.deviations).then(parseCsv),
+          fetchText(artifactPaths.traceability).then(parseCsv),
+          fetchText(artifactPaths.visual).then(JSON.parse),
+          fetchText(artifactPaths.business).then(JSON.parse),
+          fetchText(artifactPaths.generated).then(JSON.parse),
+          fetchText(artifactPaths.history).then(parseCsv).catch(() => initialData.history || [])
+        ]);
+        dashboardData = snapshotFromArtifacts({coverage, evidence, help, deviations, traceability, visual, business, generated, history});
+        els.loadState.textContent = "Loaded live artifacts. If you opened the HTML by file path and this worked, your browser allows local relative fetches.";
+        render();
+      } catch (error) {
+        els.loadState.textContent = `Could not load live artifacts: ${error.message}. The embedded snapshot is still shown. Serve the repo with python3 -m http.server for live reload.`;
+      }
+    }
+
+    document.getElementById("reloadArtifactsButton").addEventListener("click", loadLiveArtifacts);
+    document.getElementById("resetSnapshotButton").addEventListener("click", () => {
+      dashboardData = initialData;
+      els.loadState.textContent = "Embedded snapshot restored.";
+      render();
+    });
+    [els.eventSearch, els.eventFilter, els.deviationSearch, els.deviationFilter].forEach((control) => {
+      control.addEventListener("input", () => render());
+      control.addEventListener("change", () => render());
+    });
+    [els.historyRange, els.historyGranularity, els.historyStart, els.historyEnd].forEach((control) => {
+      control.addEventListener("input", () => render());
+      control.addEventListener("change", () => render());
+    });
+
+    render();
+  </script>
+</body>
+</html>

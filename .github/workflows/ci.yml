@@ -274,10 +274,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+      - name: Upload UI PQ artifacts
+        if: ${{ matrix.group == 'ui-app-workflows' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-pq-artifacts
+          path: artifacts/ui_pq
+          if-no-files-found: error
+
   coverage-report:
     name: Coverage report
     runs-on: ubuntu-latest
     needs: test-shards
+    permissions:
+      contents: write
     timeout-minutes: 15
 
     steps:
@@ -288,6 +298,11 @@ jobs:
           pattern: coverage-data-*
           path: coverage-artifacts
           merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-pq-artifacts
+          path: artifacts/ui_pq
 
       - uses: actions/setup-python@v6
         with:
@@ -309,12 +324,67 @@ jobs:
           python3 -m coverage combine
           python3 -m coverage report
           python3 -m coverage xml
+          python3 -m coverage json -o ../coverage.json
 
       - name: Upload coverage XML
         uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage-artifacts/coverage.xml
+
+      - name: Upload coverage JSON
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-json
+          path: coverage.json
+
+      - name: Append QA/PQ dashboard history
+        run: |
+          python3 scripts/update_qa_pq_history.py \
+            --coverage coverage.json \
+            --pq-artifacts artifacts/ui_pq \
+            --history docs/validation/qa_pq_history.csv \
+            --source github-actions \
+            --branch "${{ github.ref_name }}" \
+            --commit-sha "${{ github.sha }}"
+
+      - name: Upload QA/PQ dashboard history
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-pq-dashboard-history
+          path: docs/validation/qa_pq_history.csv
+
+      - name: Commit QA/PQ dashboard history on main
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
+        run: |
+          if ! git diff --quiet -- docs/validation/qa_pq_history.csv; then
+            if [ -z "${MAIN_AUTOMATION_DEPLOY_KEY:-}" ]; then
+              echo "MAIN_AUTOMATION_DEPLOY_KEY is required to push QA/PQ history through the protected main ruleset." >&2
+              exit 1
+            fi
+
+            git fetch origin main
+            if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+              echo "Main advanced while QA/PQ history was being generated; uploaded artifacts remain available and the newer main run will append history."
+              exit 0
+            fi
+
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > ~/.ssh/main_automation_deploy_key
+            chmod 600 ~/.ssh/main_automation_deploy_key
+            ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+            git remote set-url origin "git@github.com:${{ github.repository }}.git"
+            git config core.sshCommand "ssh -i ~/.ssh/main_automation_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/validation/qa_pq_history.csv
+            git commit -m "Update QA/PQ dashboard history [skip ci]"
+            git push origin HEAD:main
+          fi
 
   packaging-smoke:
     name: Packaging smoke

@@ -144,7 +144,7 @@ class DeviationRecorder:
     def write(self) -> Path:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=DEVIATION_COLUMNS)
+            writer = csv.DictWriter(handle, fieldnames=DEVIATION_COLUMNS, lineterminator="\n")
             writer.writeheader()
             for deviation in self.deviations:
                 writer.writerow(asdict(deviation))

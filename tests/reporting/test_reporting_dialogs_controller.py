@@ -123,6 +123,65 @@ def test_controller_initializes_reporting_and_handles_failure(tmp_path) -> None:
     assert logger.messages == ["Crash reporting initialization failed."]
 
 
+def test_controller_skips_crash_startup_checks_for_unfrozen_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", False, raising=False)
+    app = SimpleNamespace(
+        data_root=tmp_path / "app-data",
+        logs_dir=tmp_path / "logs",
+        _app_version_text=lambda: "5.0.0",
+    )
+
+    controller.initialize_reporting(app)
+    controller.record_app_event(app, "workflow.open", "Opened workflow")
+    controller.mark_clean_shutdown(app)
+
+    assert isinstance(app.reporting_service, ReportingService)
+    assert app._crash_report_startup_checks_enabled is False
+    assert app._pending_crash_report_session is None
+    assert not app.reporting_service.session_marker.marker_path.exists()
+
+
+def test_controller_keeps_crash_startup_checks_for_frozen_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", True, raising=False)
+    app = SimpleNamespace(
+        data_root=tmp_path / "app-data",
+        logs_dir=tmp_path / "logs",
+        _app_version_text=lambda: "5.0.0",
+    )
+
+    controller.initialize_reporting(app)
+
+    assert isinstance(app.reporting_service, ReportingService)
+    assert app._crash_report_startup_checks_enabled is True
+    assert app._pending_crash_report_session is None
+    assert app.reporting_service.session_marker.marker_path.exists()
+
+
+def test_controller_crash_prompt_is_disabled_for_unfrozen_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", False, raising=False)
+    app = SimpleNamespace(
+        _crash_report_startup_checks_enabled=False,
+        _pending_crash_report_session=CrashSession(
+            session_id="session-1",
+            started_at="2026-06-01T00:00:00Z",
+            last_seen_at="2026-06-01T00:01:00Z",
+            app_version="5.0.0",
+            pid=123,
+            last_event="editing",
+        ),
+        reporting_service=_service(tmp_path),
+    )
+    monkeypatch.setattr(
+        controller,
+        "CrashReportPromptDialog",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("prompted")),
+    )
+
+    controller.prompt_for_pending_crash_report(app)
+
+    assert app._pending_crash_report_session is None
+
+
 def test_manual_bug_report_uses_preview_submission_pipeline(monkeypatch, tmp_path) -> None:
     app = QWidget()
     app.reporting_service = _service(
@@ -177,6 +236,7 @@ def test_manual_bug_report_uses_preview_submission_pipeline(monkeypatch, tmp_pat
 def test_controller_handles_unavailable_cancel_and_submission_error_edges(
     monkeypatch, tmp_path
 ) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", True, raising=False)
     warnings: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "isrc_manager.reporting.controller.QMessageBox.warning",
@@ -278,6 +338,7 @@ def test_controller_handles_unavailable_cancel_and_submission_error_edges(
 def test_controller_crash_prompt_handles_cancel_generation_error_and_pending(
     monkeypatch, tmp_path
 ) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", True, raising=False)
     warnings: list[tuple[str, str]] = []
     infos: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -344,7 +405,8 @@ def test_controller_crash_prompt_handles_cancel_generation_error_and_pending(
     app.deleteLater()
 
 
-def test_controller_records_events_and_active_workflow(tmp_path) -> None:
+def test_controller_records_events_and_active_workflow(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(controller.sys, "frozen", True, raising=False)
     service = _service(tmp_path)
     service.start_session()
     workflow_widget = SimpleNamespace(objectName=lambda: "royaltiesPanel", windowTitle=lambda: "")

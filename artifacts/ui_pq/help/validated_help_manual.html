@@ -25,7 +25,7 @@
     .hero, .panel, .chapter {
       background: #EAEAEA;
       border: 1px solid #D5D5D5;
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 18px 20px;
       margin-bottom: 18px;
       box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
@@ -33,6 +33,18 @@
     .hero p, .panel p, .chapter p { margin: 0.55em 0; }
     .version { color: #000000; margin-top: 0; }
     ul { margin-top: 0.4em; }
+    .chapter-lead {
+      margin: 0.5rem 0 1rem;
+    }
+    .chapter-lead-with-media {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 42%);
+      gap: 16px;
+      align-items: start;
+    }
+    .chapter-lead-text {
+      min-width: 0;
+    }
     table {
       border-collapse: collapse;
       width: 100%;
@@ -95,9 +107,49 @@
       color: #000000;
       font-size: 0.95rem;
     }
+    .chapter-lead .help-screenshot {
+      clear: none;
+      margin: 0;
+    }
+    .chapter-lead .help-screenshot img {
+      max-width: 100%;
+    }
+    .chapter-top-link {
+      border-top: 1px solid #D5D5D5;
+      margin-top: 1rem;
+      padding-top: 0.7rem;
+      text-align: right;
+    }
+    .back-to-toc {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 20;
+      display: inline-block;
+      padding: 8px 12px;
+      border: 1px solid #D5D5D5;
+      border-radius: 8px;
+      background: #EAEAEA;
+      color: #308CC6;
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.12);
+    }
+    @media (max-width: 900px) {
+      .chapter-lead-with-media {
+        grid-template-columns: 1fr;
+      }
+      .chapter-lead .help-screenshot img {
+        max-width: 67%;
+      }
+      .back-to-toc {
+        position: static;
+        margin: 0 0 1rem auto;
+      }
+    }
   </style>
 </head>
 <body>
+  <a id="top"></a>
+  <a class="back-to-toc" href="#contents">Back to TOC</a>
   <section class="hero">
     <h1>Music Catalog Manager Help</h1>
     <p class='version'>Version 4.0.0</p>
@@ -111,7 +163,7 @@
               <h3>Part 1: Getting Started</h3>
               <p class='toc-section-summary'>Orientation, profiles, shortcuts, and end-to-end workflow examples.</p>
               <ol>
-                <li><a href='#overview'>Overview</a> - A clear product overview of what the app manages, why it exists, and how the main workflows fit together.</li><li><a href='#main-window'>Main Window</a> - How the main workspace is laid out, how the docks behave, and how to move through the app efficiently.</li><li><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a> - The primary shortcuts for moving through the catalog, opening key workspaces, and reaching the help, history, media, and diagnostics tools quickly.</li><li><a href='#visual-ui-reference'>Visual UI Reference</a> - Screenshot-backed orientation for the real application surfaces used by the help and UI qualification workflow.</li><li><a href='#workflow-playbooks'>Workflow Playbooks</a> - Start-to-finish examples for workflows that depend on each other, written for users who do not already know catalog, rights, accounting, or publishing terminology.</li><li><a href='#profiles'>Profiles and Databases</a> - How catalog profiles work, how to switch between them, and why they make the app safe and portable.</li>
+                <li><a href='#overview'>Overview</a> - A clear product overview of what the app manages, why it exists, and how the main workflows fit together.</li><li><a href='#main-window'>Main Window</a> - How the main workspace is laid out, how the docks behave, and how to move through the app efficiently.</li><li><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a> - The primary shortcuts for moving through the catalog, opening key workspaces, and reaching the help, history, media, and diagnostics tools quickly.</li><li><a href='#workflow-playbooks'>Workflow Playbooks</a> - Start-to-finish examples for workflows that depend on each other, written for users who do not already know catalog, rights, accounting, or publishing terminology.</li><li><a href='#profiles'>Profiles and Databases</a> - How catalog profiles work, how to switch between them, and why they make the app safe and portable.</li>
               </ol>
             </section>
 
@@ -185,7 +237,7 @@
     <h2>Keyword Index</h2>
     <table>
       <tbody>
-        <tr><th>about</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>about screenshot</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>accounting</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>action ribbon</th><td><a href='#overview'>Overview</a>, <a href='#main-window'>Main Window</a>, <a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>active codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>add album</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>add data</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>add track</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>aiff</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>album art</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#add-data'>Add Track</a>, <a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>album dialog</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>album entry</th><td><a href='#overview'>Overview</a>, <a href='#album-entry'>Add Album</a></td></tr><tr><th>album groups</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>album playlist</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>albums</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>allow column reordering</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>app translocation</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>appearance</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>application log</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>application settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>application storage</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>apply artist</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>approval</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>artist payout</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>artists</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>artwork</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>asset file</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>asset versions</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>assets</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>attach album art</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>attach audio files</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>attachment</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>audio authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>audio file</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>audio player</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>audio tags</th><td><a href='#overview'>Overview</a>, <a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>authenticity keys</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>auto advance</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>available codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>background tasks</th><td><a href='#overview'>Overview</a>, <a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>backups</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>bandcamp</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>bandcamp promo codes</th><td><a href='#overview'>Overview</a></td></tr><tr><th>before you start</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>blob</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>bookmarks</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>broken media</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>browse</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>bug report</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>bulk attach audio</th><td><a href='#overview'>Overview</a>, <a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>bulk edit</th><td><a href='#overview'>Overview</a>, <a href='#catalog-table'>Catalog Table</a>, <a href='#edit-entry'>Edit Track</a></td></tr><tr><th>buma</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>calendar</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>cancel</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>catalog</th><td><a href='#overview'>Overview</a></td></tr><tr><th>catalog identifier</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>catalog managers</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>catalog number</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#releases'>Releases</a></td></tr><tr><th>catalog table</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>check for updates</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>checkbox</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>checks</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>clause</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>cleanup</th><td><a href='#history'>Undo History and Snapshots</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>code registry</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>colors</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>column mapping</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>column widths</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>columns</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#custom-columns'>Custom Columns</a>, <a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>compositions</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>context menu</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>contract document</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>contract number</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>contract template</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>contract template workspace</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>contracts</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>conversion</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>convert storage</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>copy code</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>crash report</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>create profile</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>credit note</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>csv</th><td><a href='#overview'>Overview</a>, <a href='#promo-code-ledger'>Promo Code Ledger</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>custom columns</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>custom fields</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>custom::</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>customize action ribbon</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>data folder</th><td><a href='#application-storage-admin'>Application Storage Admin</a>, <a href='#about'>About and Support Information</a></td></tr><tr><th>database</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>database mode</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>date</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>date picker</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>dates</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>delete layout</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>delimiter</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>deliverables</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>dependent workflow</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>derivative ledger</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>diagnostics</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>disc number</th><td><a href='#releases'>Releases</a></td></tr><tr><th>dock</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>document verification</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>documents</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>double click</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>download and install</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>drag and drop media</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>dropdown</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>dry run</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>dsp</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>duplicates</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>ed25519</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>edit entry</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>edit track</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>email</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>example</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>expected result</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>export</th><td><a href='#media-preview'>Audio Player and Image Preview</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>export readiness</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>exports</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>external identifier</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>file menu conversion</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>filename matching</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>fixes</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>flac</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>font</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>fuzzy search</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>generate</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>generated document</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>gift codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>global search</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>gs1</th><td><a href='#overview'>Overview</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>gs1 metadata</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>gs1 template</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>help</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>help screenshot</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>history</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>history dialog</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>hotkeys</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>icon</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>id3</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>image preview</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>import report</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>import tags</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>import workflows</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>imports</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>install update</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>integrity</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>internal registry</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>introduction</th><td><a href='#overview'>Overview</a></td></tr><tr><th>invoice</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>invoice workspace</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>isrc</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>isrc prefix</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>issues</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>iswc</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>json</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>key bindings</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>keyboard shortcuts</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>keychain</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>layman</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>layout</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>ledger</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>legacy promoted field</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>license number</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>license pdf</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>licenses</th><td><a href='#overview'>Overview</a></td></tr><tr><th>lineage</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>link existing upload</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>link selected value</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>linked records</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>logs</th><td><a href='#application-log'>Application Log</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>logs folder</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>loop</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>m4a</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>main window</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>main workspace</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>manage</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>managed file</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>managed files</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>mapping</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>mapping preset</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>masters</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>matched tracks</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>menus</th><td><a href='#overview'>Overview</a></td></tr><tr><th>merge</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>merge fields</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>metadata</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>metadata comparison</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>migration</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>mp4</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>multi selection</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>multi track</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>oauth</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>official workbook</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>open log folder</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>open record</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>overview</th><td><a href='#overview'>Overview</a></td></tr><tr><th>package</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>package import</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>parties</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>payments</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>play next</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>playbook</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>prefix</th><td><a href='#add-data'>Add Track</a>, <a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>preflight</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>preview</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>primary version</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>privacy</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>private</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>product</th><td><a href='#releases'>Releases</a></td></tr><tr><th>profiles</th><td><a href='#main-window'>Main Window</a>, <a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>progress</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>promo code ledger</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>promo codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>provenance</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>publish</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>publish history</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>publishing</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>purge unused</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>qss</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>quality dashboard</th><td><a href='#overview'>Overview</a>, <a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>quick actions</th><td><a href='#overview'>Overview</a>, <a href='#main-window'>Main Window</a></td></tr><tr><th>real ui</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>recipient</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>record selection</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>records</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>redeemed</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>redo</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>registry sha-256 key</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>relationship explorer</th><td><a href='#global-search'>Global Search and Relationships</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>relationships</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>release browser</th><td><a href='#releases'>Releases</a></td></tr><tr><th>release date</th><td><a href='#add-data'>Add Track</a>, <a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>release notes</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>release sync</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>releases</th><td><a href='#overview'>Overview</a>, <a href='#releases'>Releases</a></td></tr><tr><th>remote_urn</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>remove profile</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>repair</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>report a bug</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>reports</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>reset search filter</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>restore</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>retained files</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>retention</th><td><a href='#overview'>Overview</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>rights</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>row heights</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>royalties</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>royalty calculation</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>royalty statement</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>safe delete</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>sanitised logs</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>save layout</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>save track</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>saved layouts</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>saved themes</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>schema</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>screenshots</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>search</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>sena</th><td><a href='#conversion'>Template Conversion</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>session-only</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>shared metadata</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>shortcuts</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>shuffle</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>signed manifest</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>smart budget</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>snapshot interval</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>snapshots</th><td><a href='#history'>Undo History and Snapshots</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>sound effects</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>soundcloud</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>soundcloud settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>sounds</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>sqlite</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>startup splash</th><td><a href='#overview'>Overview</a></td></tr><tr><th>stemra</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>step by step</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>storage admin</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>storage budget</th><td><a href='#diagnostics'>Diagnostics</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>storage mode</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a>, <a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>style</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>support</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>switch</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>table</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>template</th><td><a href='#gs1-metadata'>GS1 Metadata</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>template conversion</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>templates</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>theme</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>threading</th><td><a href='#overview'>Overview</a>, <a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>token storage</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>toolbar</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>trace log</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>track editor</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>track number</th><td><a href='#releases'>Releases</a></td></tr><tr><th>track picker</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>track sections</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>tracks</th><td><a href='#overview'>Overview</a></td></tr><tr><th>trim history</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>troubleshooting</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a>, <a href='#application-log'>Application Log</a></td></tr><tr><th>ui qualification</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>undo</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>upc</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#releases'>Releases</a></td></tr><tr><th>updater helper</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>updates</th><td><a href='#application-updates'>Application Updates</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>usage count</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>validation</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>verify audio authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>version</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>view menu</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>visual reference</th><td><a href='#visual-ui-reference'>Visual UI Reference</a></td></tr><tr><th>vorbis</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>wal</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>watermark</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>watermarked audio</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>watermarked wav</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>wav</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>waveform</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>window</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>window title</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>workbook</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>workflow</th><td><a href='#overview'>Overview</a></td></tr><tr><th>works</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>workspace</th><td><a href='#profiles'>Profiles and Databases</a>, <a href='#about'>About and Support Information</a></td></tr><tr><th>write tags</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>xlsx</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>xml</th><td><a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>xml import</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>zip</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr>
+        <tr><th>about</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>accounting</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>action ribbon</th><td><a href='#overview'>Overview</a>, <a href='#main-window'>Main Window</a>, <a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>active codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>add album</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>add data</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>add track</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>aiff</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>album art</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#add-data'>Add Track</a>, <a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>album dialog</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>album entry</th><td><a href='#overview'>Overview</a>, <a href='#album-entry'>Add Album</a></td></tr><tr><th>album groups</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>album playlist</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>albums</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>allow column reordering</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>app translocation</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>appearance</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>application log</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>application settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>application storage</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>apply artist</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>approval</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>artist payout</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>artists</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>artwork</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>asset file</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>asset versions</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>assets</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>attach album art</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>attach audio files</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>attachment</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>audio authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>audio file</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>audio player</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>audio tags</th><td><a href='#overview'>Overview</a>, <a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>authenticity keys</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>auto advance</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>auto reporting</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>automatic reporting</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>available codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>background tasks</th><td><a href='#overview'>Overview</a>, <a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>backups</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>bandcamp</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>bandcamp promo codes</th><td><a href='#overview'>Overview</a></td></tr><tr><th>before you start</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>blob</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>bookmarks</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>broken media</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>browse</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>bug report</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>bulk attach audio</th><td><a href='#overview'>Overview</a>, <a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>bulk edit</th><td><a href='#overview'>Overview</a>, <a href='#catalog-table'>Catalog Table</a>, <a href='#edit-entry'>Edit Track</a></td></tr><tr><th>buma</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>calendar</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>cancel</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>catalog</th><td><a href='#overview'>Overview</a></td></tr><tr><th>catalog identifier</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>catalog managers</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>catalog number</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#releases'>Releases</a></td></tr><tr><th>catalog table</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>check for updates</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>checkbox</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>checks</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>clause</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>cleanup</th><td><a href='#history'>Undo History and Snapshots</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>code registry</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>colors</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>column mapping</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>column widths</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>columns</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#custom-columns'>Custom Columns</a>, <a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>compositions</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>context menu</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>contract document</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>contract number</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>contract template</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>contract template workspace</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>contracts</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>conversion</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>convert storage</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>copy code</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>crash report</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>create profile</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>credit note</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>csv</th><td><a href='#overview'>Overview</a>, <a href='#promo-code-ledger'>Promo Code Ledger</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>custom columns</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>custom fields</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>custom::</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>customize action ribbon</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>data folder</th><td><a href='#application-storage-admin'>Application Storage Admin</a>, <a href='#about'>About and Support Information</a></td></tr><tr><th>database</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>database mode</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>date</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>date picker</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>dates</th><td><a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>delete layout</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>delimiter</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>deliverables</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>dependent workflow</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>derivative ledger</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>diagnostics</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>disc number</th><td><a href='#releases'>Releases</a></td></tr><tr><th>dock</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>document verification</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>documents</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>double click</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>download and install</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>drag and drop media</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>dropdown</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>dry run</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>dsp</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>duplicates</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>ed25519</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>edit entry</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>edit track</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>email</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>example</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>expected result</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>export</th><td><a href='#media-preview'>Audio Player and Image Preview</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>export readiness</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>exports</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>external identifier</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>file menu conversion</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>filename matching</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>fixes</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>flac</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>font</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>fuzzy search</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>generate</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>generated document</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>gift codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>global search</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>gs1</th><td><a href='#overview'>Overview</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>gs1 metadata</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>gs1 template</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>help</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>history</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>history dialog</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>hotkeys</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>icon</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>id3</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>image preview</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>import report</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>import tags</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>import workflows</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>imports</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>install update</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>integrity</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>internal registry</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>introduction</th><td><a href='#overview'>Overview</a></td></tr><tr><th>invoice</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>invoice workspace</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>isrc</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>isrc prefix</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>issues</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>iswc</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>json</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>key bindings</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>keyboard shortcuts</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>keychain</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>layman</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>layout</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>ledger</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>legacy promoted field</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>license number</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>license pdf</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>licenses</th><td><a href='#overview'>Overview</a></td></tr><tr><th>lineage</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>link existing upload</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>link selected value</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>linked records</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>logs</th><td><a href='#application-log'>Application Log</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>logs folder</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>loop</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>m4a</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>main window</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>manage</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>managed file</th><td><a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>managed files</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>mapping</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>mapping preset</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>masters</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>matched tracks</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a></td></tr><tr><th>menus</th><td><a href='#overview'>Overview</a></td></tr><tr><th>merge</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>merge fields</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>metadata</th><td><a href='#custom-columns'>Custom Columns</a></td></tr><tr><th>metadata comparison</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>migration</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>mp4</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>multi selection</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>multi track</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>oauth</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>official workbook</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>open log folder</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>open record</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>overview</th><td><a href='#overview'>Overview</a></td></tr><tr><th>package</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>package import</th><td><a href='#exchange-formats'>Exchange Formats</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>parties</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>payments</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>play next</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>playbook</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>prefix</th><td><a href='#add-data'>Add Track</a>, <a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>preflight</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>preview</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>primary version</th><td><a href='#assets-deliverables'>Deliverables and Asset Versions</a></td></tr><tr><th>privacy</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>private</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>product</th><td><a href='#releases'>Releases</a></td></tr><tr><th>profiles</th><td><a href='#main-window'>Main Window</a>, <a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>progress</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>promo code ledger</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a>, <a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>promo codes</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>provenance</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>publish</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>publish history</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>publishing</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>purge unused</th><td><a href='#catalog-managers'>Catalog Cleanup</a></td></tr><tr><th>qss</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>quality dashboard</th><td><a href='#overview'>Overview</a>, <a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>quick actions</th><td><a href='#overview'>Overview</a>, <a href='#main-window'>Main Window</a></td></tr><tr><th>recipient</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>record selection</th><td><a href='#conversion'>Template Conversion</a></td></tr><tr><th>records</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>redeemed</th><td><a href='#promo-code-ledger'>Promo Code Ledger</a></td></tr><tr><th>redo</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>registry sha-256 key</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>relationship explorer</th><td><a href='#global-search'>Global Search and Relationships</a>, <a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>relationships</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>release browser</th><td><a href='#releases'>Releases</a></td></tr><tr><th>release date</th><td><a href='#add-data'>Add Track</a>, <a href='#metadata-dates'>Date Picking</a></td></tr><tr><th>release notes</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>release sync</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>releases</th><td><a href='#overview'>Overview</a>, <a href='#releases'>Releases</a></td></tr><tr><th>remote_urn</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>remove profile</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>repair</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>report a bug</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>report proxy</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>reporting.json</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>reports</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>reset search filter</th><td><a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>restore</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>retained files</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>retention</th><td><a href='#overview'>Overview</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>rights</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>row heights</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>royalties</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>royalty calculation</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>royalty statement</th><td><a href='#accounting-royalties'>Accounting and Royalties</a></td></tr><tr><th>safe delete</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>sanitised logs</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>save layout</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>save track</th><td><a href='#add-data'>Add Track</a></td></tr><tr><th>saved layouts</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>saved themes</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>schema</th><td><a href='#diagnostics'>Diagnostics</a></td></tr><tr><th>search</th><td><a href='#catalog-table'>Catalog Table</a>, <a href='#global-search'>Global Search and Relationships</a></td></tr><tr><th>sena</th><td><a href='#conversion'>Template Conversion</a>, <a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>session-only</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>shared metadata</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>shortcuts</th><td><a href='#keyboard-shortcuts'>Keyboard Shortcuts</a></td></tr><tr><th>shuffle</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>signed manifest</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>smart budget</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>snapshot interval</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>snapshots</th><td><a href='#history'>Undo History and Snapshots</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>sound effects</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>soundcloud</th><td><a href='#overview'>Overview</a>, <a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>soundcloud settings</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>sounds</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>sqlite</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>startup splash</th><td><a href='#overview'>Overview</a></td></tr><tr><th>stemra</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>step by step</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a></td></tr><tr><th>storage admin</th><td><a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>storage budget</th><td><a href='#diagnostics'>Diagnostics</a>, <a href='#settings'>Application Settings</a></td></tr><tr><th>storage mode</th><td><a href='#bulk-audio-attach'>Catalog Media Attach</a>, <a href='#storage-modes'>File Storage Modes</a></td></tr><tr><th>style</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>support</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>switch</th><td><a href='#profiles'>Profiles and Databases</a></td></tr><tr><th>table</th><td><a href='#catalog-table'>Catalog Table</a></td></tr><tr><th>template</th><td><a href='#gs1-metadata'>GS1 Metadata</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>template conversion</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a></td></tr><tr><th>templates</th><td><a href='#contract-templates'>Contract Template Workspace</a></td></tr><tr><th>theme</th><td><a href='#theme-settings'>Theme Settings</a></td></tr><tr><th>threading</th><td><a href='#overview'>Overview</a>, <a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>token storage</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>toolbar</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>trace log</th><td><a href='#application-log'>Application Log</a></td></tr><tr><th>track editor</th><td><a href='#edit-entry'>Edit Track</a></td></tr><tr><th>track number</th><td><a href='#releases'>Releases</a></td></tr><tr><th>track picker</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>track sections</th><td><a href='#album-entry'>Add Album</a></td></tr><tr><th>tracks</th><td><a href='#overview'>Overview</a></td></tr><tr><th>trim history</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>troubleshooting</th><td><a href='#workflow-playbooks'>Workflow Playbooks</a>, <a href='#application-log'>Application Log</a></td></tr><tr><th>undo</th><td><a href='#history'>Undo History and Snapshots</a></td></tr><tr><th>upc</th><td><a href='#edit-entry'>Edit Track</a>, <a href='#releases'>Releases</a></td></tr><tr><th>updater helper</th><td><a href='#application-updates'>Application Updates</a></td></tr><tr><th>updates</th><td><a href='#application-updates'>Application Updates</a>, <a href='#application-storage-admin'>Application Storage Admin</a></td></tr><tr><th>usage count</th><td><a href='#code-registry'>Code Registry Workspace</a></td></tr><tr><th>validation</th><td><a href='#quality-dashboard'>Quality Dashboard</a></td></tr><tr><th>verify audio authenticity</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>version</th><td><a href='#about'>About and Support Information</a></td></tr><tr><th>view menu</th><td><a href='#layout-action-ribbon'>Layout and Action Ribbon</a></td></tr><tr><th>vorbis</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>wal</th><td><a href='#background-tasks'>Background Tasks</a></td></tr><tr><th>watermark</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>watermarked audio</th><td><a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>watermarked wav</th><td><a href='#soundcloud-publishing'>SoundCloud Publishing</a></td></tr><tr><th>wav</th><td><a href='#audio-tags'>Audio Tags</a>, <a href='#audio-authenticity'>Audio Authenticity</a></td></tr><tr><th>waveform</th><td><a href='#media-preview'>Audio Player and Image Preview</a></td></tr><tr><th>window</th><td><a href='#main-window'>Main Window</a></td></tr><tr><th>window title</th><td><a href='#settings'>Application Settings</a></td></tr><tr><th>workbook</th><td><a href='#gs1-metadata'>GS1 Metadata</a></td></tr><tr><th>workflow</th><td><a href='#overview'>Overview</a></td></tr><tr><th>works</th><td><a href='#repertoire-knowledge'>Works, Rights, and Contracts</a></td></tr><tr><th>workspace</th><td><a href='#profiles'>Profiles and Databases</a>, <a href='#about'>About and Support Information</a></td></tr><tr><th>write tags</th><td><a href='#audio-tags'>Audio Tags</a></td></tr><tr><th>xlsx</th><td><a href='#overview'>Overview</a>, <a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>xml</th><td><a href='#conversion'>Template Conversion</a>, <a href='#exchange-formats'>Exchange Formats</a></td></tr><tr><th>xml import</th><td><a href='#import-workflows'>Import and Merge Workflows</a></td></tr><tr><th>zip</th><td><a href='#exchange-formats'>Exchange Formats</a></td></tr>
       </tbody>
     </table>
   </section>
@@ -194,14 +246,10 @@
                 <section class='chapter' id='overview'>
                   <p class='section-label'>Part 1: Getting Started</p>
                   <h2>Overview</h2>
-                  <p class='summary'>A clear product overview of what the app manages, why it exists, and how the main workflows fit together.</p>
 
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/chapter_overview.png" alt="Current Music Catalog Manager user interface screenshot for the Overview help chapter.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Overview UI</strong>: Current qualified UI reference for the Overview chapter. This image is regenerated by the Help documentation qualification workflow.</p>
-        </div>
+                  <div class='chapter-lead'>
+                    <p class='summary'>A clear product overview of what the app manages, why it exists, and how the main workflows fit together.</p>
+                  </div>
 
 
         <p><strong>Music Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
@@ -235,19 +283,16 @@
         </ul>
         <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles, exchange, and template conversion, <strong>Edit</strong> starts governed musical entry with <strong>Add Track</strong> and <strong>Add Album</strong> and edits the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='main-window'>
                   <p class='section-label'>Part 1: Getting Started</p>
                   <h2>Main Window</h2>
-                  <p class='summary'>How the main workspace is laid out, how the docks behave, and how to move through the app efficiently.</p>
 
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/chapter_main-window.png" alt="Current Music Catalog Manager user interface screenshot for the Main Window help chapter.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Main Window UI</strong>: Current qualified UI reference for the Main Window chapter. This image is regenerated by the Help documentation qualification workflow.</p>
-        </div>
+                  <div class='chapter-lead'>
+                    <p class='summary'>How the main workspace is laid out, how the docks behave, and how to move through the app efficiently.</p>
+                  </div>
 
 
         <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. The <strong>Catalog Table</strong> stays central, <strong>Add Track</strong> and <strong>Add Album</strong> are the primary governed entry points for new musical items, and <strong>Work Manager</strong> stays available as the governance and follow-up surface once those entries exist.</p>
@@ -263,19 +308,16 @@
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='keyboard-shortcuts'>
                   <p class='section-label'>Part 1: Getting Started</p>
                   <h2>Keyboard Shortcuts</h2>
-                  <p class='summary'>The primary shortcuts for moving through the catalog, opening key workspaces, and reaching the help, history, media, and diagnostics tools quickly.</p>
 
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/chapter_keyboard-shortcuts.png" alt="Current Music Catalog Manager user interface screenshot for the Keyboard Shortcuts help chapter.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Keyboard Shortcuts UI</strong>: Current qualified UI reference for the Keyboard Shortcuts chapter. This image is regenerated by the Help documentation qualification workflow.</p>
-        </div>
+                  <div class='chapter-lead'>
+                    <p class='summary'>The primary shortcuts for moving through the catalog, opening key workspaces, and reaching the help, history, media, and diagnostics tools quickly.</p>
+                  </div>
 
 
         <p>The app keeps shortcuts focused on high-value actions. The goal is fast access to the main catalog workflows without turning every control into a shortcut puzzle.</p>
@@ -324,286 +366,17 @@
         </ul>
         <p>Some actions intentionally stay menu-only or context-menu-only. That usually means the action is highly local to the current selection, already has a direct manipulation gesture such as double-click, would require a shortcut that conflicts with a more important global workflow, or requires a deliberate review step such as SoundCloud publishing.</p>
 
-                </section>
-
-                <section class='chapter' id='visual-ui-reference'>
-                  <p class='section-label'>Part 1: Getting Started</p>
-                  <h2>Visual UI Reference</h2>
-                  <p class='summary'>Screenshot-backed orientation for the real application surfaces used by the help and UI qualification workflow.</p>
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/chapter_visual-ui-reference.png" alt="Current Music Catalog Manager user interface screenshot for the Visual UI Reference help chapter.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Visual UI Reference UI</strong>: Current qualified UI reference for the Visual UI Reference chapter. This image is regenerated by the Help documentation qualification workflow.</p>
-        </div>
-
-
-        <p>This chapter anchors the written manual to real application screenshots. The images are generated from the actual PySide user interface used during qualification, not from mockups. They are included so a first-time user can connect the words in this manual to the surfaces they will see in the app.</p>
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/main_window.png" alt="Music Catalog Manager main window with profile controls, action ribbon, Add Track fields, and the catalog workspace.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Main Workspace</strong>: The main workspace shows the profile selector, quick action ribbon, Add Track entry fields, catalog table, and docked workspace tabs in one operating surface.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/help_contents_dialog.png" alt="Help Contents dialog with search, chapter list, navigation buttons, and the rendered manual.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Help Contents Dialog</strong>: The Help Contents dialog is the in-app manual browser. Use the chapter index for guided reading and the search field when you know the feature name.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/about_dialog.png" alt="About dialog showing version, local workspace information, and support folder context.">
-          </p>
-          <p class="help-screenshot-caption"><strong>About and Support Dialog</strong>: The About surface confirms the running version and points to the local data and support context used for diagnostics and support handoffs.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/add_track_workspace.png" alt="Add Track workspace with governed work-linking and recording metadata fields.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Add Track Workspace</strong>: The Add Track surface is the normal starting point for a single recording. It keeps work governance, recording metadata, release hints, and media paths together.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/add_album_dialog.png" alt="Add Album dialog with release-level fields and batch track-entry rows.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Add Album Dialog</strong>: The Add Album dialog captures release metadata and multiple track rows in one governed workflow.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/catalog_table_workspace.png" alt="Catalog table workspace with searchable recording rows and table controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Catalog Table Workspace</strong>: The catalog table is the central browser for finding, selecting, sorting, and reviewing recordings.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/edit_track_dialog.png" alt="Edit Track dialog with track metadata, release metadata, and managed media fields.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Edit Track Dialog</strong>: The Edit Track dialog is the focused surface for updating an existing catalog row.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/custom_columns_dialog.png" alt="Manage Custom Columns dialog with metadata field definitions and controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Custom Columns Dialog</strong>: Custom columns extend the catalog with profile-specific metadata fields while keeping the table layout governed.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/bulk_audio_attach_dialog.png" alt="Bulk audio attach review dialog with storage mode and track matching controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Bulk Audio Attach Dialog</strong>: Bulk audio attach lets users review file-to-track matches before any managed media write is applied.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/release_browser.png" alt="Release Browser workspace with release table and detail panels.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Release Browser</strong>: The Release Browser manages release products, UPC/EAN context, track ordering, and release-level review.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/code_registry_workspace.png" alt="Code Registry workspace for internal catalog, contract, license, and registry keys.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Code Registry Workspace</strong>: The Code Registry workspace keeps internal numbers and external identifier classes traceable.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/promo_code_ledger.png" alt="Promo Code Ledger workspace for Bandcamp code sheets and redemption tracking.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Promo Code Ledger</strong>: The Promo Code Ledger keeps imported code sheets, assignments, and redemption state visible.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/global_search_workspace.png" alt="Global Search workspace with relationship-aware search controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Global Search Workspace</strong>: Global Search helps navigate across tracks, works, releases, contracts, rights, parties, documents, and assets.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/contract_template_workspace.png" alt="Contract Template workspace with import, parsing, form, and export tabs.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Contract Template Workspace</strong>: The Contract Template workspace turns reusable agreement templates into governed forms and exports.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/asset_registry.png" alt="Asset Registry workspace with deliverables and version state.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Asset Registry</strong>: The Asset Registry tracks deliverables, artwork variants, approval state, and primary-version decisions.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/invoice_workspace.png" alt="Royalties and Accounting workspace with invoice, royalty, payment, and report tabs.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Royalties and Accounting Workspace</strong>: The accounting workspace keeps invoices, payments, credit notes, royalties, statements, payouts, ledgers, and reports in one operational surface.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/work_manager.png" alt="Work Manager workspace with works, contributors, linked tracks, and detail review.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Work Manager</strong>: The Work Manager governs composition records, contributors, ownership, and links from recordings to musical works.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/party_manager.png" alt="Party Manager workspace with party table and identity/readiness details.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Party Manager</strong>: The Party Manager keeps artists, labels, publishers, licensees, payees, and business contacts reusable across workflows.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/contract_manager.png" alt="Contract Manager workspace with contract table and linked rights detail.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Contract Manager</strong>: The Contract Manager is the main review surface for agreement records, parties, linked catalog items, and lifecycle state.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/rights_matrix.png" alt="Rights Matrix workspace with rights grant table and detail review.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Rights Matrix</strong>: The Rights Matrix turns contracts and catalog relationships into explicit rights positions.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/conversion_dialog.png" alt="Template Conversion dialog with source/template setup and mapping tabs.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Template Conversion Dialog</strong>: Template Conversion lets users inspect source data, map it into rigid target templates, and export without mutating catalog data.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/quality_dashboard_dialog.png" alt="Data Quality Dashboard dialog with issue filters and repair controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Data Quality Dashboard</strong>: The Data Quality Dashboard highlights metadata gaps, relationship issues, media problems, and readiness blockers.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/diagnostics_dialog.png" alt="Diagnostics dialog with profile checks, cleanup, and recovery controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Diagnostics Dialog</strong>: Diagnostics gives support and recovery workflows a current view of profile health, integrity checks, and cleanup tools.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/application_log_dialog.png" alt="Application Log dialog with readable log and trace output.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Application Log Dialog</strong>: Application Log exposes recent support context without requiring users to search through the filesystem first.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/application_storage_admin_dialog.png" alt="Application Storage Admin dialog with retained storage audit and cleanup controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Application Storage Admin</strong>: Application Storage Admin reviews retained app files, backups, generated artifacts, and cleanup candidates.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/history_dialog.png" alt="History and Snapshots dialog with session, history, snapshot, and backup tabs.">
-          </p>
-          <p class="help-screenshot-caption"><strong>History and Snapshots Dialog</strong>: History and Snapshots make recovery actions visible before a user commits to undo, redo, restore, or cleanup.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/settings_dialog.png" alt="Application Settings dialog with identity, registration, GS1, theme, history, and SoundCloud settings.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Application Settings Dialog</strong>: Application Settings centralizes profile identity, registration defaults, GS1, theme, history, storage, sounds, and SoundCloud configuration.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/action_ribbon_dialog.png" alt="Customize Action Ribbon dialog with available and selected quick actions.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Action Ribbon Dialog</strong>: The Action Ribbon dialog lets users choose which existing actions stay one click away in the main window.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/authenticity_verification_dialog.png" alt="Audio Authenticity Verification dialog with confidence and verification details.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Audio Authenticity Verification</strong>: The authenticity verification surface reports direct, likely, and low-confidence watermark evidence with honest technical details.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/forensic_export_dialog.png" alt="Forensic watermark export dialog with output format, recipient, and share label fields.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Forensic Watermark Export</strong>: Forensic watermark export creates recipient-specific delivery copies for leak traceability.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/media_equalizer_dialog.png" alt="Media Equalizer dialog with playback tone controls and panning.">
-          </p>
-          <p class="help-screenshot-caption"><strong>Media Equalizer Dialog</strong>: The media equalizer is part of the audio preview toolset used while reviewing attached catalog media.</p>
-        </div>
-
-
-        <div class="help-screenshot">
-          <p class="help-screenshot-image">
-            <img src="screenshots/soundcloud_publish_dialog.png" alt="Publish to SoundCloud dialog with preflight options and publish controls.">
-          </p>
-          <p class="help-screenshot-caption"><strong>SoundCloud Publish Dialog</strong>: The SoundCloud Publish dialog prepares private-by-default upload/update runs with manual preflight review.</p>
-        </div>
-
-        <p>If a screenshot looks different from the current application after a feature changes, the documentation validation workflow must be run again and the screenshot set must be refreshed. That keeps Help honest: the manual should describe the current product, not a past version of it.</p>
-
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='workflow-playbooks'>
                   <p class='section-label'>Part 1: Getting Started</p>
                   <h2>Workflow Playbooks</h2>
-                  <p class='summary'>Start-to-finish examples for workflows that depend on each other, written for users who do not already know catalog, rights, accounting, or publishing terminology.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Start-to-finish examples for workflows that depend on each other, written for users who do not already know catalog, rights, accounting, or publishing terminology.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -611,6 +384,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Workflow Playbooks UI</strong>: Current qualified UI reference for the Workflow Playbooks chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>This chapter shows complete chains rather than isolated button descriptions. A chain matters because many catalog tasks depend on earlier records: a royalty statement needs a party, a track, a work, a contract, usage lines, a posted calculation, and then a payout; a SoundCloud upload should start from a governed track with media and should leave a traceable publication record.</p>
@@ -715,12 +490,17 @@
         <p><strong>Troubleshooting</strong>: if restore is blocked by running tasks, wait for them to finish. If Diagnostics reports managed-file gaps, repair those before trimming history. If you are unsure which backup is safe, restore to an isolated target instead of replacing the active profile immediately.</p>
         <p><strong>Related workflows</strong>: Undo History and Snapshots, Diagnostics, Application Storage Admin, Application Log, Import and Merge Workflows, and Quality Dashboard.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='profiles'>
                   <p class='section-label'>Part 1: Getting Started</p>
                   <h2>Profiles and Databases</h2>
-                  <p class='summary'>How catalog profiles work, how to switch between them, and why they make the app safe and portable.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How catalog profiles work, how to switch between them, and why they make the app safe and portable.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -728,6 +508,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Profiles and Databases UI</strong>: Current qualified UI reference for the Profiles and Databases chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>A profile is one self-contained SQLite catalog database. It gives you a clean boundary around a label, artist, catalog, client, or project so your data stays organized and portable.</p>
@@ -741,12 +523,17 @@
         <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. On first launch, the app can also offer to open <strong>Application Settings</strong> so you can configure registration values, snapshot posture, and appearance before deeper catalog work begins.</p>
         <p>For a non-technical user, the safest mental model is: a profile is the file that contains the catalog. Opening another profile is like opening another project. Before importing, issuing invoices, exporting media, or publishing to SoundCloud, verify that the correct profile name is visible. If you are unsure, use <strong>About</strong>, <strong>Diagnostics</strong>, or the profile path shown in support surfaces to confirm the database location before making changes.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='add-data'>
                   <p class='section-label'>Part 2: Catalog Entry and Editing</p>
                   <h2>Add Track</h2>
-                  <p class='summary'>How the primary single-track entry flow works, how Work governance is required before save, and how shared metadata seeds a new Work automatically.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the primary single-track entry flow works, how Work governance is required before save, and how shared metadata seeds a new Work automatically.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -754,6 +541,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Add Track UI</strong>: Current qualified UI reference for the Add Track chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Add Track</strong> is the primary single-item musical creation workflow in the main window. Before a new track can be saved, it must either link to an existing <strong>Work</strong> or create a new <strong>Work</strong> from the track. That keeps the recording entry flow fast while preventing new orphan tracks.</p>
@@ -766,12 +555,17 @@
         <p>Use <strong>Save Track</strong> to save the governed track currently in progress, or <strong>Clear Draft</strong> to reset the current Add Track draft. The Add Data tabs separate metadata, codes, release context, media, and governance so the form stays understandable. In <strong>Create New Work From Track</strong> mode, the app seeds the new parent Work directly from the track title, ISWC, and registration number you already entered, then links the track immediately as the first governed original. In <strong>Link to Existing Work</strong> mode, you choose the existing Work, the parent track when relevant, and the child relationship type before save. When the catalog identifier is app-managed, use <strong>Generate</strong> to issue the next internal code immediately; when it comes from a third party, keep the field in <strong>External Identifier</strong> mode instead of forcing it into the internal numbering scheme.</p>
         <p>Main artist names resolve through the <strong>Party</strong> layer on save, so when a Party-backed artist is selected the stored artist display comes from that authoritative Party record instead of loose text. Later track edits do not silently overwrite Work metadata, but the initial creation flow avoids making you enter the same shared concepts twice.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='album-entry'>
                   <p class='section-label'>Part 2: Catalog Entry and Editing</p>
                   <h2>Add Album</h2>
-                  <p class='summary'>How the governed batch-entry surface works as batch Add Track, with per-row Work decisions and automatic Work seeding for new rows.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the governed batch-entry surface works as batch Add Track, with per-row Work decisions and automatic Work seeding for new rows.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -779,6 +573,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Add Album UI</strong>: Current qualified UI reference for the Add Album chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Add Album</strong> is batch Add Track. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. Every populated row must resolve Work governance before save: either link that row to an existing Work, or create a new Work from that row so the track saves as its first governed original.</p>
@@ -794,12 +590,17 @@
         </ul>
         <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. Shared album metadata is entered once, while each row still governs itself explicitly so the batch never creates floating orphan tracks and does not force you to repeat Work metadata when a new Work is created from a row. When multiple saved tracks and the release share the same catalog identifier, the code registry keeps one shared value and records how many owners use it rather than duplicating the identifier row.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='catalog-table'>
                   <p class='section-label'>Part 2: Catalog Entry and Editing</p>
                   <h2>Catalog Table</h2>
-                  <p class='summary'>How to browse, search, select, inspect, and bulk-operate on the existing catalog from the main table.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How to browse, search, select, inspect, and bulk-operate on the existing catalog from the main table.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -807,6 +608,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Catalog Table UI</strong>: Current qualified UI reference for the Catalog Table chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Catalog Table is the operational center of the app once data has been entered. It is built for browsing, cleaning, selecting, and acting on real catalog records at speed.</p>
@@ -823,12 +626,17 @@
         </ul>
         <p>Table layout, column widths, ordering, visibility, and catalog zoom are remembered so the browser can feel tailored to your workflow rather than generic.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='custom-columns'>
                   <p class='section-label'>Part 2: Catalog Entry and Editing</p>
                   <h2>Custom Columns</h2>
-                  <p class='summary'>Create, rename, reorder, remove, and populate custom metadata fields beyond the default track schema.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Create, rename, reorder, remove, and populate custom metadata fields beyond the default track schema.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -836,6 +644,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Custom Columns UI</strong>: Current qualified UI reference for the Custom Columns chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>Custom columns let you extend the catalog beyond the built-in track fields. Supported field types include text, dropdown, checkbox, and date-based custom values.</p>
@@ -847,12 +657,17 @@
         </ul>
         <p>Custom columns can be visible in the table, exported, imported, and edited per track. The View menu controls whether they are shown, while the custom columns manager controls whether they exist at all.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='edit-entry'>
                   <p class='section-label'>Part 2: Catalog Entry and Editing</p>
                   <h2>Edit Track</h2>
-                  <p class='summary'>How the full editor works for existing tracks, including single-edit, bulk-edit, validation, and related handoff flows.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the full editor works for existing tracks, including single-edit, bulk-edit, validation, and related handoff flows.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -860,6 +675,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Edit Track UI</strong>: Current qualified UI reference for the Edit Track chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Edit Track dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
@@ -877,12 +694,17 @@
         </ul>
         <p>Saving changes updates the relevant rows, records the action in history, and keeps related catalog structures synchronized where shared release-level data is affected.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='audio-tags'>
                   <p class='section-label'>Part 3: Catalog Review and Media</p>
                   <h2>Audio Tags</h2>
-                  <p class='summary'>Import embedded tags from supported audio files and understand how catalog-backed audio exports embed metadata automatically.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Import embedded tags from supported audio files and understand how catalog-backed audio exports embed metadata automatically.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -890,6 +712,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Audio Tags UI</strong>: Current qualified UI reference for the Audio Tags chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app can read embedded audio metadata into the catalog, and catalog-backed audio exports automatically attempt to embed trustworthy catalog metadata into the exported copy.</p>
@@ -904,12 +728,17 @@
         </ul>
         <p>The app preserves the original stored audio when exporting copies. If catalog metadata is unavailable, ambiguous, or cannot be written safely into the target container, the export still succeeds and the metadata step is skipped with warnings instead of crashing the workflow. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Audio &gt; Import &amp; Attach &gt; Bulk Attach Audio Files…</strong> instead.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='bulk-audio-attach'>
                   <p class='section-label'>Part 3: Catalog Review and Media</p>
                   <h2>Catalog Media Attach</h2>
-                  <p class='summary'>Attach audio or album-art files to existing tracks with match review, explicit confirmation, storage-mode choice, and catalog drag-and-drop.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Attach audio or album-art files to existing tracks with match review, explicit confirmation, storage-mode choice, and catalog drag-and-drop.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -917,6 +746,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Catalog Media Attach UI</strong>: Current qualified UI reference for the Catalog Media Attach chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Catalog &gt; Audio &gt; Import &amp; Attach</strong> covers both local audio attachment and single-file album-art attachment for tracks that already exist in the catalog.</p>
@@ -930,12 +761,17 @@
         </ul>
         <p>This workflow is separate from exchange import and from audio-tag import. Use it when the catalog rows already exist and you mainly need to connect the right audio or artwork files quickly, explicitly, and safely.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='catalog-managers'>
                   <p class='section-label'>Part 3: Catalog Review and Media</p>
                   <h2>Catalog Cleanup</h2>
-                  <p class='summary'>Review stored artist and album names from Diagnostics and remove only data that is no longer in use.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Review stored artist and album names from Diagnostics and remove only data that is no longer in use.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -943,6 +779,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Catalog Cleanup UI</strong>: Current qualified UI reference for the Catalog Cleanup chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The stored artist and album cleanup tools live in <strong>Help &gt; Diagnostics…</strong> under the <strong>Catalog Cleanup</strong> area, because they are maintenance and integrity-adjacent tools rather than primary catalog workspaces.</p>
@@ -953,12 +791,17 @@
         <p>These tools are intended for cleanup and normalization. A typical use is after importing older data where the same artist or album was spelled several ways, or after deleting test rows that left unused names behind. Review the usage count before removing anything. If a value is still referenced by tracks, the app prevents deletion where that would break data integrity.</p>
         <p>Use Party Manager for authoritative people and companies. Use Catalog Cleanup only for stored artist and album name maintenance. Keeping the cleanup actions alongside Diagnostics makes it easier to run integrity checks before and after a purge.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='media-preview'>
                   <p class='section-label'>Part 3: Catalog Review and Media</p>
                   <h2>Audio Player and Image Preview</h2>
-                  <p class='summary'>Play audio files, inspect waveforms, and preview album-art images directly from the catalog.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Play audio files, inspect waveforms, and preview album-art images directly from the catalog.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -966,6 +809,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Audio Player and Image Preview UI</strong>: Current qualified UI reference for the Audio Player and Image Preview chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app can open file-backed audio and image media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
@@ -985,12 +830,17 @@
         </ul>
         <p>The audio player and image preview are reusable top-level windows. Reopening a media preview brings the existing window forward and updates its contents instead of creating duplicate utility dialogs. The player is intended for serious auditioning, media verification, and export follow-up without leaving the catalog workflow.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='releases'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>Releases</h2>
-                  <p class='summary'>How product-level release records work and why they matter alongside track-level recording data.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How product-level release records work and why they matter alongside track-level recording data.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -998,6 +848,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Releases UI</strong>: Current qualified UI reference for the Releases chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app stores releases as first-class product records rather than repeating product metadata across individual tracks. This gives the catalog a cleaner commercial layer and makes exports, ordering, and release maintenance much easier to trust.</p>
@@ -1012,12 +864,17 @@
         </ul>
         <p>Older databases are migrated additively. Existing catalog data remains usable, while release records are inferred where possible to give older profiles access to the richer product model without destructive change.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='code-registry'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>Code Registry Workspace</h2>
-                  <p class='summary'>Manage app-owned business codes and separate external identifiers from one docked workspace.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Manage app-owned business codes and separate external identifiers from one docked workspace.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1025,6 +882,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Code Registry Workspace UI</strong>: Current qualified UI reference for the Code Registry Workspace chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The <strong>Code Registry Workspace</strong> is the authoritative home for app-managed business codes and generated keys. It keeps internal registry values separate from external identifiers so the app can govern its own numbering without rejecting real third-party catalog data.</p>
@@ -1038,12 +897,17 @@
         </ul>
         <p><strong>Registry SHA-256 Key</strong> is a code-registry feature, not an audio-authenticity key. It does not replace watermark keys or signing keys, and it stays separate in naming, symbol resolution, workspace actions, and tests.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='promo-code-ledger'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>Promo Code Ledger</h2>
-                  <p class='summary'>Import Bandcamp promo-code sheets, refresh active-code exports, and track who received each code.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Import Bandcamp promo-code sheets, refresh active-code exports, and track who received each code.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1051,6 +915,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Promo Code Ledger UI</strong>: Current qualified UI reference for the Promo Code Ledger chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Catalog &gt; Workspace &gt; Browse / Review &gt; Promo Code Ledger...</strong> opens the Bandcamp promo-code manager as a docked catalog workspace. It is built for Bandcamp promo-code CSV exports where each sheet represents one Bandcamp code set.</p>
@@ -1067,12 +933,17 @@
         </ul>
         <p>Use the import/update action whenever Bandcamp gives you a fresh active-code export. The sheet summary shows Bandcamp metadata, stored code totals, redeemed counts, and available counts so you can confirm the database and the current Bandcamp export agree.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='global-search'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>Global Search and Relationships</h2>
-                  <p class='summary'>Find records across the catalog and inspect relationship context without guessing which manager owns the data.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Find records across the catalog and inspect relationship context without guessing which manager owns the data.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1080,6 +951,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Global Search and Relationships UI</strong>: Current qualified UI reference for the Global Search and Relationships chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Global Search and Relationships</strong> is the cross-catalog search surface. Use it when you know a title, party, identifier, contract number, release, document, or asset detail but do not remember which workspace owns the record.</p>
@@ -1092,12 +965,17 @@
         </ul>
         <p>A practical example: if a royalty question starts from a customer name, search the name, open the Party result, inspect linked contracts, inspect rights from those contracts, and then open the related track or invoice workspace. That is faster and safer than opening every manager manually and hoping the same name appears.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='gs1-metadata'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>GS1 Metadata</h2>
-                  <p class='summary'>How the GS1 workflow connects catalog data, grouped product editing, and verified workbook export.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the GS1 workflow connects catalog data, grouped product editing, and verified workbook export.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1105,6 +983,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>GS1 Metadata UI</strong>: Current qualified UI reference for the GS1 Metadata chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The GS1 Metadata dialog turns catalog data into a structured GS1 workflow. It can be opened for a single track or for a selected batch, and it groups the current selection into one or more final product rows depending on release context.</p>
@@ -1116,12 +996,17 @@
         </ul>
         <p>Use <strong>Save</strong> to keep GS1 data in the catalog, <strong>Export Current…</strong> to write the active product, or <strong>Export Batch…</strong> to generate a full workbook from the selected set. If storage needs change later, the saved template can be converted between database and managed-file storage without reselecting the original source workbook.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='metadata-dates'>
                   <p class='section-label'>Part 4: Releases and Registries</p>
                   <h2>Date Picking</h2>
-                  <p class='summary'>How date selection works for release dates and custom date fields.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How date selection works for release dates and custom date fields.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1130,17 +1015,24 @@
           <p class="help-screenshot-caption"><strong>Date Picking UI</strong>: Current qualified UI reference for the Date Picking chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
 
+                  </div>
+
 
         <p>The app uses calendar pickers for release dates and date-based custom fields. The picker lets you select a date, clear a date where supported, and return the result in ISO <code>yyyy-MM-dd</code> format.</p>
         <p>Release dates can affect generated ISRC previews when the option to use the release year is enabled. For example, if your ISRC generation settings use the release year, changing the release date can change the previewed ISRC year portion before the track is saved. That is why the date picker appears in entry and edit workflows rather than being a cosmetic calendar control.</p>
         <p>Use the calendar when accuracy matters, and clear the date only when the workflow allows an unknown or intentionally blank date. If a date appears wrong after import, first check whether the source file used a different format, then normalize the value in the relevant editor or import mapping before exporting downstream documents.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='contract-templates'>
                   <p class='section-label'>Part 5: Repertoire, Rights, and Assets</p>
                   <h2>Contract Template Workspace</h2>
-                  <p class='summary'>Create reusable contract templates and generated document patterns without confusing templates with signed agreements.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Create reusable contract templates and generated document patterns without confusing templates with signed agreements.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1148,6 +1040,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Contract Template Workspace UI</strong>: Current qualified UI reference for the Contract Template Workspace chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The <strong>Contract Template Workspace</strong> is for reusable document preparation patterns. A template is not a signed contract; it is a controlled starting point for documents that later become agreement records, drafts, amendments, or supporting files.</p>
@@ -1159,12 +1053,17 @@
         </ul>
         <p>Use this workspace when you want repeatability. Use Contract Manager when you are recording a real agreement, its parties, effective dates, obligations, documents, and lifecycle state.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='assets-deliverables'>
                   <p class='section-label'>Part 5: Repertoire, Rights, and Assets</p>
                   <h2>Deliverables and Asset Versions</h2>
-                  <p class='summary'>Track masters, artwork, alternates, derivatives, approvals, and primary versions as managed catalog assets.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Track masters, artwork, alternates, derivatives, approvals, and primary versions as managed catalog assets.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1172,6 +1071,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Deliverables and Asset Versions UI</strong>: Current qualified UI reference for the Deliverables and Asset Versions chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Deliverables and Asset Versions</strong> is the asset registry for files that matter after basic track entry. It covers masters, alternate masters, artwork variants, delivery files, derivatives, approved versions, and lineage context.</p>
@@ -1184,12 +1085,17 @@
         </ul>
         <p>A common workflow is: attach or import the source master, create a delivery derivative, inspect the derivative ledger, approve the correct version, and then use Quality Dashboard or export reporting to verify that the release has the files it needs.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='accounting-royalties'>
                   <p class='section-label'>Part 5: Repertoire, Rights, and Assets</p>
                   <h2>Accounting and Royalties</h2>
-                  <p class='summary'>Issue invoices, record payments, post credits, calculate royalties, generate statements, and settle payouts through ledger-backed workflows.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Issue invoices, record payments, post credits, calculate royalties, generate statements, and settle payouts through ledger-backed workflows.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1197,6 +1103,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Accounting and Royalties UI</strong>: Current qualified UI reference for the Accounting and Royalties chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The accounting workspace connects catalog records to financial actions. It is not a general bookkeeping package, but it is strict about the pieces it does manage: invoices, payments, credits, royalty calculations, statements, payouts, reports, and the ledger transactions that prove those actions balance.</p>
@@ -1221,12 +1129,17 @@
         </ol>
         <p><strong>Troubleshooting</strong>: if a workflow says information is missing, update the source Party, contract, work, or track record first. If a financial command already exists, use the appropriate correction flow instead of overwriting past ledger facts. If a command appears to have run twice, inspect the idempotent command log before changing amounts.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='repertoire-knowledge'>
                   <p class='section-label'>Part 5: Repertoire, Rights, and Assets</p>
                   <h2>Works, Rights, and Contracts</h2>
-                  <p class='summary'>How the app expands beyond recordings into a connected repertoire, rights, and agreement system.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the app expands beyond recordings into a connected repertoire, rights, and agreement system.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1234,6 +1147,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Works, Rights, and Contracts UI</strong>: Current qualified UI reference for the Works, Rights, and Contracts chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app models more than recordings and releases. It treats the broader catalog as a connected knowledge system so operational, legal, and creative context can live in the same place.</p>
@@ -1253,12 +1168,17 @@
         </ul>
         <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='storage-modes'>
                   <p class='section-label'>Part 6: Import, Export, and Storage</p>
                   <h2>File Storage Modes</h2>
-                  <p class='summary'>How database-backed and managed-file-backed attachments work across the catalog, and how conversions stay backward-safe.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How database-backed and managed-file-backed attachments work across the catalog, and how conversions stay backward-safe.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1266,6 +1186,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>File Storage Modes UI</strong>: Current qualified UI reference for the File Storage Modes chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app supports two storage modes for file-backed records across the catalog.</p>
@@ -1280,12 +1202,17 @@
         </ul>
         <p>The storage layer preserves the file bytes plus catalog metadata such as filename, MIME type, size, and checksums where supported. Format-aware tag writing happens during catalog-backed audio export, not during storage conversion itself, so changing storage mode never silently rewrites the managed source file.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='conversion'>
                   <p class='section-label'>Part 6: Import, Export, and Storage</p>
                   <h2>Template Conversion</h2>
-                  <p class='summary'>Load rigid CSV, XLSX, or repeat-node XML templates, map either source files or current-profile track rows into them, preview the real output, and export a faithful new artifact.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Load rigid CSV, XLSX, or repeat-node XML templates, map either source files or current-profile track rows into them, preview the real output, and export a faithful new artifact.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1293,6 +1220,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Template Conversion UI</strong>: Current qualified UI reference for the Template Conversion chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>File &gt; Conversion…</strong> is the template-driven export workflow for rigid third-party import sheets and registration files. It is designed for real-world cases where an organization gives you a fixed CSV, XLSX, or XML structure and expects your output to match that structure closely. A common example is preparing upload sheets for PRO or collection-society registration work, such as SENA-style work registration spreadsheets.</p>
@@ -1307,12 +1236,17 @@
         </ul>
         <p>This workflow is separate from plain external audio conversion. Template Conversion is for structured registration and exchange files, not for rewriting media containers. It also differs from exchange import: exchange import writes into the catalog, while template conversion compiles catalog or source-file data into an external target template and writes a new file only. It is template-and-mapping driven rather than being a hardcoded direct integration for any single PRO.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='exchange-formats'>
                   <p class='section-label'>Part 6: Import, Export, and Storage</p>
                   <h2>Exchange Formats</h2>
-                  <p class='summary'>How the app moves metadata in and out safely through exchange formats built for both daily operations and durable archives.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the app moves metadata in and out safely through exchange formats built for both daily operations and durable archives.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1320,6 +1254,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Exchange Formats UI</strong>: Current qualified UI reference for the Exchange Formats chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The exchange layer is designed for real catalog portability. Whether you are sharing data, taking a structured backup, preparing downstream workflows, or moving a project between systems, the app gives you more than a single export button.</p>
@@ -1340,12 +1276,17 @@
         </ul>
         <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, mapping, packaging, export, extraction, and template-conversion export all run in the background so larger jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> and <strong>Template Conversion</strong> in this manual.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='import-workflows'>
                   <p class='section-label'>Part 6: Import, Export, and Storage</p>
                   <h2>Import and Merge Workflows</h2>
-                  <p class='summary'>How exchange import, XML import, and audio-tag workflows differ, and how matching, merge, mapping, and dry runs actually work.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How exchange import, XML import, and audio-tag workflows differ, and how matching, merge, mapping, and dry runs actually work.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1353,6 +1294,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Import and Merge Workflows UI</strong>: Current qualified UI reference for the Import and Merge Workflows chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app has two catalog ingest surfaces plus audio-tag import: exchange import for structured rows, packages, and supported XML shapes; and audio-tag import for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
@@ -1372,12 +1315,17 @@
         <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
         <p>Keep the current limits in mind: blob custom fields are not tabular import targets, JSON and ZIP package imports do not use CSV delimiter controls because their source structure is already defined, standard exchange <code>dry_run</code> is a conservative preflight rather than a full validation engine, and matched release rows can be updated from imported release data.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='audio-authenticity'>
                   <p class='section-label'>Part 7: Publishing and Authenticity</p>
                   <h2>Audio Authenticity</h2>
-                  <p class='summary'>Export direct master authenticity copies, export provenance-only derivatives, manage signing keys, and verify authenticity honestly inside the catalog.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Export direct master authenticity copies, export provenance-only derivatives, manage signing keys, and verify authenticity honestly inside the catalog.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1385,6 +1333,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Audio Authenticity UI</strong>: Current qualified UI reference for the Audio Authenticity chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The audio authenticity workflow combines two layers: a compact keyed watermark embedded into exported audio plus an Ed25519-signed manifest that carries the real authenticity claim. The watermark links the file back to the catalog record; the signature proves which manifest was issued.</p>
@@ -1400,12 +1350,17 @@
         <p>The separate <strong>Registry SHA-256 Key</strong> in the Code Registry Workspace is <strong>not</strong> part of this authenticity system. It does not replace watermark keys, authenticity signing keys, or the signed provenance workflow described here.</p>
         <p>Recipient-specific forensic watermarking for leak tracing is a separate managed export workflow. It remains distinct from authenticity: authenticity proves signed linkage to a canonical master record, while forensic delivery exports focus on tracing shared copies. Forensic exports support WAV plus managed lossy delivery formats, include a SoundCloud-specific export path, and report verified, likely, low-confidence, and not-found evidence bands instead of treating every degraded score as a clean negative.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='soundcloud-publishing'>
                   <p class='section-label'>Part 7: Publishing and Authenticity</p>
                   <h2>SoundCloud Publishing</h2>
-                  <p class='summary'>Prepare, link, upload, update, compare, and review SoundCloud publications safely from catalog tracks.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Prepare, link, upload, update, compare, and review SoundCloud publications safely from catalog tracks.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1413,6 +1368,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>SoundCloud Publishing UI</strong>: Current qualified UI reference for the SoundCloud Publishing chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The SoundCloud workflow is a manual publishing and update surface for catalog tracks. It is designed to make publishing safe, explicit, and reversible in the catalog record without exposing credentials or skipping preflight review.</p>
@@ -1470,12 +1427,17 @@
           <li><strong>Rate limits</strong>: known SoundCloud rate-limit state is shown as a warning or error depending on whether the remaining quota is uncertain or explicitly exhausted.</li>
         </ul>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='background-tasks'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Background Tasks</h2>
-                  <p class='summary'>How the app keeps long operations responsive and safe without risking the catalog database.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How the app keeps long operations responsive and safe without risking the catalog database.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1483,6 +1445,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Background Tasks UI</strong>: Current qualified UI reference for the Background Tasks chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>Long-running operations run outside the UI thread so the workspace stays responsive while real work is happening.</p>
@@ -1496,12 +1460,17 @@
         </ul>
         <p>If a background task fails, the app reports it clearly, logs the details, and rolls database work back cleanly. The result is a system that feels responsive without becoming fragile.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='quality-dashboard'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Quality Dashboard</h2>
-                  <p class='summary'>How to audit the profile for real operational issues and move directly from findings to fixes.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How to audit the profile for real operational issues and move directly from findings to fixes.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1509,6 +1478,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Quality Dashboard UI</strong>: Current qualified UI reference for the Quality Dashboard chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The <strong>Data Quality Dashboard</strong> is designed as an operational review surface, not just a validator. It scans the active profile for issues that can materially affect catalog trust, export readiness, delivery, or rights clarity.</p>
@@ -1522,12 +1493,17 @@
         </ul>
         <p>Quality scans run on demand in the background and are meant to help you move from problem detection to action quickly. Use Diagnostics when the question is about storage health, schema integrity, history artifacts, or managed files rather than catalog content itself.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='history'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Undo History and Snapshots</h2>
-                  <p class='summary'>How to protect your work with undo, redo, snapshots, and restore paths built for real catalog operations.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>How to protect your work with undo, redo, snapshots, and restore paths built for real catalog operations.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1535,6 +1511,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Undo History and Snapshots UI</strong>: Current qualified UI reference for the Undo History and Snapshots chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The app includes a persistent history system because catalog work should be recoverable. That matters especially for imports, large edits, settings changes, migrations, and file-backed actions.</p>
@@ -1552,12 +1530,17 @@
         </ul>
         <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. Manual snapshots and protected restore points stay protected by default, while automatic cleanup focuses on safe auto-generated artifacts only. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='diagnostics'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Diagnostics</h2>
-                  <p class='summary'>Use diagnostics to verify the health of the application, the active profile, and the managed files around it.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Use diagnostics to verify the health of the application, the active profile, and the managed files around it.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1565,6 +1548,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Diagnostics UI</strong>: Current qualified UI reference for the Diagnostics chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly. Use it when the issue may involve storage, schema, managed files, history artifacts, migration state, or catalog cleanup follow-up rather than day-to-day track entry.</p>
@@ -1578,12 +1563,17 @@
         </ul>
         <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned. If a legacy app-data layout is detected, Diagnostics can guide a staged migration into the preferred app-named folder structure without deleting the legacy copy. Migration will not start while background tasks are still running, closes the active managed profile before copying, stages the new layout first, rewrites known internal paths, verifies the migrated databases, and only then switches the app over to the preferred root. If the preferred root is already valid, the app can adopt it directly, and if a preserved staged migration is still valid, the app can resume from that stage instead of starting over.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='application-log'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Application Log</h2>
-                  <p class='summary'>Browse logs and use privacy-safe crash and bug reporting for troubleshooting.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Browse logs and use privacy-safe crash and bug reporting for troubleshooting.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1591,6 +1581,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Application Log UI</strong>: Current qualified UI reference for the Application Log chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Application Log window lets you inspect the local log files the app writes while it runs.</p>
@@ -1602,16 +1594,30 @@
           <li><strong>Report a Bug…</strong>: opens a manual report workflow that collects your summary, description, reproduction steps, expected result, and actual result, then shows a sanitised preview before anything is submitted.</li>
         </ul>
         <p>Use logs together with Diagnostics when you need to understand what happened during imports, restores, settings changes, publishing, conversion, or file-management actions. The readable log is usually enough for normal support notes. The trace log is more detailed and is useful when a background task, update check, SoundCloud workflow, or repair action needs a precise event trail.</p>
-        <p>If the previous app session ended without a clean shutdown, startup asks whether you want to review a crash report. Crash and manual bug reports use the same pipeline: the app builds a structured GitHub issue, sanitises the payload locally, shows the exact Markdown preview, lets you copy it, and only submits after you press <strong>Submit Report</strong>. Installed release builds can submit without GitHub login only when they include a public HTTPS report proxy endpoint; the app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. If no secure report proxy is configured or the app is offline, the report is saved under the app data reports folder for later review. Repeated real proxy submission failures can trigger a short cooldown, but missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
+        <h3>Automatic Reporting</h3>
+        <p>Automatic reporting means a packaged app build can detect that the previous session ended without a clean shutdown and offer to prepare a crash report the next time it starts. Source-tree and unfrozen development runs skip this startup crash-report check so normal code restarts do not create repeated prompts. The app does not send reports silently. In packaged builds, startup asks whether you want to review the crash report, then opens the same privacy-safe report workflow used by <strong>Help &gt; Report a Bug…</strong>.</p>
+        <ul>
+          <li><strong>Crash detection</strong>: an unclean shutdown can seed a crash report with app version, platform, recent safe log context, and the detected failure state.</li>
+          <li><strong>Manual reports</strong>: <strong>Report a Bug…</strong> collects your summary, description, reproduction steps, expected result, and actual result.</li>
+          <li><strong>Preview first</strong>: both paths build a structured GitHub issue, sanitise the payload locally, show the exact Markdown preview, and let you copy it before submission.</li>
+          <li><strong>Submit Report</strong>: submission happens only after you press this button. If a configured report proxy accepts the payload, it can create the GitHub issue for you without requiring a local GitHub login.</li>
+          <li><strong>Local fallback</strong>: if no secure proxy is configured, the app is offline, the proxy is rate-limited, or submission fails, the sanitised report is saved under the app data reports folder for later review.</li>
+        </ul>
+        <p>Installed release builds can include a public HTTPS report proxy endpoint through the bundled <code>resources/reporting.json</code> file. That file is generated from release configuration and must not contain credentials; it only tells the app where the server-side reporting endpoint lives. Environment configuration can override the bundled file for development or support testing. The app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. Repeated real proxy submission failures can trigger a short cooldown, but missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
         <p>The sanitiser redacts tokens, passwords, API keys, connection strings, email addresses, phone numbers, local user names, and private home-folder paths. Reports must not be used to send catalog databases, raw royalty or contract data, private documents, or audio files. If a workflow depends on sensitive catalog records, describe the steps and visible symptoms rather than pasting private source data.</p>
         <p>Do not edit logs as a way to fix the catalog. Logs are evidence. If a log points to a database, managed-file, or settings problem, use the relevant workflow to repair the source issue and then keep the log as the explanation of what happened.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='application-updates'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Application Updates</h2>
-                  <p class='summary'>Check for new versions, read release notes in the app, and install packaged updates safely.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Check for new versions, read release notes in the app, and install packaged updates safely.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1619,6 +1625,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Application Updates UI</strong>: Current qualified UI reference for the Application Updates chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>Use <strong>Help &gt; Check for Updates…</strong> to compare the running version with the latest published release manifest.</p>
@@ -1634,12 +1642,17 @@
         </ul>
         <p>The updater never modifies the catalog profile database. It only replaces the packaged application bundle or executable, while profile data, settings, logs, and managed media remain in the app data folders.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='application-storage-admin'>
                   <p class='section-label'>Part 8: Operations and Recovery</p>
                   <h2>Application Storage Admin</h2>
-                  <p class='summary'>Inspect and safely clean application-wide retained storage without touching active catalog data.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Inspect and safely clean application-wide retained storage without touching active catalog data.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1647,6 +1660,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Application Storage Admin UI</strong>: Current qualified UI reference for the Application Storage Admin chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p><strong>Help &gt; Application Storage Admin…</strong> opens the maintenance surface for application-wide retained storage. It is separate from profile diagnostics because it focuses on app support folders rather than editing catalog metadata.</p>
@@ -1659,12 +1674,17 @@
         </ul>
         <p>Storage Admin is deliberately conservative. It exists to make cleanup understandable, not to hide destructive file operations behind a single mystery button.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='layout-action-ribbon'>
                   <p class='section-label'>Part 9: Settings and Reference</p>
                   <h2>Layout and Action Ribbon</h2>
-                  <p class='summary'>Customize the quick-action ribbon, saved layouts, table columns, row heights, and workspace visibility without changing catalog data.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Customize the quick-action ribbon, saved layouts, table columns, row heights, and workspace visibility without changing catalog data.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1672,6 +1692,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Layout and Action Ribbon UI</strong>: Current qualified UI reference for the Layout and Action Ribbon chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The layout tools change how the workspace is presented. They do not change catalog records, identifiers, rights, contracts, or files. Use them to make the app faster for your daily work.</p>
@@ -1685,12 +1707,17 @@
         </ul>
         <p>A useful pattern is to keep one layout for entry, one for release/product review, one for contracts and rights, and one for accounting. Switching layouts changes what you see first, while the same profile database remains active underneath.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='settings'>
                   <p class='section-label'>Part 9: Settings and Reference</p>
                   <h2>Application Settings</h2>
-                  <p class='summary'>The central settings workspace for branding, registration values, snapshots, retention posture, GS1 defaults, and appearance.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>The central settings workspace for branding, registration values, snapshots, retention posture, GS1 defaults, and appearance.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1698,6 +1725,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Application Settings UI</strong>: Current qualified UI reference for the Application Settings chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
@@ -1712,12 +1741,17 @@
         <p>If you leave the window-title field blank, the app uses the current owner Party company name automatically when one is available and otherwise falls back to the application name. Entering a custom value acts as an explicit override and is preserved until you clear it again. Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
         <p>All bundled application sound effects were designed and created by <strong>Aeon Cosmowyn</strong>.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='theme-settings'>
                   <p class='section-label'>Part 9: Settings and Reference</p>
                   <h2>Theme Settings</h2>
-                  <p class='summary'>Use the full visual theme builder to style the entire app, then finish the rare edge cases with advanced QSS.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Use the full visual theme builder to style the entire app, then finish the rare edge cases with advanced QSS.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1725,6 +1759,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>Theme Settings UI</strong>: Current qualified UI reference for the Theme Settings chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The Theme page is a full visual theme builder intended to give you real control over the application’s look and feel without forcing you into handwritten stylesheets for normal customization.</p>
@@ -1747,12 +1783,17 @@
         </ul>
         <p>Most users should begin with the visual controls and only use Advanced QSS for the last few selectors that truly need custom rules. The selector reference and autocomplete tools exist to make that final layer safe and efficient rather than mysterious. Media badge icons are intentionally stored outside the reusable theme library so you can refine catalog file indicators without overwriting a saved theme preset, and the hint/preview controls stay builder-only so they do not change the saved preset payload.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
                 <section class='chapter' id='about'>
                   <p class='section-label'>Part 9: Settings and Reference</p>
                   <h2>About and Support Information</h2>
-                  <p class='summary'>Where to find version information, local support resources, and the built-in tools that help you trust the current workspace.</p>
+
+                  <div class='chapter-lead chapter-lead-with-media'>
+                    <div class='chapter-lead-text'>
+                      <p class='summary'>Where to find version information, local support resources, and the built-in tools that help you trust the current workspace.</p>
+                    </div>
 
         <div class="help-screenshot">
           <p class="help-screenshot-image">
@@ -1760,6 +1801,8 @@
           </p>
           <p class="help-screenshot-caption"><strong>About and Support Information UI</strong>: Current qualified UI reference for the About and Support Information chapter. This image is regenerated by the Help documentation qualification workflow.</p>
         </div>
+
+                  </div>
 
 
         <p>The About dialog summarizes the current version, the local-first design of the app, and where the active workspace data lives on disk.</p>
@@ -1775,6 +1818,7 @@
         </ul>
         <p>If you are reporting a problem, include the app version, the active profile path if it is relevant, the recent action you performed, and whether Diagnostics or Application Log reported an error. That gives engineering enough context to reproduce the issue without guessing which catalog or build was used.</p>
 
+                  <p class='chapter-top-link'><a href='#contents'>Back to Table of Contents</a></p>
                 </section>
 
 </body>

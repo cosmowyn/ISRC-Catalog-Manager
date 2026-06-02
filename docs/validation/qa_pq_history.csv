@@ -1,0 +1,2 @@
+timestamp,source,branch,commit_sha,app_loc,app_loc_delta,total_coverage,statement_coverage,branch_coverage,total_tests,passed_tests,failed_tests,partial_tests,total_deviations,open_deviations,pending_manual_deviations,traceability_rows,traceability_covered,visual_checks_total,visual_checks_failed
+2026-06-02T18:22:14Z,local-seed,main,e358726a6e9ff1a07a3c39c99529fd65ae389cce,183406,0,90.0119,92.6514,81.0187,14,12,0,2,54,0,54,413,361,64,0

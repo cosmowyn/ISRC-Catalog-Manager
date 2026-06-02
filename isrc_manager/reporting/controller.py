@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,10 @@ def initialize_reporting(app: Any) -> None:
             logger=logging.getLogger("ISRCManager.reporting"),
         )
         app.reporting_service = service
-        app._pending_crash_report_session = service.start_session()
+        app._crash_report_startup_checks_enabled = _startup_crash_reports_enabled()
+        app._pending_crash_report_session = (
+            service.start_session() if app._crash_report_startup_checks_enabled else None
+        )
     except Exception:
         logger = getattr(app, "logger", logging.getLogger("ISRCManager"))
         logger.exception("Crash reporting initialization failed.")
@@ -34,6 +38,9 @@ def initialize_reporting(app: Any) -> None:
 
 
 def prompt_for_pending_crash_report(app: Any) -> None:
+    if not _startup_crash_reports_enabled(app):
+        app._pending_crash_report_session = None
+        return
     crash_session = getattr(app, "_pending_crash_report_session", None)
     if not isinstance(crash_session, CrashSession):
         return
@@ -87,12 +94,16 @@ def open_bug_report_dialog(app: Any) -> None:
 
 
 def mark_clean_shutdown(app: Any) -> None:
+    if not _startup_crash_reports_enabled(app):
+        return
     service = _service(app)
     if service is not None:
         service.mark_clean_shutdown()
 
 
 def record_app_event(app: Any, event: str, message: str) -> None:
+    if not _startup_crash_reports_enabled(app):
+        return
     service = _service(app)
     if service is not None:
         service.record_event(event=event, message=message, workflow=_active_workflow(app))
@@ -136,6 +147,13 @@ def _show_submission_result(app: Any, result: ReportSubmissionResult) -> None:
 def _service(app: Any) -> ReportingService | None:
     service = getattr(app, "reporting_service", None)
     return service if isinstance(service, ReportingService) else None
+
+
+def _startup_crash_reports_enabled(app: Any | None = None) -> bool:
+    configured = getattr(app, "_crash_report_startup_checks_enabled", None)
+    if isinstance(configured, bool):
+        return configured
+    return bool(getattr(sys, "frozen", False))
 
 
 def _active_workflow(app: Any) -> str:

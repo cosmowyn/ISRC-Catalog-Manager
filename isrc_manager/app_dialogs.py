@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import socket
 import urllib.error
@@ -50,6 +51,16 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from PySide6.QtWebEngineCore import QWebEnginePage
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # pragma: no cover - environment-specific fallback
+    QWebEnginePage = None
+    QWebEngineView = None
+if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":
+    QWebEnginePage = None
+    QWebEngineView = None
 
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
@@ -2601,6 +2612,40 @@ class ReleaseNotesDialog(QDialog):
             self.browser.setPlainText(markdown)
 
 
+class _HelpContentsWebPage(QWebEnginePage if QWebEnginePage is not None else object):
+    """WebEngine page that keeps Help navigation internal and external links external."""
+
+    def __init__(self, dialog: "HelpContentsDialog", parent=None):
+        if QWebEnginePage is None:  # pragma: no cover - runtime guard
+            return
+        super().__init__(parent)
+        self._dialog = dialog
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):  # pragma: no cover - Qt
+        if QWebEnginePage is None:
+            return True
+        scheme = str(url.scheme() or "").strip().lower()
+        if url.isLocalFile() or scheme in {
+            "",
+            "about",
+            "blob",
+            "chrome",
+            "chrome-error",
+            "data",
+            "devtools",
+            "qrc",
+        }:
+            return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+        if is_main_frame:
+            open_external_url(
+                url,
+                source="HelpContentsDialog.anchorClicked",
+                metadata={"topic_id": self._dialog._current_topic_id or ""},
+            )
+            return False
+        return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+
+
 class HelpContentsDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)
@@ -2662,9 +2707,7 @@ class HelpContentsDialog(QDialog):
         self.chapter_list.setObjectName("helpChapterList")
         splitter.addWidget(self.chapter_list)
 
-        self.browser = QTextBrowser(self)
-        self.browser.setOpenExternalLinks(False)
-        self.browser.setOpenLinks(False)
+        self.browser = self._create_help_browser()
         splitter.addWidget(self.browser)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -2688,7 +2731,8 @@ class HelpContentsDialog(QDialog):
         self.open_file_button.clicked.connect(self._open_help_file)
         self.close_button.clicked.connect(self.close)
         self.chapter_list.currentItemChanged.connect(self._on_chapter_selection_changed)
-        self.browser.anchorClicked.connect(self._on_anchor_clicked)
+        if isinstance(self.browser, QTextBrowser):
+            self.browser.anchorClicked.connect(self._on_anchor_clicked)
         self.find_shortcut = QShortcut(QKeySequence.Find, self)
         self.find_shortcut.activated.connect(
             lambda: (
@@ -2699,18 +2743,44 @@ class HelpContentsDialog(QDialog):
 
         self.refresh_help_source()
 
+    def _create_help_browser(self):
+        if QWebEngineView is not None and QWebEnginePage is not None:
+            view = QWebEngineView(self)
+            view.setObjectName("helpHtmlView")
+            view.setPage(_HelpContentsWebPage(self, view))
+            view.loadFinished.connect(self._on_help_web_load_finished)
+            return view
+
+        browser = QTextBrowser(self)
+        browser.setObjectName("helpHtmlView")
+        browser.setOpenExternalLinks(False)
+        browser.setOpenLinks(False)
+        return browser
+
+    def _uses_web_engine(self) -> bool:
+        return QWebEngineView is not None and isinstance(self.browser, QWebEngineView)
+
     def refresh_help_source(self) -> None:
         help_path = self.app._ensure_help_file()
         try:
             self._help_html = help_path.read_text(encoding="utf-8")
         except Exception:
             self._help_html = self.app._help_html()
-        self.browser.document().setBaseUrl(
-            QUrl.fromLocalFile(str(help_path.parent.resolve()) + "/")
-        )
-        self.browser.setHtml(self._help_html)
+        base_url = QUrl.fromLocalFile(str(help_path.parent.resolve()) + "/")
+        self._set_help_html(base_url)
         self._rebuild_chapter_index()
         self.open_topic(self._current_topic_id or "overview", focus_search=False)
+
+    def _set_help_html(self, base_url: QUrl) -> None:
+        if self._uses_web_engine():
+            self.browser.setHtml(self._help_html, base_url)
+            return
+        self.browser.document().setBaseUrl(base_url)
+        self.browser.setHtml(self._help_html)
+
+    def _on_help_web_load_finished(self, ok: bool) -> None:
+        if ok:
+            self._scroll_to_anchor(self._current_topic_id or "overview")
 
     def _rebuild_chapter_index(self, query: str = "") -> None:
         needle = (query or "").strip().lower()
@@ -2765,7 +2835,10 @@ class HelpContentsDialog(QDialog):
     def _on_anchor_clicked(self, url: QUrl) -> None:
         fragment = (url.fragment() or "").strip()
         if fragment:
-            self.open_topic(fragment, focus_search=False)
+            if fragment in HELP_CHAPTERS_BY_ID:
+                self.open_topic(fragment, focus_search=False)
+            else:
+                self._scroll_to_anchor(fragment)
             return
         open_external_url(
             url,
@@ -2774,11 +2847,17 @@ class HelpContentsDialog(QDialog):
         )
 
     def _move_search_to_start(self) -> None:
+        if self._uses_web_engine():
+            self.browser.page().runJavaScript("window.scrollTo(0, 0);")
+            return
         cursor = self.browser.textCursor()
         cursor.movePosition(QTextCursor.Start)
         self.browser.setTextCursor(cursor)
 
     def _move_search_to_end(self) -> None:
+        if self._uses_web_engine():
+            self.browser.page().runJavaScript("window.scrollTo(0, document.body.scrollHeight);")
+            return
         cursor = self.browser.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.browser.setTextCursor(cursor)
@@ -2790,6 +2869,13 @@ class HelpContentsDialog(QDialog):
                 "Type text into the search field to search within the help file."
             )
             return False
+        if self._uses_web_engine():
+            if backward and QWebEnginePage is not None:
+                self.browser.findText(text, QWebEnginePage.FindFlag.FindBackward)
+            else:
+                self.browser.findText(text)
+            self.match_status_label.setText(f"Searching for: {text}")
+            return True
         flags = QTextDocument.FindBackward if backward else None
         found = self.browser.find(text, flags) if flags is not None else self.browser.find(text)
         if not found:
@@ -2826,11 +2912,30 @@ class HelpContentsDialog(QDialog):
                 self.chapter_list.setCurrentRow(index)
                 self.chapter_list.blockSignals(False)
                 break
-        self.browser.scrollToAnchor(chapter_id)
+        self._scroll_to_anchor(chapter_id)
         self.match_status_label.setText(HELP_CHAPTERS_BY_ID[chapter_id].summary)
         if focus_search:
             self.search_field.setFocus(Qt.OtherFocusReason)
             self.search_field.selectAll()
+
+    def _scroll_to_anchor(self, anchor_id: str) -> None:
+        clean_anchor = str(anchor_id or "").strip()
+        if not clean_anchor:
+            return
+        if self._uses_web_engine():
+            anchor_literal = json.dumps(clean_anchor)
+            self.browser.page().runJavaScript("""
+                (function() {
+                  var target = document.getElementById(%s);
+                  if (target) {
+                    target.scrollIntoView({block: 'start'});
+                    return true;
+                  }
+                  return false;
+                })();
+                """ % anchor_literal)
+            return
+        self.browser.scrollToAnchor(clean_anchor)
 
     def _open_help_file(self) -> None:
         self.app._open_local_path(self.app._ensure_help_file(), "Open Help File")

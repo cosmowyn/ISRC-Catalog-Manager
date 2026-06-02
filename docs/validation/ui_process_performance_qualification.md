@@ -313,9 +313,20 @@ The UI PQ suite writes:
 - `artifacts/ui_pq/traceability_matrix.csv`
 - `artifacts/ui_pq/visual/visual_manifest.json`
 - `artifacts/ui_pq/visual/generated_output_manifest.json`
+- `docs/validation/qa_pq_history.csv`
 
 The visual manifests record screenshot capture metadata, baseline comparison results, generated
 report/document comparisons, and PDF structural validation profiles.
+
+The static companion dashboard in `docs/validation/qa_pq_dashboard.html` summarizes those
+artifacts alongside `coverage.json`. It opens directly from the repository with an embedded
+snapshot and can reload live artifact files when the checkout is served over HTTP.
+
+`docs/validation/qa_pq_history.csv` is append-only. Each recorded PQ/coverage run adds a timestamped
+summary row for overall coverage, branch coverage, PQ event outcomes, deviations, traceability,
+visual comparison failures, and runtime application LOC. Runtime LOC is counted from Python
+application sources under `isrc_manager` plus the root entry facade, excluding Help/manual content
+and documentation files, so it remains code context rather than a documentation-size proxy.
 
 ## 12. Current Implementation Notes
 
