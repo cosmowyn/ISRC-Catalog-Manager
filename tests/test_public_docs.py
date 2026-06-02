@@ -54,6 +54,7 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn('id="historyGraph"', dashboard)
         self.assertIn('id="historyGranularity"', dashboard)
         self.assertIn("renderHistory", dashboard)
+        self.assertIn("refreshHistoryFromCsv", dashboard)
         self.assertIn("reloadArtifactsButton", dashboard)
         self.assertIn("renderCharts", dashboard)
         self.assertIn("conic-gradient", dashboard)

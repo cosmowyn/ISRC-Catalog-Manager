@@ -1774,6 +1774,20 @@
       }
     }
 
+    async function refreshHistoryFromCsv() {
+      try {
+        const history = await fetchText(artifactPaths.history).then(parseCsv);
+        if (!history.length) return;
+        dashboardData = {...dashboardData, history};
+        render();
+        if (els.loadState.textContent === "Ready.") {
+          els.loadState.textContent = "Loaded dashboard history CSV.";
+        }
+      } catch (error) {
+        // The embedded history keeps the dashboard usable when the CSV cannot be fetched.
+      }
+    }
+
     document.getElementById("reloadArtifactsButton").addEventListener("click", loadLiveArtifacts);
     document.getElementById("resetSnapshotButton").addEventListener("click", () => {
       dashboardData = initialData;
@@ -1790,6 +1804,7 @@
     });
 
     render();
+    refreshHistoryFromCsv();
   </script>
 </body>
 </html>
