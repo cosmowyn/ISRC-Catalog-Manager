@@ -1,7 +1,7 @@
 {
-  "version": "5.0.3",
-  "released_at": "2026-06-01",
-  "summary": "bundle report proxy configuration",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v5.0.3.md",
+  "version": "5.0.4",
+  "released_at": "2026-06-02",
+  "summary": "Improve help manual layout and release badges",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v5.0.4.md",
   "minimum_supported_version": null
 }
