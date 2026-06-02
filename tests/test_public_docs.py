@@ -74,12 +74,16 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("conic-gradient", dashboard)
         self.assertIn("stacked-graph", dashboard)
         self.assertIn("qa_pq_history.csv", dashboard)
-        self.assertIn("../../coverage.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/evidence.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/deviations.csv", dashboard)
         self.assertIn("raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/", dashboard)
-        self.assertIn("coverage.json is not published", dashboard)
+        self.assertIn(
+            "Coverage is shown from the latest embedded dashboard snapshot.",
+            dashboard,
+        )
         self.assertIn("Could not load published artifacts", dashboard)
+        self.assertNotIn("../../coverage.json", dashboard)
+        self.assertNotIn("coverage.json is not published", dashboard)
         self.assertNotIn("python3 -m http.server", dashboard)
         self.assertNotIn("<script src=", dashboard)
         self.assertIn("qa_pq_dashboard.html", dashboard_entrypoint)

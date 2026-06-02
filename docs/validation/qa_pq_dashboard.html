@@ -791,7 +791,6 @@
       <section class="section">
         <h2>Artifact Inputs</h2>
         <ul class="artifact-paths">
-          <li title="coverage.json"><span class="artifact-label">Coverage</span><code>coverage.json</code></li>
           <li title="artifacts/ui_pq/evidence.json"><span class="artifact-label">PQ Evidence</span><code>artifacts/ui_pq/evidence.json</code></li>
           <li title="artifacts/ui_pq/help/help_coverage.json"><span class="artifact-label">Help Gate</span><code>artifacts/ui_pq/help/help_coverage.json</code></li>
           <li title="artifacts/ui_pq/deviations.csv"><span class="artifact-label">Deviations</span><code>artifacts/ui_pq/deviations.csv</code></li>
@@ -1053,7 +1052,6 @@
 
   <script>
     const artifactPaths = {
-      coverage: "../../coverage.json",
       evidence: "../../artifacts/ui_pq/evidence.json",
       help: "../../artifacts/ui_pq/help/help_coverage.json",
       deviations: "../../artifacts/ui_pq/deviations.csv",
@@ -1690,7 +1688,7 @@
       const totals = coverage.totals || {};
 
       return {
-        sourceLabel: "Live artifacts loaded",
+        sourceLabel: "Live UI/PQ artifacts loaded",
         generatedAt: new Date().toISOString(),
         history: files.history || [],
         coverage: {
@@ -1761,19 +1759,10 @@
       return response.text();
     }
 
-    async function fetchOptionalJson(path) {
-      try {
-        return await fetchText(path).then(JSON.parse);
-      } catch (error) {
-        return null;
-      }
-    }
-
     async function loadLiveArtifacts() {
       els.loadState.textContent = "Loading artifact files...";
       try {
-        const [coverage, evidence, help, deviations, traceability, visual, business, generated, history] = await Promise.all([
-          fetchOptionalJson(artifactPaths.coverage),
+        const [evidence, help, deviations, traceability, visual, business, generated, history] = await Promise.all([
           fetchText(artifactPaths.evidence).then(JSON.parse),
           fetchText(artifactPaths.help).then(JSON.parse),
           fetchText(artifactPaths.deviations).then(parseCsv),
@@ -1783,10 +1772,8 @@
           fetchText(artifactPaths.generated).then(JSON.parse),
           fetchText(artifactPaths.history).then(parseCsv).catch(() => initialData.history || [])
         ]);
-        dashboardData = snapshotFromArtifacts({coverage, evidence, help, deviations, traceability, visual, business, generated, history});
-        els.loadState.textContent = coverage
-          ? "Loaded live artifacts."
-          : "Loaded published UI/PQ artifacts. Coverage uses the embedded snapshot because coverage.json is not published.";
+        dashboardData = snapshotFromArtifacts({evidence, help, deviations, traceability, visual, business, generated, history});
+        els.loadState.textContent = "Loaded published UI/PQ artifacts. Coverage is shown from the latest embedded dashboard snapshot.";
         render();
       } catch (error) {
         els.loadState.textContent = `Could not load published artifacts: ${error.message}. The embedded snapshot is still shown.`;

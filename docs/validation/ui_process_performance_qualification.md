@@ -319,8 +319,8 @@ The visual manifests record screenshot capture metadata, baseline comparison res
 report/document comparisons, and PDF structural validation profiles.
 
 The static companion dashboard in `docs/validation/qa_pq_dashboard.html` summarizes those
-artifacts alongside `coverage.json`. It opens directly from the repository with an embedded
-snapshot and can reload live artifact files when the checkout is served over HTTP.
+artifacts and the embedded coverage snapshot. It opens directly from the repository and can reload
+published UI/PQ artifact files from GitHub Pages without requiring local server tooling.
 
 `docs/validation/qa_pq_history.csv` is append-only. Each recorded PQ/coverage run adds a timestamped
 summary row for overall coverage, branch coverage, PQ event outcomes, deviations, traceability,
