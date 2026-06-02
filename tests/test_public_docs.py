@@ -42,6 +42,14 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("primary user-facing manual", docs_hub)
         self.assertIn("integrated manual", readme)
 
+    def test_readme_links_to_live_qa_pq_dashboard_badge(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        readme = (repo_root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("[![QA/PQ Dashboard]", readme)
+        self.assertIn("https://img.shields.io/badge/QA%2FPQ-dashboard-live-success", readme)
+        self.assertIn("https://cosmowyn.github.io/ISRC-Catalog-Manager/validation/", readme)
+
     def test_qa_pq_dashboard_is_static_and_artifact_backed(self):
         repo_root = Path(__file__).resolve().parents[1]
         dashboard = (repo_root / "docs" / "validation" / "qa_pq_dashboard.html").read_text(

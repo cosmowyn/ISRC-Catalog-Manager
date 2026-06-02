@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/tag/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
 [![CI](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/cosmowyn/ISRC-Catalog-Manager/actions/workflows/ci.yml)
+[![QA/PQ Dashboard](https://img.shields.io/badge/QA%2FPQ-dashboard-live-success)](https://cosmowyn.github.io/ISRC-Catalog-Manager/validation/)
 [![Downloads](https://img.shields.io/github/downloads/cosmowyn/ISRC-Catalog-Manager/total?label=downloads)](https://github.com/cosmowyn/ISRC-Catalog-Manager/releases)
 [![Issues](https://img.shields.io/github/issues/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/issues)
 [![Stars](https://img.shields.io/github/stars/cosmowyn/ISRC-Catalog-Manager)](https://github.com/cosmowyn/ISRC-Catalog-Manager/stargazers)
