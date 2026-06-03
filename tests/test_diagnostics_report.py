@@ -391,6 +391,9 @@ def test_build_diagnostics_report_surfaces_warning_and_repair_paths(
         blank_target_count=2,
         conflicting_track_ids=[],
     )
+    raw_file_integrity_check = mock.Mock(
+        side_effect=AssertionError("diagnostics must use the active database connection")
+    )
     app = SimpleNamespace(
         conn=conn,
         data_root=tmp_path / "data",
@@ -398,9 +401,7 @@ def test_build_diagnostics_report_surfaces_warning_and_repair_paths(
         track_service=SimpleNamespace(resolve_media_path=lambda value: tmp_path / str(value)),
         license_service=SimpleNamespace(resolve_path=lambda value: tmp_path / str(value)),
         history_manager=history_manager,
-        database_maintenance=SimpleNamespace(
-            verify_integrity=lambda _path: "database disk image is malformed"
-        ),
+        database_maintenance=SimpleNamespace(verify_integrity=raw_file_integrity_check),
         storage_migration_service=storage_service,
         _app_version_text=lambda: "test-version",
         _history_snapshot_summary=lambda **kwargs: report._history_snapshot_summary(app, **kwargs),
@@ -433,7 +434,8 @@ def test_build_diagnostics_report_surfaces_warning_and_repair_paths(
     assert checks["Storage layout"]["status"] == "error"
     assert checks["Schema version"]["status"] == "warning"
     assert checks["Schema layout"]["status"] == "error"
-    assert checks["SQLite integrity"]["status"] == "error"
+    assert checks["SQLite integrity"]["status"] == "ok"
+    raw_file_integrity_check.assert_not_called()
     assert checks["Foreign-key consistency"]["status"] == "error"
     assert checks["Custom-value integrity"]["orphan_count"] == 4
     assert checks["Audio waveform cache"]["issue_count"] == 2

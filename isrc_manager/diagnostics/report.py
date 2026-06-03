@@ -88,6 +88,15 @@ def _legacy_promoted_field_repair_candidates(app, conn=None):
     return LegacyPromotedFieldRepairService(connection).inspect_candidates()
 
 
+def _sqlite_integrity_result(connection, database_maintenance, current_path: str) -> str:
+    if connection is not None:
+        row = connection.execute("PRAGMA integrity_check").fetchone()
+        return str(row[0]) if row else "unknown"
+    if database_maintenance is None or not current_path:
+        raise RuntimeError("No active profile is open.")
+    return str(database_maintenance.verify_integrity(current_path))
+
+
 def _diagnostics_managed_file_scan_counts(app, conn=None) -> dict[str, int]:
     connection = conn if conn is not None else app.conn
     if connection is None:
@@ -618,9 +627,11 @@ def _build_diagnostics_report(
 
     progress.set_message("Running SQLite integrity checks...")
     try:
-        if active_database_maintenance is None or not current_path:
-            raise RuntimeError("No active profile is open.")
-        result = active_database_maintenance.verify_integrity(current_path)
+        result = _sqlite_integrity_result(
+            connection,
+            active_database_maintenance,
+            current_path,
+        )
         status = "ok" if str(result).strip().lower() == "ok" else "error"
         add_check(
             "SQLite integrity",
