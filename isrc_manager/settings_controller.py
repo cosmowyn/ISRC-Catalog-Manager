@@ -35,6 +35,7 @@ from isrc_manager.services import GS1ProfileDefaults, OwnerPartySettings
 from isrc_manager.storage_sizes import format_budget_megabytes
 
 DATABASE_REMEMBER_PASSWORD_SETTING = "security/remember_database_password"
+SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING = "security/suppress_unencrypted_profile_warning"
 
 
 def _stored_window_title_override(app) -> str:
@@ -122,6 +123,10 @@ def _current_settings_values(app) -> dict[str, object]:
         app.settings.value(DATABASE_REMEMBER_PASSWORD_SETTING, False),
         default=False,
     )
+    suppress_unencrypted_profile_warnings = _coerce_bool(
+        app.settings.value(SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING, False),
+        default=False,
+    )
     return {
         "window_title": app.identity.get("window_title_override") or "",
         "effective_window_title": app.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
@@ -134,6 +139,7 @@ def _current_settings_values(app) -> dict[str, object]:
         "warning_sound_enabled": app_sound_settings[APP_SOUND_WARNING],
         "app_sound_settings": app_sound_settings,
         "remember_database_password": remember_database_password,
+        "suppress_unencrypted_profile_warnings": suppress_unencrypted_profile_warnings,
         "artist_code": app.load_artist_code(),
         "auto_snapshot_enabled": auto_snapshot_enabled,
         "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -404,6 +410,41 @@ def _apply_settings_changes(
                     ),
                     before_value=before_remember_database_password,
                     after_value=after_remember_database_password,
+                )
+            changed_count += 1
+
+        before_suppress_unencrypted_profile_warnings = _coerce_bool(
+            before_values.get("suppress_unencrypted_profile_warnings"),
+            default=False,
+        )
+        after_suppress_unencrypted_profile_warnings = _coerce_bool(
+            after_values.get("suppress_unencrypted_profile_warnings"),
+            default=False,
+        )
+        if (
+            after_suppress_unencrypted_profile_warnings
+            != before_suppress_unencrypted_profile_warnings
+        ):
+            app.settings.setValue(
+                SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING,
+                after_suppress_unencrypted_profile_warnings,
+            )
+            app.settings.sync()
+            app._log_event(
+                "settings.database_security",
+                "Unencrypted profile warning setting updated",
+                suppress_unencrypted_profile_warnings=(after_suppress_unencrypted_profile_warnings),
+            )
+            if app.history_manager is not None:
+                app.history_manager.record_setting_change(
+                    key="suppress_unencrypted_profile_warnings",
+                    label=(
+                        "Unencrypted Profile Warnings Disabled"
+                        if after_suppress_unencrypted_profile_warnings
+                        else "Unencrypted Profile Warnings Enabled"
+                    ),
+                    before_value=before_suppress_unencrypted_profile_warnings,
+                    after_value=after_suppress_unencrypted_profile_warnings,
                 )
             changed_count += 1
 
@@ -865,6 +906,9 @@ def open_settings_dialog(app, initial_focus: str | None = None):
         soundcloud_settings=before_values.get("soundcloud_settings"),
         soundcloud_actions=SoundCloudAppConnectionActions(app),
         remember_database_password=bool(before_values.get("remember_database_password", False)),
+        suppress_unencrypted_profile_warnings=bool(
+            before_values.get("suppress_unencrypted_profile_warnings", False)
+        ),
         database_password_change_callback=getattr(app, "change_database_password", None),
         party_service=app.party_service,
         parent=app,

@@ -295,7 +295,6 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
-from isrc_manager.draggable_label import DraggableLabel
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange import catalog_xml_controller
 from isrc_manager.exchange import controller as exchange_controller
@@ -1019,11 +1018,39 @@ class App(QMainWindow):
             title="Open Profile",
             description="Preparing profile database...",
         )
-        self.open_database(
-            last_db,
-            schema_prepared=startup_db_prepared,
-            progress_callback=self._startup_progress_callback(StartupPhase.LOADING_SERVICES),
-        )
+        startup_fallback_paths = [fallback_db, str(DB_PATH)]
+        if not startup_db_prepared and profile_session._startup_prepare_failure_matches(
+            self, last_db
+        ):
+            last_db, startup_db_prepared = profile_session._recover_startup_database_after_failure(
+                self,
+                failed_path=last_db,
+                fallback_paths=startup_fallback_paths,
+            )
+        try:
+            self.open_database(
+                last_db,
+                schema_prepared=startup_db_prepared,
+                progress_callback=self._startup_progress_callback(StartupPhase.LOADING_SERVICES),
+            )
+        except Exception as exc:
+            self.logger.exception("Startup profile open failed for %s: %s", last_db, exc)
+            try:
+                self._close_database_connection()
+            except Exception:
+                pass
+            failed_startup_path = last_db
+            last_db, startup_db_prepared = profile_session._recover_startup_database_after_failure(
+                self,
+                failed_path=failed_startup_path,
+                fallback_paths=startup_fallback_paths,
+                failure_reason=exc,
+            )
+            self.open_database(
+                last_db,
+                schema_prepared=startup_db_prepared,
+                progress_callback=self._startup_progress_callback(StartupPhase.LOADING_SERVICES),
+            )
 
         try:
             movable = self._catalog_header_state_manager(path=last_db).load_columns_movable_state(
@@ -2978,11 +3005,18 @@ class App(QMainWindow):
         *,
         user_message: str,
     ) -> None:
-        self.logger.error("%s: %s", title, failure.message)
+        detail = str(failure.message or "").strip() or "Background task failed."
+        if not str(failure.message or "").strip() and failure.traceback_text:
+            for line in str(failure.traceback_text or "").splitlines():
+                clean_line = line.strip()
+                if clean_line and not clean_line.startswith("Traceback"):
+                    detail = clean_line
+            detail = detail or "Background task failed."
+        self.logger.error("%s: %s", title, detail)
         if failure.traceback_text:
             self.logger.error("%s traceback:\n%s", title, failure.traceback_text)
         self._play_warning_sound()
-        QMessageBox.critical(self, title, f"{user_message}\n{failure.message}")
+        QMessageBox.critical(self, title, f"{user_message}\n{detail}")
 
     @staticmethod
     def _scaled_progress_callback(progress_callback, *, start: int, end: int):
@@ -3325,7 +3359,6 @@ class App(QMainWindow):
                 self._load_header_state()
             except Exception:
                 pass
-            self._apply_saved_hint_positions()
             try:
                 self._apply_saved_view_preferences()
             except Exception:
@@ -3337,18 +3370,6 @@ class App(QMainWindow):
             self._refresh_auto_snapshot_schedule()
             self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
             self._refresh_history_actions()
-
-    def _apply_saved_hint_positions(self):
-        for attr_name, settings_key in (
-            ("col_hint_label", "display/col_hint_pos"),
-            ("row_hint_label", "display/row_hint_pos"),
-        ):
-            label = getattr(self, attr_name, None)
-            if label is None:
-                continue
-            pos = self.settings.value(settings_key, type=QPoint)
-            if pos:
-                label.move(pos)
 
     def _on_header_layout_changed(self, *_args):
         # Compatibility shim for older callers that still expect a single
@@ -8043,10 +8064,7 @@ class App(QMainWindow):
         return main_window_layout._on_toggle_row_height(self, enabled)
 
     def _reset_hint_label(self):
-        if self.col_hint_label:
-            self.col_hint_label._user_moved = False
-        if self.row_hint_label:
-            self.row_hint_label._user_moved = False
+        return None
 
     def _on_toggle_add_data(self, enabled: bool):
         return main_window_layout._on_toggle_add_data(self, enabled)
@@ -8065,47 +8083,37 @@ class App(QMainWindow):
 
     def _ensure_col_hint_label(self):
         if self.col_hint_label is None:
-            self.col_hint_label = DraggableLabel(self, settings_key="display/col_hint_pos")
+            self.col_hint_label = QLabel(self)
             self.col_hint_label.setObjectName("colHint")
             self.col_hint_label.setProperty("role", "overlayHint")
-            s = self.settings
-            pos = s.value("display/col_hint_pos", type=QPoint)
-            if pos:
-                self.col_hint_label.move(pos)
             self.col_hint_label.hide()
 
     def _ensure_row_hint_label(self):
         if self.row_hint_label is None:
-            self.row_hint_label = DraggableLabel(self, settings_key="display/row_hint_pos")
+            self.row_hint_label = QLabel(self)
             self.row_hint_label.setObjectName("rowHint")
             self.row_hint_label.setProperty("role", "overlayHint")
-            s = self.settings
-            pos = s.value("display/row_hint_pos", type=QPoint)
-            if pos:
-                self.row_hint_label.move(pos)
             self.row_hint_label.hide()
 
     def _update_col_hint(self, logical_index: int, old_size: int, new_size: int):
         self._ensure_col_hint_label()
         self.col_hint_label.setText(f"Col {logical_index + 1}: {new_size}px")
-        if not getattr(self.col_hint_label, "_user_moved", False):
-            hh = self.table.horizontalHeader()
-            x = hh.sectionViewportPosition(logical_index) + new_size + 6
-            y = hh.height() // 2
-            pt = hh.viewport().mapTo(self, QPoint(x, y))
-            self.col_hint_label.move(pt)
+        hh = self.table.horizontalHeader()
+        x = hh.sectionViewportPosition(logical_index) + new_size + 6
+        y = hh.height() // 2
+        pt = hh.viewport().mapTo(self, QPoint(x, y))
+        self.col_hint_label.move(pt)
         self.col_hint_label.show()
         self.col_hint_label.raise_()
 
     def _update_row_hint(self, logical_index: int, old_size: int, new_size: int):
         self._ensure_row_hint_label()
         self.row_hint_label.setText(f"Row {logical_index + 1}: {new_size}px")
-        if not getattr(self.row_hint_label, "_user_moved", False):
-            vh = self.table.verticalHeader()
-            x = vh.width() // 2
-            y = vh.sectionViewportPosition(logical_index) + new_size + 6
-            pt = vh.viewport().mapTo(self, QPoint(x, y))
-            self.row_hint_label.move(pt)
+        vh = self.table.verticalHeader()
+        x = vh.width() // 2
+        y = vh.sectionViewportPosition(logical_index) + new_size + 6
+        pt = vh.viewport().mapTo(self, QPoint(x, y))
+        self.row_hint_label.move(pt)
         self.row_hint_label.show()
         self.row_hint_label.raise_()
 

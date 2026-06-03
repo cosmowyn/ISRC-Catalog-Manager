@@ -199,6 +199,11 @@ class ApplicationSettingsTransferService:
                 "enabled": app_sound_settings[APP_SOUND_STARTUP],
             },
             "app_sounds": dict(app_sound_settings),
+            "security": {
+                "suppress_unencrypted_profile_warnings": bool(
+                    current_values.get("suppress_unencrypted_profile_warnings")
+                ),
+            },
             "history_retention": {
                 "retention_mode": str(current_values.get("history_retention_mode") or "").strip(),
                 "auto_cleanup_enabled": bool(current_values.get("history_auto_cleanup_enabled")),
@@ -395,6 +400,7 @@ class ApplicationSettingsTransferService:
             ),
         )
         history = dict(payload.get("history_retention") or {})
+        security = dict(payload.get("security") or {})
 
         after_values["window_title"] = str(identity.get("window_title_override") or "").strip()
         after_values["icon_path"] = icon_path
@@ -414,6 +420,12 @@ class ApplicationSettingsTransferService:
         after_values["notice_sound_enabled"] = app_sounds[APP_SOUND_NOTICE]
         after_values["warning_sound_enabled"] = app_sounds[APP_SOUND_WARNING]
         after_values["app_sound_settings"] = dict(app_sounds)
+        after_values["suppress_unencrypted_profile_warnings"] = bool(
+            security.get(
+                "suppress_unencrypted_profile_warnings",
+                after_values.get("suppress_unencrypted_profile_warnings", False),
+            )
+        )
         after_values["history_retention_mode"] = str(history.get("retention_mode") or "").strip()
         after_values["history_auto_cleanup_enabled"] = bool(history.get("auto_cleanup_enabled"))
         after_values["history_storage_budget_mb"] = int(history.get("storage_budget_mb") or 0)

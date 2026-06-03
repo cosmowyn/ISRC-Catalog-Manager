@@ -7,8 +7,20 @@ import logging
 import traceback
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QInputDialog, QLineEdit, QMessageBox
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
+)
 
 from isrc_manager.conversion import ConversionService
 from isrc_manager.isrc_registry import ApplicationISRCRegistryService
@@ -18,6 +30,7 @@ from isrc_manager.services.database_security import (
     DatabasePasswordPolicyError,
     InvalidDatabasePasswordError,
     KeyringCredentialError,
+    database_profile_id,
     is_plaintext_sqlite_database,
     is_probably_encrypted_database,
     validate_database_password,
@@ -33,6 +46,7 @@ from isrc_manager.tasks import TaskFailure
 
 SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING = "security/suppress_unencrypted_profile_warning"
 BACKUP_SIDECAR_SUFFIX = ".backup.json"
+STARTUP_RECOVERY_PROFILE_NAME = "startup_recovery.db"
 
 
 def _apply_storage_layout(app, *, active_data_root: str | Path | None = None) -> None:
@@ -371,11 +385,21 @@ def _unencrypted_profile_warning_suppressed(app) -> bool:
     return _settings_bool(app, SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING, False)
 
 
-def _set_unencrypted_profile_warning_suppressed(app, enabled: bool) -> None:
+def _unencrypted_profile_warning_suppressed_for_profile(app, path: str | Path) -> bool:
+    if _unencrypted_profile_warning_suppressed(app):
+        return True
+    profile_key = f"{SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING}/{database_profile_id(path)}"
+    return _settings_bool(app, profile_key, False)
+
+
+def _set_unencrypted_profile_warning_suppressed_for_profile(
+    app, path: str | Path, enabled: bool
+) -> None:
     settings = getattr(app, "settings", None)
     if settings is None:
         return
-    settings.setValue(SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING, bool(enabled))
+    profile_key = f"{SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING}/{database_profile_id(path)}"
+    settings.setValue(profile_key, bool(enabled))
     sync = getattr(settings, "sync", None)
     if callable(sync):
         sync()
@@ -562,7 +586,7 @@ def _write_profile_maintenance_backup_sidecar(
 def _migrate_plaintext_profile_if_requested(app, path: str | Path) -> bool:
     if not is_plaintext_sqlite_database(path):
         return True
-    if _unencrypted_profile_warning_suppressed(app):
+    if _unencrypted_profile_warning_suppressed_for_profile(app, path):
         return True
 
     message_box = QMessageBox(app)
@@ -577,7 +601,7 @@ def _migrate_plaintext_profile_if_requested(app, path: str | Path) -> bool:
     encrypt_button = message_box.addButton("Encrypt Now", QMessageBox.AcceptRole)
     open_button = message_box.addButton("Open Unencrypted", QMessageBox.DestructiveRole)
     cancel_button = message_box.addButton(QMessageBox.Cancel)
-    suppress_check = QCheckBox("Do not warn again when I open unencrypted profiles")
+    suppress_check = QCheckBox("Do not warn again when I open this profile.")
     message_box.setCheckBox(suppress_check)
     message_box.setDefaultButton(encrypt_button)
     message_box.exec()
@@ -586,7 +610,7 @@ def _migrate_plaintext_profile_if_requested(app, path: str | Path) -> bool:
         return False
     if clicked_button is open_button:
         if suppress_check.isChecked():
-            _set_unencrypted_profile_warning_suppressed(app, True)
+            _set_unencrypted_profile_warning_suppressed_for_profile(app, path, True)
         return True
 
     password = _prompt_new_database_password(app, title="Encrypt Profile")
@@ -780,14 +804,73 @@ def browse_profile(app):
     )
 
 
+class ProfileRemovalDialog(QDialog):
+    """Prompt the user to explicitly choose which profile should be deleted."""
+
+    def __init__(self, parent, choices):
+        super().__init__(parent)
+        self.setWindowTitle("Remove Profile")
+        layout = QVBoxLayout(self)
+
+        message = QLabel(
+            "Select the profile database to remove from disk. This cannot be undone.",
+            self,
+        )
+        message.setWordWrap(True)
+        layout.addWidget(message)
+
+        self.profile_combo = QComboBox(self)
+        self.profile_combo.addItem("Select a profile...", "")
+        for choice in choices:
+            path = str(getattr(choice, "path", "") or "")
+            label = str(getattr(choice, "label", "") or Path(path).name)
+            display = f"{label} ({path})" if path else label
+            self.profile_combo.addItem(display, path)
+        layout.addWidget(self.profile_combo)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        self.remove_button = self.button_box.button(QDialogButtonBox.Ok)
+        if self.remove_button is not None:
+            self.remove_button.setText("Remove")
+            self.remove_button.setEnabled(False)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.profile_combo.currentIndexChanged.connect(self._update_remove_enabled)
+
+    def selected_profile_path(self) -> str | None:
+        path = self.profile_combo.currentData()
+        clean_path = str(path or "").strip()
+        return clean_path or None
+
+    def _update_remove_enabled(self, *_args) -> None:
+        if self.remove_button is not None:
+            self.remove_button.setEnabled(self.selected_profile_path() is not None)
+
+
+def _prompt_profile_removal_choice(app) -> str | None:
+    choices = app.profile_workflows.list_profile_choices(
+        current_db_path=getattr(app, "current_db_path", None)
+    )
+    if not choices:
+        QMessageBox.information(
+            app,
+            "Remove Profile",
+            "No profiles are available to remove.",
+        )
+        return None
+
+    dialog = ProfileRemovalDialog(app, choices)
+    if dialog.exec() != QDialog.Accepted:
+        return None
+    return dialog.selected_profile_path()
+
+
 def remove_selected_profile(app):
-    idx = app.profile_combo.currentIndex()
-    if idx < 0:
-        return
-    path = app.profile_combo.itemData(idx)
+    path = _prompt_profile_removal_choice(app)
     if not path:
         return
-
     if (
         QMessageBox.question(
             app,
@@ -954,6 +1037,7 @@ def _prepare_database_for_open_blocking(
     description: str,
 ) -> bool:
     target_path = str(Path(path))
+    app._last_database_prepare_failure = None
     app._report_startup_phase(StartupPhase.PREPARING_DATABASE)
     try:
         prepared_path = app._prepare_database_session(
@@ -971,8 +1055,176 @@ def _prepare_database_for_open_blocking(
             target_path,
             exc_info=True,
         )
+        app._last_database_prepare_failure = SimpleNamespace(
+            path=target_path,
+            error_type=type(exc).__name__,
+            message=str(exc),
+        )
         return False
     return str(prepared_path or "").strip() == target_path
+
+
+def _same_database_path(left: str | Path | None, right: str | Path | None) -> bool:
+    if not left or not right:
+        return False
+    try:
+        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+    except Exception:
+        return str(left) == str(right)
+
+
+def _append_unique_database_path(paths: list[str], path: str | Path | None) -> None:
+    if not path:
+        return
+    clean_path = str(Path(path))
+    if any(_same_database_path(existing, clean_path) for existing in paths):
+        return
+    paths.append(clean_path)
+
+
+def _next_startup_recovery_profile_path(app, excluded_paths: list[str]) -> str:
+    database_dir = Path(getattr(app, "database_dir", Path.cwd()))
+    base_path = database_dir / STARTUP_RECOVERY_PROFILE_NAME
+    if not any(_same_database_path(base_path, path) for path in excluded_paths):
+        return str(base_path)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for index in range(1, 100):
+        candidate = database_dir / f"startup_recovery_{timestamp}_{index}.db"
+        if not candidate.exists() and not any(
+            _same_database_path(candidate, path) for path in excluded_paths
+        ):
+            return str(candidate)
+    return str(database_dir / f"startup_recovery_{timestamp}.db")
+
+
+def _startup_prepare_failure_matches(app, path: str | Path) -> bool:
+    failure = getattr(app, "_last_database_prepare_failure", None)
+    return bool(failure is not None and _same_database_path(getattr(failure, "path", None), path))
+
+
+def _startup_profile_recovery_candidates(
+    app,
+    *,
+    failed_paths: list[str],
+    fallback_paths: list[str | Path | None],
+) -> list[str]:
+    candidates: list[str] = []
+    profile_store = getattr(app, "profile_store", None)
+    list_profiles = getattr(profile_store, "list_profiles", None)
+    if callable(list_profiles):
+        try:
+            for profile_path in list_profiles():
+                _append_unique_database_path(candidates, profile_path)
+        except Exception:
+            pass
+    for fallback_path in fallback_paths:
+        _append_unique_database_path(candidates, fallback_path)
+    candidates = [
+        candidate
+        for candidate in candidates
+        if not any(_same_database_path(candidate, failed_path) for failed_path in failed_paths)
+    ]
+    _append_unique_database_path(
+        candidates,
+        _next_startup_recovery_profile_path(app, failed_paths + candidates),
+    )
+    return candidates
+
+
+def _show_startup_profile_recovery_warning(
+    app,
+    *,
+    failed_path: str,
+    recovered_path: str,
+    reason: str,
+) -> None:
+    message = (
+        "The last profile database could not be opened safely and was left untouched:\n"
+        f"{failed_path}\n\n"
+        "The application opened a fallback profile instead:\n"
+        f"{recovered_path}\n\n"
+        "Use Browse, Restore, or a backup workflow to inspect the original profile."
+    )
+    clean_reason = str(reason or "").strip()
+    if clean_reason:
+        message = f"{message}\n\nReason:\n{clean_reason}"
+    run_startup_message_box = getattr(app, "_run_startup_message_box", None)
+    if callable(run_startup_message_box):
+        run_startup_message_box(
+            title="Startup Profile Recovery",
+            icon=QMessageBox.Warning,
+            text=message,
+        )
+
+
+def _recover_startup_database_after_failure(
+    app,
+    *,
+    failed_path: str,
+    fallback_paths: list[str | Path | None],
+    failure_reason: object | None = None,
+) -> tuple[str, bool]:
+    failed_paths = [str(Path(failed_path))]
+    candidates = _startup_profile_recovery_candidates(
+        app,
+        failed_paths=failed_paths,
+        fallback_paths=fallback_paths,
+    )
+    reason = str(failure_reason or "").strip()
+    if not reason:
+        failure = getattr(app, "_last_database_prepare_failure", None)
+        reason = str(getattr(failure, "message", "") or getattr(failure, "error_type", "")).strip()
+
+    logger = getattr(app, "logger", None)
+    for candidate in candidates:
+        if any(_same_database_path(candidate, failed) for failed in failed_paths):
+            continue
+        try:
+            if is_probably_encrypted_database(
+                candidate
+            ) and not _prepare_database_security_for_open(app, candidate):
+                failed_paths.append(candidate)
+                continue
+            prepared = app._prepare_database_for_open_blocking(
+                candidate,
+                title="Open Profile",
+                description="Preparing fallback profile database...",
+            )
+        except Exception as exc:
+            prepared = False
+            reason = reason or str(exc)
+            if logger is not None:
+                logger.warning(
+                    "Startup fallback profile preparation failed for %s: %s", candidate, exc
+                )
+        if not prepared:
+            failed_paths.append(candidate)
+            _forget_session_database_password(app, candidate)
+            continue
+        if logger is not None:
+            logger.warning(
+                "Startup profile recovery selected fallback database after %s failed: %s",
+                failed_path,
+                candidate,
+            )
+        settings = getattr(app, "settings", None)
+        if settings is not None:
+            settings.setValue("db/last_path", candidate)
+            sync = getattr(settings, "sync", None)
+            if callable(sync):
+                sync()
+        _forget_session_database_password(app, failed_path)
+        _show_startup_profile_recovery_warning(
+            app,
+            failed_path=failed_path,
+            recovered_path=candidate,
+            reason=reason,
+        )
+        return candidate, True
+
+    raise RuntimeError(
+        "No usable startup profile database could be prepared after the last profile failed."
+    )
 
 
 def open_database(
@@ -1340,6 +1592,8 @@ __all__ = [
     "_close_database_connection",
     "_prepare_database_session",
     "_prepare_database_for_open_blocking",
+    "_startup_prepare_failure_matches",
+    "_recover_startup_database_after_failure",
     "open_database",
     "_activate_profile",
     "_prepare_profile_database_background",

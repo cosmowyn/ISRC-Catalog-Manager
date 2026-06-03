@@ -390,7 +390,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     profiles_menu.addAction(app.reload_profiles_action)
 
     app.remove_profile_action = app._create_action(
-        "Remove Selected Profile…",
+        "Remove Profile…",
         slot=app.remove_selected_profile,
         shortcuts=("Ctrl+Shift+-", "Meta+Shift+-"),
     )

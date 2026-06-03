@@ -134,6 +134,7 @@ def test_connection_factory_creates_sqlcipher_database_when_session_password_is_
 
     conn = factory.open(db_path)
     try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
         conn.execute("CREATE TABLE tracks(id INTEGER PRIMARY KEY, title TEXT)")
         conn.execute("INSERT INTO tracks(title) VALUES (?)", ("Song",))
         conn.commit()
@@ -142,6 +143,8 @@ def test_connection_factory_creates_sqlcipher_database_when_session_password_is_
 
     assert is_probably_encrypted_database(db_path)
     assert not is_plaintext_sqlite_database(db_path)
+    assert not db_path.with_suffix(".db-wal").exists()
+    assert not db_path.with_suffix(".db-shm").exists()
     with pytest.raises(sqlite3.DatabaseError):
         plaintext_conn = sqlite3.connect(str(db_path))
         try:
@@ -166,7 +169,12 @@ def test_connection_factory_rejects_wrong_sqlcipher_password(tmp_path: Path) -> 
     passwords.set_password(db_path, "valid-secret-123")
     factory = SQLiteConnectionFactory(password_provider=passwords)
     conn = factory.open(db_path)
-    conn.close()
+    try:
+        conn.execute("CREATE TABLE demo(value TEXT)")
+        conn.execute("INSERT INTO demo(value) VALUES ('ready')")
+        conn.commit()
+    finally:
+        conn.close()
 
     passwords.set_password(db_path, "wrong-secret-123")
     with pytest.raises(InvalidDatabasePasswordError):
@@ -187,6 +195,39 @@ def test_database_session_service_uses_encrypted_connection_factory(tmp_path: Pa
         service.close(session.conn)
 
     assert is_probably_encrypted_database(db_path)
+
+
+def test_encrypted_database_session_migrates_reopens_without_wal_sidecars(tmp_path: Path) -> None:
+    db_path = tmp_path / "new-profile.db"
+    passwords = DatabaseSessionPasswordManager()
+    passwords.set_password(db_path, "session-secret-123")
+    service = DatabaseSessionService(SQLiteConnectionFactory(password_provider=passwords))
+
+    session = service.open(db_path)
+    try:
+        schema = DatabaseSchemaService(session.conn, data_root=tmp_path / "data")
+        schema.init_db()
+        schema.migrate_schema()
+        session.conn.commit()
+        assert schema.get_db_version() == SCHEMA_TARGET
+        assert session.conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert session.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
+    finally:
+        service.close(session.conn)
+
+    assert not db_path.with_suffix(".db-wal").exists()
+    assert not db_path.with_suffix(".db-shm").exists()
+
+    reopened = service.open(db_path)
+    try:
+        reopened_schema = DatabaseSchemaService(reopened.conn, data_root=tmp_path / "data")
+        assert reopened_schema.get_db_version() == SCHEMA_TARGET
+        assert reopened.conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert (
+            reopened.conn.execute("SELECT COUNT(*) FROM CodeRegistryCategories").fetchone()[0] > 0
+        )
+    finally:
+        service.close(reopened.conn)
 
 
 def test_sqlcipher_schema_init_and_migrate_reaches_current_target(tmp_path: Path) -> None:

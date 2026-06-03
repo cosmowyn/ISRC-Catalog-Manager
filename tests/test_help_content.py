@@ -219,15 +219,20 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Export Settings", settings.content_html)
         self.assertIn("Sounds", settings.content_html)
         self.assertIn("Remember database password", settings.content_html)
+        self.assertIn("Do not warn when opening unencrypted profiles", settings.content_html)
         self.assertIn("30 days", settings.content_html)
         self.assertIn("SQLCipher", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("migration path", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn(
+            "only when you open that profile", HELP_CHAPTERS_BY_ID["profiles"].content_html
+        )
         self.assertIn("app backups folder", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn("choose the profile to delete", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn(
             "preserves the original schema version", HELP_CHAPTERS_BY_ID["profiles"].content_html
         )
         self.assertIn("Invalid legacy ISRC values", HELP_CHAPTERS_BY_ID["profiles"].content_html)
-        self.assertIn("suppress the warning", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn("suppresses future warnings", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("secure-memory locking", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("database-at-rest encryption", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("SoundCloud", settings.content_html)

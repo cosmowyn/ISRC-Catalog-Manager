@@ -73,6 +73,7 @@ def _base_values() -> dict[str, object]:
             APP_SOUND_WARNING: True,
         },
         "remember_database_password": False,
+        "suppress_unencrypted_profile_warnings": False,
         "artist_code": "ABC",
         "auto_snapshot_enabled": True,
         "auto_snapshot_interval_minutes": 15,
@@ -248,6 +249,7 @@ def test_current_settings_values_collects_services_and_defaults() -> None:
     assert values["gs1_contract_entries"] == ("contract",)
     assert values["gs1_subbrand"] == "Sub"
     assert values["remember_database_password"] is True
+    assert values["suppress_unencrypted_profile_warnings"] is False
 
 
 def test_apply_settings_changes_returns_zero_for_noop() -> None:
@@ -273,6 +275,24 @@ def test_apply_settings_changes_disabling_database_password_remember_clears_keyr
         settings_controller.DATABASE_REMEMBER_PASSWORD_SETTING: False,
     }
     app.database_keyring_credentials.clear.assert_called_once_with("/tmp/catalog.db")
+
+
+def test_apply_settings_changes_updates_unencrypted_profile_warning_global_setting() -> None:
+    app = _fake_app()
+    before = dict(_base_values(), suppress_unencrypted_profile_warnings=False)
+    after = dict(before, suppress_unencrypted_profile_warnings=True)
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    assert app.settings.stored == {
+        settings_controller.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING: True,
+    }
+    app.history_manager.record_setting_change.assert_called_once()
+    assert (
+        app.history_manager.record_setting_change.call_args.kwargs["key"]
+        == "suppress_unencrypted_profile_warnings"
+    )
 
 
 def test_apply_settings_changes_persists_changed_sections_and_confirmation(
@@ -427,6 +447,7 @@ def test_open_settings_dialog_accepts_cancels_and_reports_errors(
     settings_controller.open_settings_dialog(app, initial_focus="artist_code")
 
     assert accepted_dialogs[0].kwargs["party_service"] == "party-service"
+    assert accepted_dialogs[0].kwargs["suppress_unencrypted_profile_warnings"] is False
     accepted_dialogs[0].focus_field.assert_called_once_with("artist_code")
     app._apply_settings_changes.assert_called_once()
 

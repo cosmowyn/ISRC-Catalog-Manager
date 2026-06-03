@@ -219,7 +219,7 @@ action:profile_maintenance,startup_profile,action,Profile Maintenance,,UI-PQ-SMO
 action:profiles,startup_profile,action,Profiles,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
 action:profiles:202,startup_profile,action,Profiles,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
 action:reload_profile_list,startup_profile,action,Reload Profile List,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
-action:remove_selected_profile,startup_profile,action,Remove Selected Profile…,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
+action:remove_profile,startup_profile,action,Remove Profile…,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
 action:show_profiles_ribbon,startup_profile,action,Show Profiles Ribbon,,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
 button:actionribbonbuttonqualitydashboard,startup_profile,button,Data Quality Dashboard,actionRibbonButtonQualityDashboard,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"
 button:mainwindow_qpushbutton_1,startup_profile,button,New…,mainWindow_qPushButton_1,UI-PQ-SMOKE-001,UI Reachability Qualification,covered,automated,,,"evidence.json, ui_inventory.json"

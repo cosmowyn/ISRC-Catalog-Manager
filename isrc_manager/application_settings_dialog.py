@@ -196,6 +196,7 @@ class ApplicationSettingsDialog(
         soundcloud_settings: SoundCloudSettingsSnapshot | None = None,
         soundcloud_actions: SoundCloudConnectionActions | None = None,
         remember_database_password: bool = False,
+        suppress_unencrypted_profile_warnings: bool = False,
         database_password_change_callback=None,
         parent=None,
     ):
@@ -244,6 +245,9 @@ class ApplicationSettingsDialog(
         self._startup_sound_enabled = self._app_sound_settings[APP_SOUND_STARTUP]
         self._app_sound_checks: dict[str, QCheckBox] = {}
         self._remember_database_password_warning_shown = bool(remember_database_password)
+        self._suppress_unencrypted_profile_warning_notice_shown = bool(
+            suppress_unencrypted_profile_warnings
+        )
         self._database_password_change_callback = database_password_change_callback
         self._settings_builder_specs = (
             *self.THEME_PAGE_SPECS[:-1],
@@ -383,6 +387,16 @@ class ApplicationSettingsDialog(
         self.remember_database_password_check.toggled.connect(
             self._confirm_remember_database_password
         )
+        self.suppress_unencrypted_profile_warnings_check = QCheckBox(
+            "Do not warn when opening unencrypted profiles"
+        )
+        self.suppress_unencrypted_profile_warnings_check.setChecked(
+            bool(suppress_unencrypted_profile_warnings)
+        )
+        self.suppress_unencrypted_profile_warnings_check.setMinimumWidth(360)
+        self.suppress_unencrypted_profile_warnings_check.toggled.connect(
+            self._confirm_unencrypted_profile_warning_suppression
+        )
         self.change_database_password_button = QPushButton("Change Password...")
         self.change_database_password_button.setAutoDefault(False)
         self.change_database_password_button.setEnabled(
@@ -402,6 +416,13 @@ class ApplicationSettingsDialog(
             "Database Password",
             security_widget,
             "Stores the profile password only in the operating-system keychain/keyring and expires remembered login after 30 days.",
+        )
+        self._add_row(
+            security_grid,
+            1,
+            "Unencrypted Profiles",
+            self.suppress_unencrypted_profile_warnings_check,
+            "Turns off all unencrypted-profile safety prompts. Leave this off unless you intentionally accept the risk.",
         )
         general_layout.addWidget(security_box)
 
@@ -1127,6 +1148,10 @@ class ApplicationSettingsDialog(
                 self._general_tab_index,
                 self.remember_database_password_check,
             ),
+            "suppress_unencrypted_profile_warnings": (
+                self._general_tab_index,
+                self.suppress_unencrypted_profile_warnings_check,
+            ),
             "startup_sound_enabled": (
                 self._sounds_tab_index,
                 self.startup_sound_enabled_check,
@@ -1839,6 +1864,27 @@ class ApplicationSettingsDialog(
             return
         self._remember_database_password_warning_shown = True
 
+    def _confirm_unencrypted_profile_warning_suppression(self, checked: bool) -> None:
+        if not checked or self._suppress_unencrypted_profile_warning_notice_shown:
+            return
+        result = QMessageBox.warning(
+            self,
+            "Unencrypted Profile Warnings",
+            (
+                "This turns off warnings for every unencrypted profile. Unencrypted SQLite "
+                "profiles do not protect catalog data or backups if copied or stolen. "
+                "Enable this only if you intentionally accept that risk."
+            ),
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if result != QMessageBox.Ok:
+            self.suppress_unencrypted_profile_warnings_check.blockSignals(True)
+            self.suppress_unencrypted_profile_warnings_check.setChecked(False)
+            self.suppress_unencrypted_profile_warnings_check.blockSignals(False)
+            return
+        self._suppress_unencrypted_profile_warning_notice_shown = True
+
     def _change_database_password(self) -> None:
         if callable(self._database_password_change_callback):
             self._database_password_change_callback()
@@ -1861,6 +1907,9 @@ class ApplicationSettingsDialog(
             "warning_sound_enabled": app_sound_values[APP_SOUND_WARNING],
             "app_sound_settings": app_sound_values,
             "remember_database_password": self.remember_database_password_check.isChecked(),
+            "suppress_unencrypted_profile_warnings": (
+                self.suppress_unencrypted_profile_warnings_check.isChecked()
+            ),
             "history_retention_mode": str(
                 self.history_retention_mode_combo.currentData() or DEFAULT_HISTORY_RETENTION_MODE
             ),

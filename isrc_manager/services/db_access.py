@@ -23,11 +23,15 @@ def configure_sqlite_connection(
     conn: sqlite3.Connection,
     *,
     busy_timeout_ms: int = SQLITE_BUSY_TIMEOUT_MS,
+    journal_mode: str = "WAL",
 ) -> sqlite3.Connection:
     """Apply the app's standard SQLite safety pragmas to a connection."""
 
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    clean_journal_mode = str(journal_mode or "WAL").strip().upper()
+    if clean_journal_mode not in {"WAL", "DELETE"}:
+        clean_journal_mode = "WAL"
+    conn.execute(f"PRAGMA journal_mode = {clean_journal_mode}")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute(f"PRAGMA busy_timeout = {max(1, int(busy_timeout_ms))}")
     return conn
@@ -60,7 +64,11 @@ class SQLiteConnectionFactory:
                 password,
                 timeout_seconds=float(self.timeout_seconds),
             )
-            return configure_sqlite_connection(conn, busy_timeout_ms=self.busy_timeout_ms)
+            return configure_sqlite_connection(
+                conn,
+                busy_timeout_ms=self.busy_timeout_ms,
+                journal_mode="DELETE",
+            )
         if is_probably_encrypted_database(db_path):
             raise DatabasePasswordRequiredError(
                 "This profile database is encrypted and requires a password."

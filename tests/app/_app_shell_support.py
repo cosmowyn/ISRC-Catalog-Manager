@@ -1328,6 +1328,58 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(open_calls, [True])
 
+    def case_startup_open_failure_recovers_to_fallback_profile(self):
+        self._close_window()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        database_dir = preferred_root / "Database"
+        broken_db = database_dir / "broken-startup.db"
+        fallback_db = database_dir / "healthy-startup.db"
+        self._create_profile_database(fallback_db)
+        settings = self._settings()
+        settings.setValue("storage/active_data_root", str(preferred_root.resolve()))
+        settings.setValue("paths/database_dir", str(database_dir.resolve()))
+        settings.setValue("db/last_path", str(broken_db.resolve()))
+        settings.sync()
+
+        original_open_database = app_module.App.open_database
+        failed_once = False
+
+        def _open_or_fail_once(window, path, *args, **kwargs):
+            del args
+            nonlocal failed_once
+            if Path(path).resolve() == broken_db.resolve() and not failed_once:
+                failed_once = True
+                raise RuntimeError("database disk image is malformed")
+            return original_open_database(window, path, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_prepare_database_for_open_blocking",
+                return_value=True,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_database",
+                autospec=True,
+                side_effect=_open_or_fail_once,
+            ),
+            mock.patch.object(app_module.App, "_run_startup_message_box") as recovery_prompt,
+        ):
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        self.assertTrue(failed_once)
+        self.assertNotEqual(Path(self.window.current_db_path).resolve(), broken_db.resolve())
+        self.assertTrue(Path(self.window.current_db_path).exists())
+        self.assertEqual(
+            self.window.settings.value("db/last_path", "", str),
+            str(Path(self.window.current_db_path).resolve()),
+        )
+        recovery_prompt.assert_called_once()
+        self.assertIn("database disk image is malformed", recovery_prompt.call_args.kwargs["text"])
+
     def case_startup_ignores_repo_demo_runtime_last_path_for_normal_settings(self):
         self._close_window()
         settings = self._settings()
@@ -1567,7 +1619,7 @@ class AppShellTestCase(unittest.TestCase):
                 "New Profile…",
                 "Open Profile…",
                 "Reload Profile List",
-                "Remove Selected Profile…",
+                "Remove Profile…",
                 "Profile Maintenance",
             ],
         )

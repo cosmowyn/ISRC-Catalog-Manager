@@ -2292,12 +2292,10 @@ def test_table_layout_history_hint_and_resize_edge_paths(monkeypatch) -> None:
 
     class FakeLabel:
         def __init__(self) -> None:
-            self.moves: list[object] = []
             self.visible = False
-            self._user_moved = True
 
-        def move(self, pos) -> None:
-            self.moves.append(pos)
+        def move(self, _pos) -> None:
+            return None
 
         def show(self) -> None:
             self.visible = True
@@ -2333,7 +2331,6 @@ def test_table_layout_history_hint_and_resize_edge_paths(monkeypatch) -> None:
     app.load_active_custom_fields = lambda: [{"name": "Lyrics"}]
     app._rebuild_table_headers = lambda: events.append("headers")
     app._load_header_state = lambda: (_ for _ in ()).throw(RuntimeError("header failed"))
-    app._apply_saved_hint_positions = lambda: events.append("hints")
     app._apply_saved_view_preferences = lambda: (_ for _ in ()).throw(RuntimeError("view failed"))
     app.populate_all_comboboxes = lambda: events.append("combos")
     app._update_add_data_generated_fields = lambda: events.append("generated")
@@ -2346,16 +2343,6 @@ def test_table_layout_history_hint_and_resize_edge_paths(monkeypatch) -> None:
     assert app.identity == "identity"
     assert app._last_auto_snapshot_marker == 7
     assert "history-actions" in events
-
-    point = main_window.QPoint(3, 4)
-    moved_label = FakeLabel()
-    app.settings = SimpleNamespace(
-        value=lambda key, **_kwargs: point if key == "display/col_hint_pos" else None
-    )
-    app.col_hint_label = moved_label
-    app.row_hint_label = None
-    App._apply_saved_hint_positions(app)
-    assert moved_label.moves == [point]
 
     app._save_header_state = lambda **kwargs: saves.append(kwargs)
     app._suspend_layout_history = True
@@ -2588,6 +2575,16 @@ def test_background_task_helpers_cover_runtime_status_error_and_scaled_progress(
     assert warning_sounds == [True]
     assert criticals == [("Import", "Failed:\nboom")]
     assert any("traceback" in str(call) for call in logs)
+    app._show_background_task_error(
+        "Load Catalog",
+        main_window.TaskFailure(
+            message="",
+            traceback_text="Traceback (most recent call last):\nMemoryError\n",
+        ),
+        user_message="Could not load the catalog view:",
+    )
+    assert warning_sounds == [True, True]
+    assert criticals[-1] == ("Load Catalog", "Could not load the catalog view:\nMemoryError")
 
     progress_calls: list[dict[str, object]] = []
     scaled = App._scaled_progress_callback(

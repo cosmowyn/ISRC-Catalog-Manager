@@ -23,7 +23,20 @@ def _root_attr(name: str, fallback):
 
 
 def load_isrc_prefix(app):
-    return app.settings_reads.load_isrc_prefix()
+    settings_reads = getattr(app, "settings_reads", None)
+    if settings_reads is None:
+        return ""
+    try:
+        return settings_reads.load_isrc_prefix()
+    except Exception as exc:
+        logger = getattr(app, "logger", None)
+        if logger is not None:
+            logger.warning(
+                "Could not read ISRC prefix from profile settings; "
+                "auto-generation is disabled for this refresh: %s",
+                exc,
+            )
+        return ""
 
 
 def _profile_paths_for_isrc_registry(app) -> list[Path]:
@@ -294,7 +307,7 @@ def _update_add_data_generated_fields(app) -> None:
         return
 
     state, message = app._isrc_generation_state()
-    preview = app._preview_generated_isrc()
+    preview = app._preview_generated_isrc() if state == "ready" else ""
     app.generated_isrc_field.setText(preview)
     if hasattr(app, "prev_release_toggle"):
         app.prev_release_toggle.setEnabled(state == "ready")

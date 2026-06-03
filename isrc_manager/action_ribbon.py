@@ -214,9 +214,9 @@ def _initialize_action_ribbon_registry(app):
         },
         {
             "id": "remove_profile",
-            "label": "Remove Selected Profile",
+            "label": "Remove Profile",
             "category": "File",
-            "description": "Remove the currently selected profile from the workspace list or disk.",
+            "description": "Choose a profile to remove from disk.",
             "action": app.remove_profile_action,
         },
         {

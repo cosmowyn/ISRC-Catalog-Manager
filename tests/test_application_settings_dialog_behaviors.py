@@ -10,19 +10,23 @@ try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QApplication,
+        QCheckBox,
         QComboBox,
         QGridLayout,
         QLabel,
         QLineEdit,
+        QMessageBox,
         QTableWidget,
         QWidget,
     )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QCheckBox = None
     QComboBox = None
     QGridLayout = None
     QLabel = None
     QLineEdit = None
+    QMessageBox = None
     QTableWidget = None
     QWidget = None
     Qt = None
@@ -627,6 +631,32 @@ def test_settings_validation_rejects_blob_icon_theme_color_and_qss_errors() -> N
     valid_dialog = _ValidationDialog()
     ApplicationSettingsDialog._accept_if_valid(valid_dialog)
     assert valid_dialog.accepted is True
+
+
+def test_unencrypted_profile_warning_suppression_requires_confirmation() -> None:
+    _ensure_qapp()
+    dialog = _dialog()
+    dialog._suppress_unencrypted_profile_warning_notice_shown = False
+    dialog.suppress_unencrypted_profile_warnings_check = QCheckBox()
+    dialog.suppress_unencrypted_profile_warnings_check.setChecked(True)
+
+    with mock.patch(
+        "isrc_manager.application_settings_dialog.QMessageBox.warning",
+        return_value=QMessageBox.Cancel,
+    ):
+        ApplicationSettingsDialog._confirm_unencrypted_profile_warning_suppression(dialog, True)
+
+    assert dialog.suppress_unencrypted_profile_warnings_check.isChecked() is False
+
+    dialog.suppress_unencrypted_profile_warnings_check.setChecked(True)
+    with mock.patch(
+        "isrc_manager.application_settings_dialog.QMessageBox.warning",
+        return_value=QMessageBox.Ok,
+    ):
+        ApplicationSettingsDialog._confirm_unencrypted_profile_warning_suppression(dialog, True)
+
+    assert dialog.suppress_unencrypted_profile_warnings_check.isChecked() is True
+    assert dialog._suppress_unencrypted_profile_warning_notice_shown is True
 
 
 def test_settings_focus_wrapping_rows_and_artist_party_combo_behaviour() -> None:

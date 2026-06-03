@@ -14,6 +14,7 @@ from isrc_manager.services.database_security import (
     InvalidDatabasePasswordError,
     SQLCipherDatabaseService,
 )
+from tests.qt_test_helpers import require_qapplication
 
 
 class _Combo:
@@ -228,6 +229,50 @@ def test_on_profile_changed_confirms_and_runs_activation_callback(monkeypatch):
     assert len(activated) == 1
 
 
+def test_prompt_profile_removal_choice_uses_profile_workflow_choices(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeRemovalDialog:
+        def __init__(self, parent, choices):
+            captured["parent"] = parent
+            captured["choices"] = choices
+
+        def exec(self):
+            return profile_session.QDialog.Accepted
+
+        def selected_profile_path(self):
+            return "/profiles/other.db"
+
+    monkeypatch.setattr(profile_session, "ProfileRemovalDialog", FakeRemovalDialog)
+    choices = [
+        SimpleNamespace(label="Current", path="/profiles/current.db"),
+        SimpleNamespace(label="Other", path="/profiles/other.db"),
+    ]
+    app = SimpleNamespace(
+        current_db_path="/profiles/current.db",
+        profile_workflows=SimpleNamespace(list_profile_choices=mock.Mock(return_value=choices)),
+    )
+
+    assert profile_session._prompt_profile_removal_choice(app) == "/profiles/other.db"
+    assert captured["parent"] is app
+    assert captured["choices"] == choices
+    app.profile_workflows.list_profile_choices.assert_called_once_with(
+        current_db_path="/profiles/current.db"
+    )
+
+
+def test_prompt_profile_removal_choice_reports_empty_profile_list(monkeypatch):
+    _MessageBox.messages = []
+    monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
+    app = SimpleNamespace(
+        current_db_path="/profiles/current.db",
+        profile_workflows=SimpleNamespace(list_profile_choices=mock.Mock(return_value=[])),
+    )
+
+    assert profile_session._prompt_profile_removal_choice(app) is None
+    assert _MessageBox.messages[-1][0] == "information"
+
+
 def test_create_new_profile_handles_cancel_exists_and_success(monkeypatch):
     _MessageBox.messages = []
     monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
@@ -375,12 +420,44 @@ def test_plaintext_profile_warning_can_be_suppressed_when_opened_unencrypted(mon
     app = SimpleNamespace(settings=settings)
 
     assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
-    assert settings.values[profile_session.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING] is True
+    profile_key = (
+        f"{profile_session.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING}/"
+        f"{profile_session.database_profile_id(db_path)}"
+    )
+    assert settings.values[profile_key] is True
+    assert profile_session.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING not in settings.values
     assert settings.synced is True
     assert profile_session.is_plaintext_sqlite_database(db_path) is True
-    assert _ProfileMigrationMessageBox.instances[0].checkbox.text.startswith("Do not warn")
+    assert _ProfileMigrationMessageBox.instances[0].checkbox.text.endswith(
+        "when I open this profile."
+    )
 
     _ProfileMigrationMessageBox.instances = []
+    assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
+    assert _ProfileMigrationMessageBox.instances == []
+
+    other_db = tmp_path / "other.db"
+    conn = sqlite3.connect(other_db)
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.commit()
+    conn.close()
+    assert profile_session._migrate_plaintext_profile_if_requested(app, other_db) is True
+    assert len(_ProfileMigrationMessageBox.instances) == 1
+
+
+def test_plaintext_profile_warning_global_suppression_skips_all_prompts(monkeypatch, tmp_path):
+    _ProfileMigrationMessageBox.instances = []
+    monkeypatch.setattr(profile_session, "QMessageBox", _ProfileMigrationMessageBox)
+
+    db_path = tmp_path / "plain.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.commit()
+    conn.close()
+    settings = _Settings()
+    settings.values[profile_session.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING] = True
+    app = SimpleNamespace(settings=settings)
+
     assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
     assert _ProfileMigrationMessageBox.instances == []
 
@@ -497,14 +574,38 @@ def test_plaintext_profile_encryption_tolerates_backup_sidecar_write_failure(mon
     assert _MessageBox.messages[-1][0] == "information"
 
 
+def test_profile_removal_dialog_requires_explicit_dropdown_choice():
+    app = require_qapplication()
+    dialog = profile_session.ProfileRemovalDialog(
+        None,
+        [
+            SimpleNamespace(label="Current", path="/profiles/current.db"),
+            SimpleNamespace(label="Other", path="/profiles/other.db"),
+        ],
+    )
+    try:
+        assert dialog.selected_profile_path() is None
+        assert dialog.remove_button is not None
+        assert dialog.remove_button.isEnabled() is False
+
+        dialog.profile_combo.setCurrentIndex(2)
+
+        assert dialog.selected_profile_path() == "/profiles/other.db"
+        assert dialog.remove_button.isEnabled() is True
+    finally:
+        dialog.deleteLater()
+        app.processEvents()
+
+
 def test_remove_selected_profile_deletes_current_profile_and_opens_fallback(monkeypatch):
     _MessageBox.messages = []
     monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
-    combo = _Combo()
-    combo.addItem("Current", "/profiles/current.db")
-    combo.setCurrentIndex(0)
+    monkeypatch.setattr(
+        profile_session,
+        "_prompt_profile_removal_choice",
+        mock.Mock(return_value="/profiles/current.db"),
+    )
     app = SimpleNamespace(
-        profile_combo=combo,
         current_db_path="/profiles/current.db",
         session_history_manager=SimpleNamespace(
             capture_profile_snapshot=mock.Mock(return_value="/snap/current.zip"),
@@ -542,7 +643,87 @@ def test_remove_selected_profile_deletes_current_profile_and_opens_fallback(monk
     )
     app.open_database.assert_called_once_with("/profiles/fallback.db")
     app.session_history_manager.record_profile_remove.assert_called_once()
+    assert _MessageBox.messages[0][0] == "question"
+    assert "/profiles/current.db" in _MessageBox.messages[0][1][2]
     assert _MessageBox.messages[-1][0] == "information"
+
+
+def test_remove_selected_profile_uses_dialog_choice_not_toolbar_selection(monkeypatch):
+    _MessageBox.messages = []
+    monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
+    prompt = mock.Mock(return_value="/profiles/other.db")
+    monkeypatch.setattr(profile_session, "_prompt_profile_removal_choice", prompt)
+    combo = _Combo()
+    combo.addItem("Current", "/profiles/current.db")
+    combo.setCurrentIndex(0)
+    app = SimpleNamespace(
+        profile_combo=combo,
+        current_db_path="/profiles/current.db",
+        session_history_manager=SimpleNamespace(
+            capture_profile_snapshot=mock.Mock(return_value="/snap/other.zip"),
+            record_profile_remove=mock.Mock(),
+        ),
+        _close_database_connection=mock.Mock(),
+        profile_workflows=SimpleNamespace(
+            delete_profile=mock.Mock(
+                return_value=SimpleNamespace(
+                    deleting_current=False,
+                    fallback_path=None,
+                )
+            )
+        ),
+        _sync_application_isrc_registry=mock.Mock(),
+        _reload_profiles_list=mock.Mock(),
+        open_database=mock.Mock(),
+        _schedule_owner_party_bootstrap=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+        populate_all_comboboxes=mock.Mock(),
+        _log_event=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+
+    profile_session.remove_selected_profile(app)
+
+    prompt.assert_called_once_with(app)
+    app._close_database_connection.assert_not_called()
+    app.profile_workflows.delete_profile.assert_called_once_with(
+        "/profiles/other.db",
+        "/profiles/current.db",
+    )
+    app.open_database.assert_not_called()
+    app.session_history_manager.record_profile_remove.assert_called_once()
+    assert _MessageBox.messages[0][0] == "question"
+    assert "/profiles/other.db" in _MessageBox.messages[0][1][2]
+    assert _MessageBox.messages[-1][0] == "information"
+
+
+def test_remove_selected_profile_cancel_after_dialog_selection_aborts(monkeypatch):
+    _MessageBox.messages = []
+    monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
+    monkeypatch.setattr(
+        profile_session,
+        "_prompt_profile_removal_choice",
+        mock.Mock(return_value="/profiles/other.db"),
+    )
+    monkeypatch.setattr(_MessageBox, "question", classmethod(lambda cls, *args: cls.No))
+    app = SimpleNamespace(
+        current_db_path="/profiles/current.db",
+        session_history_manager=SimpleNamespace(
+            capture_profile_snapshot=mock.Mock(),
+            record_profile_remove=mock.Mock(),
+        ),
+        profile_workflows=SimpleNamespace(delete_profile=mock.Mock()),
+    )
+
+    profile_session.remove_selected_profile(app)
+
+    app.session_history_manager.capture_profile_snapshot.assert_not_called()
+    app.profile_workflows.delete_profile.assert_not_called()
+    app.session_history_manager.record_profile_remove.assert_not_called()
 
 
 def test_close_database_connection_stops_services_and_resets_profile_state():
@@ -593,6 +774,7 @@ def test_prepare_database_for_open_blocking_reports_phase_and_handles_failure():
         is True
     )
     app._prepare_database_session.assert_called_once()
+    assert app._last_database_prepare_failure is None
 
     app._prepare_database_session.side_effect = RuntimeError("prepare failed")
     assert (
@@ -604,8 +786,54 @@ def test_prepare_database_for_open_blocking_reports_phase_and_handles_failure():
         )
         is False
     )
+    assert profile_session._startup_prepare_failure_matches(app, "/profiles/demo.db") is True
+    assert app._last_database_prepare_failure.message == "prepare failed"
     app.logger.warning.assert_called()
     app.logger.debug.assert_called()
+
+
+def test_startup_recovery_skips_failed_profile_and_remembers_fallback(tmp_path):
+    failed_path = tmp_path / "broken.db"
+    fallback_path = tmp_path / "healthy.db"
+    recovery_path = tmp_path / "startup_recovery.db"
+    settings = _Settings()
+    passwords = DatabaseSessionPasswordManager()
+    passwords.set_password(failed_path, "broken-secret-123")
+    app = SimpleNamespace(
+        database_dir=tmp_path,
+        profile_store=SimpleNamespace(list_profiles=lambda: [str(failed_path), str(fallback_path)]),
+        settings=settings,
+        database_passwords=passwords,
+        _last_database_prepare_failure=SimpleNamespace(
+            path=str(failed_path),
+            error_type="DatabaseError",
+            message="database disk image is malformed",
+        ),
+        _prepare_database_for_open_blocking=mock.Mock(return_value=True),
+        _run_startup_message_box=mock.Mock(),
+        logger=mock.Mock(),
+    )
+
+    selected_path, prepared = profile_session._recover_startup_database_after_failure(
+        app,
+        failed_path=str(failed_path),
+        fallback_paths=[str(failed_path), str(fallback_path), str(recovery_path)],
+    )
+
+    assert selected_path == str(fallback_path)
+    assert prepared is True
+    app._prepare_database_for_open_blocking.assert_called_once_with(
+        str(fallback_path),
+        title="Open Profile",
+        description="Preparing fallback profile database...",
+    )
+    assert settings.values["db/last_path"] == str(fallback_path)
+    assert settings.synced is True
+    assert passwords.password_for_database(failed_path) is None
+    app._run_startup_message_box.assert_called_once()
+    assert (
+        "database disk image is malformed" in app._run_startup_message_box.call_args.kwargs["text"]
+    )
 
 
 def test_prepare_profile_database_background_wires_worker_progress_and_error_handler():

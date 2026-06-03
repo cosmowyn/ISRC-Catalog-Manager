@@ -653,7 +653,7 @@ class HistoryManagerTestCase(unittest.TestCase):
         )
 
     def case_setting_bundle_change_restores_qpoint_and_coalesces(self):
-        key = "display/col_hint_pos"
+        key = "display/qpoint_history_probe"
         self.settings.setValue(key, QPoint(12, 18))
         self.settings.sync()
         before = self.history.capture_setting_states([key])

@@ -219,6 +219,16 @@ def test_isrc_generation_state_and_next_generated_isrc_cover_invalid_and_ready_p
     assert registry_controller._next_generated_isrc(app) == ""
 
 
+def test_load_isrc_prefix_failure_logs_and_disables_generation():
+    app = SimpleNamespace(
+        settings_reads=SimpleNamespace(load_isrc_prefix=mock.Mock(side_effect=MemoryError())),
+        logger=mock.Mock(),
+    )
+
+    assert registry_controller.load_isrc_prefix(app) == ""
+    app.logger.warning.assert_called_once()
+
+
 def test_preview_and_update_generated_fields_set_placeholders_and_toggle_state():
     generated = _Field()
     app = SimpleNamespace(
@@ -249,6 +259,24 @@ def test_preview_and_update_generated_fields_set_placeholders_and_toggle_state()
     registry_controller._update_add_data_generated_fields(app)
     assert "Fix ISRC settings" in generated.placeholder
     assert generated.tooltip == "error message"
+
+
+def test_update_generated_fields_skips_preview_when_generation_is_not_ready():
+    generated = _Field()
+    app = SimpleNamespace(
+        generated_isrc_field=generated,
+        prev_release_toggle=_Toggle(True),
+        _isrc_generation_state=mock.Mock(return_value=("disabled", "settings unavailable")),
+        _preview_generated_isrc=mock.Mock(side_effect=AssertionError("preview should be skipped")),
+    )
+
+    registry_controller._update_add_data_generated_fields(app)
+
+    assert generated.text == ""
+    assert "disabled" in generated.placeholder
+    assert generated.tooltip == "settings unavailable"
+    assert app.prev_release_toggle.enabled is False
+    app._preview_generated_isrc.assert_not_called()
 
 
 def test_generate_set_prefix_and_taken_checks(monkeypatch):

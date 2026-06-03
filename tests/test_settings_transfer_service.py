@@ -61,6 +61,7 @@ def build_current_values(
         "auto_snapshot_enabled": True,
         "auto_snapshot_interval_minutes": 45,
         "startup_sound_enabled": True,
+        "suppress_unencrypted_profile_warnings": True,
         "history_retention_mode": "balanced",
         "history_auto_cleanup_enabled": True,
         "history_storage_budget_mb": history_storage_budget_mb,
@@ -171,6 +172,7 @@ class SettingsTransferServiceTests(unittest.TestCase):
         self.assertTrue(payload["general"]["app_sounds"]["startup"])
         self.assertTrue(payload["general"]["app_sounds"]["notice"])
         self.assertTrue(payload["general"]["app_sounds"]["warning"])
+        self.assertTrue(payload["general"]["security"]["suppress_unencrypted_profile_warnings"])
         self.assertTrue(payload["gs1"]["template"]["present"])
         self.assertTrue(payload["gs1"]["contracts"]["present"])
         self.assertIn("Migrated Theme", payload["theme"]["custom_theme_library"])
@@ -245,6 +247,7 @@ class SettingsTransferServiceTests(unittest.TestCase):
         self.assertTrue(result.values["startup_sound_enabled"])
         self.assertTrue(result.values["app_sound_settings"]["notice"])
         self.assertTrue(result.values["app_sound_settings"]["warning"])
+        self.assertTrue(result.values["suppress_unencrypted_profile_warnings"])
         self.assertTrue(Path(str(result.values["icon_path"])).exists())
         self.assertIn("Migrated Theme", result.values["theme_library"])
         self.assertEqual(result.values["gs1_template_import_bytes"], template_bytes)

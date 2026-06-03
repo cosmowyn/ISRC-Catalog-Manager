@@ -20,6 +20,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_prepares_database_before_live_open = (
         AppShellTestCase.case_startup_prepares_database_before_live_open
     )
+    test_startup_open_failure_recovers_to_fallback_profile = (
+        AppShellTestCase.case_startup_open_failure_recovers_to_fallback_profile
+    )
     test_startup_ignores_repo_demo_runtime_last_path_for_normal_settings = (
         AppShellTestCase.case_startup_ignores_repo_demo_runtime_last_path_for_normal_settings
     )
