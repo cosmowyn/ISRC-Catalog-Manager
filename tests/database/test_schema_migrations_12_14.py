@@ -5,6 +5,9 @@ class DatabaseSchemaMigrations1214Tests(DatabaseSchemaServiceTestCase):
     test_migrate_12_to_13_promotes_default_custom_fields = (
         DatabaseSchemaServiceTestCase.case_migrate_12_to_13_promotes_default_custom_fields
     )
+    test_migrate_12_to_13_clears_invalid_legacy_isrc_values = (
+        DatabaseSchemaServiceTestCase.case_migrate_12_to_13_clears_invalid_legacy_isrc_values
+    )
     test_migrate_13_to_14_reconciles_leftover_promoted_custom_fields = (
         DatabaseSchemaServiceTestCase.case_migrate_13_to_14_reconciles_leftover_promoted_custom_fields
     )

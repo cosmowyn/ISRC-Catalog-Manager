@@ -278,6 +278,83 @@ def test_sqlcipher_database_service_migrates_plaintext_database_safely(tmp_path:
         encrypted_conn.close()
 
 
+def test_sqlcipher_migrated_plaintext_legacy_profile_tolerates_invalid_isrc(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "legacy_invalid_isrc.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript("""
+            CREATE TABLE Tracks (
+                id INTEGER PRIMARY KEY,
+                isrc TEXT NOT NULL,
+                isrc_compact TEXT,
+                track_title TEXT NOT NULL,
+                main_artist_id INTEGER NOT NULL,
+                album_id INTEGER,
+                release_date DATE,
+                track_length_sec INTEGER NOT NULL DEFAULT 0,
+                iswc TEXT,
+                upc TEXT,
+                genre TEXT
+            );
+            CREATE TABLE CustomFieldDefs (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER,
+                field_type TEXT NOT NULL DEFAULT 'text',
+                options TEXT
+            );
+            CREATE TABLE CustomFieldValues (
+                track_id INTEGER NOT NULL,
+                field_def_id INTEGER NOT NULL,
+                value TEXT,
+                blob_value BLOB,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (track_id, field_def_id)
+            );
+            INSERT INTO Tracks(
+                id, isrc, isrc_compact, track_title, main_artist_id, album_id,
+                release_date, track_length_sec, iswc, upc, genre
+            )
+            VALUES (1, 'legacy invalid isrc', '', 'Legacy Invalid', 1, NULL, NULL, 0, NULL, NULL, NULL);
+            CREATE TRIGGER trg_tracks_isrc_validate_upd
+            BEFORE UPDATE ON Tracks
+            FOR EACH ROW
+            WHEN NOT (
+                length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
+                AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
+                    '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+                AND upper(NEW.isrc_compact) = replace(replace(upper(NEW.isrc),'-',''),' ','')
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'ISRC validation failed');
+            END;
+            """)
+        conn.execute("PRAGMA user_version = 12")
+        conn.commit()
+
+    SQLCipherDatabaseService().encrypt_plaintext_database(db_path, "legacy-secret-123")
+    encrypted_conn = SQLCipherDatabaseService().open(db_path, "legacy-secret-123")
+    try:
+        schema = DatabaseSchemaService(encrypted_conn, data_root=tmp_path / "data")
+
+        assert schema.get_db_version() == 12
+        schema.migrate_schema()
+
+        assert schema.get_db_version() == SCHEMA_TARGET
+        assert encrypted_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert encrypted_conn.execute(
+            "SELECT isrc, isrc_compact FROM Tracks WHERE id=1"
+        ).fetchone() == ("", "")
+        assert "legacy invalid isrc" in str(
+            encrypted_conn.execute("SELECT comments FROM Tracks WHERE id=1").fetchone()[0]
+        )
+    finally:
+        encrypted_conn.close()
+
+
 def test_sqlcipher_database_service_uses_explicit_backup_path(tmp_path: Path) -> None:
     db_path = tmp_path / "catalog.db"
     with sqlite3.connect(db_path) as conn:

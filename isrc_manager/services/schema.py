@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
-from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
+from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc, to_iso_isrc
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -772,15 +772,7 @@ class DatabaseSchemaService:
         cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
         if "isrc_compact" not in cols:
             self.cursor.execute("ALTER TABLE Tracks ADD COLUMN isrc_compact TEXT")
-        for track_id, isrc in self.cursor.execute(
-            "SELECT id, isrc FROM Tracks WHERE isrc_compact IS NULL OR isrc_compact = ''"
-        ).fetchall():
-            self.cursor.execute(
-                "UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id)
-            )
-        self.cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
-        )
+        self._normalize_legacy_track_isrc_values()
 
     def _mig_4_to_5(self) -> None:
         self.cursor.execute("""
@@ -3075,13 +3067,7 @@ class DatabaseSchemaService:
         for column_name, column_sql in additions:
             if column_name not in cols:
                 self.cursor.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
-        if "isrc_compact" in self._table_columns("Tracks"):
-            for track_id, isrc in self.cursor.execute(
-                "SELECT id, isrc FROM Tracks WHERE isrc_compact IS NULL OR isrc_compact = ''"
-            ).fetchall():
-                self.cursor.execute(
-                    "UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id)
-                )
+        self._normalize_legacy_track_isrc_values()
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)"
         )
@@ -3106,6 +3092,102 @@ class DatabaseSchemaService:
                 SET relationship_type='original'
                 WHERE relationship_type IS NULL OR trim(relationship_type)=''
                 """)
+
+    def _drop_track_isrc_validation_objects(self) -> None:
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
+        self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
+        self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_compact_unique")
+
+    @staticmethod
+    def _migration_note_value(value: object) -> str:
+        return " ".join(str(value or "").strip().split())[:120]
+
+    @classmethod
+    def _append_migration_comment(cls, current: object, note: str) -> str:
+        clean_current = str(current or "").strip()
+        return f"{clean_current}\n{note}" if clean_current else note
+
+    def _normalize_legacy_track_isrc_values(self) -> None:
+        if not self._table_exists("Tracks"):
+            return
+        columns = self._table_columns("Tracks")
+        if "id" not in columns or "isrc" not in columns or "isrc_compact" not in columns:
+            return
+
+        self._drop_track_isrc_validation_objects()
+        has_comments = "comments" in columns
+        select_columns = (
+            "id, isrc, isrc_compact, comments" if has_comments else "id, isrc, isrc_compact"
+        )
+        rows = self.cursor.execute(f"SELECT {select_columns} FROM Tracks ORDER BY id").fetchall()
+        seen_compacts: set[str] = set()
+
+        for row in rows:
+            track_id = int(row[0])
+            raw_isrc = str(row[1] or "")
+            raw_compact = str(row[2] or "")
+            current_comments = row[3] if has_comments else None
+            compact_from_isrc = to_compact_isrc(raw_isrc)
+            compact_from_compact = to_compact_isrc(raw_compact)
+            new_isrc = raw_isrc
+            new_compact = raw_compact
+            note = ""
+
+            if compact_from_isrc:
+                new_compact = compact_from_isrc
+            elif compact_from_compact:
+                new_isrc = to_iso_isrc(compact_from_compact) or compact_from_compact
+                new_compact = compact_from_compact
+                if raw_isrc.strip():
+                    note = (
+                        "Migration note: replaced invalid legacy ISRC value "
+                        f"'{self._migration_note_value(raw_isrc)}' from its compact value."
+                    )
+            elif raw_isrc.strip() or raw_compact.strip():
+                new_isrc = ""
+                new_compact = ""
+                parts = []
+                if raw_isrc.strip():
+                    parts.append(f"isrc='{self._migration_note_value(raw_isrc)}'")
+                if raw_compact.strip():
+                    parts.append(f"isrc_compact='{self._migration_note_value(raw_compact)}'")
+                note = (
+                    "Migration note: cleared invalid legacy ISRC field"
+                    f"{'s' if len(parts) != 1 else ''} ({', '.join(parts)})."
+                )
+
+            compact_key = new_compact.strip().upper()
+            if compact_key:
+                if compact_key in seen_compacts:
+                    new_isrc = ""
+                    new_compact = ""
+                    note = (
+                        "Migration note: cleared duplicate legacy ISRC value "
+                        f"'{self._migration_note_value(raw_isrc or raw_compact)}'."
+                    )
+                else:
+                    seen_compacts.add(compact_key)
+
+            updates: list[str] = []
+            values: list[object] = []
+            if new_isrc != raw_isrc:
+                updates.append("isrc=?")
+                values.append(new_isrc)
+            if new_compact != raw_compact:
+                updates.append("isrc_compact=?")
+                values.append(new_compact)
+            if note and has_comments:
+                updates.append("comments=?")
+                values.append(self._append_migration_comment(current_comments, note))
+            if updates:
+                values.append(track_id)
+                self.cursor.execute(
+                    f"UPDATE Tracks SET {', '.join(updates)} WHERE id=?",
+                    values,
+                )
+
+        self._ensure_optional_isrc_constraints()
 
     def _migrate_tracks_artist_authority_to_parties(self) -> None:
         self._ensure_repertoire_tables()

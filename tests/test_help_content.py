@@ -223,6 +223,10 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("SQLCipher", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("migration path", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("app backups folder", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn(
+            "preserves the original schema version", HELP_CHAPTERS_BY_ID["profiles"].content_html
+        )
+        self.assertIn("Invalid legacy ISRC values", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("suppress the warning", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("secure-memory locking", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("database-at-rest encryption", HELP_CHAPTERS_BY_ID["profiles"].content_html)

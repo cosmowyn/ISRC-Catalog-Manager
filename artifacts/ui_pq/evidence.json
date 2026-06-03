@@ -8,18 +8,18 @@
     "message": "Runtime UI inventory and traceability matrix were generated.",
     "status": "passed",
     "test_id": "UI-PQ-INV-001",
-    "timestamp": "2026-06-03T13:07:52.574968+00:00"
+    "timestamp": "2026-06-03T16:23:41.298481+00:00"
   },
   {
     "data": {
-      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpwe49tgiu/qt-settings/AppLocalDataLocation/Database/default.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpzv36xpso/qt-settings/AppLocalDataLocation/Database/default.db",
       "menu_count": 38,
       "window_title": "Music Catalog Manager"
     },
     "message": "Main window, menu bar, and QA database are reachable.",
     "status": "passed",
     "test_id": "UI-PQ-SMOKE-001",
-    "timestamp": "2026-06-03T13:07:52.575002+00:00"
+    "timestamp": "2026-06-03T16:23:41.298545+00:00"
   },
   {
     "data": {
@@ -29,7 +29,7 @@
     "message": "Runtime menu/action inventory was generated.",
     "status": "passed",
     "test_id": "UI-PQ-MENU-001",
-    "timestamp": "2026-06-03T13:07:52.575016+00:00"
+    "timestamp": "2026-06-03T16:23:41.298565+00:00"
   },
   {
     "data": {
@@ -142,13 +142,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
             "sample_count": 289,
-            "sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
-            "unique_sample_colors": 17,
+            "sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
+            "unique_sample_colors": 16,
             "width": 1233
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-            "actual_sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
+            "actual_sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
             "baseline_sha256": "3c483b36eaefd87d78553d527c1ec1d4951c0ca9739c22508a56a99fda9a9e28",
@@ -160,14 +160,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
                 "sample_count": 289,
-                "sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
-                "unique_sample_colors": 17,
+                "sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
+                "unique_sample_colors": 16,
                 "width": 1233
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0073461891643709825,
-                "changed_samples": 8,
-                "mean_channel_delta": 0.5027548209366391,
+                "changed_sample_ratio": 0.009182736455463728,
+                "changed_samples": 10,
+                "mean_channel_delta": 0.878099173553719,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -192,13 +192,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
             "sample_count": 272,
-            "sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+            "sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
             "unique_sample_colors": 22,
             "width": 720
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-            "actual_sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+            "actual_sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
             "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -210,14 +210,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
                 "sample_count": 272,
-                "sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+                "sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
                 "unique_sample_colors": 22,
                 "width": 720
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0036730945821854912,
-                "changed_samples": 4,
-                "mean_channel_delta": 0.25550964187327824,
+                "changed_sample_ratio": 0.005509641873278237,
+                "changed_samples": 6,
+                "mean_channel_delta": 0.32644628099173556,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -492,13 +492,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
             "sample_count": 289,
-            "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+            "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
             "unique_sample_colors": 21,
             "width": 1080
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
-            "actual_sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+            "actual_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/diagnostics_dialog.png",
             "baseline_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
@@ -510,14 +510,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
                 "sample_count": 289,
-                "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+                "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
                 "unique_sample_colors": 21,
                 "width": 1080
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.020202020202020204,
-                "changed_samples": 22,
-                "mean_channel_delta": 1.1590909090909092,
+                "changed_sample_ratio": 0.021120293847566574,
+                "changed_samples": 23,
+                "mean_channel_delta": 1.1811294765840221,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -542,13 +542,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
             "sample_count": 289,
-            "sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+            "sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
             "unique_sample_colors": 20,
             "width": 1220
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-            "actual_sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+            "actual_sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
             "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -560,14 +560,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
                 "sample_count": 289,
-                "sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+                "sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
                 "unique_sample_colors": 20,
                 "width": 1220
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0017825311942959,
-                "changed_samples": 2,
-                "mean_channel_delta": 0.0768716577540107,
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1122,
@@ -592,13 +592,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
             "sample_count": 289,
-            "sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
-            "unique_sample_colors": 26,
+            "sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
+            "unique_sample_colors": 29,
             "width": 860
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-            "actual_sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
+            "actual_sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
             "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -610,14 +610,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
                 "sample_count": 289,
-                "sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
-                "unique_sample_colors": 26,
+                "sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
+                "unique_sample_colors": 29,
                 "width": 860
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.006920415224913495,
-                "changed_samples": 8,
-                "mean_channel_delta": 0.3393166089965398,
+                "changed_sample_ratio": 0.0034602076124567475,
+                "changed_samples": 4,
+                "mean_channel_delta": 0.2004757785467128,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1156,
@@ -1694,13 +1694,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
             "sample_count": 289,
-            "sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
-            "unique_sample_colors": 17,
+            "sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
+            "unique_sample_colors": 16,
             "width": 1233
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-            "actual_sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
+            "actual_sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
             "baseline_sha256": "3c483b36eaefd87d78553d527c1ec1d4951c0ca9739c22508a56a99fda9a9e28",
@@ -1712,14 +1712,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
                 "sample_count": 289,
-                "sha256": "869bfa241668ba3736a420650261c369d9a389a5098b4fb4dd7525edbab844c5",
-                "unique_sample_colors": 17,
+                "sha256": "0daf703bf929d36bd53e42337db2cfd91d31d035291e21c5443254a51134abb5",
+                "unique_sample_colors": 16,
                 "width": 1233
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0073461891643709825,
-                "changed_samples": 8,
-                "mean_channel_delta": 0.5027548209366391,
+                "changed_sample_ratio": 0.009182736455463728,
+                "changed_samples": 10,
+                "mean_channel_delta": 0.878099173553719,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -1744,13 +1744,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
             "sample_count": 272,
-            "sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+            "sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
             "unique_sample_colors": 22,
             "width": 720
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-            "actual_sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+            "actual_sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
             "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -1762,14 +1762,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
                 "sample_count": 272,
-                "sha256": "647dad34a93880147a0b03ad87a64cf9d80671d4c57953b49fe328a97ebfaafa",
+                "sha256": "04410def389c0a6f04f395478122453e12b12ab4217f204651d988890b29de0d",
                 "unique_sample_colors": 22,
                 "width": 720
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0036730945821854912,
-                "changed_samples": 4,
-                "mean_channel_delta": 0.25550964187327824,
+                "changed_sample_ratio": 0.005509641873278237,
+                "changed_samples": 6,
+                "mean_channel_delta": 0.32644628099173556,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -2044,13 +2044,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
             "sample_count": 289,
-            "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+            "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
             "unique_sample_colors": 21,
             "width": 1080
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
-            "actual_sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+            "actual_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/diagnostics_dialog.png",
             "baseline_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
@@ -2062,14 +2062,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
                 "sample_count": 289,
-                "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+                "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
                 "unique_sample_colors": 21,
                 "width": 1080
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.020202020202020204,
-                "changed_samples": 22,
-                "mean_channel_delta": 1.1590909090909092,
+                "changed_sample_ratio": 0.021120293847566574,
+                "changed_samples": 23,
+                "mean_channel_delta": 1.1811294765840221,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -2094,13 +2094,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
             "sample_count": 289,
-            "sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+            "sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
             "unique_sample_colors": 20,
             "width": 1220
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-            "actual_sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+            "actual_sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
             "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -2112,14 +2112,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
                 "sample_count": 289,
-                "sha256": "dd5a2d840e181642a65f777ddb9580ef982962c42aea6efd30cb656ff92bcae4",
+                "sha256": "69d0f529ff26dd0296cfffd3496c71f57c21abdd47c02a18b0858563581db507",
                 "unique_sample_colors": 20,
                 "width": 1220
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.0017825311942959,
-                "changed_samples": 2,
-                "mean_channel_delta": 0.0768716577540107,
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1122,
@@ -2144,13 +2144,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
             "sample_count": 289,
-            "sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
-            "unique_sample_colors": 26,
+            "sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
+            "unique_sample_colors": 29,
             "width": 860
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-            "actual_sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
+            "actual_sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
             "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -2162,14 +2162,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
                 "sample_count": 289,
-                "sha256": "e9ddcbd9bc545b9f9156d87d4f18b348d74d86a93abd6f8abbc68eaf98df6b49",
-                "unique_sample_colors": 26,
+                "sha256": "07cff10bab53fafe761d7556a5e57d54d9648e6b8953a57fb21840649c238195",
+                "unique_sample_colors": 29,
                 "width": 860
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.006920415224913495,
-                "changed_samples": 8,
-                "mean_channel_delta": 0.3393166089965398,
+                "changed_sample_ratio": 0.0034602076124567475,
+                "changed_samples": 4,
+                "mean_channel_delta": 0.2004757785467128,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1156,
@@ -2543,7 +2543,7 @@
     "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed.",
     "status": "passed",
     "test_id": "UI-PQ-SET-001",
-    "timestamp": "2026-06-03T13:07:54.752301+00:00"
+    "timestamp": "2026-06-03T16:23:43.702291+00:00"
   },
   {
     "data": {
@@ -2612,7 +2612,7 @@
     "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references.",
     "status": "passed",
     "test_id": "UI-PQ-HELP-001",
-    "timestamp": "2026-06-03T13:07:55.467678+00:00"
+    "timestamp": "2026-06-03T16:23:44.461974+00:00"
   },
   {
     "data": {
@@ -2648,7 +2648,7 @@
     "message": "Track was created through Add Track UI and edited through Edit Track UI.",
     "status": "passed",
     "test_id": "UI-PQ-CAT-001",
-    "timestamp": "2026-06-03T13:07:55.755952+00:00"
+    "timestamp": "2026-06-03T16:23:44.772678+00:00"
   },
   {
     "data": {
@@ -2707,7 +2707,7 @@
     "message": "Party, Work, and Release relationships were created or verified through manager UI.",
     "status": "passed",
     "test_id": "UI-PQ-REL-001",
-    "timestamp": "2026-06-03T13:07:56.112132+00:00"
+    "timestamp": "2026-06-03T16:23:45.163337+00:00"
   },
   {
     "data": {
@@ -2759,7 +2759,7 @@
     "message": "Contract and Rights Matrix records were created through UI and verified in the database.",
     "status": "passed",
     "test_id": "UI-PQ-CON-001",
-    "timestamp": "2026-06-03T13:07:56.364857+00:00"
+    "timestamp": "2026-06-03T16:23:45.432929+00:00"
   },
   {
     "data": {
@@ -2904,7 +2904,7 @@
     "message": "Invoice creation, invoice posting, payment entry, credit note creation, royalty statement generation, payout creation, report generation, and balanced ledger checks were executed through UI controls.",
     "status": "passed",
     "test_id": "UI-PQ-ACC-001",
-    "timestamp": "2026-06-03T13:07:57.409274+00:00"
+    "timestamp": "2026-06-03T16:23:46.547960+00:00"
   },
   {
     "data": {
@@ -2964,14 +2964,14 @@
     "message": "SoundCloud publish dialog options, private preflight, watermarked source, artwork, mocked publish action, progress UI, completion UI, run state, and no-secret storage were verified without network.",
     "status": "passed",
     "test_id": "UI-PQ-SC-001",
-    "timestamp": "2026-06-03T13:07:57.560585+00:00"
+    "timestamp": "2026-06-03T16:23:46.711362+00:00"
   },
   {
     "data": {
       "backup_integrity": "ok",
       "backup_method": "backup_api",
-      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpwe49tgiu/qt-settings/AppLocalDataLocation/backups/default_20260603_150757.db",
-      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpwe49tgiu/qt-settings/AppLocalDataLocation/Database/default.db",
+      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpzv36xpso/qt-settings/AppLocalDataLocation/backups/default_20260603_182346.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpzv36xpso/qt-settings/AppLocalDataLocation/Database/default.db",
       "diagnostics_check_statuses": {
         "Audio waveform cache": "ok",
         "Backup artifacts": "ok",
@@ -2990,7 +2990,7 @@
       "progress_message_count": 40,
       "restore_integrity": "ok",
       "restore_target": "artifacts/ui_pq/diagnostics-restore-target.db",
-      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpwe49tgiu/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260603_150757.db",
+      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpzv36xpso/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260603_182346.db",
       "status_messages": [
         "Collecting environment details...",
         "Collected environment details.",
@@ -3037,7 +3037,7 @@
     "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed against the QA profile.",
     "status": "passed",
     "test_id": "UI-PQ-DIAG-001",
-    "timestamp": "2026-06-03T13:07:57.623603+00:00"
+    "timestamp": "2026-06-03T16:23:46.781180+00:00"
   },
   {
     "data": {
@@ -3088,7 +3088,7 @@
       "pdf_profile": {
         "ends_with_eof": true,
         "page_count": 1,
-        "sha256": "67654d574ff7d5aba1728709c0fc80b5bae02f7a8606d40dfcb665ef9d88ca5a",
+        "sha256": "2c4d6d25cb8eeaf292794f394553008a85fc4ba3dfc98e3af858070d938a99b8",
         "size_bytes": 13551,
         "starts_with_pdf_header": true,
         "valid": true
@@ -3111,7 +3111,7 @@
     "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines.",
     "status": "passed",
     "test_id": "UI-PQ-IMP-001",
-    "timestamp": "2026-06-03T13:07:57.633262+00:00"
+    "timestamp": "2026-06-03T16:23:46.791262+00:00"
   },
   {
     "data": {
@@ -3132,7 +3132,7 @@
     "message": "Authenticity, watermark, and forensic verification workflow coverage.",
     "status": "partial",
     "test_id": "UI-PQ-AUTH-001",
-    "timestamp": "2026-06-03T13:07:57.633281+00:00"
+    "timestamp": "2026-06-03T16:23:46.791290+00:00"
   },
   {
     "data": {
@@ -3153,6 +3153,6 @@
     "message": "Media player, audio attachment, conversion, and derivative ledger workflow coverage.",
     "status": "partial",
     "test_id": "UI-PQ-MEDIA-001",
-    "timestamp": "2026-06-03T13:07:57.633306+00:00"
+    "timestamp": "2026-06-03T16:23:46.791319+00:00"
   }
 ]

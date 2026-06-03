@@ -461,6 +461,10 @@ class SQLCipherDatabaseService:
         try:
             conn = sqlcipher3.connect(str(source_path), timeout=float(self.timeout_seconds))
             try:
+                source_user_version = max(
+                    0,
+                    int((conn.execute("PRAGMA user_version").fetchone() or (0,))[0] or 0),
+                )
                 conn.execute(
                     f"ATTACH DATABASE '{_quote_sql_literal(tmp_path)}' "
                     f"AS encrypted KEY '{_quote_sql_literal(secret)}'"
@@ -472,6 +476,9 @@ class SQLCipherDatabaseService:
 
             verify_conn = self.open(tmp_path, secret)
             try:
+                if source_user_version:
+                    verify_conn.execute(f"PRAGMA user_version = {source_user_version}")
+                    verify_conn.commit()
                 integrity = (
                     str(verify_conn.execute("PRAGMA integrity_check").fetchone()[0]).strip().lower()
                 )

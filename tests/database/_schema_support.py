@@ -1550,6 +1550,86 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             finally:
                 conn.close()
 
+    def case_migrate_12_to_13_clears_invalid_legacy_isrc_values(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.executescript("""
+                CREATE TABLE Tracks (
+                    id INTEGER PRIMARY KEY,
+                    isrc TEXT NOT NULL,
+                    isrc_compact TEXT,
+                    track_title TEXT NOT NULL,
+                    main_artist_id INTEGER NOT NULL,
+                    album_id INTEGER,
+                    release_date DATE,
+                    track_length_sec INTEGER NOT NULL DEFAULT 0,
+                    iswc TEXT,
+                    upc TEXT,
+                    genre TEXT
+                );
+                CREATE TABLE CustomFieldDefs (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER,
+                    field_type TEXT NOT NULL DEFAULT 'text',
+                    options TEXT
+                );
+                CREATE TABLE CustomFieldValues (
+                    track_id INTEGER NOT NULL,
+                    field_def_id INTEGER NOT NULL,
+                    value TEXT,
+                    blob_value BLOB,
+                    mime_type TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (track_id, field_def_id)
+                );
+                INSERT INTO Tracks(
+                    id, isrc, isrc_compact, track_title, main_artist_id, album_id,
+                    release_date, track_length_sec, iswc, upc, genre
+                )
+                VALUES
+                    (1, 'bad legacy isrc', '', 'Invalid Legacy ISRC', 1, NULL, NULL, 0, NULL, NULL, NULL),
+                    (2, 'NL-ABC-26-00001', '', 'Valid Legacy ISRC', 1, NULL, NULL, 0, NULL, NULL, NULL),
+                    (3, '', 'NLABC2600001', 'Duplicate Compact Legacy ISRC', 1, NULL, NULL, 0, NULL, NULL, NULL);
+                CREATE TRIGGER trg_tracks_isrc_validate_upd
+                BEFORE UPDATE ON Tracks
+                FOR EACH ROW
+                WHEN NOT (
+                    length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
+                    AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
+                        '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+                    AND upper(NEW.isrc_compact) = replace(replace(upper(NEW.isrc),'-',''),' ','')
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'ISRC validation failed');
+                END;
+                """)
+            conn.execute("PRAGMA user_version = 12")
+            conn.commit()
+
+            service = DatabaseSchemaService(conn)
+            service.migrate_schema()
+
+            rows = conn.execute("""
+                SELECT id, isrc, isrc_compact, comments
+                FROM Tracks
+                ORDER BY id
+                """).fetchall()
+            self.assertEqual(rows[0][1:3], ("", ""))
+            self.assertIn("bad legacy isrc", rows[0][3])
+            self.assertEqual(rows[1][1:3], ("NL-ABC-26-00001", "NLABC2600001"))
+            self.assertEqual(rows[2][1:3], ("", ""))
+            self.assertIn("duplicate legacy ISRC", rows[2][3])
+            conn.execute(
+                "UPDATE Tracks SET track_title=? WHERE id=1", ("Editable After Migration",)
+            )
+            conn.commit()
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone(), ("ok",))
+        finally:
+            conn.close()
+
     def case_migrate_10_to_11_preserves_runner_savepoint(self):
         self.conn.execute("""
             CREATE TABLE Tracks (
