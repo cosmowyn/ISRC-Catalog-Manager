@@ -16,8 +16,8 @@ from .settings import init_settings
 from .version import current_app_version
 
 PACKAGED_SMOKE_TEST_ARGUMENT = "--packaged-smoke-test"
-REQUIRED_PACKAGED_RUNTIME_MODULES = ("keyring",)
-REQUIRED_PACKAGED_RUNTIME_DISTRIBUTIONS = ("keyring",)
+REQUIRED_PACKAGED_RUNTIME_MODULES = ("keyring", "sqlcipher3")
+REQUIRED_PACKAGED_RUNTIME_DISTRIBUTIONS = ("keyring", "sqlcipher3")
 
 
 def _filtered_smoke_argv(argv: Sequence[str] | None) -> list[str]:

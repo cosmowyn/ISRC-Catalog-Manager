@@ -725,17 +725,21 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "create profile",
             "remove profile",
             "switch",
+            "SQLCipher",
+            "encrypted database",
+            "database password",
         ),
         content_html="""
-        <p>A profile is one self-contained SQLite catalog database. It gives you a clean boundary around a label, artist, catalog, client, or project so your data stays organized and portable.</p>
+        <p>A profile is one self-contained catalog database. New profiles are protected with SQLCipher encryption, which means the profile file and encrypted backups cannot be read as ordinary SQLite files if they are copied from the machine.</p>
         <ul>
           <li><strong>Profile selector</strong>: choose the active database from the profile combo box in the toolbar. Changing the selection changes which catalog is open.</li>
-          <li><strong>New…</strong>: create a fresh local profile database.</li>
-          <li><strong>Browse…</strong>: open an existing database file from any location.</li>
+          <li><strong>New…</strong>: create a fresh local encrypted profile database. The password must be at least 12 characters and is kept only for the current app session unless remembered login is enabled.</li>
+          <li><strong>Browse…</strong>: open an existing database file from any location. Encrypted profiles prompt for the database password before the profile opens.</li>
           <li><strong>Reload List</strong>: refresh the known profile list from disk.</li>
           <li><strong>Remove…</strong>: remove the selected profile from the list and, if you choose, from disk as well.</li>
         </ul>
-        <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. On first launch, the app can also offer to open <strong>Application Settings</strong> so you can configure registration values, snapshot posture, and appearance before deeper catalog work begins.</p>
+        <p>When you browse to an older unencrypted SQLite profile, the app warns before opening it and offers a migration path. You can encrypt the profile now, open it unencrypted for the session, or cancel. If you choose to keep opening unencrypted profiles, the dialog includes a checkbox to suppress the warning for future unencrypted profile opens. Migration creates a SQLCipher copy, verifies the encrypted result, and replaces the active database only after the encrypted copy is valid. The previous unencrypted file is retained as a recovery backup in the app backups folder so the operation can fail safely.</p>
+        <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. On first launch, the app can also offer to open <strong>Application Settings</strong> so you can configure registration values, database-password posture, snapshot posture, and appearance before deeper catalog work begins.</p>
         <p>For a non-technical user, the safest mental model is: a profile is the file that contains the catalog. Opening another profile is like opening another project. Before importing, issuing invoices, exporting media, or publishing to SoundCloud, verify that the correct profile name is visible. If you are unsure, use <strong>About</strong>, <strong>Diagnostics</strong>, or the profile path shown in support surfaces to confirm the database location before making changes.</p>
         """,
     ),
@@ -1500,16 +1504,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "soundcloud settings",
             "keychain",
             "session-only",
+            "database password",
+            "remember password",
+            "SQLCipher",
         ),
         content_html="""
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
-          <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
+          <li><strong>General</strong>: current profile context, database password controls, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls. Use Smart Budget can fill a practical history budget from the combined size of all profile databases, retained snapshot count, and safety margin.</li>
           <li><strong>Sounds</strong>: app-wide sound controls for startup, completed-action notices, and warnings. Each bundled sound can be switched on or off independently.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>SoundCloud</strong>: safe connection settings for client id, redirect URI, write-only client secret replacement, connection status, OS keychain/keyring availability, session-only fallback state, and Connect, Refresh connection, and Disconnect actions. Stored secrets and OAuth callback query strings are never displayed.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
+        <p>The <strong>Remember database password on this device</strong> option is off by default. When enabled, the database password is stored only in the operating-system keychain/keyring and reused for up to 30 days; it is never written to normal settings, the profile database, JSON files, environment variables, or source files. Use <strong>Change Password…</strong> to rekey the current SQLCipher profile after entering the current password and confirming the new one.</p>
         <p>The <strong>Settings</strong> menu also includes <strong>Export Settings…</strong> and <strong>Import Settings…</strong> for portable migration. Treat settings export as the way to move the current General, GS1, SoundCloud-safe public settings, and Theme choices to another environment without copying private secrets. That ZIP bundle contains a JSON settings payload for the General, Sounds, GS1, and Theme areas plus any bundled exportable assets such as the stored GS1 workbook, stored GTIN contracts CSV, and the current application icon when that file is available.</p>
         <p>If you leave the window-title field blank, the app uses the current owner Party company name automatically when one is available and otherwise falls back to the application name. Entering a custom value acts as an explicit override and is preserved until you clear it again. Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
         <p>All bundled application sound effects were designed and created by <strong>Aeon Cosmowyn</strong>.</p>
@@ -1565,13 +1573,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Create Snapshot…</strong>: save a manual restore point.</li>
           <li><strong>Restore Snapshot</strong>: roll the profile back to a previous state.</li>
           <li><strong>Backups</strong>: review registered backup files that were created manually or as restore safety copies.</li>
-          <li><strong>Cleanup…</strong>: preview safe-to-delete snapshots, backup artifacts, archived snapshot bundles, file-state bundles, and stale session snapshots.</li>
+          <li><strong>Cleanup…</strong>: preview safe-to-delete snapshots, restore safety copies, archived snapshot bundles, file-state bundles, and stale session snapshots. Manual database backups stay warning-protected recovery points instead of ordinary reclaimable storage.</li>
           <li><strong>Trim History</strong>: keep the most recent reversible actions on the active branch while removing older history rows and newly unreferenced storage artifacts.</li>
           <li><strong>Retention and safety controls</strong>: the General settings page can store Maximum Safety, Balanced, Lean, or Custom cleanup posture for the active profile.</li>
           <li><strong>Budget-aware prompts</strong>: snapshot, restore, and related flows can warn when the profile is over its configured history storage budget and open cleanup directly.</li>
           <li><strong>Code registry behavior</strong>: internal registry issuance is append-only. Undo and redo revert owner links and surrounding editor state rather than editing immutable internal code rows in place. Generated values can remain intentionally unlinked, and unused <strong>Registry SHA-256 Key</strong> rows can be deleted manually from the Code Registry Workspace when they are not in use.</li>
         </ul>
-        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. Manual snapshots and protected restore points stay protected by default, while automatic cleanup focuses on safe auto-generated artifacts only. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
+        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. Manual snapshots, manual database backups, and protected restore points stay protected by default, while automatic cleanup focuses on safe auto-generated artifacts only. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
         """,
     ),
     HelpChapter(
@@ -1641,7 +1649,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Submit Report</strong>: submission happens only after you press this button. If a configured report proxy accepts the payload, it can create the GitHub issue for you without requiring a local GitHub login.</li>
           <li><strong>Local fallback</strong>: if no secure proxy is configured, the app is offline, the proxy is rate-limited, or submission fails, the sanitised report is saved under the app data reports folder for later review.</li>
         </ul>
-        <p>Installed release builds can include a public HTTPS report proxy endpoint through the bundled <code>resources/reporting.json</code> file. That file is generated from release configuration and must not contain credentials; it only tells the app where the server-side reporting endpoint lives. Environment configuration can override the bundled file for development or support testing. The app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. Repeated real proxy submission failures can trigger a short cooldown, but missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
+        <p>Installed release builds can include a public HTTPS report proxy endpoint through the bundled <code>resources/reporting.json</code> file. That file is generated from release configuration and must not contain credentials; it only tells the app where the server-side reporting endpoint lives. Environment configuration can override the bundled file for development or support testing. The app never ships a bug-report token, shared account password, GitHub private key, or other repository write credential. Large diagnostic reports are shortened before online GitHub submission so the issue body stays within GitHub limits, and repeated real proxy submission failures can trigger a short cooldown. Missing local proxy configuration does not consume that cooldown once the proxy has been configured.</p>
         <p>The sanitiser redacts tokens, passwords, API keys, connection strings, email addresses, phone numbers, local user names, and private home-folder paths. Reports must not be used to send catalog databases, raw royalty or contract data, private documents, or audio files. If a workflow depends on sensitive catalog records, describe the steps and visible symptoms rather than pasting private source data.</p>
         <p>Do not edit logs as a way to fix the catalog. Logs are evidence. If a log points to a database, managed-file, or settings problem, use the relevant workflow to repair the source issue and then keep the log as the explanation of what happened.</p>
         """,
@@ -1809,6 +1817,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>What it is for</strong>: review retained update staging files, support artifacts, stale retained storage, logs, snapshots, or other app-level files that can accumulate outside the active catalog table workflow.</li>
           <li><strong>Preview before cleanup</strong>: use the review surface to understand what will be removed before confirming any cleanup action.</li>
           <li><strong>Active-profile safety</strong>: the tool is intended to protect the currently active profile database and its referenced managed media. Use profile diagnostics and backups for profile-specific repair decisions.</li>
+          <li><strong>Backup safety</strong>: manual database backups with backup metadata are retained as warning-protected recovery points, even when their source profile is not currently active. Restore safety copies can still be cleaned after the restore workflow is no longer needed.</li>
           <li><strong>Do not manually delete catalog media</strong>: if a file is referenced by a catalog record, use the app's managed media, diagnostics, or conversion workflows instead of deleting it directly from the data folder.</li>
           <li><strong>Support workflow</strong>: pair Storage Admin with <strong>Application Log</strong>, <strong>Diagnostics</strong>, and <strong>Open Data Folder</strong> when troubleshooting app storage pressure or update leftovers.</li>
         </ul>

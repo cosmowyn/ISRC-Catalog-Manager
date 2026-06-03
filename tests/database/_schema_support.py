@@ -1550,6 +1550,29 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             finally:
                 conn.close()
 
+    def case_migrate_10_to_11_preserves_runner_savepoint(self):
+        self.conn.execute("""
+            CREATE TABLE Tracks (
+                id INTEGER PRIMARY KEY,
+                track_title TEXT NOT NULL
+            )
+            """)
+
+        self.conn.execute("SAVEPOINT mig")
+        self.service._mig_10_to_11()
+        self.conn.execute("ROLLBACK TO SAVEPOINT mig")
+        self.conn.execute("RELEASE SAVEPOINT mig")
+
+        tables = {
+            row[0]
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
+        }
+        self.assertNotIn("Licensees", tables)
+        self.assertNotIn("Licenses", tables)
+        self.assertNotIn("vw_Licenses", tables)
+
     def case_current_schema_allows_multiple_blank_isrc_rows(self):
         self.service.init_db()
         self.service.migrate_schema()

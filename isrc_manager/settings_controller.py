@@ -34,6 +34,8 @@ from isrc_manager.integrations.soundcloud.workflow import (
 from isrc_manager.services import GS1ProfileDefaults, OwnerPartySettings
 from isrc_manager.storage_sizes import format_budget_megabytes
 
+DATABASE_REMEMBER_PASSWORD_SETTING = "security/remember_database_password"
+
 
 def _stored_window_title_override(app) -> str:
     if app.settings.contains("identity/window_title_override"):
@@ -59,6 +61,17 @@ def _resolve_window_title(app, override: str | None = None) -> str:
     if owner_company_name:
         return owner_company_name
     return DEFAULT_WINDOW_TITLE
+
+
+def _coerce_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    return text not in {"0", "false", "no", "off"}
 
 
 def _load_identity(app):
@@ -104,10 +117,10 @@ def _current_settings_values(app) -> dict[str, object]:
         app.settings.value(SOUNDCLOUD_REDIRECT_URI_SETTING, "", str) or ""
     ).strip()
     raw_soundcloud_persistent = app.settings.value(SOUNDCLOUD_PERSISTENT_TOKENS_SETTING, True)
-    soundcloud_prefer_persistent = (
-        raw_soundcloud_persistent
-        if isinstance(raw_soundcloud_persistent, bool)
-        else str(raw_soundcloud_persistent).strip().lower() not in {"0", "false", "no", "off", ""}
+    soundcloud_prefer_persistent = _coerce_bool(raw_soundcloud_persistent, default=True)
+    remember_database_password = _coerce_bool(
+        app.settings.value(DATABASE_REMEMBER_PASSWORD_SETTING, False),
+        default=False,
     )
     return {
         "window_title": app.identity.get("window_title_override") or "",
@@ -120,6 +133,7 @@ def _current_settings_values(app) -> dict[str, object]:
         "notice_sound_enabled": app_sound_settings[APP_SOUND_NOTICE],
         "warning_sound_enabled": app_sound_settings[APP_SOUND_WARNING],
         "app_sound_settings": app_sound_settings,
+        "remember_database_password": remember_database_password,
         "artist_code": app.load_artist_code(),
         "auto_snapshot_enabled": auto_snapshot_enabled,
         "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -353,6 +367,43 @@ def _apply_settings_changes(
                     label="Update SoundCloud Settings",
                     before_value=before_soundcloud,
                     after_value=after_soundcloud,
+                )
+            changed_count += 1
+
+        before_remember_database_password = _coerce_bool(
+            before_values.get("remember_database_password"),
+            default=False,
+        )
+        after_remember_database_password = _coerce_bool(
+            after_values.get("remember_database_password"),
+            default=False,
+        )
+        if after_remember_database_password != before_remember_database_password:
+            app.settings.setValue(
+                DATABASE_REMEMBER_PASSWORD_SETTING,
+                after_remember_database_password,
+            )
+            app.settings.sync()
+            if not after_remember_database_password:
+                store = getattr(app, "database_keyring_credentials", None)
+                current_path = str(getattr(app, "current_db_path", "") or "").strip()
+                if store is not None and current_path:
+                    store.clear(current_path)
+            app._log_event(
+                "settings.database_password",
+                "Database password remember setting updated",
+                remember_database_password=after_remember_database_password,
+            )
+            if app.history_manager is not None:
+                app.history_manager.record_setting_change(
+                    key="remember_database_password",
+                    label=(
+                        "Remember Database Password Enabled"
+                        if after_remember_database_password
+                        else "Remember Database Password Disabled"
+                    ),
+                    before_value=before_remember_database_password,
+                    after_value=after_remember_database_password,
                 )
             changed_count += 1
 
@@ -813,6 +864,8 @@ def open_settings_dialog(app, initial_focus: str | None = None):
         ],
         soundcloud_settings=before_values.get("soundcloud_settings"),
         soundcloud_actions=SoundCloudAppConnectionActions(app),
+        remember_database_password=bool(before_values.get("remember_database_password", False)),
+        database_password_change_callback=getattr(app, "change_database_password", None),
         party_service=app.party_service,
         parent=app,
     )

@@ -164,9 +164,10 @@ _CONTRACT_ENTRY_FIELDS = {
 class CodeRegistryService:
     """Owns internal registry categories, immutable entries, and external code IDs."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, *, ensure_defaults: bool = True):
         self.conn = conn
-        self.ensure_default_categories()
+        if ensure_defaults:
+            self.ensure_default_categories()
 
     def _registry_schema_ready(self, *, cursor: sqlite3.Cursor | None = None) -> bool:
         cur = cursor or self.conn.cursor()

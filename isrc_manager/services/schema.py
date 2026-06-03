@@ -583,7 +583,7 @@ class DatabaseSchemaService:
             )
             try:
                 self.conn.execute("RELEASE SAVEPOINT mig")
-            except sqlite3.OperationalError as exc:
+            except Exception as exc:
                 if "no such savepoint" not in str(exc).lower():
                     raise
             self.conn.commit()
@@ -972,7 +972,6 @@ class DatabaseSchemaService:
             JOIN Licensees lic ON lic.id = l.licensee_id
             JOIN Tracks t ON t.id = l.track_id
             """)
-        self.conn.commit()
 
     def _mig_11_to_12(self) -> None:
         self.cursor.execute("""
@@ -1169,7 +1168,7 @@ class DatabaseSchemaService:
             return
 
         self._ensure_code_registry_tables(backfill_catalog_links=False)
-        service = CodeRegistryService(self.conn)
+        service = CodeRegistryService(self.conn, ensure_defaults=False)
         metrics = (
             "internal_authority",
             "external_authority",
@@ -2763,6 +2762,12 @@ class DatabaseSchemaService:
 
     def _ensure_license_columns(self) -> None:
         self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Licensees (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            )
+            """)
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS Licenses (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
@@ -4007,7 +4012,9 @@ class DatabaseSchemaService:
             from isrc_manager.code_registry.service import CodeRegistryService
         except Exception:
             return
-        CodeRegistryService(self.conn).ensure_default_categories(cursor=self.cursor)
+        CodeRegistryService(self.conn, ensure_defaults=False).ensure_default_categories(
+            cursor=self.cursor
+        )
 
     def _backfill_catalog_registry_links(self) -> None:
         try:
@@ -4021,7 +4028,7 @@ class DatabaseSchemaService:
         except Exception:
             return
 
-        service = CodeRegistryService(self.conn)
+        service = CodeRegistryService(self.conn, ensure_defaults=False)
         for owner_kind, table_name in (("track", "Tracks"), ("release", "Releases")):
             if not self._table_exists(table_name):
                 continue

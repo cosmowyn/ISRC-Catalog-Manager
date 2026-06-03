@@ -21,7 +21,7 @@ from typing import Any
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from .models import ALLOWED_LABELS
+from .models import ALLOWED_LABELS, GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES, fit_issue_body_for_github
 from .sanitizer import ReportSanitizer
 
 JsonPayload = dict[str, Any]
@@ -34,6 +34,7 @@ class ReportProxyConfig:
     allowed_versions: tuple[str, ...] = ()
     max_payload_bytes: int = 180_000
     max_body_chars: int = 160_000
+    github_issue_body_max_bytes: int = GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES
     per_ip_hour_limit: int = 20
     allowed_labels: frozenset[str] = ALLOWED_LABELS
 
@@ -182,6 +183,10 @@ def create_wsgi_app_from_environment() -> ReportProxyApp:
         allowed_versions=_csv_env("ISRC_REPORT_PROXY_ALLOWED_VERSIONS"),
         max_payload_bytes=_int_env("ISRC_REPORT_PROXY_MAX_BYTES", 180_000),
         max_body_chars=_int_env("ISRC_REPORT_PROXY_MAX_BODY_CHARS", 160_000),
+        github_issue_body_max_bytes=_int_env(
+            "ISRC_REPORT_PROXY_GITHUB_BODY_MAX_BYTES",
+            GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES,
+        ),
         per_ip_hour_limit=_int_env("ISRC_REPORT_PROXY_PER_IP_HOUR_LIMIT", 20),
     )
     client = GitHubAppIssueClient(
@@ -226,6 +231,7 @@ def validate_proxy_payload(
         raise ProxyValidationError("Report body is required.")
     if len(body.encode("utf-8")) > config.max_payload_bytes:
         raise ProxyValidationError("Report body exceeds the payload limit.")
+    body = fit_issue_body_for_github(body, max_bytes=config.github_issue_body_max_bytes)
 
     labels = ["bug", "user-report"]
     if kind == "crash":

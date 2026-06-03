@@ -80,6 +80,7 @@ GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_FILE
 ISRC_REPORT_PROXY_REPOSITORY=cosmowyn/ISRC-Catalog-Manager
 ISRC_REPORT_PROXY_ALLOWED_VERSIONS=5.0.0
 ISRC_REPORT_PROXY_MAX_BYTES=180000
+ISRC_REPORT_PROXY_GITHUB_BODY_MAX_BYTES=60000
 ISRC_REPORT_PROXY_PER_IP_HOUR_LIMIT=20
 ```
 
@@ -157,7 +158,9 @@ The desktop app applies local rate limits before submission:
 - maximum reports per day;
 - duplicate report detection;
 - cooldown after repeated failed proxy submissions or proxy rate-limit responses;
-- payload size limits.
+- payload size limits;
+- online issue-body shortening before GitHub submission, so large crash diagnostics do not exceed
+  GitHub issue body limits.
 
 Missing local proxy configuration and local validation failures are saved as pending reports without
 consuming the submission-failure cooldown. This keeps the app abuse-resistant without locking out a

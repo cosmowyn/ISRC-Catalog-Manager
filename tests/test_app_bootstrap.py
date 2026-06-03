@@ -475,7 +475,7 @@ class PackagedSmokeTests(unittest.TestCase):
         self.assertEqual(_FakeApplication._instance.quit_calls, 1)
         self.assertIn("9.8.7", output.getvalue())
 
-    def test_packaged_runtime_dependency_check_reports_missing_keyring(self):
+    def test_packaged_runtime_dependency_check_reports_missing_dynamic_security_dependencies(self):
         if BOOTSTRAP_IMPORT_ERROR is not None:
             raise unittest.SkipTest(f"Bootstrap helpers unavailable: {BOOTSTRAP_IMPORT_ERROR}")
 
@@ -487,7 +487,10 @@ class PackagedSmokeTests(unittest.TestCase):
                 side_effect=packaged_smoke.importlib.metadata.PackageNotFoundError,
             ),
         ):
-            with self.assertRaisesRegex(RuntimeError, "modules: keyring.*metadata: keyring"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "modules: keyring, sqlcipher3.*metadata: keyring, sqlcipher3",
+            ):
                 packaged_smoke.verify_packaged_runtime_dependencies()
 
 

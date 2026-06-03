@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isrc-catalog-manager"
-version = "5.1.0"
+version = "6.0.0"
 description = "Desktop ISRC catalog manager for tracks, metadata, licensing, and exports."
 readme = "README.md"
 requires-python = ">=3.14.4"
@@ -26,6 +26,7 @@ dependencies = [
   "scipy==1.17.1",
   "cryptography==48.0.0",
   "keyring==25.7.0",
+  "sqlcipher3==0.6.2",
 ]
 
 [project.optional-dependencies]
@@ -147,6 +148,7 @@ files = [
   "isrc_manager/services/catalog_admin.py",
   "isrc_manager/services/catalog_reads.py",
   "isrc_manager/services/database_admin.py",
+  "isrc_manager/services/database_security.py",
   "isrc_manager/services/db_access.py",
   "isrc_manager/services/gs1_models.py",
   "isrc_manager/services/gs1_repository.py",

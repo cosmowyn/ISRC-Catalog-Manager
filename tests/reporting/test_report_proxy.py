@@ -6,6 +6,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from isrc_manager.reporting.models import ISSUE_BODY_TRUNCATION_NOTICE
 from isrc_manager.reporting.proxy import (
     GitHubAppIssueClient,
     InMemoryProxyRateLimiter,
@@ -123,6 +124,24 @@ def test_crash_proxy_payload_receives_fixed_crash_labels() -> None:
     assert issue["labels"] == ["bug", "user-report", "crash-report"]
 
 
+def test_proxy_payload_validation_trims_large_github_issue_body() -> None:
+    config = ReportProxyConfig(
+        repository="owner/repo",
+        max_payload_bytes=10_000,
+        max_body_chars=10_000,
+        github_issue_body_max_bytes=500,
+    )
+
+    issue = validate_proxy_payload(
+        _valid_payload(body="x" * 2_000),
+        config=config,
+        sanitizer=ReportSanitizer(max_chars=10_000),
+    )
+
+    assert len(issue["body"].encode("utf-8")) <= 500
+    assert ISSUE_BODY_TRUNCATION_NOTICE.strip() in issue["body"]
+
+
 def test_wsgi_proxy_creates_issue_and_rate_limits() -> None:
     client = FakeIssueClient()
     app = ReportProxyApp(
@@ -197,12 +216,14 @@ def test_proxy_app_can_be_created_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "not-used-until-request")
     monkeypatch.setenv("ISRC_REPORT_PROXY_REPOSITORY", "owner/repo")
     monkeypatch.setenv("ISRC_REPORT_PROXY_ALLOWED_VERSIONS", "1.2.3,1.2.4")
+    monkeypatch.setenv("ISRC_REPORT_PROXY_GITHUB_BODY_MAX_BYTES", "50000")
 
     app = create_wsgi_app_from_environment()
 
     assert isinstance(app, ReportProxyApp)
     assert app.config.repository == "owner/repo"
     assert app.config.allowed_versions == ("1.2.3", "1.2.4")
+    assert app.config.github_issue_body_max_bytes == 50_000
 
 
 def test_proxy_environment_reads_private_key_file_and_integer_defaults(

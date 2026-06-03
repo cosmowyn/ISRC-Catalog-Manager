@@ -72,6 +72,7 @@ def _base_values() -> dict[str, object]:
             APP_SOUND_NOTICE: True,
             APP_SOUND_WARNING: True,
         },
+        "remember_database_password": False,
         "artist_code": "ABC",
         "auto_snapshot_enabled": True,
         "auto_snapshot_interval_minutes": 15,
@@ -223,6 +224,7 @@ def test_identity_helpers_resolve_override_legacy_owner_and_default(tmp_path: Pa
 
 def test_current_settings_values_collects_services_and_defaults() -> None:
     app = _fake_app()
+    app.settings.values[settings_controller.DATABASE_REMEMBER_PASSWORD_SETTING] = "true"
     app.gs1_settings_service = mock.Mock()
     app.gs1_settings_service.load_profile_defaults.return_value = GS1ProfileDefaults(
         contract_number="C-1",
@@ -245,6 +247,7 @@ def test_current_settings_values_collects_services_and_defaults() -> None:
     assert values["gs1_template_asset"] == "template"
     assert values["gs1_contract_entries"] == ("contract",)
     assert values["gs1_subbrand"] == "Sub"
+    assert values["remember_database_password"] is True
 
 
 def test_apply_settings_changes_returns_zero_for_noop() -> None:
@@ -255,6 +258,21 @@ def test_apply_settings_changes_returns_zero_for_noop() -> None:
 
     app._refresh_auto_snapshot_schedule.assert_not_called()
     app.settings_mutations.set_artist_code.assert_not_called()
+
+
+def test_apply_settings_changes_disabling_database_password_remember_clears_keyring() -> None:
+    app = _fake_app()
+    app.database_keyring_credentials = mock.Mock()
+    before = dict(_base_values(), remember_database_password=True)
+    after = dict(before, remember_database_password=False)
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    assert app.settings.stored == {
+        settings_controller.DATABASE_REMEMBER_PASSWORD_SETTING: False,
+    }
+    app.database_keyring_credentials.clear.assert_called_once_with("/tmp/catalog.db")
 
 
 def test_apply_settings_changes_persists_changed_sections_and_confirmation(

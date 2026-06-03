@@ -62,7 +62,9 @@ That makes it practical to answer questions such as:
 
 ### Local-first by design
 
-Catalog data lives in SQLite profile databases on your own machine. The app does not require a hosted backend or subscription service to remain usable.
+Catalog data lives in local profile databases on your own machine. New profiles are protected with SQLCipher encryption, while the app remains usable without a hosted backend or subscription service.
+
+Database passwords are kept in memory for the active app session. Remembered login is opt-in and uses the operating-system keychain/keyring only; passwords are not stored in normal settings files, JSON payloads, environment variables, source files, or the catalog database.
 
 ### Governed musical entry
 
@@ -391,7 +393,7 @@ The build script follows a deterministic release workflow:
 - on Windows, prefer a repo-local `.venv\Scripts\pyinstaller.exe` when present before falling back to other PyInstaller launch methods
 - resolve packaged branding from `build_assets/icons/app_logo.*`
 - bundle the runtime splash asset from `build_assets/splash.*`
-- bundle the dynamic `keyring` runtime package, backend modules, and metadata needed for secure credential storage
+- bundle the dynamic `keyring` and `sqlcipher3` runtime packages, backend modules, and metadata needed for secure credential storage and encrypted profiles
 - build with PyInstaller using the platform policy in the script
 - stage the release artifact under `dist/release/`
 - create a compressed release package under `dist/release/packages/`
@@ -532,7 +534,7 @@ The current public version block below is maintained by `scripts/sync_version_do
 run by the production version-bump workflow after the canonical version changes.
 
 <!-- version:sync:start -->
-Current source release: `5.1.0` (`v5.1.0`).
+Current source release: `6.0.0` (`v6.0.0`).
 Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->

@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QFileDialog, QInputDialog, QLineEdit, QMessageBox
 
 from isrc_manager.conversion import ConversionService
 from isrc_manager.isrc_registry import ApplicationISRCRegistryService
 from isrc_manager.paths import resolve_app_storage_layout
 from isrc_manager.services import DatabaseSchemaService
+from isrc_manager.services.database_security import (
+    DatabasePasswordPolicyError,
+    InvalidDatabasePasswordError,
+    KeyringCredentialError,
+    is_plaintext_sqlite_database,
+    is_probably_encrypted_database,
+    validate_database_password,
+)
 from isrc_manager.startup_progress import StartupPhase, StartupProgressTracker
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
@@ -20,6 +29,9 @@ from isrc_manager.storage_migration import (
     StorageMigrationService,
 )
 from isrc_manager.tasks import TaskFailure
+
+SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING = "security/suppress_unencrypted_profile_warning"
+BACKUP_SIDECAR_SUFFIX = ".backup.json"
 
 
 def _apply_storage_layout(app, *, active_data_root: str | Path | None = None) -> None:
@@ -311,6 +323,8 @@ def _on_profile_changed(app, idx: int):
         != QMessageBox.Yes
     ):
         return
+    if not _prepare_database_security_for_open(app, path):
+        return
 
     previous_path = app.current_db_path
 
@@ -338,6 +352,355 @@ def _on_profile_changed(app, idx: int):
     )
 
 
+def _settings_bool(app, key: str, default: bool = False) -> bool:
+    settings = getattr(app, "settings", None)
+    if settings is None:
+        return default
+    raw = settings.value(key, default)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _remember_database_password_enabled(app) -> bool:
+    return _settings_bool(app, "security/remember_database_password", False)
+
+
+def _unencrypted_profile_warning_suppressed(app) -> bool:
+    return _settings_bool(app, SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING, False)
+
+
+def _set_unencrypted_profile_warning_suppressed(app, enabled: bool) -> None:
+    settings = getattr(app, "settings", None)
+    if settings is None:
+        return
+    settings.setValue(SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING, bool(enabled))
+    sync = getattr(settings, "sync", None)
+    if callable(sync):
+        sync()
+
+
+def _database_password_manager(app):
+    return getattr(app, "database_passwords", None)
+
+
+def _database_security_service(app):
+    return getattr(app, "database_security_service", None)
+
+
+def _database_keyring_store(app):
+    return getattr(app, "database_keyring_credentials", None)
+
+
+def _set_session_database_password(app, path: str | Path, password: str) -> None:
+    manager = _database_password_manager(app)
+    if manager is not None:
+        manager.set_password(path, password)
+
+
+def _forget_session_database_password(app, path: str | Path) -> None:
+    manager = _database_password_manager(app)
+    if manager is not None:
+        manager.forget_password(path)
+
+
+def _session_database_password(app, path: str | Path) -> str | None:
+    manager = _database_password_manager(app)
+    if manager is None:
+        return None
+    return manager.password_for_database(path)
+
+
+def _remember_database_password_if_enabled(app, path: str | Path, password: str) -> None:
+    if not _remember_database_password_enabled(app):
+        return
+    store = _database_keyring_store(app)
+    if store is None:
+        QMessageBox.warning(
+            app,
+            "Database Password",
+            "The OS keychain/keyring is not available, so this password was kept for this app session only.",
+        )
+        return
+    try:
+        store.remember(path, password)
+    except KeyringCredentialError as exc:
+        QMessageBox.warning(app, "Database Password", str(exc))
+
+
+def _load_remembered_database_password(app, path: str | Path) -> str | None:
+    if not _remember_database_password_enabled(app):
+        return None
+    store = _database_keyring_store(app)
+    if store is None:
+        return None
+    try:
+        password = store.load(path)
+    except KeyringCredentialError as exc:
+        QMessageBox.warning(app, "Database Password", str(exc))
+        return None
+    if password:
+        _set_session_database_password(app, path, password)
+    return password
+
+
+def _prompt_password_text(app, *, title: str, label: str) -> str | None:
+    password, accepted = QInputDialog.getText(
+        app,
+        title,
+        label,
+        QLineEdit.Password,
+    )
+    if not accepted:
+        return None
+    return str(password or "")
+
+
+def _prompt_existing_database_password(app, path: str | Path) -> bool:
+    if _session_database_password(app, path):
+        return True
+    remembered = _load_remembered_database_password(app, path)
+    if remembered:
+        return True
+    security_service = _database_security_service(app)
+    while True:
+        password = _prompt_password_text(
+            app,
+            title="Unlock Profile",
+            label=f"Password for encrypted profile:\n{path}",
+        )
+        if password is None:
+            return False
+        try:
+            clean_password = validate_database_password(password)
+        except DatabasePasswordPolicyError as exc:
+            QMessageBox.warning(app, "Invalid Password", str(exc))
+            continue
+        if security_service is not None and is_probably_encrypted_database(path):
+            try:
+                conn = security_service.open(path, clean_password)
+                conn.close()
+            except InvalidDatabasePasswordError as exc:
+                QMessageBox.warning(app, "Unlock Failed", str(exc))
+                continue
+            except Exception as exc:
+                QMessageBox.critical(
+                    app,
+                    "Unlock Failed",
+                    f"Could not unlock the encrypted profile:\n{exc}",
+                )
+                return False
+        _set_session_database_password(app, path, clean_password)
+        _remember_database_password_if_enabled(app, path, clean_password)
+        return True
+
+
+def _prompt_new_database_password(app, *, title: str) -> str | None:
+    while True:
+        password = _prompt_password_text(
+            app,
+            title=title,
+            label=(
+                "Choose a database password. It protects the profile and backups if the "
+                "database file is copied or stolen."
+            ),
+        )
+        if password is None:
+            return None
+        confirmation = _prompt_password_text(
+            app,
+            title=title,
+            label="Confirm the database password:",
+        )
+        if confirmation is None:
+            return None
+        try:
+            return validate_database_password(password, confirmation=confirmation)
+        except DatabasePasswordPolicyError as exc:
+            QMessageBox.warning(app, "Invalid Password", str(exc))
+
+
+def _profile_maintenance_backup_path(app, source_path: str | Path) -> Path:
+    source = Path(source_path)
+    backups_dir = Path(getattr(app, "backups_dir", source.parent))
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = source.stem or "profile"
+    candidate = backups_dir / f"{stem}_unencrypted_{timestamp}.db"
+    counter = 1
+    while (
+        candidate.exists()
+        or candidate.with_suffix(candidate.suffix + BACKUP_SIDECAR_SUFFIX).exists()
+    ):
+        candidate = backups_dir / f"{stem}_unencrypted_{timestamp}_{counter}.db"
+        counter += 1
+    return candidate
+
+
+def _write_profile_maintenance_backup_sidecar(
+    backup_path: str | Path,
+    *,
+    source_db_path: str | Path,
+    kind: str,
+    label: str,
+) -> None:
+    backup = Path(backup_path)
+    payload = {
+        "backup_id": None,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "kind": kind,
+        "label": label,
+        "source_db_path": str(source_db_path),
+        "metadata": {"source": "profile_maintenance"},
+    }
+    sidecar_path = backup.with_suffix(backup.suffix + BACKUP_SIDECAR_SUFFIX)
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _migrate_plaintext_profile_if_requested(app, path: str | Path) -> bool:
+    if not is_plaintext_sqlite_database(path):
+        return True
+    if _unencrypted_profile_warning_suppressed(app):
+        return True
+
+    message_box = QMessageBox(app)
+    message_box.setIcon(QMessageBox.Warning)
+    message_box.setWindowTitle("Unencrypted Profile")
+    message_box.setText("This profile is an unencrypted SQLite database.")
+    message_box.setInformativeText(
+        "Encrypted SQLCipher profiles protect catalog data and backups if the database file is "
+        "copied or stolen. You can encrypt this profile now, or open it unencrypted for this "
+        "session."
+    )
+    encrypt_button = message_box.addButton("Encrypt Now", QMessageBox.AcceptRole)
+    open_button = message_box.addButton("Open Unencrypted", QMessageBox.DestructiveRole)
+    cancel_button = message_box.addButton(QMessageBox.Cancel)
+    suppress_check = QCheckBox("Do not warn again when I open unencrypted profiles")
+    message_box.setCheckBox(suppress_check)
+    message_box.setDefaultButton(encrypt_button)
+    message_box.exec()
+    clicked_button = message_box.clickedButton()
+    if clicked_button is cancel_button:
+        return False
+    if clicked_button is open_button:
+        if suppress_check.isChecked():
+            _set_unencrypted_profile_warning_suppressed(app, True)
+        return True
+
+    password = _prompt_new_database_password(app, title="Encrypt Profile")
+    if password is None:
+        return False
+    security_service = _database_security_service(app)
+    if security_service is None:
+        QMessageBox.critical(
+            app,
+            "Encrypt Profile",
+            "SQLCipher database security service is not available.",
+        )
+        return False
+    try:
+        backup_path = _profile_maintenance_backup_path(app, path)
+        result = security_service.encrypt_plaintext_database(
+            path,
+            password,
+            backup_path=backup_path,
+        )
+    except Exception as exc:
+        QMessageBox.critical(app, "Encrypt Profile", f"Could not encrypt this profile:\n{exc}")
+        return False
+    try:
+        _write_profile_maintenance_backup_sidecar(
+            result.backup_path,
+            source_db_path=path,
+            kind="profile_migration_unencrypted",
+            label=f"Pre-encryption backup: {Path(path).name}",
+        )
+    except Exception as exc:
+        QMessageBox.warning(
+            app,
+            "Encrypt Profile",
+            f"Profile encrypted, but backup metadata could not be written:\n{exc}",
+        )
+    _set_session_database_password(app, path, password)
+    _remember_database_password_if_enabled(app, path, password)
+    QMessageBox.information(
+        app,
+        "Profile Encrypted",
+        f"Encrypted profile:\n{result.database_path}\n\nUnencrypted backup:\n{result.backup_path}",
+    )
+    return True
+
+
+def _prepare_database_security_for_open(app, path: str | Path) -> bool:
+    if is_plaintext_sqlite_database(path):
+        return _migrate_plaintext_profile_if_requested(app, path)
+    if is_probably_encrypted_database(path):
+        return _prompt_existing_database_password(app, path)
+    return True
+
+
+def change_current_database_password(app) -> bool:
+    path = str(getattr(app, "current_db_path", "") or "").strip()
+    if not path:
+        QMessageBox.warning(app, "Database Password", "Open a profile first.")
+        return False
+    if is_plaintext_sqlite_database(path):
+        QMessageBox.warning(
+            app,
+            "Database Password",
+            "This profile is not encrypted yet. Open it through the profile picker to run migration first.",
+        )
+        return False
+    if not is_probably_encrypted_database(path):
+        QMessageBox.warning(
+            app,
+            "Database Password",
+            "This profile is empty or cannot be identified as an encrypted database.",
+        )
+        return False
+    security_service = _database_security_service(app)
+    if security_service is None:
+        QMessageBox.critical(
+            app,
+            "Database Password",
+            "SQLCipher database security service is not available.",
+        )
+        return False
+
+    current_password = _prompt_password_text(
+        app,
+        title="Change Database Password",
+        label="Current database password:",
+    )
+    if current_password is None:
+        return False
+    try:
+        validate_database_password(current_password)
+        verify_conn = security_service.open(path, current_password)
+        verify_conn.close()
+    except Exception as exc:
+        QMessageBox.warning(
+            app, "Database Password", f"Current password could not unlock the profile:\n{exc}"
+        )
+        return False
+
+    new_password = _prompt_new_database_password(app, title="Change Database Password")
+    if new_password is None:
+        return False
+    try:
+        security_service.change_password(path, current_password, new_password)
+    except Exception as exc:
+        QMessageBox.critical(
+            app, "Database Password", f"Could not change the database password:\n{exc}"
+        )
+        return False
+    _set_session_database_password(app, path, new_password)
+    _remember_database_password_if_enabled(app, path, new_password)
+    QMessageBox.information(app, "Database Password", "Database password changed.")
+    return True
+
+
 def create_new_profile(app):
     name, ok = QInputDialog.getText(
         app, "New Profile", "Database file name (no path, e.g., mylabel.db):"
@@ -350,6 +713,10 @@ def create_new_profile(app):
     except FileExistsError:
         QMessageBox.warning(app, "Exists", "A database with this name already exists.")
         return
+    password = _prompt_new_database_password(app, title="New Profile Password")
+    if password is None:
+        return
+    _set_session_database_password(app, new_path, password)
     app._clear_table_settings_for_path(new_path)
 
     def _after_create(prepared_path: str):
@@ -366,6 +733,7 @@ def create_new_profile(app):
             previous_path=previous_path,
         )
         app._refresh_history_actions()
+        _remember_database_password_if_enabled(app, prepared_path, password)
         QMessageBox.information(app, "Profile Created", f"Database created:\n{prepared_path}")
 
     app._activate_profile_in_background(
@@ -381,6 +749,8 @@ def browse_profile(app):
         app, "Open Database", str(app.database_dir), "SQLite DB (*.db);;All Files (*)"
     )
     if not path:
+        return
+    if not _prepare_database_security_for_open(app, path):
         return
     previous_path = app.current_db_path
 
@@ -480,6 +850,7 @@ def remove_selected_profile(app):
 
 def _close_database_connection(app):
     app._stop_audio_waveform_cache_worker(wait=False)
+    closing_path = getattr(app, "current_db_path", None)
     if hasattr(app, "auto_snapshot_timer"):
         app.auto_snapshot_timer.stop()
     quality_dashboard = getattr(app, "quality_dashboard_dialog", None)
@@ -543,6 +914,8 @@ def _close_database_connection(app):
     if hasattr(app, "background_service_factory"):
         app.background_service_factory.db_path = None
     app._background_write_lock = None
+    if closing_path:
+        _forget_session_database_password(app, closing_path)
     app._refresh_catalog_workspace_docks()
 
 
@@ -619,8 +992,11 @@ def open_database(
         if callable(progress_callback):
             progress_callback(completed_steps, total_steps, message)
 
+    target_session_password = _session_database_password(app, path)
     if app.conn is not None or app.cursor is not None:
         app._close_database_connection()
+        if target_session_password:
+            _set_session_database_password(app, path, target_session_password)
     session = app.database_session.open(path)
     app.conn = session.conn
     app.cursor = session.cursor
@@ -928,6 +1304,7 @@ __all__ = [
     "_on_profile_changed",
     "create_new_profile",
     "browse_profile",
+    "change_current_database_password",
     "remove_selected_profile",
     "_close_database_connection",
     "_prepare_database_session",

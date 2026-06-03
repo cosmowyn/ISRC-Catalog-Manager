@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from .models import ReportPayload
+from .models import GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES, ReportPayload
 
 MAX_SUBMISSION_BYTES = 180_000
 
@@ -44,7 +44,7 @@ class BackendProxySubmitter:
                 "ISRC_REPORT_PROXY_URL; the report was saved locally for later submission.",
             )
 
-        payload = report.to_issue_payload()
+        payload = report.to_issue_payload(max_body_bytes=GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES)
         payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
         if len(payload_bytes) > self.max_payload_bytes:
             return ReportSubmissionResult(False, "The report exceeds the configured payload limit.")
@@ -63,9 +63,13 @@ class BackendProxySubmitter:
                 response_body = response.read(min(4096, self.max_payload_bytes))
                 status_code = int(getattr(response, "status", 200))
         except urllib.error.HTTPError as exc:
+            response_error = _response_error_message(exc)
+            message = f"Report proxy rejected the submission with HTTP {exc.code}."
+            if response_error:
+                message = f"{message} {response_error}"
             return ReportSubmissionResult(
                 False,
-                f"Report proxy rejected the submission with HTTP {exc.code}.",
+                message,
                 status_code=exc.code,
             )
         except Exception as exc:
@@ -95,3 +99,13 @@ def _parse_response_body(raw: bytes) -> dict[str, object]:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _response_error_message(exc: urllib.error.HTTPError) -> str:
+    try:
+        raw = exc.read(4096)
+    except Exception:
+        return ""
+    parsed = _parse_response_body(raw)
+    message = parsed.get("error") or parsed.get("message")
+    return str(message or "").strip()

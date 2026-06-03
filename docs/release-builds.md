@@ -35,7 +35,7 @@ updates that value first, then runs `scripts/sync_version_docs.py` to align the 
 markers, `RELEASE_NOTES.md`, and `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
-Current canonical source version: `5.1.0` (`v5.1.0`).
+Current canonical source version: `6.0.0` (`v6.0.0`).
 Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
 <!-- version:sync:end -->
@@ -94,9 +94,11 @@ python build.py
 under `dist/release/`, creates an upload-ready archive under `dist/release/packages/`, and writes
 `dist/release_manifest.json`.
 
-SoundCloud credential storage imports Python `keyring` dynamically at runtime. The build command
-therefore explicitly includes `keyring`, collects `keyring.backends`, and copies `keyring`
-distribution metadata so the frozen app can discover safe OS keychain/keyring backends.
+SoundCloud credential storage imports Python `keyring` dynamically at runtime, and encrypted
+profile support imports `sqlcipher3` dynamically for SQLCipher connections. The build command
+therefore explicitly includes `keyring` and `sqlcipher3`, collects `keyring.backends`, and copies
+package metadata so the frozen app can discover safe OS keychain/keyring backends and initialize
+SQLCipher profile databases.
 
 Package names include:
 
@@ -159,6 +161,6 @@ python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release
 python build.py
 ```
 
-The packaged smoke entrypoint checks that the frozen binary includes the dynamic `keyring` module
-and its metadata before reporting success. Local builds produce packages only for the current
-operating system.
+The packaged smoke entrypoint checks that the frozen binary includes the dynamic `keyring` and
+`sqlcipher3` modules plus their metadata before reporting success. Local builds produce packages
+only for the current operating system.

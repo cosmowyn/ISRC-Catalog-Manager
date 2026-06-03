@@ -195,6 +195,8 @@ class ApplicationSettingsDialog(
         party_service: PartyService | None = None,
         soundcloud_settings: SoundCloudSettingsSnapshot | None = None,
         soundcloud_actions: SoundCloudConnectionActions | None = None,
+        remember_database_password: bool = False,
+        database_password_change_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -241,6 +243,8 @@ class ApplicationSettingsDialog(
         )
         self._startup_sound_enabled = self._app_sound_settings[APP_SOUND_STARTUP]
         self._app_sound_checks: dict[str, QCheckBox] = {}
+        self._remember_database_password_warning_shown = bool(remember_database_password)
+        self._database_password_change_callback = database_password_change_callback
         self._settings_builder_specs = (
             *self.THEME_PAGE_SPECS[:-1],
             (
@@ -367,6 +371,39 @@ class ApplicationSettingsDialog(
         profile_grid.addWidget(self._make_label("Path"), 1, 0)
         profile_grid.addWidget(profile_path_lbl, 1, 1)
         general_layout.addWidget(profile_box)
+
+        security_box = QGroupBox("Security")
+        security_grid = QGridLayout(security_box)
+        self._configure_grid(security_grid)
+        self.remember_database_password_check = QCheckBox(
+            "Remember database password on this device"
+        )
+        self.remember_database_password_check.setChecked(bool(remember_database_password))
+        self.remember_database_password_check.setMinimumWidth(360)
+        self.remember_database_password_check.toggled.connect(
+            self._confirm_remember_database_password
+        )
+        self.change_database_password_button = QPushButton("Change Password...")
+        self.change_database_password_button.setAutoDefault(False)
+        self.change_database_password_button.setEnabled(
+            callable(self._database_password_change_callback)
+        )
+        self.change_database_password_button.clicked.connect(self._change_database_password)
+        security_widget = QWidget(self)
+        security_row = QHBoxLayout(security_widget)
+        security_row.setContentsMargins(0, 0, 0, 0)
+        security_row.setSpacing(8)
+        security_row.addWidget(self.remember_database_password_check)
+        security_row.addWidget(self.change_database_password_button)
+        security_row.addStretch(1)
+        self._add_row(
+            security_grid,
+            0,
+            "Database Password",
+            security_widget,
+            "Stores the profile password only in the operating-system keychain/keyring and expires remembered login after 30 days.",
+        )
+        general_layout.addWidget(security_box)
 
         app_box = QGroupBox("Application")
         app_grid = QGridLayout(app_box)
@@ -1086,6 +1123,10 @@ class ApplicationSettingsDialog(
                 self._general_tab_index,
                 self.auto_snapshot_interval_spin,
             ),
+            "remember_database_password": (
+                self._general_tab_index,
+                self.remember_database_password_check,
+            ),
             "startup_sound_enabled": (
                 self._sounds_tab_index,
                 self.startup_sound_enabled_check,
@@ -1777,6 +1818,31 @@ class ApplicationSettingsDialog(
             )
         return OwnerPartySettings(party_id=self._owner_selected_party_id)
 
+    def _confirm_remember_database_password(self, checked: bool) -> None:
+        if not checked or self._remember_database_password_warning_shown:
+            return
+        result = QMessageBox.warning(
+            self,
+            "Remember Database Password",
+            (
+                "The database password will be stored in the operating-system "
+                "keychain/keyring on this device and reused for up to 30 days. "
+                "Do not enable this on shared or untrusted machines."
+            ),
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if result != QMessageBox.Ok:
+            self.remember_database_password_check.blockSignals(True)
+            self.remember_database_password_check.setChecked(False)
+            self.remember_database_password_check.blockSignals(False)
+            return
+        self._remember_database_password_warning_shown = True
+
+    def _change_database_password(self) -> None:
+        if callable(self._database_password_change_callback):
+            self._database_password_change_callback()
+
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
         blob_icon_values = self._blob_icon_value_payload()
@@ -1794,6 +1860,7 @@ class ApplicationSettingsDialog(
             "notice_sound_enabled": app_sound_values[APP_SOUND_NOTICE],
             "warning_sound_enabled": app_sound_values[APP_SOUND_WARNING],
             "app_sound_settings": app_sound_values,
+            "remember_database_password": self.remember_database_password_check.isChecked(),
             "history_retention_mode": str(
                 self.history_retention_mode_combo.currentData() or DEFAULT_HISTORY_RETENTION_MODE
             ),

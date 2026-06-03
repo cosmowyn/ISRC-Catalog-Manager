@@ -9,7 +9,13 @@ from hashlib import sha256
 from typing import Any
 
 MAX_TITLE_CHARS = 120
+GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES = 60_000
 ALLOWED_LABELS = frozenset({"bug", "crash-report", "user-report"})
+ISSUE_BODY_TRUNCATION_NOTICE = (
+    "\n\n---\n\n"
+    "_Report body was shortened before online submission because GitHub issues reject "
+    "very large bodies._\n"
+)
 
 
 @dataclass(frozen=True)
@@ -76,12 +82,15 @@ class ReportPayload:
         )
         return sha256(material.encode("utf-8")).hexdigest()
 
-    def to_issue_payload(self) -> dict[str, Any]:
+    def to_issue_payload(self, *, max_body_bytes: int | None = None) -> dict[str, Any]:
+        body = self.to_markdown()
+        if max_body_bytes is not None:
+            body = fit_issue_body_for_github(body, max_bytes=max_body_bytes)
         return {
             "schema_version": self.schema_version,
             "repository": self.repository,
             "title": self.issue_title,
-            "body": self.to_markdown(),
+            "body": body,
             "labels": list(self.safe_labels),
             "report_id": self.report_id,
             "kind": self.kind,
@@ -137,6 +146,26 @@ def utc_timestamp() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def fit_issue_body_for_github(
+    body: str,
+    *,
+    max_bytes: int = GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES,
+) -> str:
+    """Keep an issue body under the conservative GitHub API size budget."""
+
+    body = str(body or "")
+    max_bytes = int(max_bytes)
+    if max_bytes <= 0:
+        return ""
+    if len(body.encode("utf-8")) <= max_bytes:
+        return body
+    notice_bytes = ISSUE_BODY_TRUNCATION_NOTICE.encode("utf-8")
+    if len(notice_bytes) >= max_bytes:
+        return _truncate_utf8(ISSUE_BODY_TRUNCATION_NOTICE, max_bytes)
+    budget = max_bytes - len(notice_bytes)
+    return _truncate_utf8(body, budget).rstrip() + ISSUE_BODY_TRUNCATION_NOTICE
+
+
 def _format_section_body(body: str, *, kind: str) -> str:
     if kind == "markdown":
         return _safe_markdown_text(body)
@@ -149,6 +178,12 @@ def _safe_code_block(value: str) -> str:
 
 def _safe_markdown_text(value: str) -> str:
     return value.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    if max_bytes <= 0:
+        return ""
+    return value.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def _single_line(value: str) -> str:

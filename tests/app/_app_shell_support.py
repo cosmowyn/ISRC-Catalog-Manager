@@ -2791,7 +2791,11 @@ class AppShellTestCase(unittest.TestCase):
             mock.patch.object(
                 app_module.QInputDialog,
                 "getText",
-                return_value=("Label Test", True),
+                side_effect=[
+                    ("Label Test", True),
+                    ("valid-secret-123", True),
+                    ("valid-secret-123", True),
+                ],
             ),
             mock.patch.object(app_module.QMessageBox, "information", return_value=None),
         ):
@@ -2811,6 +2815,9 @@ class AppShellTestCase(unittest.TestCase):
                 app_module.QFileDialog,
                 "getOpenFileName",
                 return_value=(str(external_path), "SQLite DB (*.db)"),
+            ),
+            mock.patch.object(
+                app_module.profile_session, "_prepare_database_security_for_open", return_value=True
             ),
         ):
             self.window.browse_profile()

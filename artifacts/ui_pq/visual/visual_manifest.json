@@ -166,8 +166,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
       "sample_count": 289,
-      "sha256": "bba90bd95e5c8504ba4c384352bb5142a2687ea1f31373f113ce64935204fcc8",
-      "unique_sample_colors": 15,
+      "sha256": "e9e996a46169a00bdc3e9d44db061ad503a93964bcebb46f132067ed20dff2c6",
+      "unique_sample_colors": 18,
       "width": 1233
     },
     {
@@ -176,7 +176,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
       "sample_count": 272,
-      "sha256": "45fe2917109ef7b545b994c4d8122a89626dddff08912f394d011fa174f924fc",
+      "sha256": "3596e0292739b5c0fd15ac22f09b35371e075002ce79b051a912629c98094761",
       "unique_sample_colors": 22,
       "width": 720
     },
@@ -186,7 +186,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
       "sample_count": 289,
-      "sha256": "49c9fb9752601a7d3842a27ddb793897cdddeb93f0f2f3a71bc35f818594a0c1",
+      "sha256": "71f1e69147f568583a8162bc573dfdb18f9b96fcf9ff17c806a150018da868fa",
       "unique_sample_colors": 33,
       "width": 1180
     },
@@ -236,8 +236,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
       "sample_count": 289,
-      "sha256": "7ec4a534318c7169c0cc5f8949071193d2d5efa4a3d92c8d5a7e1d642db7a212",
-      "unique_sample_colors": 22,
+      "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+      "unique_sample_colors": 21,
       "width": 1080
     },
     {
@@ -246,7 +246,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
       "sample_count": 289,
-      "sha256": "e0b618c9f2d9bd4e52c76478f80edf3a3552e457cfe1f080d20ea33e802b7192",
+      "sha256": "2ea0dd06ebe276c647ee939f7b530deed0ec58376cfdb75d688561c29c28b9fb",
       "unique_sample_colors": 20,
       "width": 1220
     },
@@ -256,8 +256,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
       "sample_count": 289,
-      "sha256": "6c5d618f143dcdce00eeffa0ef6dfd7181615d908c71943758ee8316a55c022d",
-      "unique_sample_colors": 30,
+      "sha256": "3ad1132cc09daa460d3ae4e08d9b7c6df6fe94b948371aeb0527d8d5b40def9b",
+      "unique_sample_colors": 25,
       "width": 860
     },
     {
@@ -884,10 +884,10 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-      "actual_sha256": "bba90bd95e5c8504ba4c384352bb5142a2687ea1f31373f113ce64935204fcc8",
+      "actual_sha256": "e9e996a46169a00bdc3e9d44db061ad503a93964bcebb46f132067ed20dff2c6",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
-      "baseline_sha256": "2f9d880d453b7ab86480ca094047701ebcbae15b633a88cc879670300b95784c",
+      "baseline_sha256": "3c483b36eaefd87d78553d527c1ec1d4951c0ca9739c22508a56a99fda9a9e28",
       "comparison_type": "screenshot",
       "details": {
         "capture": {
@@ -896,14 +896,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
           "sample_count": 289,
-          "sha256": "bba90bd95e5c8504ba4c384352bb5142a2687ea1f31373f113ce64935204fcc8",
-          "unique_sample_colors": 15,
+          "sha256": "e9e996a46169a00bdc3e9d44db061ad503a93964bcebb46f132067ed20dff2c6",
+          "unique_sample_colors": 18,
           "width": 1233
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.010101010101010102,
-          "changed_samples": 11,
-          "mean_channel_delta": 0.9201101928374655,
+          "changed_sample_ratio": 0.011019283746556474,
+          "changed_samples": 12,
+          "mean_channel_delta": 1.3581267217630855,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -919,7 +919,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-      "actual_sha256": "45fe2917109ef7b545b994c4d8122a89626dddff08912f394d011fa174f924fc",
+      "actual_sha256": "3596e0292739b5c0fd15ac22f09b35371e075002ce79b051a912629c98094761",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
       "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -931,14 +931,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
           "sample_count": 272,
-          "sha256": "45fe2917109ef7b545b994c4d8122a89626dddff08912f394d011fa174f924fc",
+          "sha256": "3596e0292739b5c0fd15ac22f09b35371e075002ce79b051a912629c98094761",
           "unique_sample_colors": 22,
           "width": 720
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.0036730945821854912,
-          "changed_samples": 4,
-          "mean_channel_delta": 0.17355371900826447,
+          "changed_sample_ratio": 0.005509641873278237,
+          "changed_samples": 6,
+          "mean_channel_delta": 0.3608815426997245,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -954,7 +954,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
-      "actual_sha256": "49c9fb9752601a7d3842a27ddb793897cdddeb93f0f2f3a71bc35f818594a0c1",
+      "actual_sha256": "71f1e69147f568583a8162bc573dfdb18f9b96fcf9ff17c806a150018da868fa",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/help_contents_dialog.png",
       "baseline_sha256": "c3953f56f5e3d9e422d7d8c18ab3849424cf2dbd70c54e9014300a467997870e",
@@ -966,7 +966,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
           "sample_count": 289,
-          "sha256": "49c9fb9752601a7d3842a27ddb793897cdddeb93f0f2f3a71bc35f818594a0c1",
+          "sha256": "71f1e69147f568583a8162bc573dfdb18f9b96fcf9ff17c806a150018da868fa",
           "unique_sample_colors": 33,
           "width": 1180
         },
@@ -1129,7 +1129,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
-      "actual_sha256": "7ec4a534318c7169c0cc5f8949071193d2d5efa4a3d92c8d5a7e1d642db7a212",
+      "actual_sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/diagnostics_dialog.png",
       "baseline_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
@@ -1141,14 +1141,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
           "sample_count": 289,
-          "sha256": "7ec4a534318c7169c0cc5f8949071193d2d5efa4a3d92c8d5a7e1d642db7a212",
-          "unique_sample_colors": 22,
+          "sha256": "285a60c9eb35f21e4a0380ee7677c5c54a01a687be599efd8dbe83d9c5868262",
+          "unique_sample_colors": 21,
           "width": 1080
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.021120293847566574,
-          "changed_samples": 23,
-          "mean_channel_delta": 1.294077134986226,
+          "changed_sample_ratio": 0.020202020202020204,
+          "changed_samples": 22,
+          "mean_channel_delta": 1.1590909090909092,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1164,7 +1164,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-      "actual_sha256": "e0b618c9f2d9bd4e52c76478f80edf3a3552e457cfe1f080d20ea33e802b7192",
+      "actual_sha256": "2ea0dd06ebe276c647ee939f7b530deed0ec58376cfdb75d688561c29c28b9fb",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
       "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -1176,14 +1176,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
           "sample_count": 289,
-          "sha256": "e0b618c9f2d9bd4e52c76478f80edf3a3552e457cfe1f080d20ea33e802b7192",
+          "sha256": "2ea0dd06ebe276c647ee939f7b530deed0ec58376cfdb75d688561c29c28b9fb",
           "unique_sample_colors": 20,
           "width": 1220
         },
         "comparison_profile": {
           "changed_sample_ratio": 0.00089126559714795,
           "changed_samples": 1,
-          "mean_channel_delta": 0.17045454545454544,
+          "mean_channel_delta": 0.1557486631016043,
           "passed": true,
           "same_size": true,
           "sample_count": 1122,
@@ -1199,7 +1199,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-      "actual_sha256": "6c5d618f143dcdce00eeffa0ef6dfd7181615d908c71943758ee8316a55c022d",
+      "actual_sha256": "3ad1132cc09daa460d3ae4e08d9b7c6df6fe94b948371aeb0527d8d5b40def9b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
       "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -1211,14 +1211,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
           "sample_count": 289,
-          "sha256": "6c5d618f143dcdce00eeffa0ef6dfd7181615d908c71943758ee8316a55c022d",
-          "unique_sample_colors": 30,
+          "sha256": "3ad1132cc09daa460d3ae4e08d9b7c6df6fe94b948371aeb0527d8d5b40def9b",
+          "unique_sample_colors": 25,
           "width": 860
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.00865051903114187,
-          "changed_samples": 10,
-          "mean_channel_delta": 0.5650951557093425,
+          "changed_sample_ratio": 0.01384083044982699,
+          "changed_samples": 16,
+          "mean_channel_delta": 0.9809688581314879,
           "passed": true,
           "same_size": true,
           "sample_count": 1156,

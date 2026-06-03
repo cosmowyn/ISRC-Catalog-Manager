@@ -629,7 +629,7 @@ class CommandConstructionTests(unittest.TestCase):
             cmd,
         )
 
-    def test_pyinstaller_command_bundles_keyring_backend_discovery(self):
+    def test_pyinstaller_command_bundles_dynamic_security_dependencies(self):
         entry_script = Path("/project/ISRC_manager.py")
 
         with (
@@ -645,8 +645,10 @@ class CommandConstructionTests(unittest.TestCase):
             )
 
         self.assertIn("keyring", _option_values(cmd, "--hidden-import"))
+        self.assertIn("sqlcipher3", _option_values(cmd, "--hidden-import"))
         self.assertIn("keyring.backends", _option_values(cmd, "--collect-submodules"))
         self.assertIn("keyring", _option_values(cmd, "--copy-metadata"))
+        self.assertIn("sqlcipher3", _option_values(cmd, "--copy-metadata"))
 
     def test_macos_pyinstaller_command_keeps_runtime_splash_without_bootloader_splash(self):
         entry_script = Path("/project/ISRC_manager.py")

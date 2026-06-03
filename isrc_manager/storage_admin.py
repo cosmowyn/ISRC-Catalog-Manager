@@ -1042,8 +1042,31 @@ class ApplicationStorageAdminService:
             source_db_path,
             metadata_json,
         ) in backup_rows:
-            del created_at, kind, source_db_path, metadata_json
+            del created_at, source_db_path
             backup_file = Path(str(backup_path))
+            backup_metadata = self._load_json(metadata_json)
+            if not isinstance(backup_metadata, dict):
+                backup_metadata = {}
+            backup_kind = str(kind or backup_metadata.get("kind") or "").strip().lower()
+            is_restore_safety_copy = "pre_restore" in backup_kind or (
+                "restore" in backup_kind and "safety" in backup_kind
+            )
+            if is_restore_safety_copy:
+                reason = (
+                    "This restore safety backup is retained for recovery but can be cleaned "
+                    "after the restore workflow is no longer needed."
+                )
+                recommended = True
+                warning_required = False
+                warning = ""
+            else:
+                reason = (
+                    "This user-created database backup is retained as a recovery point and is "
+                    "not treated as safe automatic cleanup."
+                )
+                recommended = False
+                warning_required = True
+                warning = "Deleting this backup removes a user-created recovery point."
             items.append(
                 StorageAdminItem(
                     item_key=f"history:{profile_path}:backup_record:{int(backup_id)}",
@@ -1059,9 +1082,10 @@ class ApplicationStorageAdminService:
                     ),
                     profile_name=profile_name,
                     profile_path=profile_path,
-                    reason="Safety backups are retained for recovery but are not required for live catalog data.",
-                    recommended=True,
-                    warning_required=False,
+                    reason=reason,
+                    recommended=recommended,
+                    warning_required=warning_required,
+                    warning=warning,
                     metadata={
                         "cleanup_kind": "history_item",
                         "history_item_type": "backup_record",
@@ -1290,20 +1314,51 @@ class ApplicationStorageAdminService:
             normalized = str(path)
             if normalized in registered_backup_paths:
                 continue
-            metadata = self._load_json_sidecar(self._backup_sidecar_path(path))
+            sidecar_path = self._backup_sidecar_path(path)
+            metadata = self._load_json_sidecar(sidecar_path)
             source_db_path = self._normalize_existing_path(metadata.get("source_db_path"))
-            if source_db_path and source_db_path not in active_profile_set:
+            backup_kind = str(metadata.get("kind") or "").strip().lower()
+            has_backup_sidecar = bool(metadata)
+            is_restore_safety_copy = "pre_restore" in backup_kind or (
+                "restore" in backup_kind and "safety" in backup_kind
+            )
+            if has_backup_sidecar and not is_restore_safety_copy:
+                status_key = STATUS_RECOVERABILITY
+                status_label = "Recoverability / Database Backup"
+                reason = (
+                    "This sidecar-backed database backup is retained as a recovery point. "
+                    "It is not treated as safe automatic cleanup, even if its source profile "
+                    "is not currently active."
+                )
+                recommended = False
+                warning_required = True
+                warning = "Deleting this backup removes a retained database recovery point."
+            elif has_backup_sidecar and is_restore_safety_copy:
+                status_key = STATUS_RECOVERABILITY
+                status_label = "Recoverability / Restore Safety Copy"
+                reason = (
+                    "This restore safety backup can be cleaned after the restore workflow is "
+                    "no longer needed."
+                )
+                recommended = True
+                warning_required = False
+                warning = ""
+            elif source_db_path and source_db_path not in active_profile_set:
                 status_key = STATUS_DELETED_PROFILE
                 status_label = "Deleted / Missing Profile Residue"
                 reason = (
                     "This database copy was created for a profile database that no longer exists."
                 )
                 recommended = True
+                warning_required = False
+                warning = ""
             else:
                 status_key = STATUS_ORPHANED
                 status_label = "Orphaned / Unreferenced"
                 reason = "This database copy is present on disk but is not registered in any active profile history."
                 recommended = True
+                warning_required = False
+                warning = ""
             items.append(
                 StorageAdminItem(
                     item_key=f"backup-file:{path}",
@@ -1319,10 +1374,12 @@ class ApplicationStorageAdminService:
                     profile_path=source_db_path,
                     reason=reason,
                     recommended=recommended,
-                    warning_required=False,
+                    warning_required=warning_required,
+                    warning=warning,
                     metadata={
                         "cleanup_kind": "direct_path",
                         "stored_path": str(path),
+                        "companion_paths": [str(sidecar_path)] if sidecar_path.exists() else [],
                     },
                 )
             )
@@ -1563,7 +1620,16 @@ class ApplicationStorageAdminService:
         if cleanup_kind == "direct_path":
             target = Path(str(item.metadata.get("stored_path") or item.path))
             self._remove_direct_path(target)
-            return [str(target)]
+            removed = [str(target)]
+            companion_paths = item.metadata.get("companion_paths")
+            if isinstance(companion_paths, (list, tuple)):
+                for companion_path in companion_paths:
+                    companion = Path(str(companion_path))
+                    if companion == target:
+                        continue
+                    self._remove_direct_path(companion)
+                    removed.append(str(companion))
+            return removed
 
         if cleanup_kind == "session_snapshot":
             snapshot_path = Path(str(item.metadata.get("stored_path") or item.path))

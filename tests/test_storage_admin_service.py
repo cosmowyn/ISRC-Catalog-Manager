@@ -226,11 +226,49 @@ class StorageAdminServiceTests(unittest.TestCase):
         self.assertTrue(live_item.warning_required)
         self.assertEqual(orphan_item.status_key, STATUS_ORPHANED)
         self.assertEqual(deleted_tree_item.status_key, STATUS_DELETED_PROFILE)
-        self.assertEqual(backup_item.status_key, STATUS_DELETED_PROFILE)
+        self.assertEqual(backup_item.status_key, STATUS_RECOVERABILITY)
+        self.assertFalse(backup_item.recommended)
+        self.assertTrue(backup_item.warning_required)
         self.assertEqual(session_item.status_key, STATUS_DELETED_PROFILE)
         self.assertTrue(session_item.warning_required)
         self.assertEqual(protected_snapshot_item.status_key, STATUS_IN_USE)
         self.assertTrue(protected_snapshot_item.warning_required)
+
+    def test_manual_database_backups_are_protected_from_recommended_cleanup(self):
+        audit = self.service.inspect(current_db_path=self.db_path)
+        direct_backup_item = next(
+            item for item in audit.items if item.path == str(self.orphan_backup_path)
+        )
+        registered_backup_item = next(
+            item
+            for item in audit.items
+            if item.category_key == "database_backup" and item.label == "Registered Backup"
+        )
+        direct_sidecar = self.orphan_backup_path.with_suffix(".db.backup.json")
+
+        self.assertEqual(direct_backup_item.status_key, STATUS_RECOVERABILITY)
+        self.assertFalse(direct_backup_item.recommended)
+        self.assertTrue(direct_backup_item.warning_required)
+        self.assertIn("recovery point", direct_backup_item.reason)
+        self.assertFalse(registered_backup_item.recommended)
+        self.assertTrue(registered_backup_item.warning_required)
+
+        with self.assertRaises(ValueError):
+            self.service.cleanup_selected(
+                [direct_backup_item.item_key],
+                current_db_path=self.db_path,
+            )
+
+        result = self.service.cleanup_selected(
+            [direct_backup_item.item_key],
+            current_db_path=self.db_path,
+            allow_warning_deletes=True,
+        )
+
+        self.assertIn(str(self.orphan_backup_path), result.removed_paths)
+        self.assertIn(str(direct_sidecar), result.removed_paths)
+        self.assertFalse(self.orphan_backup_path.exists())
+        self.assertFalse(direct_sidecar.exists())
 
     def test_cleanup_of_orphaned_items_does_not_create_new_history_or_session_entries(self):
         audit = self.service.inspect(current_db_path=self.db_path)
@@ -606,12 +644,20 @@ class StorageAdminServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.service._version_label_from_update_workspace(Path("cache")), "")
 
-        recoverable_item = next(
+        recoverable_items = [
             item
             for item in self.service.inspect(current_db_path=self.db_path).items
             if item.status_key == STATUS_RECOVERABILITY
+        ]
+        self.assertTrue(any(item.recommended for item in recoverable_items))
+        self.assertTrue(
+            any(
+                not item.recommended
+                and item.warning_required
+                and item.category_key == "database_copy"
+                for item in recoverable_items
+            )
         )
-        self.assertTrue(recoverable_item.recommended)
 
     def test_cleanup_tolerates_disappearing_items_and_closes_context_failures(self):
         audit = self.service.inspect(current_db_path=self.db_path)

@@ -496,6 +496,7 @@ from isrc_manager.services import (
     DatabaseMaintenanceService,
     DatabaseSchemaService,
     DatabaseSessionService,
+    DatabaseSessionPasswordManager,
     GS1ContractEntry,
     GS1ContractImportError,
     GS1IntegrationService,
@@ -512,6 +513,8 @@ from isrc_manager.services import (
     RepertoireWorkflowService,
     SettingsMutationService,
     SettingsReadService,
+    KeyringDatabaseCredentialStore,
+    SQLCipherDatabaseService,
     TrackCreatePayload,
     TrackImportRepairQueueService,
     TrackService,
@@ -840,7 +843,12 @@ class App(QMainWindow):
         )
         self._cleanup_ready_update_backup_handoff(phase="startup")
 
-        self.sqlite_connection_factory = SQLiteConnectionFactory()
+        self.database_passwords = DatabaseSessionPasswordManager()
+        self.database_keyring_credentials = KeyringDatabaseCredentialStore()
+        self.database_security_service = SQLCipherDatabaseService()
+        self.sqlite_connection_factory = SQLiteConnectionFactory(
+            password_provider=self.database_passwords
+        )
         self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
         self.profile_store = ProfileStoreService(self.database_dir)
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
@@ -925,6 +933,12 @@ class App(QMainWindow):
             maximum=1,
             message_override="Selected startup profile database.",
         )
+        if profile_session.is_probably_encrypted_database(last_db) and not (
+            profile_session._prepare_database_security_for_open(self, last_db)
+        ):
+            last_db = fallback_db if fallback_db != last_db else str(DB_PATH)
+            self.settings.setValue("db/last_path", last_db)
+            self.settings.sync()
 
         self.conn = None
         self.cursor = None
@@ -2872,6 +2886,9 @@ class App(QMainWindow):
 
     def browse_profile(self):
         return profile_session.browse_profile(self)
+
+    def change_database_password(self):
+        return profile_session.change_current_database_password(self)
 
     def remove_selected_profile(self):
         return profile_session.remove_selected_profile(self)

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 from isrc_manager import profile_session
+from isrc_manager.services.database_security import (
+    DatabaseSessionPasswordManager,
+    InvalidDatabasePasswordError,
+    SQLCipherDatabaseService,
+)
 
 
 class _Combo:
@@ -63,6 +72,99 @@ class _MessageBox:
     @classmethod
     def critical(cls, *args):
         cls.messages.append(("critical", args))
+
+
+class _Settings:
+    def __init__(self):
+        self.values: dict[str, object] = {}
+        self.synced = False
+
+    def value(self, key: str, default=None):
+        return self.values.get(key, default)
+
+    def setValue(self, key: str, value) -> None:
+        self.values[key] = value
+
+    def sync(self) -> None:
+        self.synced = True
+
+
+class _ProfileMigrationMessageBox:
+    Warning = 3
+    AcceptRole = 10
+    DestructiveRole = 11
+    Cancel = 12
+    next_choice = "open"
+    instances: list["_ProfileMigrationMessageBox"] = []
+
+    def __init__(self, *args):
+        del args
+        self.buttons: dict[str, object] = {}
+        self.checkbox = None
+        self.clicked = None
+        self.text = ""
+        self.informative_text = ""
+        type(self).instances.append(self)
+
+    def setIcon(self, *args):
+        del args
+
+    def setWindowTitle(self, *args):
+        del args
+
+    def setText(self, text: str) -> None:
+        self.text = text
+
+    def setInformativeText(self, text: str) -> None:
+        self.informative_text = text
+
+    def addButton(self, *args):
+        label = str(args[0])
+        if label == "Encrypt Now":
+            key = "encrypt"
+        elif label == "Open Unencrypted":
+            key = "open"
+        elif args[0] == self.Cancel:
+            key = "cancel"
+        else:
+            key = label
+        button = object()
+        self.buttons[key] = button
+        return button
+
+    def setCheckBox(self, checkbox) -> None:
+        self.checkbox = checkbox
+
+    def setDefaultButton(self, *args):
+        del args
+
+    def exec(self) -> None:
+        self.clicked = self.buttons[type(self).next_choice]
+
+    def clickedButton(self):
+        return self.clicked
+
+    @classmethod
+    def warning(cls, *args):
+        _MessageBox.warning(*args)
+
+    @classmethod
+    def information(cls, *args):
+        _MessageBox.information(*args)
+
+    @classmethod
+    def critical(cls, *args):
+        _MessageBox.critical(*args)
+
+
+class _CheckBox:
+    next_checked = False
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def isChecked(self) -> bool:
+        return bool(type(self).next_checked)
 
 
 def test_reload_profiles_list_blocks_signals_and_selects_requested_path():
@@ -131,11 +233,12 @@ def test_create_new_profile_handles_cancel_exists_and_success(monkeypatch):
     monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
 
     class FakeInputDialog:
-        result = ("", False)
+        results = [("", False)]
 
         @classmethod
         def getText(cls, *args):
-            return cls.result
+            del args
+            return cls.results.pop(0)
 
     monkeypatch.setattr(profile_session, "QInputDialog", FakeInputDialog)
     activated = []
@@ -154,14 +257,18 @@ def test_create_new_profile_handles_cancel_exists_and_success(monkeypatch):
     profile_session.create_new_profile(app)
     assert activated == []
 
-    FakeInputDialog.result = ("Existing.db", True)
+    FakeInputDialog.results = [("Existing.db", True)]
     app.profile_workflows.build_new_profile_path.side_effect = FileExistsError
     profile_session.create_new_profile(app)
     assert _MessageBox.messages[-1][0] == "warning"
 
     app.profile_workflows.build_new_profile_path.side_effect = None
     app.profile_workflows.build_new_profile_path.return_value = Path("/profiles/new.db")
-    FakeInputDialog.result = ("New.db", True)
+    FakeInputDialog.results = [
+        ("New.db", True),
+        ("valid-secret-123", True),
+        ("valid-secret-123", True),
+    ]
     profile_session.create_new_profile(app)
 
     assert activated[0][0] == "/profiles/new.db"
@@ -203,6 +310,191 @@ def test_browse_profile_activates_selected_database_and_records_switch(monkeypat
     activated[0][1]["on_activated"]("/profiles/external.db")
     app._log_event.assert_called_once()
     app.session_history_manager.record_profile_switch.assert_called_once()
+
+
+def test_change_current_database_password_rekeys_encrypted_profile(monkeypatch, tmp_path):
+    _MessageBox.messages = []
+    monkeypatch.setattr(profile_session, "QMessageBox", _MessageBox)
+    db_path = tmp_path / "catalog.db"
+    security_service = SQLCipherDatabaseService()
+    conn = security_service.open(db_path, "current-secret-123")
+    try:
+        conn.execute("CREATE TABLE demo(value TEXT)")
+        conn.execute("INSERT INTO demo(value) VALUES ('ready')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    class FakeInputDialog:
+        results = [
+            ("current-secret-123", True),
+            ("changed-secret-123", True),
+            ("changed-secret-123", True),
+        ]
+
+        @classmethod
+        def getText(cls, *args):
+            del args
+            return cls.results.pop(0)
+
+    monkeypatch.setattr(profile_session, "QInputDialog", FakeInputDialog)
+    passwords = DatabaseSessionPasswordManager()
+    app = SimpleNamespace(
+        current_db_path=str(db_path),
+        database_security_service=security_service,
+        database_passwords=passwords,
+    )
+
+    assert profile_session.change_current_database_password(app) is True
+    assert passwords.password_for_database(db_path) == "changed-secret-123"
+    with pytest.raises(InvalidDatabasePasswordError):
+        security_service.open(db_path, "current-secret-123")
+    reopened = security_service.open(db_path, "changed-secret-123")
+    try:
+        assert reopened.execute("SELECT value FROM demo").fetchone() == ("ready",)
+    finally:
+        reopened.close()
+    assert _MessageBox.messages[-1][0] == "information"
+
+
+def test_plaintext_profile_warning_can_be_suppressed_when_opened_unencrypted(monkeypatch, tmp_path):
+    _MessageBox.messages = []
+    _ProfileMigrationMessageBox.instances = []
+    _ProfileMigrationMessageBox.next_choice = "open"
+    _CheckBox.next_checked = True
+    monkeypatch.setattr(profile_session, "QMessageBox", _ProfileMigrationMessageBox)
+    monkeypatch.setattr(profile_session, "QCheckBox", _CheckBox)
+
+    db_path = tmp_path / "plain.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.commit()
+    conn.close()
+
+    settings = _Settings()
+    app = SimpleNamespace(settings=settings)
+
+    assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
+    assert settings.values[profile_session.SUPPRESS_UNENCRYPTED_PROFILE_WARNING_SETTING] is True
+    assert settings.synced is True
+    assert profile_session.is_plaintext_sqlite_database(db_path) is True
+    assert _ProfileMigrationMessageBox.instances[0].checkbox.text.startswith("Do not warn")
+
+    _ProfileMigrationMessageBox.instances = []
+    assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
+    assert _ProfileMigrationMessageBox.instances == []
+
+
+def test_plaintext_profile_encryption_writes_backup_to_backup_directory(monkeypatch, tmp_path):
+    _MessageBox.messages = []
+    _ProfileMigrationMessageBox.instances = []
+    _ProfileMigrationMessageBox.next_choice = "encrypt"
+    _CheckBox.next_checked = False
+    monkeypatch.setattr(profile_session, "QMessageBox", _ProfileMigrationMessageBox)
+    monkeypatch.setattr(profile_session, "QCheckBox", _CheckBox)
+
+    db_path = tmp_path / "plain.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.commit()
+    conn.close()
+
+    class FakeInputDialog:
+        results = [
+            ("migration-secret-123", True),
+            ("migration-secret-123", True),
+        ]
+
+        @classmethod
+        def getText(cls, *args):
+            del args
+            return cls.results.pop(0)
+
+    class FakeSecurityService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, str, Path]] = []
+
+        def encrypt_plaintext_database(self, path, password, *, backup_path=None):
+            backup = Path(backup_path)
+            backup.write_bytes(Path(path).read_bytes())
+            self.calls.append((Path(path), password, backup))
+            return SimpleNamespace(database_path=Path(path), backup_path=backup)
+
+    monkeypatch.setattr(profile_session, "QInputDialog", FakeInputDialog)
+    passwords = DatabaseSessionPasswordManager()
+    security_service = FakeSecurityService()
+    backups_dir = tmp_path / "app-data" / "backups"
+    app = SimpleNamespace(
+        settings=_Settings(),
+        backups_dir=backups_dir,
+        database_security_service=security_service,
+        database_passwords=passwords,
+    )
+
+    assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
+
+    assert len(security_service.calls) == 1
+    _source, _password, backup_path = security_service.calls[0]
+    assert backup_path.parent == backups_dir
+    assert backup_path.suffix == ".db"
+    assert backup_path.exists()
+    sidecar_path = backup_path.with_suffix(".db.backup.json")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["kind"] == "profile_migration_unencrypted"
+    assert sidecar["source_db_path"] == str(db_path)
+    assert sidecar["metadata"] == {"source": "profile_maintenance"}
+    assert passwords.password_for_database(db_path) == "migration-secret-123"
+    assert str(backup_path) in _MessageBox.messages[-1][1][2]
+
+
+def test_plaintext_profile_encryption_tolerates_backup_sidecar_write_failure(monkeypatch, tmp_path):
+    _MessageBox.messages = []
+    _ProfileMigrationMessageBox.instances = []
+    _ProfileMigrationMessageBox.next_choice = "encrypt"
+    monkeypatch.setattr(profile_session, "QMessageBox", _ProfileMigrationMessageBox)
+    monkeypatch.setattr(profile_session, "QCheckBox", _CheckBox)
+
+    db_path = tmp_path / "plain.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.commit()
+    conn.close()
+
+    class FakeInputDialog:
+        results = [
+            ("migration-secret-123", True),
+            ("migration-secret-123", True),
+        ]
+
+        @classmethod
+        def getText(cls, *args):
+            del args
+            return cls.results.pop(0)
+
+    class FakeSecurityService:
+        def encrypt_plaintext_database(self, path, password, *, backup_path=None):
+            del password
+            backup = Path(backup_path)
+            backup.write_bytes(Path(path).read_bytes())
+            return SimpleNamespace(database_path=Path(path), backup_path=backup)
+
+    monkeypatch.setattr(profile_session, "QInputDialog", FakeInputDialog)
+    monkeypatch.setattr(
+        profile_session,
+        "_write_profile_maintenance_backup_sidecar",
+        mock.Mock(side_effect=OSError("metadata failed")),
+    )
+    app = SimpleNamespace(
+        settings=_Settings(),
+        backups_dir=tmp_path / "backups",
+        database_security_service=FakeSecurityService(),
+        database_passwords=DatabaseSessionPasswordManager(),
+    )
+
+    assert profile_session._migrate_plaintext_profile_if_requested(app, db_path) is True
+    assert _MessageBox.messages[-2][0] == "warning"
+    assert "metadata could not be written" in _MessageBox.messages[-2][1][2]
+    assert _MessageBox.messages[-1][0] == "information"
 
 
 def test_remove_selected_profile_deletes_current_profile_and_opens_fallback(monkeypatch):

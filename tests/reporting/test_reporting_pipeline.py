@@ -1,3 +1,4 @@
+import io
 import json
 import urllib.error
 from pathlib import Path
@@ -8,7 +9,14 @@ from isrc_manager.reporting import collectors
 from isrc_manager.reporting.config import ReportingConfiguration, load_reporting_configuration
 from isrc_manager.reporting.crash_detection import SessionMarkerStore, _record_from_mapping
 from isrc_manager.reporting.github import BackendProxySubmitter, ReportSubmissionResult
-from isrc_manager.reporting.models import ManualBugReportFields, ReportPayload, ReportSection
+from isrc_manager.reporting.models import (
+    GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES,
+    ISSUE_BODY_TRUNCATION_NOTICE,
+    ManualBugReportFields,
+    ReportPayload,
+    ReportSection,
+    fit_issue_body_for_github,
+)
 from isrc_manager.reporting.rate_limit import LocalReportRateLimiter
 from isrc_manager.reporting.sanitizer import ReportSanitizer
 from isrc_manager.reporting.service import ReportingService
@@ -152,6 +160,36 @@ def test_manual_report_is_sanitised_before_preview_and_pending_storage(tmp_path)
     assert "<REDACTED_EMAIL_" in saved_text
 
 
+def test_pending_storage_saves_replay_safe_json_and_full_markdown(tmp_path) -> None:
+    service = ReportingService(
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        app_version="5.1.0",
+        repository="owner/repo",
+        submitter=FakeSubmitter(ReportSubmissionResult(False, "offline")),
+    )
+    report = ReportPayload(
+        report_id="isrc-large",
+        kind="crash",
+        created_at="2026-06-01T00:00:00Z",
+        summary="Large crash",
+        app_version="5.1.0",
+        repository="owner/repo",
+        sections=(ReportSection("Large Diagnostics", "x" * 80_000),),
+        labels=("bug", "user-report", "crash-report"),
+    )
+
+    result = service.submit_or_save(report)
+
+    pending_dir = tmp_path / "data" / "reports" / "pending"
+    saved_json = json.loads((pending_dir / "isrc-large.json").read_text(encoding="utf-8"))
+    saved_markdown = (pending_dir / "isrc-large.md").read_text(encoding="utf-8")
+    assert not result.success
+    assert len(saved_json["body"].encode("utf-8")) <= GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES
+    assert ISSUE_BODY_TRUNCATION_NOTICE.strip() in saved_json["body"]
+    assert len(saved_markdown.encode("utf-8")) > GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES
+
+
 def test_successful_submission_uses_restricted_issue_payload(tmp_path) -> None:
     submitter = FakeSubmitter(
         ReportSubmissionResult(True, "created", issue_url="https://example/i")
@@ -218,6 +256,27 @@ def test_report_payload_markdown_title_and_crash_marker_edges(tmp_path: Path) ->
     store.marker_path.write_text("[]", encoding="utf-8")
     assert store._load_record() is None
     assert _record_from_mapping({"session_id": "missing required fields"}) is None
+
+
+def test_report_issue_payload_can_fit_github_body_budget() -> None:
+    report = ReportPayload(
+        report_id="isrc-large",
+        kind="crash",
+        created_at="2026-06-01T00:00:00Z",
+        summary="Large crash",
+        app_version="5.1.0",
+        repository="owner/repo",
+        sections=(ReportSection("Large Diagnostics", "x" * 80_000),),
+        labels=("bug", "user-report", "crash-report"),
+    )
+
+    payload = report.to_issue_payload(max_body_bytes=GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES)
+    body = payload["body"]
+
+    assert len(body.encode("utf-8")) <= GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES
+    assert ISSUE_BODY_TRUNCATION_NOTICE.strip() in body
+    assert payload["labels"] == ["bug", "user-report", "crash-report"]
+    assert len(fit_issue_body_for_github("x" * 100, max_bytes=20).encode("utf-8")) <= 20
 
 
 def test_submission_boundary_sanitises_direct_report_payloads(tmp_path) -> None:
@@ -556,7 +615,7 @@ def test_proxy_submitter_handles_response_and_network_failures(monkeypatch) -> N
             429,
             "Too Many Requests",
             {},
-            None,
+            io.BytesIO(b'{"error": "Report rate limit exceeded."}'),
         )
 
     monkeypatch.setattr("isrc_manager.reporting.github.urllib.request.urlopen", _raise_http)
@@ -564,6 +623,7 @@ def test_proxy_submitter_handles_response_and_network_failures(monkeypatch) -> N
     assert not result.success
     assert result.status_code == 429
     assert "HTTP 429" in result.message
+    assert "Report rate limit exceeded" in result.message
 
     monkeypatch.setattr(
         "isrc_manager.reporting.github.urllib.request.urlopen",
@@ -598,3 +658,42 @@ def test_proxy_submitter_rejects_oversized_payload_without_network(tmp_path) -> 
 
     assert not result.success
     assert "payload limit" in result.message
+
+
+def test_proxy_submitter_trims_large_issue_body_before_upload(monkeypatch) -> None:
+    requests = []
+
+    class _Response:
+        status = 201
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return b'{"message": "created"}'
+
+    def _fake_urlopen(request, *, timeout):
+        requests.append((request, timeout))
+        return _Response()
+
+    monkeypatch.setattr("isrc_manager.reporting.github.urllib.request.urlopen", _fake_urlopen)
+    report = ReportPayload(
+        report_id="isrc-large",
+        kind="crash",
+        created_at="2026-06-01T00:00:00Z",
+        summary="Large crash",
+        app_version="5.1.0",
+        repository="owner/repo",
+        sections=(ReportSection("Large Diagnostics", "x" * 120_000),),
+        labels=("bug", "user-report", "crash-report"),
+    )
+
+    result = BackendProxySubmitter("https://reports.example.test/submit").submit(report)
+    submitted = json.loads(requests[0][0].data.decode("utf-8"))
+
+    assert result.success
+    assert len(submitted["body"].encode("utf-8")) <= GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES
+    assert ISSUE_BODY_TRUNCATION_NOTICE.strip() in submitted["body"]

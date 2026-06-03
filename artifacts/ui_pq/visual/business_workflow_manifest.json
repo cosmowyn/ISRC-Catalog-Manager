@@ -66,7 +66,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
       "sample_count": 272,
-      "sha256": "dda232d6299e14524b4d26da1b73296f62cf651f970aab1b61b2afc0ac03458d",
+      "sha256": "71dc018e03b77635cf3254f642219a1639d2ca467324fdc59f305fd9668588f6",
       "unique_sample_colors": 11,
       "width": 1174
     },
@@ -484,7 +484,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
-      "actual_sha256": "dda232d6299e14524b4d26da1b73296f62cf651f970aab1b61b2afc0ac03458d",
+      "actual_sha256": "71dc018e03b77635cf3254f642219a1639d2ca467324fdc59f305fd9668588f6",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
       "baseline_sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
@@ -496,7 +496,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
           "sample_count": 272,
-          "sha256": "dda232d6299e14524b4d26da1b73296f62cf651f970aab1b61b2afc0ac03458d",
+          "sha256": "71dc018e03b77635cf3254f642219a1639d2ca467324fdc59f305fd9668588f6",
           "unique_sample_colors": 11,
           "width": 1174
         },
