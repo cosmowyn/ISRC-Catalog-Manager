@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -916,7 +917,6 @@ def _close_database_connection(app):
     app._background_write_lock = None
     if closing_path:
         _forget_session_database_password(app, closing_path)
-    app._refresh_catalog_workspace_docks()
 
 
 def _prepare_database_session(app, path: str, *, progress_callback=None) -> str:
@@ -1194,89 +1194,120 @@ def _activate_profile_in_background(
         finally:
             app._finish_loading_feedback(loading_feedback)
 
+    def _report_activation_failure(prepared_path: str, exc: BaseException) -> None:
+        traceback_text = traceback.format_exc()
+        try:
+            app.logger.exception("Profile activation failed for %s: %s", prepared_path, exc)
+        except Exception:
+            pass
+        try:
+            app._show_background_task_error(
+                title,
+                TaskFailure(message=str(exc), traceback_text=traceback_text),
+                user_message="Could not activate the selected profile:",
+            )
+        except Exception:
+            pass
+
+    loading_feedback_finished = False
+
+    def _finish_profile_loading_feedback() -> None:
+        nonlocal loading_feedback_finished
+        if loading_feedback_finished:
+            return
+        loading_feedback_finished = True
+        try:
+            if loading_progress_tracker is not None:
+                loading_progress_tracker.finish()
+        finally:
+            app._finish_loading_feedback(loading_feedback)
+
     def _finished():
         prepared_path = str(prepared.get("path") or "").strip()
         if not prepared_path:
             app._finish_loading_feedback(loading_feedback)
             return
-        if loading_progress_tracker is not None:
-            loading_progress_tracker.set_phase(
-                StartupPhase.LOADING_SERVICES,
-                "Opening selected profile database...",
-            )
-        else:
-            app._set_loading_feedback_phase(
-                loading_feedback,
-                StartupPhase.LOADING_SERVICES,
-                "Opening selected profile database...",
-            )
-        if loading_feedback is not None:
-            app._drain_qt_events()
-        app.open_database(
-            prepared_path,
-            schema_prepared=True,
-            progress_callback=app._loading_feedback_progress_callback(
-                loading_feedback,
-                loading_progress_tracker,
-                StartupPhase.LOADING_SERVICES,
-            ),
-        )
-        app._reset_catalog_zoom_for_profile_change()
-        with app._suspend_table_layout_history():
-            interface_progress = app._loading_feedback_progress_callback(
-                loading_feedback,
-                loading_progress_tracker,
-                StartupPhase.FINALIZING_INTERFACE,
-            )
-            try:
-                app.active_custom_fields = app.load_active_custom_fields()
-                interface_progress(1, 3, "Loaded active custom fields for the selected profile.")
-                app._rebuild_table_headers()
-                interface_progress(2, 3, "Rebuilt catalog headers for the selected profile.")
-                app._load_header_state()
-            except Exception:
-                pass
-            interface_progress(3, 3, "Restored header state and profile selection.")
-            app._reload_profiles_list(select_path=prepared_path)
+        try:
             if loading_progress_tracker is not None:
                 loading_progress_tracker.set_phase(
-                    StartupPhase.LOADING_CATALOG,
-                    "Loading catalog rows and workspace data...",
+                    StartupPhase.LOADING_SERVICES,
+                    "Opening selected profile database...",
                 )
             else:
                 app._set_loading_feedback_phase(
                     loading_feedback,
-                    StartupPhase.LOADING_CATALOG,
-                    "Loading catalog rows and workspace data...",
+                    StartupPhase.LOADING_SERVICES,
+                    "Opening selected profile database...",
                 )
             if loading_feedback is not None:
                 app._drain_qt_events()
-            task_id = app._refresh_catalog_ui_in_background(
-                select_path=prepared_path,
-                unique_key=f"catalog.ui.profile.{prepared_path}",
-                show_dialog=loading_feedback is None,
-                on_finished=lambda: (
-                    on_activated(prepared_path) if on_activated is not None else None,
-                    app._schedule_owner_party_bootstrap(),
-                ),
-                on_complete=lambda: (
-                    (
-                        loading_progress_tracker.finish()
-                        if loading_progress_tracker is not None
-                        else None
-                    ),
-                    app._finish_loading_feedback(loading_feedback),
-                ),
+            app.open_database(
+                prepared_path,
+                schema_prepared=True,
                 progress_callback=app._loading_feedback_progress_callback(
                     loading_feedback,
                     loading_progress_tracker,
-                    StartupPhase.LOADING_CATALOG,
+                    StartupPhase.LOADING_SERVICES,
                 ),
             )
-            if task_id is None:
+            app._reset_catalog_zoom_for_profile_change()
+            with app._suspend_table_layout_history():
+                interface_progress = app._loading_feedback_progress_callback(
+                    loading_feedback,
+                    loading_progress_tracker,
+                    StartupPhase.FINALIZING_INTERFACE,
+                )
+                try:
+                    app.active_custom_fields = app.load_active_custom_fields()
+                    interface_progress(
+                        1, 3, "Loaded active custom fields for the selected profile."
+                    )
+                    app._rebuild_table_headers()
+                    interface_progress(2, 3, "Rebuilt catalog headers for the selected profile.")
+                    app._load_header_state()
+                except Exception:
+                    pass
+                interface_progress(3, 3, "Restored header state and profile selection.")
+                app._reload_profiles_list(select_path=prepared_path)
                 if loading_progress_tracker is not None:
-                    loading_progress_tracker.finish()
-                app._finish_loading_feedback(loading_feedback)
+                    loading_progress_tracker.set_phase(
+                        StartupPhase.LOADING_CATALOG,
+                        "Loading catalog rows and workspace data...",
+                    )
+                else:
+                    app._set_loading_feedback_phase(
+                        loading_feedback,
+                        StartupPhase.LOADING_CATALOG,
+                        "Loading catalog rows and workspace data...",
+                    )
+                if loading_feedback is not None:
+                    app._drain_qt_events()
+
+                def _profile_catalog_loaded() -> None:
+                    try:
+                        if on_activated is not None:
+                            on_activated(prepared_path)
+                        app._schedule_owner_party_bootstrap()
+                    except Exception as exc:
+                        _report_activation_failure(prepared_path, exc)
+
+                task_id = app._refresh_catalog_ui_in_background(
+                    select_path=prepared_path,
+                    unique_key=f"catalog.ui.profile.{prepared_path}",
+                    show_dialog=loading_feedback is None,
+                    on_finished=_profile_catalog_loaded,
+                    on_complete=_finish_profile_loading_feedback,
+                    progress_callback=app._loading_feedback_progress_callback(
+                        loading_feedback,
+                        loading_progress_tracker,
+                        StartupPhase.LOADING_CATALOG,
+                    ),
+                )
+                if task_id is None:
+                    _finish_profile_loading_feedback()
+        except Exception as exc:
+            _finish_profile_loading_feedback()
+            _report_activation_failure(prepared_path, exc)
 
     task_id = app._prepare_profile_database_background(
         path,

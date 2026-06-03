@@ -571,7 +571,7 @@ def test_close_database_connection_stops_services_and_resets_profile_state():
     assert app.conversion_service is not None
     assert app.background_service_factory.db_path is None
     assert app._background_write_lock is None
-    app._refresh_catalog_workspace_docks.assert_called_once()
+    app._refresh_catalog_workspace_docks.assert_not_called()
 
 
 def test_prepare_database_for_open_blocking_reports_phase_and_handles_failure():

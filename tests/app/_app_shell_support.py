@@ -747,6 +747,22 @@ class AppShellTestCase(unittest.TestCase):
         finally:
             DatabaseSessionService.close(session.conn)
 
+    def _create_encrypted_profile_database(self, path: Path, password: str) -> None:
+        self.window.database_passwords.set_password(path, password)
+        try:
+            session = self.window.database_session.open(path)
+            try:
+                schema = DatabaseSchemaService(
+                    session.conn,
+                    data_root=self.local_appdata / APP_NAME,
+                )
+                schema.init_db()
+                schema.migrate_schema()
+            finally:
+                DatabaseSessionService.close(session.conn)
+        finally:
+            self.window.database_passwords.forget_password(path)
+
     def _create_track(self, *, index: int, title: str, album_title: str = "Workspace Tests") -> int:
         payload = TrackCreatePayload(
             isrc=f"NL-TST-26-{index:05d}",
@@ -2996,6 +3012,46 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(open_calls, [True])
         self.assertEqual(self.window.current_db_path, str(target_path))
+
+    def case_profile_switch_unlocks_encrypted_profile_after_password_prompt(self):
+        target_path = self.window.database_dir / "encrypted-switch.db"
+        password = "switch-secret-123"
+        self._create_encrypted_profile_database(target_path, password)
+        self.window._reload_profiles_list(select_path=self.window.current_db_path)
+        target_index = self.window.profile_combo.findData(str(target_path))
+        self.assertGreaterEqual(target_index, 0)
+        critical_messages: list[tuple[object, ...]] = []
+
+        with (
+            mock.patch.object(
+                app_module.QMessageBox,
+                "question",
+                return_value=app_module.QMessageBox.Yes,
+            ),
+            mock.patch.object(
+                app_module.QInputDialog,
+                "getText",
+                return_value=(password, True),
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "critical",
+                side_effect=lambda *args: critical_messages.append(args),
+            ),
+        ):
+            self.window._on_profile_changed(target_index)
+            self._wait_for_background_tasks(
+                timeout_ms=8000,
+                description="encrypted profile switch to finish",
+            )
+            self._drain_events(cycles=12)
+
+        self.assertEqual(self.window.current_db_path, str(target_path))
+        self.assertEqual(
+            self.window.database_passwords.password_for_database(target_path), password
+        )
+        self.assertEqual(self.window.conn.execute("SELECT 1").fetchone()[0], 1)
+        self.assertEqual(critical_messages, [])
 
     def case_trace_logging_sanitizes_reserved_logrecord_field_names(self):
         with mock.patch.object(self.window.trace_logger, "log") as trace_log:

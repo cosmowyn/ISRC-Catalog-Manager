@@ -11,6 +11,9 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_profile_switch_reuses_prepared_database_activation_path = (
         AppShellTestCase.case_profile_switch_reuses_prepared_database_activation_path
     )
+    test_profile_switch_unlocks_encrypted_profile_after_password_prompt = (
+        AppShellTestCase.case_profile_switch_unlocks_encrypted_profile_after_password_prompt
+    )
     test_cancelled_profile_creation_and_restore_leave_shell_idle = (
         AppShellTestCase.case_cancelled_profile_creation_and_restore_leave_shell_idle
     )

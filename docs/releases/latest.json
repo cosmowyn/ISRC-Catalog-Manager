@@ -1,7 +1,7 @@
 {
-  "version": "6.0.2",
+  "version": "6.0.3",
   "released_at": "2026-06-03",
-  "summary": "Fix encrypted profile open after owner bootstrap and registry refresh",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.2.md",
+  "summary": "Fix encrypted profile switching after password unlock",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.3.md",
   "minimum_supported_version": null
 }
