@@ -24,6 +24,7 @@ from isrc_manager.storage_admin import (
     STATUS_ORPHANED,
     STATUS_OTHER,
     STATUS_RECOVERABILITY,
+    STATUS_UNKNOWN_REFERENCES,
     ApplicationStorageAdminService,
     StorageAdminItem,
     StorageAdminReference,
@@ -204,6 +205,45 @@ class StorageAdminServiceTests(unittest.TestCase):
         self.assertEqual(license_item.profile_path, str(external_profile.resolve()))
         self.assertEqual(len(license_item.references), 1)
         self.assertEqual(license_item.references[0].owner_label, "License #42 'Untitled'")
+
+    def test_inspect_uses_connection_opener_for_non_plaintext_profile_paths(self):
+        encrypted_profile = self.layout.database_dir / "encrypted.db"
+        encrypted_profile.write_bytes(b"not a plaintext sqlite database")
+        opened_paths: list[str] = []
+
+        def connection_opener(path: str | Path):
+            opened_paths.append(str(Path(path).resolve()))
+            if Path(path).resolve() == encrypted_profile.resolve():
+                return sqlite3.connect(self.db_path)
+            return sqlite3.connect(path)
+
+        service = ApplicationStorageAdminService(
+            self.layout,
+            connection_opener=connection_opener,
+        )
+
+        audit = service.inspect(current_db_path=encrypted_profile)
+
+        self.assertEqual(audit.summary.current_profile_name, encrypted_profile.name)
+        self.assertIn(str(encrypted_profile.resolve()), opened_paths)
+
+    def test_inspect_remains_available_when_another_encrypted_profile_is_locked(self):
+        locked_profile = self.layout.database_dir / "locked.db"
+        locked_profile.write_bytes(b"not a plaintext sqlite database")
+
+        audit = self.service.inspect(current_db_path=self.db_path)
+        items_by_path = {item.path: item for item in audit.items}
+        locked_item = items_by_path[str(locked_profile)]
+        orphan_item = items_by_path[str(self.orphan_audio_path)]
+
+        self.assertEqual(locked_item.status_key, STATUS_UNKNOWN_REFERENCES)
+        self.assertEqual(locked_item.category_key, "profile_database")
+        self.assertFalse(locked_item.recommended)
+        self.assertTrue(locked_item.warning_required)
+        self.assertIn("could not inspect", locked_item.reason)
+        self.assertEqual(orphan_item.status_key, STATUS_UNKNOWN_REFERENCES)
+        self.assertFalse(orphan_item.recommended)
+        self.assertTrue(orphan_item.warning_required)
 
     def test_inspect_classifies_in_use_orphaned_and_deleted_profile_artifacts(self):
         audit = self.service.inspect(current_db_path=self.db_path)

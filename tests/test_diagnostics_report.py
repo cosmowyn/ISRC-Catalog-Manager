@@ -113,6 +113,23 @@ def test_build_diagnostics_progress_plan_sums_managed_and_storage_units():
     assert report._build_diagnostics_progress_plan(app)["application_storage_units"] == 1
 
 
+def test_application_storage_admin_service_uses_app_connection_factory(tmp_path):
+    opener = mock.Mock()
+    layout = SimpleNamespace(
+        database_dir=tmp_path / "Database",
+        data_root=tmp_path,
+        preferred_data_root=tmp_path,
+    )
+    app = SimpleNamespace(
+        storage_layout=layout,
+        sqlite_connection_factory=SimpleNamespace(open=opener),
+    )
+
+    service = report._application_storage_admin_service(app)
+
+    assert service.connection_opener is opener
+
+
 def test_application_storage_summary_payload_describes_empty_and_nonempty_audits():
     app = SimpleNamespace(
         _human_size=lambda value: f"{int(value)} B",

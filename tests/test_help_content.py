@@ -299,6 +299,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Help &gt; Application Storage Admin", chapter.content_html)
         self.assertIn("Preview before cleanup", chapter.content_html)
         self.assertIn("Active-profile safety", chapter.content_html)
+        self.assertIn("Encrypted profile safety", chapter.content_html)
+        self.assertIn("reference state as unknown", chapter.content_html)
         self.assertIn("manual database backups", chapter.content_html)
         self.assertIn("warning-protected recovery points", chapter.content_html)
         self.assertIn("managed media", chapter.content_html)

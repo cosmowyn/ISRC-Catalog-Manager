@@ -166,6 +166,7 @@ def _application_storage_admin_service(app) -> ApplicationStorageAdminService:
         app.storage_layout,
         update_root=app.storage_layout.preferred_data_root / "updates",
         installed_update_target_path=installed_update_target,
+        connection_opener=app.sqlite_connection_factory.open,
     )
 
 

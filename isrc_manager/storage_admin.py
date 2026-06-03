@@ -35,6 +35,7 @@ STATUS_DELETED_PROFILE = "deleted_profile_residue"
 STATUS_ORPHANED = "orphaned"
 STATUS_RECOVERABILITY = "recoverability_artifact"
 STATUS_OTHER = "other_app_managed"
+STATUS_UNKNOWN_REFERENCES = "unknown_references"
 
 
 @dataclass(slots=True)
@@ -271,6 +272,7 @@ class ApplicationStorageAdminService:
         *,
         update_root: str | Path | None = None,
         installed_update_target_path: str | Path | None = None,
+        connection_opener: Callable[[str | Path], sqlite3.Connection] | None = None,
     ):
         self.layout = layout
         self.update_root = (
@@ -288,6 +290,11 @@ class ApplicationStorageAdminService:
             name: ManagedFileStorage(data_root=layout.data_root, relative_root=name)
             for name in MANAGED_STORAGE_SUBDIRS
         }
+        self.connection_opener = connection_opener or self._open_plain_sqlite_connection
+
+    @staticmethod
+    def _open_plain_sqlite_connection(path: str | Path) -> sqlite3.Connection:
+        return sqlite3.connect(str(path))
 
     def inspect(
         self,
@@ -303,6 +310,7 @@ class ApplicationStorageAdminService:
         active_stems = {Path(path).stem for path in active_profiles}
         current_profile_name = Path(current_profile).name if current_profile else None
         references_by_stored_path: dict[str, list[StorageAdminReference]] = defaultdict(list)
+        unreadable_profiles: dict[str, Exception] = {}
 
         if status_callback is not None:
             status_callback("Discovering active profiles...")
@@ -313,7 +321,10 @@ class ApplicationStorageAdminService:
                 status_callback(
                     f"Collecting managed-file references from {Path(profile_path).name}..."
                 )
-            self._collect_profile_references(profile_path, references_by_stored_path)
+            try:
+                self._collect_profile_references(profile_path, references_by_stored_path)
+            except Exception as exc:
+                unreadable_profiles[profile_path] = exc
             self._report(
                 progress_callback,
                 1 + index,
@@ -325,6 +336,7 @@ class ApplicationStorageAdminService:
             )
 
         items: list[StorageAdminItem] = []
+        items.extend(self._unreadable_profile_items(unreadable_profiles))
 
         if status_callback is not None:
             status_callback("Auditing managed media and document roots...")
@@ -332,6 +344,7 @@ class ApplicationStorageAdminService:
             self._audit_managed_roots(
                 references_by_stored_path=references_by_stored_path,
                 active_profile_set=active_profile_set,
+                reference_scan_complete=not unreadable_profiles,
             )
         )
         self._report(
@@ -345,7 +358,9 @@ class ApplicationStorageAdminService:
             status_callback("Auditing history, backup, and session artifacts...")
         items.extend(
             self._audit_history_and_backup_storage(
-                active_profiles=active_profiles,
+                active_profiles=[
+                    path for path in active_profiles if path not in unreadable_profiles
+                ],
                 active_stems=active_stems,
                 active_profile_set=active_profile_set,
             )
@@ -518,7 +533,7 @@ class ApplicationStorageAdminService:
         profile_path: str,
         references_by_stored_path: dict[str, list[StorageAdminReference]],
     ) -> None:
-        conn = sqlite3.connect(profile_path)
+        conn = self.connection_opener(profile_path)
         try:
             for spec in self._MANAGED_REFERENCE_SPECS:
                 table = str(spec["table"])
@@ -566,6 +581,7 @@ class ApplicationStorageAdminService:
         *,
         references_by_stored_path: dict[str, list[StorageAdminReference]],
         active_profile_set: set[str],
+        reference_scan_complete: bool = True,
     ) -> list[StorageAdminItem]:
         items: list[StorageAdminItem] = []
         for root_name, store in self.managed_stores.items():
@@ -610,11 +626,31 @@ class ApplicationStorageAdminService:
                         )
                     )
                     continue
+                if reference_scan_complete:
+                    status_key = STATUS_ORPHANED
+                    status_label = "Orphaned / Unreferenced"
+                    reason = "No active profile references this application-managed file."
+                    recommended = True
+                    warning_required = False
+                    warning = ""
+                else:
+                    status_key = STATUS_UNKNOWN_REFERENCES
+                    status_label = "Reference Status Unknown"
+                    reason = (
+                        "One or more active profiles could not be unlocked or inspected, so this "
+                        "application-managed file might still be referenced."
+                    )
+                    recommended = False
+                    warning_required = True
+                    warning = (
+                        "Do not delete this file until every encrypted profile has been opened "
+                        "in this app session and Storage Admin can inspect all references."
+                    )
                 items.append(
                     StorageAdminItem(
                         item_key=f"managed:{stored_path}",
-                        status_key=STATUS_ORPHANED,
-                        status_label="Orphaned / Unreferenced",
+                        status_key=status_key,
+                        status_label=status_label,
                         category_key=category_key,
                         category_label=category_label,
                         label=path.name,
@@ -622,15 +658,58 @@ class ApplicationStorageAdminService:
                         bytes_on_disk=self._path_size(path),
                         profile_name=None,
                         profile_path=None,
-                        reason="No active profile references this application-managed file.",
-                        recommended=True,
-                        warning_required=False,
+                        reason=reason,
+                        recommended=recommended,
+                        warning_required=warning_required,
+                        warning=warning,
                         metadata={
                             "cleanup_kind": "direct_path",
                             "stored_path": str(path),
                         },
                     )
                 )
+        return items
+
+    def _unreadable_profile_items(
+        self, unreadable_profiles: dict[str, Exception]
+    ) -> list[StorageAdminItem]:
+        items: list[StorageAdminItem] = []
+        for profile_path, exc in sorted(
+            unreadable_profiles.items(), key=lambda item: Path(item[0]).name.lower()
+        ):
+            path = Path(profile_path)
+            reason = (
+                "Storage Admin could not inspect this active profile database. "
+                "Its managed-file and history references were not included in cleanup decisions."
+            )
+            detail = str(exc or "").strip()
+            if detail:
+                reason = f"{reason}\nReason: {detail}"
+            items.append(
+                StorageAdminItem(
+                    item_key=f"profile-unreadable:{profile_path}",
+                    status_key=STATUS_UNKNOWN_REFERENCES,
+                    status_label="Reference Status Unknown",
+                    category_key="profile_database",
+                    category_label="Profile Database",
+                    label=path.name,
+                    path=str(path),
+                    bytes_on_disk=self._profile_bundle_size(path),
+                    profile_name=path.name,
+                    profile_path=str(path),
+                    reason=reason,
+                    recommended=False,
+                    warning_required=True,
+                    warning=(
+                        "Open this encrypted profile during the current app session, then refresh "
+                        "Storage Admin before deleting managed files."
+                    ),
+                    metadata={
+                        "cleanup_kind": "profile_unreadable",
+                        "profile_path": str(path),
+                    },
+                )
+            )
         return items
 
     def _audit_history_and_backup_storage(
@@ -644,7 +723,7 @@ class ApplicationStorageAdminService:
         registered_backup_paths: set[str] = set()
 
         for profile_path in active_profiles:
-            conn = sqlite3.connect(profile_path)
+            conn = self.connection_opener(profile_path)
             try:
                 history_state = self._collect_history_state(profile_path, conn)
             finally:
@@ -1558,7 +1637,11 @@ class ApplicationStorageAdminService:
         if current_profile:
             current_profile_bytes += self._profile_bundle_size(Path(current_profile))
         for item in items:
-            if current_profile and self._item_belongs_to_profile(item, current_profile):
+            if (
+                current_profile
+                and item.category_key != "profile_database"
+                and self._item_belongs_to_profile(item, current_profile)
+            ):
                 current_profile_bytes += int(item.bytes_on_disk or 0)
         reclaimable_items = [item for item in items if item.recommended]
         warning_items = [item for item in items if item.warning_required]
@@ -1701,7 +1784,7 @@ class ApplicationStorageAdminService:
         cached = history_contexts.get(profile_path)
         if cached is not None:
             return cached
-        conn = sqlite3.connect(profile_path)
+        conn = self.connection_opener(profile_path)
         manager = HistoryManager(
             conn,
             self._history_settings(),
