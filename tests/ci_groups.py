@@ -143,6 +143,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
     ),
     "history-storage-migration": (
         "tests.database.test_schema_current_target",
+        "tests.database.test_schema_migrations_10_11",
         "tests.database.test_schema_migrations_35_36",
         "tests.database.test_schema_migrations_36_37",
         "tests.database.test_schema_migrations_37_38",
@@ -166,6 +167,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.history.test_history_snapshots",
         "tests.history.test_history_tracks",
         "tests.test_database_admin_service",
+        "tests.test_database_security",
         "tests.test_file_storage_helpers",
         "tests.test_db_access",
         "tests.test_history_cleanup_service",
