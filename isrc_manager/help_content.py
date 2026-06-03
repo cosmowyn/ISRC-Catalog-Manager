@@ -668,7 +668,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li>Use the workflow readiness and reports surfaces to confirm missing billing, VAT, payout, statement, or posting information before issuing financial documents.</li>
         </ol>
         <p><strong>Expected result</strong>: the business chain can be explained from the catalog item back to parties and contracts, then forward into rights and accounting. A later user should be able to open the record and understand why a document, invoice, statement, or payout exists.</p>
-        <p><strong>Troubleshooting</strong>: if accounting readiness reports missing information, update the source Party records rather than duplicating identity fields in accounting. If a right appears without a contract source, link or create the contract before relying on the right. If a ledger is unbalanced, stop and inspect the command log rather than editing totals by hand.</p>
+        <p><strong>Troubleshooting</strong>: if accounting readiness reports missing information, update the source Party records rather than duplicating identity fields in accounting. If the current-owner prompt appears after opening a profile and you dismiss it, the profile remains open; set or change the current owner later from Party Manager. If a right appears without a contract source, link or create the contract before relying on the right. If a ledger is unbalanced, stop and inspect the command log rather than editing totals by hand.</p>
         <p><strong>Related workflows</strong>: Party Manager, Work Manager, Contract Manager, Rights Matrix, Accounting and Royalties, Global Search, Quality Dashboard, and Application Log.</p>
 
         <h3>Playbook 5: Prepare a SoundCloud Upload With a Forensic Trace</h3>

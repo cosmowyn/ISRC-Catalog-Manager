@@ -1,7 +1,7 @@
 {
-  "version": "6.0.1",
+  "version": "6.0.2",
   "released_at": "2026-06-03",
-  "summary": "Fix packaged update version reporting and release smoke validation",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.1.md",
+  "summary": "Fix encrypted profile open after owner bootstrap and registry refresh",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.2.md",
   "minimum_supported_version": null
 }

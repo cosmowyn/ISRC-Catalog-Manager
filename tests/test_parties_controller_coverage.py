@@ -162,11 +162,7 @@ def test_owner_bootstrap_schedule_and_dialog_loop_branches(monkeypatch) -> None:
     party_controller._ensure_owner_party_bootstrap(no_service_app)
     assert no_service_app._owner_party_bootstrap_scheduled is False
 
-    decisions = [
-        (QDialog.Rejected, None),
-        (QDialog.Accepted, None),
-        (QDialog.Accepted, 77),
-    ]
+    decisions = [(QDialog.Accepted, 77)]
     dialog_owner_ids: list[int | None] = []
 
     class FakeOwnerBootstrapDialog:
@@ -209,8 +205,24 @@ def test_owner_bootstrap_schedule_and_dialog_loop_branches(monkeypatch) -> None:
     party_controller._ensure_owner_party_bootstrap(bootstrap_app)
 
     assert bootstrap_app._owner_party_bootstrap_scheduled is False
-    assert dialog_owner_ids == [None, None, None]
+    assert dialog_owner_ids == [None]
     assert assigned == [(77, False)]
+    assert decisions == []
+
+    rejected_app = SimpleNamespace(
+        _owner_party_bootstrap_scheduled=True,
+        party_service=object(),
+        _owner_bootstrap_required=mock.Mock(return_value=True),
+        _current_owner_party_record=mock.Mock(return_value=None),
+        _current_owner_party_id=mock.Mock(return_value=None),
+        _assign_owner_party=mock.Mock(),
+    )
+    decisions.extend([(QDialog.Rejected, None), (QDialog.Accepted, None)])
+    party_controller._ensure_owner_party_bootstrap(rejected_app)
+    assert rejected_app._owner_party_bootstrap_scheduled is False
+    rejected_app._assign_owner_party.assert_not_called()
+    party_controller._ensure_owner_party_bootstrap(rejected_app)
+    rejected_app._assign_owner_party.assert_not_called()
     assert decisions == []
 
 

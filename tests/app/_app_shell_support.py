@@ -1466,6 +1466,34 @@ class AppShellTestCase(unittest.TestCase):
         owner_record = self.window.party_service.fetch_party(created_party_id)
         self.assertIsNotNone(owner_record)
 
+    def case_owner_bootstrap_cancel_keeps_profile_open_without_reprompt(self):
+        dialog_calls: list[int | None] = []
+
+        class _FakeOwnerBootstrapDialog:
+            def __init__(self, *, current_owner_party_id=None, **kwargs):
+                del kwargs
+                dialog_calls.append(current_owner_party_id)
+
+            def exec(self):
+                return app_module.QDialog.Rejected
+
+            def selected_party_id(self):
+                raise AssertionError("cancelled bootstrap should not read selected_party_id")
+
+        current_path = self.window.current_db_path
+        with mock.patch.object(
+            app_module,
+            "OwnerBootstrapDialog",
+            _FakeOwnerBootstrapDialog,
+        ):
+            self.window._ensure_owner_party_bootstrap()
+            self._drain_events()
+
+        self.assertEqual(dialog_calls, [None])
+        self.assertEqual(self.window.current_db_path, current_path)
+        self.assertIsNotNone(self.window.conn)
+        self.assertIsNone(self.window.settings_reads.load_owner_party_id())
+
     def case_window_title_defaults_to_app_name_then_owner_then_manual_override(self):
         self.window.settings_mutations.set_owner_party_id(None)
         self.window.settings.setValue("identity/window_title", "ISRC Manager")

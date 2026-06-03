@@ -382,18 +382,17 @@ def _ensure_owner_party_bootstrap(self) -> None:
         return
     if self.party_service is None:
         return
-    while self._current_owner_party_record() is None:
-        dialog = _owner_bootstrap_dialog_class()(
-            party_service=self.party_service,
-            current_owner_party_id=self._current_owner_party_id(),
-            parent=self,
-        )
-        if dialog.exec() != QDialog.Accepted:
-            continue
-        selected_party_id = dialog.selected_party_id()
-        if selected_party_id is None:
-            continue
-        self._assign_owner_party(int(selected_party_id), record_history=False)
+    dialog = _owner_bootstrap_dialog_class()(
+        party_service=self.party_service,
+        current_owner_party_id=self._current_owner_party_id(),
+        parent=self,
+    )
+    if dialog.exec() != QDialog.Accepted:
+        return
+    selected_party_id = dialog.selected_party_id()
+    if selected_party_id is None:
+        return
+    self._assign_owner_party(int(selected_party_id), record_history=False)
 
 
 def _artist_party_primary_label(record: PartyRecord) -> str:

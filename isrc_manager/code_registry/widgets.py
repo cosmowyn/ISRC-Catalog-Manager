@@ -116,7 +116,10 @@ class CodeIdentifierSelector(QWidget):
         service = self._service()
         if service is None:
             return None
-        return service.fetch_category_by_system_key(self.system_key)
+        try:
+            return service.fetch_category_by_system_key(self.system_key)
+        except Exception:
+            return None
 
     def _current_mode(self) -> str:
         data = self.mode_combo.currentData()
@@ -131,7 +134,10 @@ class CodeIdentifierSelector(QWidget):
         service = self._service()
         if service is None:
             return "Open a profile to use internal registry generation."
-        return service.generation_unavailable_reason(system_key=self.system_key)
+        try:
+            return service.generation_unavailable_reason(system_key=self.system_key)
+        except Exception:
+            return "Registry generation is temporarily unavailable."
 
     def refresh_choices(self) -> None:
         service = self._service()
@@ -141,14 +147,20 @@ class CodeIdentifierSelector(QWidget):
             self._internal_value_to_entry_id = {}
             values: list[str] = []
         elif self._current_mode() == CATALOG_MODE_INTERNAL:
-            entries = service.list_entries(category_id=category.id)
+            try:
+                entries = service.list_entries(category_id=category.id)
+            except Exception:
+                entries = []
             self._internal_value_to_entry_id = {
                 str(entry.value): int(entry.id) for entry in entries
             }
             values = sorted(self._internal_value_to_entry_id)
         else:
             self._internal_value_to_entry_id = {}
-            values = service.external_identifier_suggestions(system_key=self.system_key)
+            try:
+                values = service.external_identifier_suggestions(system_key=self.system_key)
+            except Exception:
+                values = []
         previous = self.value_combo.blockSignals(True)
         try:
             self.value_combo.clear()
@@ -228,11 +240,17 @@ class CodeIdentifierSelector(QWidget):
         if service is None or category is None:
             self.status_label.setText("")
             return
-        classification = service.classify_identifier_value(
-            system_key=self.system_key,
-            value=clean_value,
-            allow_existing_internal_match=(self.system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY),
-        )
+        try:
+            classification = service.classify_identifier_value(
+                system_key=self.system_key,
+                value=clean_value,
+                allow_existing_internal_match=(
+                    self.system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+                ),
+            )
+        except Exception:
+            self.status_label.setText("Registry status is temporarily unavailable.")
+            return
         if self._current_mode() == CATALOG_MODE_INTERNAL:
             if self._registry_entry_id is not None:
                 self.status_label.setText("Selected existing immutable registry value.")

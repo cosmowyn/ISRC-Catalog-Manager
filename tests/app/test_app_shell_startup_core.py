@@ -35,6 +35,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_owner_bootstrap_requires_assigning_a_party_before_normal_use = (
         AppShellTestCase.case_owner_bootstrap_requires_assigning_a_party_before_normal_use
     )
+    test_owner_bootstrap_cancel_keeps_profile_open_without_reprompt = (
+        AppShellTestCase.case_owner_bootstrap_cancel_keeps_profile_open_without_reprompt
+    )
     test_window_title_defaults_to_app_name_then_owner_then_manual_override = (
         AppShellTestCase.case_window_title_defaults_to_app_name_then_owner_then_manual_override
     )

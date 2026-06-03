@@ -805,26 +805,21 @@ def test_redirect_owner_registration_edit_to_party_manager(monkeypatch) -> None:
     assert len(message_box.information.call_args_list) == 2
 
 
-def test_owner_party_bootstrap_scheduler_and_loop_assigns_once(monkeypatch) -> None:
+def test_owner_party_bootstrap_scheduler_and_prompt_assigns_once(monkeypatch) -> None:
     timer_calls: list[tuple[int, object]] = []
-    dialog_invocations: list[int] = []
+    dialog_results: list[tuple[int, int | None]] = [(QDialog.Accepted, 77)]
+    dialog_invocations: list[None] = []
 
     class _FakeDialog:
         def __init__(self, **_kwargs) -> None:
-            self.seq = _FakeDialog.seq
-            _FakeDialog.seq += 1
-
-        seq = 0
+            dialog_invocations.append(None)
+            self._result, self._selected_party_id = dialog_results.pop(0)
 
         def exec(self):
-            if self.seq == 0:
-                return QDialog.Rejected
-            if self.seq == 1:
-                return QDialog.Accepted
-            return QDialog.Accepted
+            return self._result
 
         def selected_party_id(self):
-            return (None, None, 77)[self.seq]
+            return self._selected_party_id
 
     class _FakeTimer:
         def singleShot(self, ms, callback):
@@ -859,13 +854,50 @@ def test_owner_party_bootstrap_scheduler_and_loop_assigns_once(monkeypatch) -> N
     assert app._owner_party_bootstrap_scheduled is True
     assert len(timer_calls) == 1
 
-    dialog_invocations.clear()
-    _FakeDialog.seq = 0
     app._owner_party_bootstrap_scheduled = False
-    _FakeDialog.seq = 0
     party_controller._ensure_owner_party_bootstrap(app)
+    assert dialog_invocations == [None]
     assert assignments == [77]
 
     app._owner_party_bootstrap_scheduled = False
     party_controller._ensure_owner_party_bootstrap(app)
     assert assignments == [77]
+
+
+def test_owner_party_bootstrap_cancel_returns_without_reprompt(monkeypatch) -> None:
+    decisions = [(QDialog.Rejected, None), (QDialog.Accepted, None)]
+    dialog_invocations: list[None] = []
+
+    class _FakeDialog:
+        def __init__(self, **_kwargs) -> None:
+            dialog_invocations.append(None)
+            self._result, self._selected_party_id = decisions.pop(0)
+
+        def exec(self):
+            return self._result
+
+        def selected_party_id(self):
+            return self._selected_party_id
+
+    assignments: list[int] = []
+    app = SimpleNamespace(
+        _owner_party_bootstrap_scheduled=True,
+        party_service=object(),
+        _owner_bootstrap_required=lambda: True,
+        _current_owner_party_record=lambda: None,
+        _current_owner_party_id=lambda: None,
+        _assign_owner_party=lambda party_id, record_history=False: assignments.append(
+            int(party_id)
+        ),
+    )
+    monkeypatch.setattr(party_controller, "_owner_bootstrap_dialog_class", lambda: _FakeDialog)
+
+    party_controller._ensure_owner_party_bootstrap(app)
+    assert app._owner_party_bootstrap_scheduled is False
+    assert dialog_invocations == [None]
+    assert assignments == []
+
+    app._owner_party_bootstrap_scheduled = True
+    party_controller._ensure_owner_party_bootstrap(app)
+    assert dialog_invocations == [None, None]
+    assert assignments == []
