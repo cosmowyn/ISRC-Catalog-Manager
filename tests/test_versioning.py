@@ -1,4 +1,6 @@
+import tomllib
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from isrc_manager.version import __version__, current_app_version
@@ -71,6 +73,12 @@ class SemVerTests(unittest.TestCase):
 
 
 class RuntimeVersionTests(unittest.TestCase):
+    def test_runtime_fallback_version_matches_project_metadata(self):
+        project_root = Path(__file__).resolve().parents[1]
+        metadata = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+
+        self.assertEqual(__version__, metadata["project"]["version"])
+
     def test_current_app_version_uses_fallback_when_package_metadata_is_unavailable(self):
         self.assertEqual(
             current_app_version(package_names=("definitely-not-installed",)), __version__

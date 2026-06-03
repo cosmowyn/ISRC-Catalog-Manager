@@ -1086,6 +1086,7 @@ class PackagedSmokeScriptTests(unittest.TestCase):
                     {
                         "platform": "windows",
                         "app_name": build.PACKAGE_APP_NAME,
+                        "app_version": "3.1.1",
                         "release_artifact": str(executable),
                     }
                 ),
@@ -1095,7 +1096,7 @@ class PackagedSmokeScriptTests(unittest.TestCase):
             completed = _completed_process(
                 [str(executable), smoke_packaged_app.PACKAGED_SMOKE_TEST_ARGUMENT],
                 returncode=0,
-                stdout="ok\n",
+                stdout="ISRCManager packaged smoke test OK (3.1.1)\n",
             )
             with mock.patch.object(
                 smoke_packaged_app.subprocess,
@@ -1111,6 +1112,39 @@ class PackagedSmokeScriptTests(unittest.TestCase):
             [str(executable), smoke_packaged_app.PACKAGED_SMOKE_TEST_ARGUMENT],
         )
         self.assertEqual(run.call_args.kwargs["timeout"], 3.0)
+
+    def test_main_rejects_packaged_smoke_version_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            executable = root / f"{build.PACKAGE_APP_NAME}.exe"
+            executable.write_bytes(b"binary")
+            manifest = root / "dist" / "release_manifest.json"
+            manifest.parent.mkdir()
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "platform": "windows",
+                        "app_name": build.PACKAGE_APP_NAME,
+                        "app_version": "6.0.1",
+                        "release_artifact": str(executable),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = _completed_process(
+                [str(executable), smoke_packaged_app.PACKAGED_SMOKE_TEST_ARGUMENT],
+                returncode=0,
+                stdout="ISRCManager packaged smoke test OK (5.1.0)\n",
+            )
+            with mock.patch.object(
+                smoke_packaged_app.subprocess,
+                "run",
+                return_value=completed,
+            ):
+                exit_code = smoke_packaged_app.main(["--manifest", str(manifest)])
+
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == "__main__":

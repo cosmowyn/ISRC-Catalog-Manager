@@ -35,7 +35,7 @@ updates that value first, then runs `scripts/sync_version_docs.py` to align the 
 markers, `RELEASE_NOTES.md`, and `docs/releases/latest.json`.
 
 <!-- version:sync:start -->
-Current canonical source version: `6.0.0` (`v6.0.0`).
+Current canonical source version: `6.0.1` (`v6.0.1`).
 Repository latest metadata: [`docs/releases/latest.json`](releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
 <!-- version:sync:end -->
@@ -162,5 +162,7 @@ python build.py
 ```
 
 The packaged smoke entrypoint checks that the frozen binary includes the dynamic `keyring` and
-`sqlcipher3` modules plus their metadata before reporting success. Local builds produce packages
-only for the current operating system.
+`sqlcipher3` modules plus their metadata before reporting success. The smoke script also compares
+the frozen binary's reported version with `dist/release_manifest.json` so a package cannot publish
+if `pyproject.toml` and the frozen-build fallback version drift. Local builds produce packages only
+for the current operating system.

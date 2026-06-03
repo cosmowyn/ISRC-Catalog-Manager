@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -216,6 +217,20 @@ def run_smoke_test(
     return completed
 
 
+def verify_smoke_reported_version(stdout: str, expected_version: str) -> None:
+    expected = str(expected_version or "").strip()
+    if not expected:
+        return
+    match = re.search(r"packaged smoke test OK \(([^)]+)\)", str(stdout or ""))
+    if match is None:
+        raise SmokeTestError("packaged smoke output did not report the application version")
+    actual = match.group(1).strip()
+    if actual != expected:
+        raise SmokeTestError(
+            f"packaged smoke version {actual} does not match release manifest {expected}"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -244,11 +259,15 @@ def main(argv: list[str] | None = None) -> int:
 
         with tempfile.TemporaryDirectory(prefix="isrc-packaged-smoke-") as temp_dir:
             env = _isolated_environment(Path(temp_dir), platform_key)
-            run_smoke_test(
+            completed = run_smoke_test(
                 executable,
                 platform_key=platform_key,
                 timeout_seconds=args.timeout,
                 env=env,
+            )
+            verify_smoke_reported_version(
+                completed.stdout,
+                str(manifest.get("app_version") or ""),
             )
     except (OSError, ValueError, SmokeTestError) as exc:
         print(f"ERROR [packaged-smoke]: {exc}", file=sys.stderr)
