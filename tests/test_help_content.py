@@ -224,6 +224,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("migration path", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("app backups folder", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("suppress the warning", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn("secure-memory locking", HELP_CHAPTERS_BY_ID["profiles"].content_html)
+        self.assertIn("database-at-rest encryption", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("SoundCloud", settings.content_html)
         self.assertIn("OS keychain/keyring availability", settings.content_html)
         self.assertIn("Aeon Cosmowyn", settings.content_html)
@@ -234,6 +236,8 @@ class HelpContentTests(unittest.TestCase):
             application_log.content_html,
         )
         self.assertIn("Submit Report", application_log.content_html)
+        self.assertIn("unchecked option", application_log.content_html)
+        self.assertIn("read-only native log queries", application_log.content_html)
         self.assertIn("resources/reporting.json", application_log.content_html)
         self.assertIn("report proxy", application_log.content_html)
         self.assertIn("reports folder", application_log.content_html)

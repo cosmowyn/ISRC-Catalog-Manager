@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 MIN_DATABASE_PASSWORD_LENGTH = 12
 REMEMBERED_DATABASE_PASSWORD_TTL_DAYS = 30
 DEFAULT_DATABASE_KEYRING_SERVICE = "isrc-catalog-manager.database"
+SQLCIPHER_MEMORY_SECURITY_ENV = "ISRC_SQLCIPHER_MEMORY_SECURITY"
 
 
 class DatabaseSecurityError(RuntimeError):
@@ -137,6 +139,14 @@ def _quote_sql_literal(value: str | Path) -> str:
     return str(value).replace("'", "''")
 
 
+def sqlcipher_memory_security_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Return whether SQLCipher secure-memory locking was explicitly requested."""
+
+    env = os.environ if environ is None else environ
+    value = str(env.get(SQLCIPHER_MEMORY_SECURITY_ENV, "") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _sqlcipher_module() -> Any:
     try:
         return importlib.import_module("sqlcipher3")
@@ -146,15 +156,26 @@ def _sqlcipher_module() -> Any:
         ) from exc
 
 
-def apply_sqlcipher_key(conn: Any, password: str) -> None:
+def apply_sqlcipher_key(
+    conn: Any,
+    password: str,
+    *,
+    enable_memory_security: bool | None = None,
+) -> None:
     """Apply a SQLCipher key to a newly opened connection."""
 
     key = validate_database_password(password)
     conn.execute(f"PRAGMA key = '{_quote_sql_literal(key)}'")
-    try:
-        conn.execute("PRAGMA cipher_memory_security = ON")
-    except Exception:
-        pass
+    should_enable_memory_security = (
+        sqlcipher_memory_security_enabled()
+        if enable_memory_security is None
+        else enable_memory_security
+    )
+    if should_enable_memory_security:
+        try:
+            conn.execute("PRAGMA cipher_memory_security = ON")
+        except Exception:
+            pass
 
 
 def verify_sqlcipher_connection(conn: Any) -> None:

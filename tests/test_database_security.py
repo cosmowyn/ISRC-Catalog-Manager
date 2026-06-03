@@ -10,6 +10,7 @@ import pytest
 from isrc_manager.constants import SCHEMA_TARGET
 from isrc_manager.services import DatabaseSchemaService
 from isrc_manager.services.database_security import (
+    SQLCIPHER_MEMORY_SECURITY_ENV,
     DatabasePasswordPolicyError,
     DatabasePasswordRequiredError,
     DatabaseSessionPasswordManager,
@@ -17,8 +18,10 @@ from isrc_manager.services.database_security import (
     KeyringCredentialError,
     KeyringDatabaseCredentialStore,
     SQLCipherDatabaseService,
+    apply_sqlcipher_key,
     is_plaintext_sqlite_database,
     is_probably_encrypted_database,
+    sqlcipher_memory_security_enabled,
     validate_database_password,
 )
 from isrc_manager.services.db_access import SQLiteConnectionFactory
@@ -53,6 +56,18 @@ class FakeInsecureKeyringBackend(FakeKeyringBackend):
 FakeInsecureKeyringBackend.__module__ = "keyrings.alt.file"
 
 
+@dataclass(slots=True)
+class RecordingSQLCipherConnection:
+    fail_memory_security: bool = False
+    statements: list[str] = field(default_factory=list)
+
+    def execute(self, statement: str):
+        self.statements.append(statement)
+        if self.fail_memory_security and "cipher_memory_security" in statement:
+            raise RuntimeError("secure memory unavailable")
+        return self
+
+
 def test_database_password_policy_rejects_blank_short_and_mismatch() -> None:
     with pytest.raises(DatabasePasswordPolicyError):
         validate_database_password("   ")
@@ -62,6 +77,51 @@ def test_database_password_policy_rejects_blank_short_and_mismatch() -> None:
         validate_database_password("valid-secret-123", confirmation="valid-secret-456")
 
     assert validate_database_password("valid-secret-123", confirmation="valid-secret-123")
+
+
+def test_sqlcipher_memory_security_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(SQLCIPHER_MEMORY_SECURITY_ENV, raising=False)
+    conn = RecordingSQLCipherConnection()
+
+    apply_sqlcipher_key(conn, "valid-secret-123")
+
+    assert sqlcipher_memory_security_enabled({}) is False
+    assert conn.statements == ["PRAGMA key = 'valid-secret-123'"]
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_sqlcipher_memory_security_can_be_enabled_by_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv(SQLCIPHER_MEMORY_SECURITY_ENV, value)
+    conn = RecordingSQLCipherConnection()
+
+    apply_sqlcipher_key(conn, "valid-secret-123")
+
+    assert "PRAGMA cipher_memory_security = ON" in conn.statements
+
+
+def test_sqlcipher_memory_security_can_be_explicitly_suppressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(SQLCIPHER_MEMORY_SECURITY_ENV, "true")
+    conn = RecordingSQLCipherConnection()
+
+    apply_sqlcipher_key(conn, "valid-secret-123", enable_memory_security=False)
+
+    assert conn.statements == ["PRAGMA key = 'valid-secret-123'"]
+
+
+def test_sqlcipher_memory_security_failure_does_not_prevent_key_application() -> None:
+    conn = RecordingSQLCipherConnection(fail_memory_security=True)
+
+    apply_sqlcipher_key(conn, "valid-secret-123", enable_memory_security=True)
+
+    assert conn.statements == [
+        "PRAGMA key = 'valid-secret-123'",
+        "PRAGMA cipher_memory_security = ON",
+    ]
 
 
 def test_connection_factory_creates_sqlcipher_database_when_session_password_is_set(

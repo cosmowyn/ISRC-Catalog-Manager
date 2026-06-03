@@ -68,6 +68,8 @@ def test_reporting_dialogs_collect_validate_copy_and_submit(monkeypatch) -> None
 
     prompt = CrashReportPromptDialog()
     manual = ManualBugReportDialog()
+    assert prompt.include_os_context() is False
+    assert manual.include_os_context_checkbox.isChecked() is False
     manual._accept_if_valid()
     manual.summary_edit.setText("Bug title")
     manual.description_edit.setPlainText("Description")
@@ -76,6 +78,7 @@ def test_reporting_dialogs_collect_validate_copy_and_submit(monkeypatch) -> None
     manual.actual_edit.setPlainText("Actual")
     manual.include_logs_checkbox.setChecked(False)
     manual.include_system_checkbox.setChecked(False)
+    manual.include_os_context_checkbox.setChecked(True)
     fields = manual.fields()
 
     preview = ReportPreviewDialog(_report(), "## Preview\nbody")
@@ -92,6 +95,7 @@ def test_reporting_dialogs_collect_validate_copy_and_submit(monkeypatch) -> None
         actual_behavior="Actual",
         include_logs=False,
         include_system_details=False,
+        include_os_context=True,
     )
     assert app.clipboard().text() == "## Preview\nbody"
     assert preview.submit_requested is True
@@ -352,12 +356,16 @@ def test_controller_crash_prompt_handles_cancel_generation_error_and_pending(
 
     class _CrashPrompt:
         result = QDialog.Accepted
+        os_context = False
 
         def __init__(self, *, parent=None):
             self.parent = parent
 
         def exec(self):
             return self.result
+
+        def include_os_context(self):
+            return self.os_context
 
     class _PreviewDialog:
         submit_requested = True
@@ -390,6 +398,7 @@ def test_controller_crash_prompt_handles_cancel_generation_error_and_pending(
     )
     controller.prompt_for_pending_crash_report(app)
     app.reporting_service.create_crash_report = original_create
+    _CrashPrompt.os_context = True
     controller.prompt_for_pending_crash_report(app)
     controller._show_submission_result(app, ReportSubmissionResult(False, "rejected"))
 

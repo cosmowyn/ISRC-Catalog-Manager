@@ -7,7 +7,12 @@ import logging
 import os
 from pathlib import Path
 
-from .collectors import collect_recent_logs, collect_system_context, collect_traceback_files
+from .collectors import (
+    collect_os_crash_context,
+    collect_recent_logs,
+    collect_system_context,
+    collect_traceback_files,
+)
 from .config import DEFAULT_REPOSITORY, load_reporting_configuration
 from .crash_detection import CrashSession, SessionMarkerStore
 from .github import BackendProxySubmitter, ReportSubmissionResult
@@ -87,7 +92,9 @@ class ReportingService:
         except Exception:
             self.logger.debug("Reporter could not update the session marker.", exc_info=True)
 
-    def create_crash_report(self, crash_session: CrashSession) -> ReportPayload:
+    def create_crash_report(
+        self, crash_session: CrashSession, *, include_os_context: bool = False
+    ) -> ReportPayload:
         system_context = collect_system_context(
             app_version=self.app_version,
             sanitizer=self.sanitizer,
@@ -112,6 +119,14 @@ class ReportingService:
             ),
             ReportSection("System Context", _format_mapping(system_context)),
         ]
+        if include_os_context:
+            for title, body in collect_os_crash_context(
+                pid=crash_session.pid,
+                started_at=crash_session.started_at,
+                last_seen_at=crash_session.last_seen_at,
+                sanitizer=self.sanitizer,
+            ):
+                sections.append(ReportSection(title, body))
         sections.extend(self._diagnostic_file_sections(include_logs=True))
         summary = (
             f"Unexpected termination after {crash_session.last_event}"
@@ -166,6 +181,13 @@ class ReportingService:
             )
         if fields.include_logs:
             sections.extend(self._diagnostic_file_sections(include_logs=True))
+        if fields.include_os_context:
+            for title, body in collect_os_crash_context(
+                pid=os.getpid(),
+                last_seen_at=utc_timestamp(),
+                sanitizer=self.sanitizer,
+            ):
+                sections.append(ReportSection(title, body))
         return ReportPayload(
             report_id=_report_id("bug"),
             kind="bug",

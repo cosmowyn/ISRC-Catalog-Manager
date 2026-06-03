@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import urllib.error
 from pathlib import Path
 
@@ -7,7 +8,11 @@ import pytest
 
 from isrc_manager.reporting import collectors
 from isrc_manager.reporting.config import ReportingConfiguration, load_reporting_configuration
-from isrc_manager.reporting.crash_detection import SessionMarkerStore, _record_from_mapping
+from isrc_manager.reporting.crash_detection import (
+    CrashSession,
+    SessionMarkerStore,
+    _record_from_mapping,
+)
 from isrc_manager.reporting.github import BackendProxySubmitter, ReportSubmissionResult
 from isrc_manager.reporting.models import (
     GITHUB_ISSUE_BODY_SOFT_LIMIT_BYTES,
@@ -158,6 +163,56 @@ def test_manual_report_is_sanitised_before_preview_and_pending_storage(tmp_path)
     saved_text = next(pending_markdown).read_text(encoding="utf-8")
     assert "secret-token" not in saved_text
     assert "<REDACTED_EMAIL_" in saved_text
+
+
+def test_manual_report_only_includes_os_context_when_opted_in(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def _fake_collect_os_crash_context(**kwargs):
+        calls.append(kwargs)
+        return [
+            (
+                "Sanitised OS Crash Context (manual)",
+                "path=/Users/cosmowyn/private.db password=hunter2 legal@example.test",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "isrc_manager.reporting.service.collect_os_crash_context",
+        _fake_collect_os_crash_context,
+    )
+    service = ReportingService(
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        app_version="1.2.3",
+        repository="owner/repo",
+    )
+    base_fields = dict(
+        summary="Cannot export",
+        description="Description",
+        steps_to_reproduce="Steps",
+        expected_behavior="Expected",
+        actual_behavior="Actual",
+        include_logs=False,
+        include_system_details=False,
+    )
+
+    default_preview = service.preview_text(
+        service.create_manual_report(ManualBugReportFields(**base_fields))
+    )
+    opt_in_preview = service.preview_text(
+        service.create_manual_report(ManualBugReportFields(**base_fields, include_os_context=True))
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["pid"] > 0
+    assert calls[0]["last_seen_at"]
+    assert calls[0]["sanitizer"] is service.sanitizer
+    assert "Sanitised OS Crash Context (manual)" not in default_preview
+    assert "Sanitised OS Crash Context (manual)" in opt_in_preview
+    assert "hunter2" not in opt_in_preview
+    assert "legal@example.test" not in opt_in_preview
+    assert "/Users/cosmowyn" not in opt_in_preview
 
 
 def test_pending_storage_saves_replay_safe_json_and_full_markdown(tmp_path) -> None:
@@ -416,6 +471,179 @@ def test_collectors_sanitise_context_logs_tracebacks_and_file_errors(
     monkeypatch.setattr(Path, "is_file", lambda _path: (_ for _ in ()).throw(OSError("blocked")))
     assert collectors._safe_mtime(latest) == 0.0
     assert collectors._safe_is_file(latest) is False
+
+
+def test_collect_os_crash_context_uses_bounded_macos_native_log_query(monkeypatch) -> None:
+    sanitizer = ReportSanitizer()
+    calls = []
+    monkeypatch.setattr(collectors.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(collectors.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def _fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "2026-06-03 fault Music Catalog Manager path=/Users/cosmowyn/catalog.db "
+                "password=hunter2 legal@example.test"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(collectors.subprocess, "run", _fake_run)
+
+    sections = collectors.collect_os_crash_context(
+        pid=1234,
+        started_at="2026-06-03T09:59:00Z",
+        last_seen_at="2026-06-03T10:00:00Z",
+        sanitizer=sanitizer,
+        process_names=("Music Catalog Manager",),
+    )
+
+    command, kwargs = calls[0]
+    assert sections[0][0] == "Sanitised OS Crash Context (macOS)"
+    assert command[:4] == ["log", "show", "--style", "compact"]
+    assert "processIdentifier == 1234" in " ".join(command)
+    assert "shell" not in kwargs
+    assert kwargs["timeout"] <= collectors.OS_CONTEXT_TIMEOUT_SECONDS
+    assert "read-only native OS log query" in sections[0][1]
+    assert "hunter2" not in sections[0][1]
+    assert "legal@example.test" not in sections[0][1]
+    assert "/Users/cosmowyn" not in sections[0][1]
+    assert "<USER_PATH>" in sections[0][1]
+
+
+def test_collect_os_crash_context_filters_windows_events_and_sanitises_output(
+    monkeypatch,
+) -> None:
+    sanitizer = ReportSanitizer()
+    calls = []
+    monkeypatch.setattr(collectors.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        collectors.shutil, "which", lambda name: f"C:\\Windows\\System32\\{name}.exe"
+    )
+
+    def _fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "Event[0]:\n"
+                "  Provider: Application Error\n"
+                "  Faulting application name: UnrelatedApp.exe\n"
+                "  password=hunter2\n\n"
+                "Event[1]:\n"
+                "  Provider: Windows Error Reporting\n"
+                "  Faulting application name: Music Catalog Manager.exe\n"
+                "  Faulting process id: 4321\n"
+                "  Path: C:\\Users\\cosmowyn\\Music\\catalog.db\n"
+                "  Contact: legal@example.test\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(collectors.subprocess, "run", _fake_run)
+
+    sections = collectors.collect_os_crash_context(
+        pid=4321,
+        last_seen_at="2026-06-03T10:00:00Z",
+        sanitizer=sanitizer,
+        process_names=("Music Catalog Manager.exe",),
+    )
+
+    command, kwargs = calls[0]
+    body = sections[0][1]
+    assert sections[0][0] == "Sanitised OS Crash Context (Windows)"
+    assert command[0] == "wevtutil"
+    assert "powershell" not in " ".join(command).lower()
+    assert "shell" not in kwargs
+    assert "UnrelatedApp" not in body
+    assert "hunter2" not in body
+    assert "Music Catalog Manager.exe" in body
+    assert "legal@example.test" not in body
+    assert "C:\\Users\\cosmowyn" not in body
+    assert "<USER_PATH>" in body
+
+
+def test_collect_os_crash_context_handles_invalid_pid_missing_tools_and_timeout(
+    monkeypatch,
+) -> None:
+    sanitizer = ReportSanitizer()
+    invalid = collectors.collect_os_crash_context(pid=0, sanitizer=sanitizer)
+    assert "previous session PID was invalid" in invalid[0][1]
+
+    monkeypatch.setattr(collectors.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(collectors.shutil, "which", lambda _name: None)
+    missing = collectors.collect_os_crash_context(pid=123, sanitizer=sanitizer)
+    assert "journalctl was not found" in missing[0][1]
+
+    monkeypatch.setattr(collectors.shutil, "which", lambda name: f"/bin/{name}")
+
+    def _timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(collectors.subprocess, "run", _timeout)
+    timed_out = collectors.collect_os_crash_context(pid=123, sanitizer=sanitizer)
+    assert "timed out" in timed_out[0][1]
+
+
+def test_crash_report_only_includes_sanitised_os_context_when_opted_in(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls = []
+
+    def _fake_collect_os_crash_context(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["pid"] == 2468
+        assert kwargs["started_at"] == "2026-06-03T09:59:00Z"
+        assert kwargs["last_seen_at"] == "2026-06-03T10:00:00Z"
+        return [
+            (
+                "Sanitised OS Crash Context (test)",
+                "path=/Users/cosmowyn/private.db password=hunter2 legal@example.test",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "isrc_manager.reporting.service.collect_os_crash_context",
+        _fake_collect_os_crash_context,
+    )
+    service = ReportingService(
+        data_root=tmp_path / "data",
+        logs_dir=tmp_path / "logs",
+        app_version="6.0.3",
+        repository="owner/repo",
+    )
+    crash_session = CrashSession(
+        session_id="session-1",
+        started_at="2026-06-03T09:59:00Z",
+        last_seen_at="2026-06-03T10:00:00Z",
+        app_version="6.0.2",
+        pid=2468,
+        last_event="profile.change",
+    )
+
+    default_preview = service.preview_text(service.create_crash_report(crash_session))
+    opt_in_preview = service.preview_text(
+        service.create_crash_report(crash_session, include_os_context=True)
+    )
+
+    assert calls == [
+        {
+            "pid": 2468,
+            "started_at": "2026-06-03T09:59:00Z",
+            "last_seen_at": "2026-06-03T10:00:00Z",
+            "sanitizer": service.sanitizer,
+        }
+    ]
+    assert "Sanitised OS Crash Context (test)" not in default_preview
+    assert "Sanitised OS Crash Context (test)" in opt_in_preview
+    assert "hunter2" not in opt_in_preview
+    assert "legal@example.test" not in opt_in_preview
+    assert "/Users/cosmowyn" not in opt_in_preview
+    assert "<USER_PATH>" in opt_in_preview
 
 
 def test_reporting_sanitizer_and_rate_limit_edge_paths(monkeypatch, tmp_path: Path) -> None:

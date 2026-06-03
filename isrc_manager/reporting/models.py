@@ -39,6 +39,7 @@ class ManualBugReportFields:
     actual_behavior: str
     include_logs: bool = True
     include_system_details: bool = True
+    include_os_context: bool = False
 
 
 @dataclass(frozen=True)

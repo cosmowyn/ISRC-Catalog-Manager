@@ -52,7 +52,10 @@ def prompt_for_pending_crash_report(app: Any) -> None:
     if prompt.exec() != QDialog.Accepted:
         return
     try:
-        report = service.create_crash_report(crash_session)
+        report = service.create_crash_report(
+            crash_session,
+            include_os_context=prompt.include_os_context(),
+        )
     except Exception:
         _log_exception(app, "Crash report generation failed.")
         QMessageBox.warning(

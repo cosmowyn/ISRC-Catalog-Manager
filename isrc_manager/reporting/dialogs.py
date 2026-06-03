@@ -43,12 +43,25 @@ class CrashReportPromptDialog(QDialog):
         body.setWordWrap(True)
         layout.addWidget(body)
 
+        self.include_os_context_checkbox = QCheckBox(
+            "Include optional sanitised operating-system crash context"
+        )
+        self.include_os_context_checkbox.setChecked(False)
+        self.include_os_context_checkbox.setToolTip(
+            "Runs a short, read-only native OS log query for the previous app session. "
+            "No shell, script, or administrator access is used."
+        )
+        layout.addWidget(self.include_os_context_checkbox)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
         review_button = buttons.addButton("Review Report", QDialogButtonBox.AcceptRole)
         review_button.setDefault(True)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def include_os_context(self) -> bool:
+        return self.include_os_context_checkbox.isChecked()
 
 
 class ManualBugReportDialog(QDialog):
@@ -89,8 +102,17 @@ class ManualBugReportDialog(QDialog):
         self.include_logs_checkbox.setChecked(True)
         self.include_system_checkbox = QCheckBox("Include technical system details")
         self.include_system_checkbox.setChecked(True)
+        self.include_os_context_checkbox = QCheckBox(
+            "Include optional sanitised operating-system event context"
+        )
+        self.include_os_context_checkbox.setChecked(False)
+        self.include_os_context_checkbox.setToolTip(
+            "Runs a short, read-only native OS log query for the current app process. "
+            "No shell, script, or administrator access is used."
+        )
         layout.addWidget(self.include_logs_checkbox)
         layout.addWidget(self.include_system_checkbox)
+        layout.addWidget(self.include_os_context_checkbox)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         buttons.button(QDialogButtonBox.Ok).setText("Preview Report")
@@ -107,6 +129,7 @@ class ManualBugReportDialog(QDialog):
             actual_behavior=self.actual_edit.toPlainText().strip(),
             include_logs=self.include_logs_checkbox.isChecked(),
             include_system_details=self.include_system_checkbox.isChecked(),
+            include_os_context=self.include_os_context_checkbox.isChecked(),
         )
 
     def _accept_if_valid(self) -> None:
