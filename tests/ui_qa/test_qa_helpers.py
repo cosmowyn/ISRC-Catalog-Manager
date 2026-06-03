@@ -283,7 +283,9 @@ def test_pq_artifact_recorders_write_deviations_evidence_and_traceability(tmp_pa
         "covered",
     ]
     trace_path = write_traceability_matrix(tmp_path / "traceability.csv", rows)
-    assert "unknown.button" in trace_path.read_text(encoding="utf-8")
+    trace_text = trace_path.read_text(encoding="utf-8")
+    assert "unknown.button" in trace_text
+    assert "\r" not in trace_text
     assert any(item.coverage_status == "object_name_gap" for item in deviations.deviations)
 
 

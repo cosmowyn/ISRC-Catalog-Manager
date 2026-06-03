@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import json
+import sys
+import unittest
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import mock
 
-from PySide6.QtCore import QByteArray, QRect
-from PySide6.QtWidgets import QApplication, QComboBox, QMenu, QPushButton
+from PySide6.QtCore import QByteArray, QRect, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QMenu,
+    QPushButton,
+    QToolBar,
+    QToolButton,
+    QWidget,
+)
 
-from isrc_manager import main_window_layout
+from isrc_manager import action_ribbon, main_window_layout
 from isrc_manager.catalog_table import CATALOG_ZOOM_LAYOUT_KEY
 
 
@@ -19,6 +31,9 @@ class _Settings:
     def value(self, key, default=None, *args):
         del args
         return self.values.get(key, default)
+
+    def contains(self, key):
+        return key in self.values
 
     def setValue(self, key, value):
         self.values[key] = value
@@ -38,6 +53,499 @@ def _settings_app(values=None):
 
 def _ensure_qapp():
     return QApplication.instance() or QApplication([])
+
+
+class _FakeShortcutSequence:
+    def __init__(self, text: str = "", *, empty: bool = False):
+        self._text = text
+        self._empty = empty
+
+    def isEmpty(self):
+        return self._empty
+
+    def toString(self, _format):
+        return self._text
+
+
+class _FakeShortcutAction:
+    def __init__(self, shortcuts=(), shortcut=None):
+        self._shortcuts = tuple(shortcuts)
+        self._shortcut = shortcut or _FakeShortcutSequence(empty=True)
+
+    def shortcuts(self):
+        return self._shortcuts
+
+    def shortcut(self):
+        return self._shortcut
+
+
+class _RibbonToolbar:
+    def __init__(self):
+        self.visible = None
+        self.geometry_updates = 0
+
+    def setVisible(self, visible):
+        self.visible = bool(visible)
+
+    def updateGeometry(self):
+        self.geometry_updates += 1
+
+    def mapToGlobal(self, pos):
+        return ("global", pos)
+
+
+class _RibbonRootedApp:
+    pass
+
+
+class ActionRibbonHelperTests(unittest.TestCase):
+    def test_action_ribbon_registry_shortcuts_normalization_payloads_and_preferences(self):
+        class RegistryApp:
+            def __init__(self):
+                self.created_actions = {}
+
+            def __getattr__(self, name):
+                if name.endswith("_action"):
+                    action = SimpleNamespace(name=name)
+                    self.created_actions[name] = action
+                    setattr(self, name, action)
+                    return action
+                raise AttributeError(name)
+
+            def _action_shortcut_text(self, action):
+                return f"shortcut:{action.name}"
+
+        registry_app = RegistryApp()
+        action_ribbon._initialize_action_ribbon_registry(registry_app)
+        assert registry_app._action_ribbon_specs_by_id["media_player"]["shortcut"] == (
+            "shortcut:media_player_action"
+        )
+        assert "add_track" in registry_app._action_ribbon_default_ids
+        assert "application_log" in registry_app._action_ribbon_specs_by_id
+
+        assert action_ribbon._action_shortcut_text(None) == ""
+        assert (
+            action_ribbon._action_shortcut_text(
+                _FakeShortcutAction(
+                    [
+                        _FakeShortcutSequence("Ctrl+A"),
+                        _FakeShortcutSequence(empty=True),
+                        _FakeShortcutSequence("Ctrl+B"),
+                    ]
+                )
+            )
+            == "Ctrl+A, Ctrl+B"
+        )
+        assert (
+            action_ribbon._action_shortcut_text(
+                _FakeShortcutAction(shortcut=_FakeShortcutSequence("Ctrl+S"))
+            )
+            == "Ctrl+S"
+        )
+        assert action_ribbon._action_shortcut_text(_FakeShortcutAction()) == ""
+
+        prefs = SimpleNamespace(
+            settings=_Settings(),
+            _action_ribbon_specs_by_id={"save": {}, "open": {}, "default": {}},
+            _action_ribbon_default_ids=["default"],
+            logger=SimpleNamespace(warning=mock.Mock()),
+        )
+        prefs._normalize_action_ribbon_ids_for_known_ids = (
+            action_ribbon._normalize_action_ribbon_ids_for_known_ids
+        )
+        prefs._normalize_action_ribbon_ids = lambda ids: action_ribbon._normalize_action_ribbon_ids(
+            prefs,
+            ids,
+        )
+        prefs._current_action_ribbon_visibility = lambda: True
+
+        assert action_ribbon._action_ribbon_setting_keys(prefs) == [
+            "display/action_ribbon_visible",
+            "display/action_ribbon_actions_json",
+        ]
+        assert action_ribbon._normalize_action_ribbon_ids_for_known_ids(
+            [" save ", "save", "", None, "missing", "open"],
+            ["save", "open"],
+        ) == ["save", "open"]
+        assert action_ribbon._normalize_action_ribbon_ids_for_known_ids(["free"], []) == ["free"]
+        assert action_ribbon._load_saved_action_ribbon_action_ids(prefs) == ["default"]
+
+        key = "display/action_ribbon_actions_json"
+        prefs.settings.values[key] = '["save", "missing", "save", " open "]'
+        assert action_ribbon._load_saved_action_ribbon_action_ids(prefs) == ["save", "open"]
+        prefs.settings.values[key] = "not-json"
+        assert action_ribbon._load_saved_action_ribbon_action_ids(prefs) == ["default"]
+        prefs.settings.values[key] = ["missing"]
+        assert action_ribbon._load_saved_action_ribbon_action_ids(prefs) == ["default"]
+        prefs.settings.values[key] = 42
+        assert action_ribbon._load_saved_action_ribbon_action_ids(prefs) == []
+
+        prefs._action_ribbon_action_ids = []
+        assert action_ribbon._capture_current_action_ribbon_layout_snapshot(prefs) == {
+            "schema_version": 1,
+            "action_ids": ["default"],
+            "visible": True,
+        }
+
+        assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot_payload(
+            {
+                "action_ribbon": {"action_ids": ["missing"], "visible": None},
+                "action_ribbon_visible": False,
+            },
+            current_action_ids=["save"],
+            current_visible=True,
+            default_action_ids=["default"],
+            known_action_ids=["save", "default"],
+        ) == (["save"], False)
+        assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot_payload(
+            {"action_ribbon": {"action_ids": ["save"], "visible": True}},
+            current_action_ids=[],
+            current_visible=False,
+            default_action_ids=["default"],
+            known_action_ids=["save", "default"],
+        ) == (["save"], True)
+        assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot_payload(
+            {},
+            current_action_ids=[],
+            current_visible=False,
+            default_action_ids=["default"],
+            known_action_ids=["save", "default"],
+        ) == (["default"], False)
+
+        wrapper_app = SimpleNamespace(
+            _action_ribbon_action_ids=["save"],
+            _action_ribbon_default_ids=["default"],
+            _action_ribbon_specs_by_id={"save": {}, "default": {}},
+            _normalize_action_ribbon_ids=lambda ids: list(ids or []),
+            _current_action_ribbon_visibility=lambda: False,
+        )
+        wrapper_app._resolve_saved_layout_action_ribbon_snapshot_payload = (
+            lambda _snapshot, **kwargs: (
+                kwargs["current_action_ids"],
+                kwargs["current_visible"],
+            )
+        )
+        assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot(wrapper_app, {}) == (
+            ["save"],
+            False,
+        )
+
+        prefs._normalize_action_ribbon_ids = lambda _ids: []
+        action_ribbon._store_action_ribbon_preferences(prefs, [], visible=False, sync=False)
+        assert json.loads(prefs.settings.values[key]) == ["default"]
+        assert prefs.settings.values["display/action_ribbon_visible"] is False
+        assert prefs.settings.synced == 0
+
+        prefs._normalize_action_ribbon_ids = lambda ids: list(ids or [])
+        action_ribbon._store_action_ribbon_preferences(prefs, ["save"], visible=True)
+        assert json.loads(prefs.settings.values[key]) == ["save"]
+        assert prefs.settings.synced == 1
+
+        class BrokenSettings(_Settings):
+            def setValue(self, _key, _value):
+                raise RuntimeError("cannot write")
+
+        broken = SimpleNamespace(
+            settings=BrokenSettings(),
+            _action_ribbon_default_ids=["default"],
+            _normalize_action_ribbon_ids=lambda ids: list(ids or []),
+            logger=SimpleNamespace(warning=mock.Mock()),
+        )
+        action_ribbon._store_action_ribbon_preferences(broken, ["save"], visible=True)
+        broken.logger.warning.assert_called_once()
+
+    def test_action_ribbon_widget_configuration_toolbar_rebuild_and_context_menu(self):
+        qapp = _ensure_qapp()
+        toolbar = QToolBar()
+        reference_button = QToolButton()
+        reference_button.setProperty("role", "actionRibbonButton")
+        reference_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        toolbar.addWidget(reference_button)
+
+        app = SimpleNamespace(action_ribbon_toolbar=toolbar)
+        app._action_ribbon_button_tooltip = (
+            lambda spec: action_ribbon._action_ribbon_button_tooltip(
+                app,
+                spec,
+            )
+        )
+        app._action_ribbon_text_button_height = lambda widget: (
+            action_ribbon._action_ribbon_text_button_height(app, widget)
+        )
+        app._text_scaled_icon_extent = lambda _font: 13
+
+        assert action_ribbon._action_ribbon_button_object_name("media_player") == (
+            "actionRibbonButtonMediaPlayer"
+        )
+        assert action_ribbon._action_ribbon_button_object_name("") == "actionRibbonButtonUnnamed"
+        assert (
+            action_ribbon._action_ribbon_button_tooltip(
+                app,
+                {"label": "Media", "description": "Open player", "shortcut": "Ctrl+M"},
+            )
+            == "Media\nOpen player\nShortcut: Ctrl+M"
+        )
+
+        action_ribbon._configure_action_ribbon_button_widget(app, "noop", None, {})
+        plain_widget = QWidget()
+        action_ribbon._configure_action_ribbon_button_widget(
+            app,
+            "plain",
+            plain_widget,
+            {"label": "Plain"},
+        )
+        assert plain_widget.property("role") == "actionRibbonButton"
+        assert plain_widget.toolTip() == "Plain"
+
+        media_button = QToolButton()
+        original_style = media_button.toolButtonStyle()
+        fallback_app = SimpleNamespace(action_ribbon_toolbar=None)
+        fallback_height = action_ribbon._action_ribbon_text_button_height(
+            fallback_app, media_button
+        )
+        assert fallback_height >= 1
+        assert media_button.toolButtonStyle() == original_style
+
+        action_ribbon._configure_action_ribbon_button_widget(
+            app,
+            "media_player",
+            media_button,
+            {"label": "Media Player"},
+        )
+        assert media_button.objectName() == "actionRibbonButtonMediaPlayer"
+        assert media_button.property("role") == "actionRibbonButton"
+        assert media_button.toolButtonStyle() == Qt.ToolButtonTextBesideIcon
+        assert media_button.iconSize().width() == 13
+        assert media_button.minimumHeight() >= 1
+
+        refresh_calls: list[tuple[object, ...]] = []
+        action_ribbon._refresh_media_player_action_surfaces(
+            SimpleNamespace(
+                _configure_media_player_action_icon=lambda: refresh_calls.append(("icon",))
+            )
+        )
+        media_action = QAction("Media", toolbar)
+        toolbar.addAction(media_action)
+        refresh_app = SimpleNamespace(
+            action_ribbon_toolbar=toolbar,
+            media_player_action=media_action,
+            _action_ribbon_specs_by_id={"media_player": {"label": "Media"}},
+            _configure_media_player_action_icon=lambda: refresh_calls.append(("icon",)),
+            _configure_action_ribbon_button_widget=lambda *args: refresh_calls.append(args),
+        )
+        action_ribbon._refresh_media_player_action_surfaces(refresh_app)
+        assert refresh_calls[-1][0] == "media_player"
+
+        assert not action_ribbon._current_action_ribbon_visibility(
+            SimpleNamespace(action_ribbon_toolbar=None)
+        )
+        visible_toolbar = QToolBar()
+        visible_toolbar.show()
+        qapp.processEvents()
+        assert action_ribbon._current_action_ribbon_visibility(
+            SimpleNamespace(action_ribbon_toolbar=visible_toolbar)
+        )
+
+        action_ribbon._rebuild_action_ribbon_toolbar(SimpleNamespace(action_ribbon_toolbar=None))
+        rebuild_toolbar = QToolBar()
+        save_action = QAction("Save", rebuild_toolbar)
+        customize_action = QAction("Customize", rebuild_toolbar)
+        configured: list[tuple[str, object]] = []
+        rebuild_app = SimpleNamespace(
+            action_ribbon_toolbar=rebuild_toolbar,
+            _action_ribbon_action_ids=["save", "missing"],
+            _action_ribbon_specs_by_id={
+                "save": {"id": "save", "label": "Save", "action": save_action}
+            },
+            customize_action_ribbon_action=customize_action,
+            _normalize_action_ribbon_ids=lambda ids: list(ids or []),
+            _configure_action_ribbon_button_widget=lambda action_id, widget, _spec: configured.append(
+                (action_id, widget)
+            ),
+            _build_saved_layout_ribbon_widget=lambda parent: QWidget(parent),
+        )
+        action_ribbon._rebuild_action_ribbon_toolbar(rebuild_app)
+        assert [entry[0] for entry in configured] == ["save", "customize_action_ribbon"]
+
+        apply_events: list[tuple[str, object]] = []
+        rebuild_app._rebuild_action_ribbon_toolbar = lambda: apply_events.append(("rebuild", None))
+        rebuild_app._set_action_checked_silently = lambda action, checked: apply_events.append(
+            ("checked", (action, checked))
+        )
+        rebuild_app.action_ribbon_visibility_action = QAction("Visible", rebuild_toolbar)
+        action_ribbon._apply_action_ribbon_configuration(rebuild_app, ["save"], False)
+        assert ("checked", (rebuild_app.action_ribbon_visibility_action, False)) in apply_events
+        assert rebuild_toolbar.isVisible() is False
+
+        class FakeMenu:
+            instances = []
+
+            def __init__(self, parent):
+                self.parent = parent
+                self.actions = []
+                self.executed_at = None
+                self.__class__.instances.append(self)
+
+            def addAction(self, action):
+                self.actions.append(action)
+
+            def addSeparator(self):
+                self.actions.append(None)
+
+            def exec(self, pos):
+                self.executed_at = pos
+
+        rooted_app = _RibbonRootedApp()
+        rooted_app.action_ribbon_toolbar = _RibbonToolbar()
+        rooted_app.customize_action_ribbon_action = object()
+        rooted_app.action_ribbon_visibility_action = object()
+        with mock.patch.object(sys.modules[__name__], "QMenu", FakeMenu):
+            assert action_ribbon._menu_class(rooted_app) is FakeMenu
+            action_ribbon._open_action_ribbon_context_menu(
+                SimpleNamespace(action_ribbon_toolbar=None), (0, 0)
+            )
+            action_ribbon._open_action_ribbon_context_menu(rooted_app, (2, 3))
+        assert FakeMenu.instances[-1].executed_at == ("global", (2, 3))
+
+    def test_action_ribbon_saved_layout_widget_toggles_and_customizer(self):
+        _ensure_qapp()
+        events: list[tuple[str, object]] = []
+        widget_parent = QWidget()
+        app = SimpleNamespace(
+            _connect_args_signal=lambda signal, _owner, callback: signal.connect(callback),
+            _connect_noarg_signal=lambda signal, _owner, callback: signal.connect(callback),
+            _on_saved_layout_selected=lambda index: events.append(("selected", index)),
+            add_named_main_window_layout=lambda: events.append(("add_layout", None)),
+            delete_named_main_window_layout_interactive=lambda name: events.append(
+                ("delete", name)
+            ),
+            _refresh_saved_layout_controls=lambda: events.append(("refresh", None)),
+        )
+        container = action_ribbon._build_saved_layout_ribbon_widget(app, widget_parent)
+        assert container.objectName() == "savedLayoutRibbonControls"
+        app.saved_layout_add_button.click()
+        app.saved_layout_selector.addItem("Desk", "Desk")
+        app.saved_layout_selector.setCurrentIndex(0)
+        app.saved_layout_delete_button.click()
+        assert ("add_layout", None) in events
+        assert ("delete", "Desk") in events
+
+        profile_events: list[tuple[str, object]] = []
+        profile_app = SimpleNamespace(
+            toolbar=_RibbonToolbar(),
+            profiles_toolbar_visibility_action=object(),
+            _set_action_checked_silently=lambda action, checked: profile_events.append(
+                ("checked", (action, checked))
+            ),
+            _queue_top_chrome_boundary_refresh=lambda: profile_events.append(("queue", None)),
+        )
+        action_ribbon._apply_profiles_toolbar_visibility(profile_app, True)
+        assert profile_app.toolbar.visible is True
+        assert profile_app.toolbar.geometry_updates == 1
+        assert ("queue", None) in profile_events
+
+        settings = _Settings()
+        toggle_events: list[tuple[str, object]] = []
+
+        def run_history_action(**kwargs):
+            toggle_events.append(("history", kwargs["action_label"]))
+            kwargs["mutation"]()
+
+        toggle_app = SimpleNamespace(
+            settings=settings,
+            _run_setting_bundle_history_action=run_history_action,
+            _apply_profiles_toolbar_visibility=lambda visible: toggle_events.append(
+                ("profiles", visible)
+            ),
+            _apply_action_ribbon_configuration=lambda ids, visible: toggle_events.append(
+                ("ribbon", (tuple(ids), visible))
+            ),
+            _queue_top_chrome_boundary_refresh=lambda: toggle_events.append(("queue", None)),
+            _store_action_ribbon_preferences=lambda ids, visible: toggle_events.append(
+                ("store", (tuple(ids), visible))
+            ),
+            _action_ribbon_setting_keys=lambda: action_ribbon._action_ribbon_setting_keys(
+                toggle_app
+            ),
+            _action_ribbon_action_ids=["save"],
+        )
+        action_ribbon._on_toggle_profiles_toolbar(toggle_app, True)
+        action_ribbon._on_toggle_action_ribbon(toggle_app, False)
+        assert ("history", "Toggle Profiles Ribbon") in toggle_events
+        assert ("profiles", True) in toggle_events
+        assert settings.values["display/profiles_toolbar_visible"] is True
+        assert ("history", "Toggle Action Ribbon") in toggle_events
+        assert ("ribbon", (("save",), False)) in toggle_events
+        assert ("store", (("save",), False)) in toggle_events
+
+        class FakeToolbar:
+            def __init__(self, visible):
+                self._visible = visible
+
+            def isVisible(self):
+                return self._visible
+
+        class FakeActionRibbonDialog:
+            result = action_ribbon.QDialog.Accepted
+            selected_ids = ["save"]
+            visible = True
+            created = []
+
+            def __init__(self, available, selected, *, ribbon_visible, parent):
+                self.__class__.created.append((available, selected, ribbon_visible, parent))
+
+            def exec(self):
+                return self.result
+
+            def selected_action_ids(self):
+                return list(self.selected_ids)
+
+            def ribbon_visible(self):
+                return self.visible
+
+        customizer_app = _RibbonRootedApp()
+        customizer_app._action_ribbon_specs = [{"id": "save", "label": "Save"}]
+        customizer_app._action_ribbon_action_ids = ["save"]
+        customizer_app.action_ribbon_toolbar = FakeToolbar(True)
+        customizer_app._normalize_action_ribbon_ids = lambda ids: list(ids or [])
+        customizer_app._action_ribbon_setting_keys = lambda: ["display/action_ribbon_actions_json"]
+        customizer_app._store_action_ribbon_preferences = lambda ids, visible: events.append(
+            ("store_custom", (tuple(ids), visible))
+        )
+        customizer_app._apply_action_ribbon_configuration = lambda ids, visible: events.append(
+            ("apply_custom", (tuple(ids), visible))
+        )
+        customizer_app._run_setting_bundle_history_action = lambda **kwargs: (
+            events.append(("history_custom", kwargs["action_label"])),
+            kwargs["mutation"](),
+        )
+
+        with mock.patch.object(
+            sys.modules[__name__],
+            "ActionRibbonDialog",
+            FakeActionRibbonDialog,
+            create=True,
+        ):
+            assert (
+                action_ribbon._action_ribbon_dialog_class(customizer_app) is FakeActionRibbonDialog
+            )
+
+            FakeActionRibbonDialog.result = action_ribbon.QDialog.Rejected
+            action_ribbon.open_action_ribbon_customizer(customizer_app)
+            assert not any(event[0] == "history_custom" for event in events)
+
+            FakeActionRibbonDialog.result = action_ribbon.QDialog.Accepted
+            FakeActionRibbonDialog.selected_ids = ["save"]
+            FakeActionRibbonDialog.visible = True
+            action_ribbon.open_action_ribbon_customizer(customizer_app)
+            assert not any(event[0] == "history_custom" for event in events)
+
+            FakeActionRibbonDialog.selected_ids = ["open", "save"]
+            FakeActionRibbonDialog.visible = False
+            action_ribbon.open_action_ribbon_customizer(customizer_app)
+        assert ("history_custom", "Customize Action Ribbon") in events
+        assert ("store_custom", (("open", "save"), False)) in events
+        assert ("apply_custom", (("open", "save"), False)) in events
 
 
 def test_main_window_layout_setting_serializers_and_loaders_handle_stale_payloads():

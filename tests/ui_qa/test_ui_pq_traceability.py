@@ -20,6 +20,8 @@ def test_ui_pq_traceability(ui_pq_harness):
             "UI-PQ-CON-001",
             "UI-PQ-ACC-001",
             "UI-PQ-SC-001",
+            "UI-PQ-AUTH-001",
+            "UI-PQ-MEDIA-001",
         }
     ]
     assert major_business_rows

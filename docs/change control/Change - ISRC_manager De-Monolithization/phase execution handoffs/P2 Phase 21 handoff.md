@@ -29,7 +29,6 @@ Completion timestamp: 2026-05-25 00:57 CEST
 - `isrc_manager/contract_templates/html_support.py`
 - `isrc_manager/contract_templates/ingestion.py`
 - `isrc_manager/media/waveform_cache.py`
-- `isrc_manager/media/waveform_cache_controller.py`
 - `isrc_manager/tags/__init__.py`
 - `isrc_manager/tags/catalog.py`
 - `isrc_manager/tags/service.py`

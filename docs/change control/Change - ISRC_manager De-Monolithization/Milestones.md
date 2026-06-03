@@ -630,7 +630,7 @@ Files changed:
 
 - `ISRC_manager.py`
 - `isrc_manager/app_sound_controller.py`
-- `isrc_manager/theme_controller.py`
+- `isrc_manager/theme_builder.py`
 - `isrc_manager/history_retention_controller.py`
 - `isrc_manager/settings_controller.py`
 - `architecture_metrics.md`
@@ -702,7 +702,6 @@ Files changed:
 - `isrc_manager/catalog_table/context_menu.py`
 - `isrc_manager/catalog_table/media_routing.py`
 - `isrc_manager/custom_fields/__init__.py`
-- `isrc_manager/custom_fields/controller.py`
 - `pyproject.toml`
 - `architecture_metrics.md`
 - `phase execution handoffs/P2 Phase 18 handoff.md`
@@ -836,7 +835,7 @@ Status: Completed
 Files changed:
 
 - `ISRC_manager.py`
-- `isrc_manager/media/waveform_cache_controller.py`
+- `isrc_manager/media/waveform_cache_worker.py`
 - `isrc_manager/media/player_controller.py`
 - `isrc_manager/media/export_controller.py`
 - `architecture_metrics.md`
@@ -845,7 +844,7 @@ Files changed:
 
 Summary:
 
-- Added `isrc_manager.media.waveform_cache_controller` for waveform cache service/worker queue orchestration.
+- Added waveform cache service/worker queue orchestration to `isrc_manager.media.waveform_cache_worker`.
 - Added `isrc_manager.media.player_controller` for media player action icon, media player opening, preview state assembly, preview navigation, and audio/image preview opening orchestration.
 - Added `isrc_manager.media.export_controller` for media file export, focused media-column export, catalog audio copy export, and tagged audio export preparation.
 - Changed the matching `App` methods into thin delegation shims.
@@ -1068,7 +1067,6 @@ Files changed:
 - `isrc_manager/contract_templates/ingestion.py`
 - `isrc_manager/contract_templates/errors.py`
 - `isrc_manager/media/waveform_cache.py`
-- `isrc_manager/media/waveform_cache_controller.py`
 - `isrc_manager/media/waveform_cache_worker.py`
 - `isrc_manager/tags/__init__.py`
 - `isrc_manager/tags/catalog.py`

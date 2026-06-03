@@ -6,7 +6,7 @@ from unittest import mock
 
 from PySide6.QtWidgets import QDialog
 
-from isrc_manager.custom_fields import controller
+from isrc_manager import custom_fields as controller
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE
 
 

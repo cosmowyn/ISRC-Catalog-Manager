@@ -20,13 +20,14 @@ from .inventory import UIInventoryItem, discover_ui_inventory, write_inventory
 from .mocks import NoNetworkGuard
 from .scenarios import (
     run_accounting_workflow,
+    run_authenticity_workflow,
     run_catalog_workflow,
     run_contract_workflow,
     run_diagnostics_workflow,
     run_generated_output_qualification_workflow,
     run_help_documentation_workflow,
+    run_media_audio_workflow,
     run_menu_inventory,
-    run_pending_area,
     run_relationship_workflow,
     run_soundcloud_workflow,
     run_startup_smoke,
@@ -409,28 +410,21 @@ class UIQualificationHarness:
             "generated output workflow",
             lambda: run_generated_output_qualification_workflow(self),
         )
-        pending_steps: tuple[tuple[str, str, str], ...] = (
-            (
-                "UI-PQ-AUTH-001",
-                "authenticity",
-                "Authenticity, watermark, and forensic verification workflow coverage.",
-            ),
-            (
-                "UI-PQ-MEDIA-001",
-                "media_audio",
-                "Media player, audio attachment, conversion, and derivative ledger workflow coverage.",
-            ),
-        )
-        for test_id, area, message in pending_steps:
+        workflow_track_id = int(self.qa_data.get("track_id") or track_id or 0)
+        if workflow_track_id > 0:
             self._run_step(
-                test_id,
-                message,
-                lambda test_id=test_id, area=area, message=message: run_pending_area(
-                    self,
-                    test_id=test_id,
-                    ui_area=area,
-                    message=message,
-                ),
+                "UI-PQ-AUTH-001",
+                "authenticity, watermark, and forensic workflow",
+                lambda: run_authenticity_workflow(self, track_id=workflow_track_id),
+            )
+            self._run_step(
+                "UI-PQ-MEDIA-001",
+                "media player, audio attachment, conversion, and derivative ledger workflow",
+                lambda: run_media_audio_workflow(self, track_id=workflow_track_id),
+            )
+        else:
+            raise RuntimeError(
+                "UI PQ media/authenticity workflows require the catalog workflow track id."
             )
         self.finalize()
 

@@ -940,7 +940,7 @@
   <script id="initial-dashboard-data" type="application/json">
 {
   "sourceLabel": "Embedded snapshot from local artifacts",
-  "generatedAt": "2026-06-02",
+  "generatedAt": "2026-06-03",
   "history": [
     {
       "timestamp": "2026-06-02T18:22:14Z",
@@ -953,15 +953,15 @@
       "statement_coverage": 92.6514,
       "branch_coverage": 81.0187,
       "total_tests": 14,
-      "passed_tests": 12,
+      "passed_tests": 14,
       "failed_tests": 0,
-      "partial_tests": 2,
-      "total_deviations": 54,
+      "partial_tests": 0,
+      "total_deviations": 32,
       "open_deviations": 0,
-      "pending_manual_deviations": 54,
+      "pending_manual_deviations": 32,
       "traceability_rows": 413,
-      "traceability_covered": 361,
-      "visual_checks_total": 64,
+      "traceability_covered": 381,
+      "visual_checks_total": 71,
       "visual_checks_failed": 0
     }
   ],
@@ -979,15 +979,10 @@
     "lowestFiles": [
       {"path": "isrc_manager/contracts/controller.py", "percent": 54.1, "branch": 25.0, "missing": 22, "statements": 53},
       {"path": "isrc_manager/forensics/controller.py", "percent": 59.35, "branch": 58.62, "missing": 63, "statements": 156},
-      {"path": "isrc_manager/invoicing/catalog_service.py", "percent": 64.38, "branch": 44.44, "missing": 16, "statements": 55},
-      {"path": "isrc_manager/media/waveform_cache_controller.py", "percent": 65.65, "branch": 54.76, "missing": 26, "statements": 89},
       {"path": "isrc_manager/conversion/adapters/xlsx.py", "percent": 68.53, "branch": 56.76, "missing": 47, "statements": 177},
       {"path": "isrc_manager/contract_templates/formatting.py", "percent": 73.63, "branch": 71.43, "missing": 16, "statements": 63},
       {"path": "isrc_manager/catalog_table/context_menu.py", "percent": 73.97, "branch": 53.23, "missing": 47, "statements": 230},
-      {"path": "isrc_manager/theme_controller.py", "percent": 74.26, "branch": 55.0, "missing": 51, "statements": 243},
-      {"path": "isrc_manager/custom_fields/controller.py", "percent": 74.47, "branch": 63.16, "missing": 44, "statements": 206},
-      {"path": "isrc_manager/action_ribbon.py", "percent": 74.48, "branch": 55.13, "missing": 51, "statements": 259},
-      {"path": "isrc_manager/diagnostics_progress.py", "percent": 74.7, "branch": 50.0, "missing": 17, "statements": 75}
+      {"path": "isrc_manager/action_ribbon.py", "percent": 74.48, "branch": 55.13, "missing": 51, "statements": 259}
     ],
     "coverageWins": [
       {"path": "isrc_manager/history/manager.py", "percent": 96.07, "branch": 92.29, "missing": 37, "statements": 1613},
@@ -1002,7 +997,7 @@
   },
   "pq": {
     "eventCount": 14,
-    "eventStatusCounts": {"passed": 12, "partial": 2},
+    "eventStatusCounts": {"passed": 14},
     "events": [
       {"testId": "UI-PQ-INV-001", "status": "passed", "message": "Runtime UI inventory and traceability matrix were generated."},
       {"testId": "UI-PQ-SMOKE-001", "status": "passed", "message": "Main window, menu bar, and QA database are reachable."},
@@ -1016,8 +1011,8 @@
       {"testId": "UI-PQ-SC-001", "status": "passed", "message": "SoundCloud publish dialog and no-network publish boundary were verified."},
       {"testId": "UI-PQ-DIAG-001", "status": "passed", "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed."},
       {"testId": "UI-PQ-IMP-001", "status": "passed", "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines."},
-      {"testId": "UI-PQ-AUTH-001", "status": "partial", "message": "Authenticity, watermark, and forensic verification workflow coverage."},
-      {"testId": "UI-PQ-MEDIA-001", "status": "partial", "message": "Media player, audio attachment, conversion, and derivative ledger workflow coverage."}
+      {"testId": "UI-PQ-AUTH-001", "status": "passed", "message": "Authenticity key, direct watermark export, signed sidecar verification, forensic export, forensic inspection, and result dialogs were verified."},
+      {"testId": "UI-PQ-MEDIA-001", "status": "passed", "message": "Media audio attachment, media player command routing, no-ffmpeg conversion boundary, managed derivative export, and derivative ledger drill-in were verified."}
     ],
     "help": {
       "status": "passed",
@@ -1028,21 +1023,21 @@
       "chapter_screenshot_exempt_count": 3,
       "workflow_example_count": 7
     },
-    "deviationCount": 54,
-    "deviationStatusCounts": {"pending_manual": 54},
-    "deviationSeverityCounts": {"medium": 54},
+    "deviationCount": 32,
+    "deviationStatusCounts": {"pending_manual": 32},
+    "deviationSeverityCounts": {"medium": 32},
     "topDeviations": [
       {"id": "UI-PQ-DEV-0001", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_and_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
       {"id": "UI-PQ-DEV-0002", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
-      {"id": "UI-PQ-DEV-0006", "testId": "UI-PQ-AUTH-001", "severity": "medium", "area": "authenticity", "object": "action:audio_authenticity_keys", "status": "pending_manual", "followup": "synthetic audio fixture automation pending"},
-      {"id": "UI-PQ-DEV-0030", "testId": "UI-PQ-MEDIA-001", "severity": "medium", "area": "media_audio", "object": "action:bulk_attach_audio_files", "status": "pending_manual", "followup": "codec-stable media fixture coverage pending"}
+      {"id": "UI-PQ-DEV-0003", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "button:qt_dockwidget_closebutton:370", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
+      {"id": "UI-PQ-DEV-0004", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "button:qt_dockwidget_floatbutton:369", "status": "pending_manual", "followup": "feature-specific workflow automation pending"}
     ],
     "traceabilityRows": 413,
-    "traceabilityStatusCounts": {"covered": 361, "pending_manual": 52},
-    "automationStatusCounts": {"automated": 361, "pending": 52},
+    "traceabilityStatusCounts": {"covered": 381, "pending_manual": 32},
+    "automationStatusCounts": {"automated": 381, "pending": 32},
     "visualManifests": [
       {"path": "artifacts/ui_pq/visual/visual_manifest.json", "captures": 32, "comparisons": 33, "passed": 33, "failed": 0},
-      {"path": "artifacts/ui_pq/visual/business_workflow_manifest.json", "captures": 27, "comparisons": 27, "passed": 27, "failed": 0},
+      {"path": "artifacts/ui_pq/visual/business_workflow_manifest.json", "captures": 34, "comparisons": 34, "passed": 34, "failed": 0},
       {"path": "artifacts/ui_pq/visual/generated_output_manifest.json", "captures": 0, "comparisons": 4, "passed": 4, "failed": 0}
     ]
   }

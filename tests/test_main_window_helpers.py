@@ -26,6 +26,17 @@ def _raise(error: Exception):
     raise error
 
 
+def test_audio_waveform_cache_queue_rejects_invalid_track_ids() -> None:
+    app = _app()
+    app._is_closing = False
+    app._audio_waveform_cache_worker_for_current_profile = mock.Mock()
+
+    assert app._queue_audio_waveform_cache_for_track("bad", delay_ms=0) is False
+    assert app._queue_audio_waveform_cache_for_track(None, delay_ms=0) is False
+    assert app._queue_audio_waveform_cache_for_track(0, delay_ms=0) is False
+    app._audio_waveform_cache_worker_for_current_profile.assert_not_called()
+
+
 class _Settings:
     def __init__(self, values: dict[str, object] | None = None) -> None:
         self.values = dict(values or {})
@@ -5740,7 +5751,7 @@ def test_main_window_composition_shell_delegates_to_feature_controllers(monkeypa
         "_refresh_menu_theme_state",
         "_apply_theme_with_loading",
     ]:
-        patch_function(main_window.theme_controller, name)
+        patch_function(main_window.theme_builder, name)
 
     assert App._theme_setting_defaults() == "_theme_setting_defaults:result"
     assert App._theme_setting_keys() == "_theme_setting_keys:result"

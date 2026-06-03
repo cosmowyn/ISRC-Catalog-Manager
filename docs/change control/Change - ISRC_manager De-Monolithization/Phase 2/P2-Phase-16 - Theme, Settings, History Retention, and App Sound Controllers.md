@@ -139,7 +139,7 @@ Execute **Plan 2 / Phase 16 — Theme, Settings, History Retention, and App Soun
 - keep behavior stable through delegation/shims
 
 ## Allowed
-- creation or update of `isrc_manager/theme_controller.py`
+- creation or update of `isrc_manager/theme_builder.py`
 - creation or update of `isrc_manager/settings_controller.py`
 - creation or update of `isrc_manager/history_retention_controller.py`
 - creation or update of `isrc_manager/app_sound_controller.py`

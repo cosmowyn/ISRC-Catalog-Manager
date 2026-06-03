@@ -235,7 +235,7 @@ class XlsxTemplateAdapter(TemplateAdapter):
             for row_number in range(start_row + len(preview.rendered_rows), sample_end + 1):
                 for field in target_fields:
                     column_index = int(field.metadata.get("column_index") or 1)
-                    worksheet.cell(row=row_number, column=column_index, value=None)
+                    worksheet.cell(row=row_number, column=column_index).value = None
             if callable(progress_callback):
                 progress_callback(80, 100, "Writing converted workbook...")
             target = Path(output_path)

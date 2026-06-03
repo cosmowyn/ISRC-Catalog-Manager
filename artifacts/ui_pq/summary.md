@@ -2,16 +2,16 @@
 
 This is an internal engineering UI qualification artifact. It is not a regulatory certification or external compliance claim.
 
-- Generated: 2026-06-03T18:00:36.410329+00:00
+- Generated: 2026-06-03T20:41:57.614613+00:00
 - Inventory items discovered: 413
 - Traceability rows written: 413
-- Automated traceability rows: 361
-- Pending/manual/out-of-scope rows: 52
-- Deviations recorded: 54
+- Automated traceability rows: 381
+- Pending/manual/out-of-scope rows: 32
+- Deviations recorded: 32
 - Open actionable deviations: 0
-- Pending/manual deviations: 54
+- Pending/manual deviations: 32
 - Object-name gap deviations: 0
-- QA database: /private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpemci4659/qt-settings/AppLocalDataLocation/Database/default.db
+- QA database: /private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/Database/default.db
 
 ## Executed Evidence Events
 
@@ -27,5 +27,5 @@ This is an internal engineering UI qualification artifact. It is not a regulator
 - `UI-PQ-SC-001` passed: SoundCloud publish dialog options, private preflight, watermarked source, artwork, mocked publish action, progress UI, completion UI, run state, and no-secret storage were verified without network.
 - `UI-PQ-DIAG-001` passed: Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed against the QA profile.
 - `UI-PQ-IMP-001` passed: Generated report, document, CSV, and PDF comparison checks completed with stable baselines.
-- `UI-PQ-AUTH-001` partial: Authenticity, watermark, and forensic verification workflow coverage.
-- `UI-PQ-MEDIA-001` partial: Media player, audio attachment, conversion, and derivative ledger workflow coverage.
+- `UI-PQ-AUTH-001` passed: Authenticity key, direct watermark export, signed sidecar verification, forensic export, forensic inspection, and result dialogs were verified.
+- `UI-PQ-MEDIA-001` passed: Media audio attachment, media player command routing, no-ffmpeg conversion boundary, managed derivative export, and derivative ledger drill-in were verified.

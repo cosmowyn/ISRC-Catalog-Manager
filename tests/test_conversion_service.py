@@ -2,14 +2,16 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
+from isrc_manager.conversion.adapters.xlsx import XlsxSourceAdapter, XlsxTemplateAdapter
 from isrc_manager.conversion.models import (
     MAPPING_KIND_CONSTANT,
     MAPPING_KIND_SKIP,
@@ -19,6 +21,7 @@ from isrc_manager.conversion.models import (
     REQUIRED_STATUS_REQUIRED,
     SOURCE_MODE_FILE,
     ConversionMappingEntry,
+    ConversionPreview,
     ConversionSourceProfile,
     ConversionTargetField,
     ConversionTemplateProfile,
@@ -188,6 +191,196 @@ class ConversionServiceTests(unittest.TestCase):
             self.assertIn("Notes", exported.sheetnames)
         finally:
             exported.close()
+
+    def test_xlsx_template_inspects_multi_sheet_scopes_and_preview_rows(self):
+        template_path = self.root / "multi-template.xlsx"
+        workbook = Workbook()
+        blank = workbook.active
+        blank.title = "Blank"
+        producer = workbook.create_sheet("Producer")
+        producer["A3"] = "Catalog Number*"
+        producer["C3"] = "Title"
+        producer["A4"] = "TEMPLATE"
+        producer["C4"] = "Sample"
+        producer["A6"] = "Ignored after blank"
+        alternate = workbook.create_sheet("Alternate")
+        alternate["B1"] = "ISRC"
+        workbook.save(template_path)
+
+        adapter = XlsxTemplateAdapter()
+        profile = adapter.inspect_template(template_path)
+
+        self.assertEqual(profile.chosen_scope, "Producer")
+        self.assertEqual(
+            profile.available_scopes, (("Producer", "Producer"), ("Alternate", "Alternate"))
+        )
+        self.assertIn("Multiple workbook sheets look writable", profile.warnings[0])
+        self.assertEqual(
+            [
+                (field.field_key, field.display_name, field.location, field.required_status)
+                for field in profile.target_fields
+            ],
+            [
+                ("catalog_number", "Catalog Number*", "Producer!A3", REQUIRED_STATUS_REQUIRED),
+                ("title", "Title", "Producer!C3", REQUIRED_STATUS_OPTIONAL),
+            ],
+        )
+        producer_state = profile.adapter_state["sheet_profiles"]["Producer"]
+        self.assertEqual(producer_state["sample_start"], 4)
+        self.assertEqual(producer_state["sample_end"], 4)
+        self.assertEqual(producer_state["style_row"], 4)
+
+        alternate_profile = adapter.select_scope(profile, "Alternate")
+        self.assertEqual(alternate_profile.chosen_scope, "Alternate")
+        self.assertEqual(alternate_profile.target_fields[0].field_key, "isrc")
+        self.assertIn("sheet:Alternate", alternate_profile.template_signature)
+        self.assertIs(adapter.select_scope(profile, "Missing"), profile)
+
+        headers, rows, xml_text, warnings, state = adapter.build_preview(
+            profile,
+            [{"catalog_number": "CAT-1"}],
+        )
+        self.assertEqual(headers, ("Catalog Number*", "Title"))
+        self.assertEqual(rows, (("CAT-1", ""),))
+        self.assertEqual(xml_text, "")
+        self.assertEqual(warnings, ())
+        self.assertEqual(state, {})
+
+        empty_path = self.root / "empty-template.xlsx"
+        empty_workbook = Workbook()
+        empty_workbook.save(empty_path)
+        with self.assertRaisesRegex(ValueError, "usable data sheet"):
+            adapter.inspect_template(empty_path)
+
+    def test_xlsx_template_export_from_stored_bytes_clears_stale_rows_and_reports_progress(self):
+        template_path = self.root / "stored-template.xlsx"
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Data"
+        worksheet.append(["Catalog Number*", "Title"])
+        worksheet.append(["TEMPLATE", "Sample"])
+        worksheet.append(["OLD-1", "Stale 1"])
+        worksheet.append(["OLD-2", "Stale 2"])
+        workbook.save(template_path)
+
+        service = ConversionService()
+        template_profile = service.inspect_template(template_path)
+        stored_profile = replace(template_profile, template_bytes=template_path.read_bytes())
+        preview = ConversionPreview(
+            template_profile=stored_profile,
+            source_profile=ConversionSourceProfile(
+                source_mode=SOURCE_MODE_FILE,
+                format_name="json",
+                source_label="memory",
+                headers=("catalog_number", "title"),
+                rows=(),
+                preview_rows=(),
+            ),
+            mapping_entries=(),
+            included_row_indices=(0,),
+            rendered_rows=(("CAT-9", "Fresh"),),
+        )
+        progress: list[tuple[int, int, str]] = []
+
+        output_path = self.root / "stored-output.xlsx"
+        result = XlsxTemplateAdapter().export_preview(
+            preview,
+            output_path,
+            progress_callback=lambda value, maximum, message: progress.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported_row_count, 1)
+        self.assertEqual(
+            progress,
+            [
+                (15, 100, "Opening workbook template..."),
+                (80, 100, "Writing converted workbook..."),
+                (90, 100, "Workbook conversion export written."),
+            ],
+        )
+        exported = load_workbook(output_path)
+        try:
+            sheet = exported["Data"]
+            self.assertEqual(sheet["A2"].value, "CAT-9")
+            self.assertEqual(sheet["B2"].value, "Fresh")
+            self.assertIsNone(sheet["A3"].value)
+            self.assertIsNone(sheet["B3"].value)
+            self.assertIsNone(sheet["A4"].value)
+            self.assertIsNone(sheet["B4"].value)
+        finally:
+            exported.close()
+
+    def test_xlsx_template_row_style_clone_copies_full_style_and_respects_noop_guards(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet["A1"] = "Styled"
+        worksheet["A1"].font = Font(bold=True, color="FF0000")
+        worksheet["A1"].fill = PatternFill("solid", fgColor="FFF2CC")
+        worksheet["A1"].border = Border(left=Side(style="thin", color="000000"))
+        worksheet["A1"].alignment = Alignment(horizontal="center")
+        worksheet["A1"].protection = Protection(locked=False)
+        worksheet["A1"].number_format = "0.00"
+        worksheet.row_dimensions[1].height = 33
+        worksheet.row_dimensions[1].hidden = True
+
+        adapter = XlsxTemplateAdapter()
+        adapter._clone_row_style(worksheet, 0, 4)
+        adapter._clone_row_style(worksheet, 1, 1)
+        adapter._clone_row_style(worksheet, 1, 3)
+
+        target = worksheet["A3"]
+        self.assertTrue(target.font.bold)
+        self.assertEqual(target.fill.fgColor.rgb, "00FFF2CC")
+        self.assertEqual(target.border.left.style, "thin")
+        self.assertEqual(target.alignment.horizontal, "center")
+        self.assertFalse(target.protection.locked)
+        self.assertEqual(target.number_format, "0.00")
+        self.assertEqual(worksheet.row_dimensions[3].height, 33)
+        self.assertTrue(worksheet.row_dimensions[3].hidden)
+
+    def test_xlsx_source_adapter_reads_scopes_rows_and_rejects_empty_workbooks(self):
+        source_path = self.root / "source.xlsx"
+        workbook = Workbook()
+        data = workbook.active
+        data.title = "Data"
+        data.append(["Catalog Number", "", "Title"])
+        data.append(["CAT-1", "ignored", "First"])
+        data.append([None, None, None])
+        data.append(["CAT-2", "ignored", "Second"])
+        alternate = workbook.create_sheet("Alternate")
+        alternate.append(["ISRC"])
+        alternate.append(["NLA1"])
+        workbook.save(source_path)
+
+        adapter = XlsxSourceAdapter()
+        profile = adapter.inspect_source(source_path, preferred_csv_delimiter=";")
+
+        self.assertEqual(profile.chosen_scope, "Data")
+        self.assertEqual(profile.available_scopes, (("Data", "Data"), ("Alternate", "Alternate")))
+        self.assertIn("Multiple source sheets look usable", profile.warnings[0])
+        self.assertEqual(profile.headers, ("Catalog Number", "Title"))
+        self.assertEqual(
+            profile.rows,
+            (
+                {"Catalog Number": "CAT-1", "Title": "First"},
+                {"Catalog Number": "CAT-2", "Title": "Second"},
+            ),
+        )
+        self.assertEqual(profile.preview_rows, profile.rows[:10])
+        self.assertIs(adapter.select_scope(profile, "Missing"), profile)
+
+        alternate_profile = adapter.select_scope(profile, "Alternate")
+        self.assertEqual(alternate_profile.chosen_scope, "Alternate")
+        self.assertEqual(alternate_profile.headers, ("ISRC",))
+        self.assertEqual(alternate_profile.rows, ({"ISRC": "NLA1"},))
+
+        empty_path = self.root / "empty-source.xlsx"
+        empty_workbook = Workbook()
+        empty_workbook.save(empty_path)
+        with self.assertRaisesRegex(ValueError, "usable source sheet"):
+            adapter.inspect_source(empty_path)
 
     def test_xml_template_export_preserves_tree_and_xml_declaration(self):
         template_path = self.root / "template.xml"

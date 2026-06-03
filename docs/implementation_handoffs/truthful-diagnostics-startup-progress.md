@@ -52,7 +52,7 @@ This pass broke the coarse grouped work into meaningful reportable units where t
 
 ## 4. New truthful progress model
 
-Diagnostics startup now uses `DiagnosticsProgressTracker` in [isrc_manager/diagnostics_progress.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/diagnostics_progress.py).
+Diagnostics startup now uses `DiagnosticsProgressTracker` in [isrc_manager/diagnostics/report.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/diagnostics/report.py).
 
 Key behavior:
 
@@ -96,7 +96,7 @@ This keeps `100%` aligned with diagnostics startup actually being ready to use.
 
 - [ISRC_manager.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py)
 - [isrc_manager/app_dialogs.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_dialogs.py)
-- [isrc_manager/diagnostics_progress.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/diagnostics_progress.py)
+- [isrc_manager/diagnostics/report.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/diagnostics/report.py)
 - [isrc_manager/storage_admin.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/storage_admin.py)
 - [tests/test_app_dialogs.py](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_app_dialogs.py)
 

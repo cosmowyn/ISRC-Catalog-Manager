@@ -15,7 +15,6 @@ Status: Completed
 - `isrc_manager/catalog_table/context_menu.py`
 - `isrc_manager/catalog_table/media_routing.py`
 - `isrc_manager/custom_fields/__init__.py`
-- `isrc_manager/custom_fields/controller.py`
 - `docs/change control/Change - ISRC_manager De-Monolithization/phase execution handoffs/P2 Phase 18 handoff.md`
 
 ## Files Modified
@@ -28,7 +27,7 @@ Status: Completed
 - Moved catalog table dataset refresh, model snapshot application, search/filter, count/duration, combo lookup loading, catalog repaint flushing, and view-state preservation orchestration into `isrc_manager.catalog_table.workflow`.
 - Moved catalog context-menu construction and catalog cell blob preview routing into `isrc_manager.catalog_table.context_menu`.
 - Moved catalog media/blob routing helpers, drag/drop media routing, standard track media helpers, storage-mode prompting, and attach/delete/preview standard media workflows into `isrc_manager.catalog_table.media_routing`.
-- Moved custom-field definition management and catalog custom-cell editing orchestration into `isrc_manager.custom_fields.controller`.
+- Moved custom-field definition management and catalog custom-cell editing orchestration into `isrc_manager.custom_fields`.
 - Moved application-wide ISRC registry sync/conflict/reservation/generation/prefix orchestration into `isrc_manager.isrc_registry_controller`.
 - Replaced the moved `App` methods with thin delegation shims.
 - Added `isrc_manager.custom_fields` to the explicit package list in `pyproject.toml`.
@@ -52,13 +51,13 @@ Phase 18 required catalog workflow responsibilities to leave `ISRC_manager.py` w
 
 ## QA Checks
 - `.venv/bin/python -m compileall -q ISRC_manager.py isrc_manager/isrc_registry_controller.py isrc_manager/catalog_table/workflow.py isrc_manager/catalog_table/context_menu.py isrc_manager/catalog_table/media_routing.py isrc_manager/custom_fields`
-- `.venv/bin/python -m ruff check isrc_manager/isrc_registry_controller.py isrc_manager/catalog_table/workflow.py isrc_manager/catalog_table/context_menu.py isrc_manager/catalog_table/media_routing.py isrc_manager/custom_fields/controller.py`
+- `.venv/bin/python -m ruff check isrc_manager/isrc_registry_controller.py isrc_manager/catalog_table/workflow.py isrc_manager/catalog_table/context_menu.py isrc_manager/catalog_table/media_routing.py isrc_manager/custom_fields/__init__.py`
 - Import smoke for:
   - `isrc_manager.isrc_registry_controller`
   - `isrc_manager.catalog_table.workflow`
   - `isrc_manager.catalog_table.context_menu`
   - `isrc_manager.catalog_table.media_routing`
-  - `isrc_manager.custom_fields.controller`
+  - `isrc_manager.custom_fields`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_catalog_table_models.py tests/test_catalog_table_controller.py tests/test_catalog_workflow_integration.py tests/test_custom_field_services.py tests/test_isrc_registry.py`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_catalog_model_view.py tests/app/test_app_shell_catalog_controller.py tests/app/test_app_shell_catalog_header_state.py`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_editor_surfaces.py -k 'catalog or custom or isrc or media or blob'`
@@ -93,7 +92,7 @@ None. The new `App` delegating methods are temporary phase shims but are not roo
 - `catalog_table.workflow` owns dataset/search/count/duration/view-state orchestration.
 - `catalog_table.context_menu` owns context-menu construction only.
 - `catalog_table.media_routing` owns catalog media/blob routing and standard-media attach/delete/preview helpers; it does not own media playback, equalizer, waveform cache orchestration, bookmarks, or export controller responsibilities.
-- `custom_fields.controller` owns catalog custom-field management/editing orchestration and reuses existing custom-field services.
+- `custom_fields` owns catalog custom-field management/editing orchestration and reuses existing custom-field services.
 - `isrc_registry_controller` owns application-wide ISRC registry/generation orchestration and reuses `ApplicationISRCRegistryService`.
 
 ## Package Parity Impact
@@ -109,7 +108,7 @@ Low. New modules depend on focused package modules and do not import `ISRC_manag
 - `isrc_manager.catalog_table.workflow.py` is 1,142 LOC, below but close to the 1,200 LOC warning threshold.
 - `isrc_manager.catalog_table.context_menu.py` is 463 LOC.
 - `isrc_manager.catalog_table.media_routing.py` is 566 LOC.
-- `isrc_manager.custom_fields.controller.py` is 436 LOC.
+- `isrc_manager.custom_fields.__init__.py` is 436 LOC.
 - `isrc_manager.isrc_registry_controller.py` is 359 LOC.
 - The extraction avoided creating a single catalog mega-controller, but `workflow.py` should stay watched during later catalog-adjacent changes.
 

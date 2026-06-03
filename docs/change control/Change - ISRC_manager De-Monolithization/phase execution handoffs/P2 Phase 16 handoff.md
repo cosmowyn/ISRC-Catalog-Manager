@@ -25,7 +25,7 @@ Status: Completed
 ## Files Added
 
 - `isrc_manager/app_sound_controller.py`
-- `isrc_manager/theme_controller.py`
+- `isrc_manager/theme_builder.py`
 - `isrc_manager/history_retention_controller.py`
 - `isrc_manager/settings_controller.py`
 - `docs/change control/Change - ISRC_manager De-Monolithization/phase execution handoffs/P2 Phase 16 handoff.md`
@@ -39,7 +39,7 @@ Status: Completed
 ## What Changed
 
 - Moved app sound and startup sound settings/playback orchestration to `isrc_manager.app_sound_controller`.
-- Moved theme load, normalization, save, build, and apply orchestration to `isrc_manager.theme_controller`.
+- Moved theme load, normalization, save, build, and apply orchestration to `isrc_manager.theme_builder`.
 - Moved history retention, automatic snapshot scheduling, storage budget estimation, and storage budget enforcement orchestration to `isrc_manager.history_retention_controller`.
 - Moved current settings, settings application, identity/window-title settings, application settings import/export, and single-setting application logic to `isrc_manager.settings_controller`.
 - Replaced the matching `App` method bodies with thin delegation shims that preserve existing runtime entry points.
@@ -69,9 +69,9 @@ Phase 16 required the theme, settings, history retention, and app-sound responsi
 
 ## QA Checks
 
-- `.venv/bin/python -m compileall ISRC_manager.py isrc_manager/app_sound_controller.py isrc_manager/theme_controller.py isrc_manager/history_retention_controller.py isrc_manager/settings_controller.py`
-- `.venv/bin/python -m ruff check isrc_manager/app_sound_controller.py isrc_manager/theme_controller.py isrc_manager/history_retention_controller.py isrc_manager/settings_controller.py`
-- Import smoke for `isrc_manager.app_sound_controller`, `isrc_manager.theme_controller`, `isrc_manager.history_retention_controller`, and `isrc_manager.settings_controller`
+- `.venv/bin/python -m compileall ISRC_manager.py isrc_manager/app_sound_controller.py isrc_manager/theme_builder.py isrc_manager/history_retention_controller.py isrc_manager/settings_controller.py`
+- `.venv/bin/python -m ruff check isrc_manager/app_sound_controller.py isrc_manager/theme_builder.py isrc_manager/history_retention_controller.py isrc_manager/settings_controller.py`
+- Import smoke for `isrc_manager.app_sound_controller`, `isrc_manager.theme_builder`, `isrc_manager.history_retention_controller`, and `isrc_manager.settings_controller`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_startup_core.py -k 'sound or settings or bundled_themes or startup_first_launch_prompt_can_open_settings_and_clears_pending_flag'`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_theme_builder.py tests/test_qss_autocomplete.py`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_history_cleanup_service.py tests/test_storage_admin_service.py`
@@ -107,7 +107,7 @@ Results:
 
 ## Architecture Boundary Observations
 
-- Theme controller owns theme settings normalization/application orchestration only and delegates stylesheet/palette construction to `theme_builder.py`.
+- Theme builder owns theme settings normalization/application orchestration and stylesheet/palette construction.
 - Settings controller owns settings current/apply/import/export orchestration only and delegates bundle transfer work to the existing settings transfer services.
 - History retention controller owns snapshot retention and storage-budget orchestration only; storage-admin and diagnostics workflows remain outside this phase.
 - App sound controller owns application interaction and startup sound orchestration only and uses existing `app_sounds.py` path/effect helpers.
@@ -122,7 +122,7 @@ Results:
   - `isrc_manager.tags.catalog` <-> `isrc_manager.tags.service`
 - Module-size / mini-monolith risk:
   - `isrc_manager/app_sound_controller.py`: 206 LOC
-  - `isrc_manager/theme_controller.py`: 400 LOC
+  - `isrc_manager/theme_builder.py`: 400 LOC
   - `isrc_manager/history_retention_controller.py`: 445 LOC
   - `isrc_manager/settings_controller.py`: 858 LOC
   - All four modules are below the 1,200 LOC warning threshold.

@@ -83,7 +83,7 @@ Use or create, reusing existing modules where noted:
 - `isrc_manager/diagnostics/report.py`
 - `isrc_manager/diagnostics/controller.py`
 - `isrc_manager/update_controller.py`
-- `isrc_manager/theme_controller.py`
+- `isrc_manager/theme_builder.py`
 - `isrc_manager/settings_controller.py`
 - `isrc_manager/history_retention_controller.py`
 - `isrc_manager/startup_controller.py`
@@ -91,7 +91,7 @@ Use or create, reusing existing modules where noted:
 - `isrc_manager/catalog_table/workflow.py`
 - `isrc_manager/catalog_table/context_menu.py`
 - `isrc_manager/catalog_table/media_routing.py`
-- `isrc_manager/custom_fields/controller.py`
+- `isrc_manager/custom_fields/__init__.py`
 - `isrc_manager/isrc_registry_controller.py`
 - `isrc_manager/media/player_controller.py`
 - `isrc_manager/media/export_controller.py`

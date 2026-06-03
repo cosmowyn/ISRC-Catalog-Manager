@@ -81,9 +81,8 @@ from isrc_manager.parties import PartyRecord, PartyService
 from isrc_manager.services.settings_reads import OwnerPartySettings, SettingsReadService
 from isrc_manager.ui_common import _configure_standard_form_layout, _create_standard_section
 
-from .catalog_service import InvoiceCatalogService
 from .credit_note_service import CreditNoteService
-from .invoice_service import InvoiceService
+from .invoice_service import InvoiceCatalogService, InvoiceService
 from .models import (
     VAT_TREATMENTS,
     ArtistPayoutPayload,

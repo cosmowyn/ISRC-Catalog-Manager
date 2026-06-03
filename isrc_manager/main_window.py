@@ -204,7 +204,7 @@ from isrc_manager.catalog_table import (
 from isrc_manager.catalog_table import context_menu as catalog_context_menu
 from isrc_manager.catalog_table import media_routing as catalog_media_routing
 from isrc_manager.catalog_table import workflow as catalog_workflow
-from isrc_manager.custom_fields import controller as custom_fields_controller
+from isrc_manager import custom_fields as custom_fields_controller
 from isrc_manager.catalog_managers import (
     CatalogManagersPanel,
     DiagnosticsCatalogCleanupPanel,
@@ -276,7 +276,6 @@ from isrc_manager.contracts import controller as contract_controller
 from isrc_manager.contracts.dialogs import ContractBrowserPanel
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
 from isrc_manager.conversion.dialogs import ConversionDialog
-from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
 from isrc_manager.diagnostics import controller as diagnostics_controller
 from isrc_manager.diagnostics import report as diagnostics_report
 from isrc_manager.domain.codes import (
@@ -356,7 +355,6 @@ from isrc_manager.media import (
     conversion_controller as audio_conversion_controller,
     export_controller as media_export_controller,
     player_controller as media_player_controller,
-    waveform_cache_controller,
 )
 from isrc_manager.media.audio_visualization import (
     OscilloscopeWidget,
@@ -414,8 +412,15 @@ from isrc_manager.media.preview_dialogs import (
     _build_audio_preview_track_load,
 )
 from isrc_manager.media.waveform import WaveformWidget, load_wav_peaks
-from isrc_manager.media.waveform_cache import AudioWaveformCacheService
-from isrc_manager.media.waveform_cache_worker import AudioWaveformCacheWorker
+from isrc_manager.media.waveform_cache_worker import (
+    _audio_waveform_cache_for_track,
+    _audio_waveform_cache_service,
+    _audio_waveform_cache_worker_for_current_profile,
+    _queue_audio_waveform_cache_for_track,
+    _queue_startup_audio_waveform_cache_pass,
+    _run_startup_audio_waveform_cache_pass,
+    _stop_audio_waveform_cache_worker,
+)
 from isrc_manager import profile_session
 from isrc_manager.packaged_smoke import (
     PACKAGED_SMOKE_TEST_ARGUMENT,
@@ -537,7 +542,7 @@ from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
 from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 from isrc_manager.services.tracks import TRACK_RELATIONSHIP_TYPES
 from isrc_manager.settings import enforce_single_instance, init_settings
-from isrc_manager import settings_controller, theme_controller
+from isrc_manager import settings_controller, theme_builder
 from isrc_manager.starter_themes import (
     STARTER_THEME_SPECS,
     starter_theme_descriptions,
@@ -1326,33 +1331,25 @@ class App(QMainWindow):
         self._maybe_finish_startup_loading()
 
     def _audio_waveform_cache_service(self, *args, **kwargs):
-        return waveform_cache_controller._audio_waveform_cache_service(self, *args, **kwargs)
+        return _audio_waveform_cache_service(self, *args, **kwargs)
 
     def _audio_waveform_cache_worker_for_current_profile(self, *args, **kwargs):
-        return waveform_cache_controller._audio_waveform_cache_worker_for_current_profile(
-            self, *args, **kwargs
-        )
+        return _audio_waveform_cache_worker_for_current_profile(self, *args, **kwargs)
 
     def _stop_audio_waveform_cache_worker(self, *args, **kwargs):
-        return waveform_cache_controller._stop_audio_waveform_cache_worker(self, *args, **kwargs)
+        return _stop_audio_waveform_cache_worker(self, *args, **kwargs)
 
     def _queue_audio_waveform_cache_for_track(self, *args, **kwargs):
-        return waveform_cache_controller._queue_audio_waveform_cache_for_track(
-            self, *args, **kwargs
-        )
+        return _queue_audio_waveform_cache_for_track(self, *args, **kwargs)
 
     def _queue_startup_audio_waveform_cache_pass(self, *args, **kwargs):
-        return waveform_cache_controller._queue_startup_audio_waveform_cache_pass(
-            self, *args, **kwargs
-        )
+        return _queue_startup_audio_waveform_cache_pass(self, *args, **kwargs)
 
     def _audio_waveform_cache_for_track(self, *args, **kwargs):
-        return waveform_cache_controller._audio_waveform_cache_for_track(self, *args, **kwargs)
+        return _audio_waveform_cache_for_track(self, *args, **kwargs)
 
     def _run_startup_audio_waveform_cache_pass(self, *args, **kwargs):
-        return waveform_cache_controller._run_startup_audio_waveform_cache_pass(
-            self, *args, **kwargs
-        )
+        return _run_startup_audio_waveform_cache_pass(self, *args, **kwargs)
 
     def _maybe_finish_startup_loading(self) -> None:
         if self._startup_ready_emitted:
@@ -2450,50 +2447,50 @@ class App(QMainWindow):
 
     @staticmethod
     def _theme_setting_defaults() -> dict[str, object]:
-        return theme_controller._theme_setting_defaults()
+        return theme_builder._theme_setting_defaults()
 
     @classmethod
     def _theme_setting_keys(cls) -> tuple[str, ...]:
-        return theme_controller._theme_setting_keys()
+        return theme_builder._theme_setting_keys()
 
     @staticmethod
     def _normalize_theme_string(value) -> str:
-        return theme_controller._normalize_theme_string(
+        return theme_builder._normalize_theme_string(
             value,
         )
 
     @staticmethod
     def _format_theme_qss_issues(issues: list) -> str:
-        return theme_controller._format_theme_qss_issues(
+        return theme_builder._format_theme_qss_issues(
             issues,
         )
 
     @classmethod
     def _normalize_theme_font_family(cls, value, fallback) -> str:
-        return theme_controller._normalize_theme_font_family(
+        return theme_builder._normalize_theme_font_family(
             value,
             fallback,
         )
 
     @staticmethod
     def _normalize_theme_color(value) -> str:
-        return theme_controller._normalize_theme_color(
+        return theme_builder._normalize_theme_color(
             value,
         )
 
     def _load_theme_settings(self) -> dict[str, object]:
-        return theme_controller._load_theme_settings(
+        return theme_builder._load_theme_settings(
             self,
         )
 
     def _normalize_theme_settings(self, values: dict[str, object] | None) -> dict[str, object]:
-        return theme_controller._normalize_theme_settings(
+        return theme_builder._normalize_theme_settings(
             self,
             values,
         )
 
     def _stored_theme_payload(self, values: dict[str, object] | None) -> dict[str, object]:
-        return theme_controller._stored_theme_payload(
+        return theme_builder._stored_theme_payload(
             self,
             values,
         )
@@ -2501,46 +2498,46 @@ class App(QMainWindow):
     def _sanitize_theme_library(
         self, library: dict[str, object] | None
     ) -> dict[str, dict[str, object]]:
-        return theme_controller._sanitize_theme_library(
+        return theme_builder._sanitize_theme_library(
             self,
             library,
         )
 
     def _load_theme_library(self) -> dict[str, dict[str, object]]:
-        return theme_controller._load_theme_library(
+        return theme_builder._load_theme_library(
             self,
         )
 
     def _save_theme_library(
         self, library: dict[str, object] | None
     ) -> dict[str, dict[str, object]]:
-        return theme_controller._save_theme_library(
+        return theme_builder._save_theme_library(
             self,
             library,
         )
 
     @staticmethod
     def _color_relative_luminance(color_value: str) -> float:
-        return theme_controller._color_relative_luminance(
+        return theme_builder._color_relative_luminance(
             color_value,
         )
 
     @classmethod
     def _contrast_ratio(cls, fg_value: str, bg_value: str) -> float:
-        return theme_controller._contrast_ratio(
+        return theme_builder._contrast_ratio(
             fg_value,
             bg_value,
         )
 
     @classmethod
     def _pick_contrasting_color(cls, bg_value: str) -> str:
-        return theme_controller._pick_contrasting_color(
+        return theme_builder._pick_contrasting_color(
             bg_value,
         )
 
     @staticmethod
     def _shift_color(color_value: str, factor: int) -> str:
-        return theme_controller._shift_color(
+        return theme_builder._shift_color(
             color_value,
             factor,
         )
@@ -2548,59 +2545,59 @@ class App(QMainWindow):
     def _effective_theme_settings(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
-        return theme_controller._effective_theme_settings(
+        return theme_builder._effective_theme_settings(
             self,
             raw_values,
         )
 
     def _save_theme_settings(self, values: dict[str, object]) -> dict[str, object]:
-        return theme_controller._save_theme_settings(
+        return theme_builder._save_theme_settings(
             self,
             values,
         )
 
     @staticmethod
     def _blob_icon_setting_defaults() -> dict[str, dict[str, object]]:
-        return theme_controller._blob_icon_setting_defaults()
+        return theme_builder._blob_icon_setting_defaults()
 
     def _load_blob_icon_settings(self) -> dict[str, dict[str, object]]:
-        return theme_controller._load_blob_icon_settings(
+        return theme_builder._load_blob_icon_settings(
             self,
         )
 
     def _save_blob_icon_settings(
         self, values: dict[str, object] | None
     ) -> dict[str, dict[str, object]]:
-        return theme_controller._save_blob_icon_settings(
+        return theme_builder._save_blob_icon_settings(
             self,
             values,
         )
 
     def _reset_blob_badge_render_cache(self) -> None:
-        return theme_controller._reset_blob_badge_render_cache(
+        return theme_builder._reset_blob_badge_render_cache(
             self,
         )
 
     def _active_custom_qss(self) -> str:
-        return theme_controller._active_custom_qss(
+        return theme_builder._active_custom_qss(
             self,
         )
 
     def _build_theme_stylesheet(self, raw_values: dict[str, object] | None = None) -> str:
-        return theme_controller._build_theme_stylesheet(
+        return theme_builder._build_theme_stylesheet(
             self,
             raw_values,
         )
 
     def _set_application_theme_stylesheet(self, app: QApplication, stylesheet: str) -> None:
-        return theme_controller._set_application_theme_stylesheet(
+        return theme_builder._set_application_theme_stylesheet(
             self,
             app,
             stylesheet,
         )
 
     def _apply_theme(self, raw_values: dict[str, object] | None = None) -> None:
-        return theme_controller._apply_theme(
+        return theme_builder._apply_theme(
             self,
             raw_values,
         )
@@ -2608,19 +2605,19 @@ class App(QMainWindow):
     def _prepare_theme_application_payload(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
-        return theme_controller._prepare_theme_application_payload(
+        return theme_builder._prepare_theme_application_payload(
             self,
             raw_values,
         )
 
     def _apply_prepared_theme_payload(self, payload: dict[str, object]) -> None:
-        return theme_controller._apply_prepared_theme_payload(
+        return theme_builder._apply_prepared_theme_payload(
             self,
             payload,
         )
 
     def _refresh_menu_theme_state(self) -> None:
-        return theme_controller._refresh_menu_theme_state(
+        return theme_builder._refresh_menu_theme_state(
             self,
         )
 
@@ -2631,7 +2628,7 @@ class App(QMainWindow):
         title: str = "Apply Theme",
         description: str = "Preparing updated theme styles...",
     ) -> None:
-        return theme_controller._apply_theme_with_loading(
+        return theme_builder._apply_theme_with_loading(
             self,
             raw_values,
             title=title,

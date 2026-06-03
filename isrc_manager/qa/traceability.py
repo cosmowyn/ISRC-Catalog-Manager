@@ -177,16 +177,15 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
             "Authenticity, watermark, forensic, and verification workflows.",
             "authenticity/watermark dialogs",
             "Functional Workflow Qualification",
-            "pending",
+            "automated",
             "QA profile open; no live external calls.",
-            "Synthetic media and manifests.",
-            "Discover surfaces and record fixture gaps for audio/authenticity automation.",
-            "Surfaces are inventoried; missing fixture coverage is a deviation.",
-            "Authenticity manifests, watermark results",
-            "Authenticity services, audio conversion",
-            "evidence.json, deviations.csv",
-            "No traceability entry or unreported unsupported media condition.",
-            manual_followup_status="synthetic audio fixture automation pending",
+            "Synthetic WAV master, local signing key, signed sidecar, and forensic export metadata.",
+            "Attach deterministic audio, generate/resolve an authenticity key, preview direct-watermark export, export a signed watermarked master, verify the exported audio and sidecar, open verification UI, collect forensic export metadata, export a forensic WAV copy, inspect it, and open the forensic inspection UI.",
+            "Direct authenticity report is verified with a valid signature; forensic inspection resolves the created export record; dialogs and service outputs are captured as evidence.",
+            "AuthenticityKeys, AuthenticityManifests, ForensicWatermarkExports, DerivativeExportBatches, TrackAudioDerivatives",
+            "AudioAuthenticityService, ForensicExportCoordinator, Authenticity dialogs, Forensic dialogs, VisualQualificationService",
+            "evidence.json, business_workflow_manifest.json",
+            "Key generation fails, direct watermark export fails, signature verification fails, forensic export/inspection fails, or result dialogs are not captured.",
         ),
         TraceabilityEntry(
             "UI-PQ-IMP-001",
@@ -258,16 +257,15 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
             "Media player, audio attachment, conversion, derivative/export ledger.",
             "media player/audio actions",
             "Performance/Responsiveness Qualification",
-            "pending",
+            "automated",
             "QA profile open.",
-            "Synthetic local WAV/MP3 fixtures.",
-            "Inventory surfaces and record fixture/external codec gaps.",
-            "No media automation gap is silent.",
-            "Media blobs, waveform cache, derivative ledger",
-            "Audio codecs, media controllers",
-            "deviations.csv",
-            "Playback/conversion gap omitted.",
-            manual_followup_status="codec-stable media fixture coverage pending",
+            "Synthetic local WAV fixture and deterministic no-ffmpeg conversion boundary.",
+            "Attach audio through TrackService, render the bulk attach review dialog, route the Media Player command to the selected track, export a managed lossy derivative through the coordinator using a controlled conversion service, open the derivative ledger, and verify persisted batch/item rows.",
+            "Attached audio is fetchable, media player command targets the QA track, derivative export writes one completed batch/item, and the ledger drill-in surface is captured.",
+            "Tracks media columns, TrackAudioWaveformCache, DerivativeExportBatches, TrackAudioDerivatives",
+            "TrackService, media player controller, BulkAudioAttachDialog, ManagedDerivativeExportCoordinator, DerivativeLedgerService, VisualQualificationService",
+            "evidence.json, business_workflow_manifest.json",
+            "Audio attachment fails, media player target is wrong, derivative conversion/export fails, ledger rows are absent, or ledger UI is not captured.",
         ),
         TraceabilityEntry(
             "UI-PQ-MISC-001",
@@ -423,7 +421,11 @@ def build_traceability_matrix(
 def write_traceability_matrix(path: Path, rows: list[TraceabilityRow]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=TRACEABILITY_COLUMNS)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=TRACEABILITY_COLUMNS,
+            lineterminator="\n",
+        )
         writer.writeheader()
         for row in rows:
             writer.writerow(asdict(row))

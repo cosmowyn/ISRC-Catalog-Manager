@@ -2,7 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import ExitStack
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +23,12 @@ from isrc_manager.contract_templates import (
     ContractTemplateRevisionPayload,
     ContractTemplateService,
     QtWebEngineHtmlPdfAdapter,
+)
+from isrc_manager.contract_templates.formatting import (
+    DEFAULT_MANUAL_DATE_FORMAT,
+    format_manual_date_value,
+    normalize_manual_date_format,
+    parse_manual_date_value,
 )
 from isrc_manager.contract_templates.models import (
     build_contract_template_indexed_selection_key,
@@ -46,6 +52,41 @@ from tests.contract_templates._support import (
     make_docx_bytes,
 )
 from tests.qt_test_helpers import require_qapplication
+
+
+class ContractTemplateFormattingTests(unittest.TestCase):
+    def test_normalize_manual_date_format_uses_default_for_blank_values(self):
+        self.assertEqual(normalize_manual_date_format(None), DEFAULT_MANUAL_DATE_FORMAT)
+        self.assertEqual(normalize_manual_date_format("   "), DEFAULT_MANUAL_DATE_FORMAT)
+        self.assertEqual(normalize_manual_date_format(" yyyy/mm/dd "), "yyyy/mm/dd")
+
+    def test_parse_manual_date_value_accepts_dates_datetimes_and_supported_strings(self):
+        self.assertEqual(parse_manual_date_value(datetime(2026, 6, 3, 19, 45)), date(2026, 6, 3))
+        existing_date = date(2026, 4, 6)
+        self.assertIs(parse_manual_date_value(existing_date), existing_date)
+        self.assertEqual(parse_manual_date_value("2026-06-03"), date(2026, 6, 3))
+        self.assertEqual(parse_manual_date_value("2026/06/03"), date(2026, 6, 3))
+        self.assertEqual(parse_manual_date_value("03.06.2026"), date(2026, 6, 3))
+        self.assertEqual(parse_manual_date_value("03/06/2026"), date(2026, 6, 3))
+        self.assertEqual(parse_manual_date_value("2026-06-03T21:04:00"), date(2026, 6, 3))
+
+    def test_parse_manual_date_value_rejects_blank_and_invalid_values(self):
+        self.assertIsNone(parse_manual_date_value(None))
+        self.assertIsNone(parse_manual_date_value(" "))
+        self.assertIsNone(parse_manual_date_value("not-a-date"))
+
+    def test_format_manual_date_value_supports_all_tokens_and_literal_text(self):
+        value = date(2026, 6, 3)
+        self.assertEqual(format_manual_date_value(value), "03.Jun.2026")
+        self.assertEqual(
+            format_manual_date_value(value, "yyyy|mmmm|mmm|yy|dd|mm|d|m|literal"),
+            "2026|June|Jun|26|03|06|3|6|literal",
+        )
+        self.assertEqual(format_manual_date_value(value, "YYYY/MMMM/DD"), "2026/June/03")
+
+    def test_format_manual_date_value_returns_original_text_for_unparseable_values(self):
+        self.assertEqual(format_manual_date_value("not-a-date", "yyyy"), "not-a-date")
+        self.assertEqual(format_manual_date_value(None, "yyyy"), "")
 
 
 class _FakeSignal:

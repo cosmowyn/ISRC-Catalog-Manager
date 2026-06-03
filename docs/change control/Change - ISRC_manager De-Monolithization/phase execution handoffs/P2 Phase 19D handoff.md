@@ -31,7 +31,7 @@ Completion timestamp: 2026-05-24 23:51 CEST
 - `docs/change control/Change - ISRC_manager De-Monolithization/Milestones.md`
 
 ## Files Added
-- `isrc_manager/media/waveform_cache_controller.py`
+- `isrc_manager/media/waveform_cache_worker.py`
 - `isrc_manager/media/player_controller.py`
 - `isrc_manager/media/export_controller.py`
 - `docs/change control/Change - ISRC_manager De-Monolithization/phase execution handoffs/P2 Phase 19D handoff.md`
@@ -64,10 +64,10 @@ Completion timestamp: 2026-05-24 23:51 CEST
 - No `isrc_manager` package module imports `ISRC_manager`.
 
 ## Validation
-- `.venv/bin/python -m compileall -q ISRC_manager.py isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_controller.py`
-- `.venv/bin/python -m ruff check isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_controller.py`
-- `QT_QPA_PLATFORM=offscreen .venv/bin/python - <<'PY' ... import isrc_manager.media.player_controller/export_controller/waveform_cache_controller ... PY`
-- `rg -n "from ISRC_manager|import ISRC_manager|ISRC_manager\\." isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_controller.py`
+- `.venv/bin/python -m compileall -q ISRC_manager.py isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_worker.py`
+- `.venv/bin/python -m ruff check isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_worker.py`
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python - <<'PY' ... import isrc_manager.media.player_controller/export_controller/waveform_cache_worker ... PY`
+- `rg -n "from ISRC_manager|import ISRC_manager|ISRC_manager\\." isrc_manager/media/player_controller.py isrc_manager/media/export_controller.py isrc_manager/media/waveform_cache_worker.py`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_editor_surfaces.py -k 'export_catalog_audio_copies or export_standard_audio_file_embeds_catalog_metadata or bulk_audio_column_export_uses_background_task_and_embeds_catalog_metadata or media_player_action or audio_preview'`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_app_shell_catalog_model_view.py -k 'audio_preview_navigation or focused_audio_export'`
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_track_service.py -k 'waveform_cache'`

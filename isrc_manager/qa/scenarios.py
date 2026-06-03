@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import shutil
+import struct
+import wave
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -33,6 +36,7 @@ from isrc_manager.integrations.soundcloud.models import (
 from isrc_manager.integrations.soundcloud.persistence import SoundCloudSQLiteRepository
 from isrc_manager.integrations.soundcloud.service import SoundCloudPublishPlanner
 from isrc_manager.integrations.soundcloud.ui import SoundCloudPublishDialog
+from isrc_manager.media.conversion import AudioConversionResult
 
 from .commands import table_contains_text
 from .fixtures import QARepertoireIds
@@ -116,6 +120,161 @@ class _SoundCloudAccountState:
             hourly_upload_limit=20,
             rate_limit_remaining=50,
         )
+
+
+class _QAAudioConversionService:
+    """Deterministic no-ffmpeg converter for UI PQ service-boundary checks."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def is_available(self) -> bool:
+        return True
+
+    def is_supported_target(
+        self,
+        format_id: str,
+        *,
+        managed_only: bool = False,
+        capability_group: str | None = None,
+    ) -> bool:
+        del managed_only
+        clean_id = str(format_id or "").strip().lower()
+        if capability_group == "managed_lossy":
+            return clean_id == "mp3"
+        if capability_group == "managed_forensic":
+            return clean_id == "wav"
+        if capability_group in {"managed", "managed_any"}:
+            return clean_id in {"mp3", "wav"}
+        return clean_id in {"mp3", "wav"}
+
+    def transcode(
+        self,
+        *,
+        source_path: str | Path,
+        destination_path: str | Path,
+        target_id: str,
+        metadata_behavior: str = "inherit",
+    ) -> AudioConversionResult:
+        source = Path(source_path)
+        destination = Path(destination_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        clean_target = str(target_id or "").strip().lower()
+        self.calls.append(
+            {
+                "source_path": str(source),
+                "destination_path": str(destination),
+                "target_id": clean_target,
+                "metadata_behavior": str(metadata_behavior or ""),
+            }
+        )
+        return AudioConversionResult(
+            destination_path=destination,
+            output_format=clean_target,
+            codec_name="ui-pq-copy",
+        )
+
+
+def _write_synthetic_wav_fixture(
+    path: Path,
+    *,
+    duration_seconds: int,
+    seed: int,
+) -> Path:
+    sample_rate = 44100
+    frame_count = int(sample_rate * max(1, int(duration_seconds)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import numpy as np
+        import soundfile as sf
+
+        t = np.arange(frame_count, dtype=np.float32) / sample_rate
+        rng = np.random.default_rng(seed)
+        signal = (
+            0.25 * np.sin(2 * np.pi * (180 + seed * 17) * t)
+            + 0.18 * np.sin(2 * np.pi * (910 + seed * 13) * t)
+            + 0.09 * np.sin(2 * np.pi * (2300 + seed * 31) * t)
+            + 0.06 * np.sin(2 * np.pi * (4100 + seed * 19) * t)
+        ).astype(np.float32)
+        modulation = 1.0 + 0.25 * np.sin(2 * np.pi * 0.7 * t)
+        signal *= modulation.astype(np.float32)
+        signal += 0.02 * rng.standard_normal(signal.shape[0], dtype=np.float32)
+        signal = np.clip(signal, -0.95, 0.95)
+        stereo = np.stack([signal, np.roll(signal, 97)], axis=1)
+        sf.write(str(path), stereo, sample_rate, format="WAV", subtype="PCM_24")
+        return path
+    except Exception:
+        pass
+
+    amplitude = 0.42
+    phase = float(seed % 29) / 29.0
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(2)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        for start in range(0, frame_count, 4096):
+            chunk = bytearray()
+            stop = min(frame_count, start + 4096)
+            for frame in range(start, stop):
+                t = frame / sample_rate
+                sample = amplitude * (
+                    0.42 * math.sin(2.0 * math.pi * (220.0 + seed) * t)
+                    + 0.32 * math.sin(2.0 * math.pi * (1900.0 + seed * 3) * t + phase)
+                    + 0.26 * math.sin(2.0 * math.pi * (3800.0 + seed * 5) * t)
+                )
+                left = max(-32767, min(32767, int(sample * 32767)))
+                right = max(-32767, min(32767, int(sample * 0.91 * 32767)))
+                chunk.extend(struct.pack("<hh", left, right))
+            handle.writeframes(bytes(chunk))
+    return path
+
+
+def _attach_synthetic_audio_to_track(
+    harness: Any,
+    *,
+    track_id: int,
+    stem: str,
+    duration_seconds: int,
+    seed: int,
+) -> tuple[Path, dict[str, object], list[str]]:
+    window = harness.window
+    if window is None or getattr(window, "track_service", None) is None:
+        raise AssertionError("Track service is required for UI PQ audio attachment.")
+    fixture_path = _write_synthetic_wav_fixture(
+        harness.artifact_dir / "fixtures" / f"{stem}.wav",
+        duration_seconds=duration_seconds,
+        seed=seed,
+    )
+    progress_messages: list[str] = []
+    meta = window.track_service.set_media_path(
+        int(track_id),
+        "audio_file",
+        fixture_path,
+        storage_mode="managed_file",
+        progress_callback=lambda _value, _maximum, message: progress_messages.append(
+            str(message or "")
+        ),
+    )
+    harness.connection.commit()
+    if not window.track_service.has_media(int(track_id), "audio_file"):
+        raise AssertionError("Synthetic audio attachment was not persisted on the QA track.")
+    return fixture_path, dict(meta), progress_messages
+
+
+def _reset_generated_artifact_dir(harness: Any, name: str) -> Path:
+    target = harness.artifact_dir / name
+    artifact_root = harness.artifact_dir.resolve()
+    target_resolved = target.resolve() if target.exists() else target.parent.resolve() / target.name
+    if not target_resolved.is_relative_to(artifact_root):
+        raise AssertionError(f"Refusing to reset artifact path outside UI PQ output: {target}")
+    if target.exists():
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def _workflow_visual_service(harness: Any) -> VisualQualificationService:
@@ -2063,6 +2222,407 @@ def run_soundcloud_workflow(harness: Any, ids: QARepertoireIds) -> None:
             "help_reference": _require_help_reference(
                 harness,
                 "Prepare a SoundCloud Upload With a Forensic Trace",
+            ),
+        },
+    )
+
+
+def run_authenticity_workflow(harness: Any, *, track_id: int) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Authenticity PQ requires an open application window.")
+    if getattr(window, "audio_authenticity_service", None) is None:
+        raise AssertionError("Audio authenticity service is required for AUTH PQ.")
+    if getattr(window, "authenticity_key_service", None) is None:
+        raise AssertionError("Authenticity key service is required for AUTH PQ.")
+
+    from isrc_manager.authenticity.dialogs import (
+        AuthenticityExportPreviewDialog,
+        AuthenticityVerificationDialog,
+    )
+    from isrc_manager.authenticity.models import VERIFICATION_STATUS_VERIFIED
+    from isrc_manager.forensics.dialogs import ForensicExportDialog, ForensicInspectionDialog
+    from isrc_manager.forensics.models import FORENSIC_STATUS_MATCH_FOUND, ForensicExportRequest
+    from isrc_manager.forensics.service import ForensicExportCoordinator
+
+    source_path, attachment_meta, attachment_progress = _attach_synthetic_audio_to_track(
+        harness,
+        track_id=int(track_id),
+        stem="ui-pq-authenticity-master",
+        duration_seconds=30,
+        seed=17,
+    )
+
+    key_service = window.authenticity_key_service
+    key_id = key_service.default_key_id()
+    if not key_id:
+        key_record = key_service.generate_keypair(signer_label="UI PQ Authenticity Signer")
+        key_id = key_record.key_id
+    else:
+        key_record = key_service.resolve_key(key_id)
+
+    service = window.audio_authenticity_service
+    progress_messages: list[str] = []
+    plan = service.build_export_plan(
+        [int(track_id)],
+        key_id=key_id,
+        profile_name=window._current_profile_name(),
+        progress_callback=lambda _value, _maximum, message: progress_messages.append(
+            str(message or "")
+        ),
+    )
+    if len(plan.ready_items()) != 1:
+        raise AssertionError(f"Authenticity export plan was not ready: {plan.to_dict()!r}")
+
+    preview_dialog = AuthenticityExportPreviewDialog(plan=plan, parent=window)
+    try:
+        preview_visual = _capture_workflow_widget(
+            harness,
+            preview_dialog,
+            "ui_pq_authenticity_export_preview",
+        )
+    finally:
+        preview_dialog.close()
+        preview_dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+    export_result = service.export_watermarked_audio(
+        output_dir=_reset_generated_artifact_dir(harness, "authenticity_exports"),
+        track_ids=[int(track_id)],
+        key_id=key_id,
+        profile_name=window._current_profile_name(),
+        progress_callback=lambda _value, _maximum, message: progress_messages.append(
+            str(message or "")
+        ),
+    )
+    if export_result.exported != 1 or len(export_result.written_audio_paths) != 1:
+        raise AssertionError(f"Authenticity export did not produce one artifact: {export_result}")
+    exported_audio_path = Path(export_result.written_audio_paths[0])
+    sidecar_path = Path(export_result.written_sidecar_paths[0])
+    if not exported_audio_path.exists() or not sidecar_path.exists():
+        raise AssertionError("Authenticity export audio or sidecar is missing.")
+
+    report = service.verify_file(exported_audio_path)
+    if report.status != VERIFICATION_STATUS_VERIFIED or report.signature_valid is not True:
+        raise AssertionError(f"Authenticity verification did not pass: {report.to_dict()!r}")
+    if not report.manifest_id or report.manifest_id not in export_result.manifest_ids:
+        raise AssertionError("Verified authenticity report did not resolve the exported manifest.")
+
+    verification_dialog = AuthenticityVerificationDialog(report=report, parent=window)
+    try:
+        verification_visual = _capture_workflow_widget(
+            harness,
+            verification_dialog,
+            "ui_pq_authenticity_verification_dialog",
+        )
+    finally:
+        verification_dialog.close()
+        verification_dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+    forensic_dialog = ForensicExportDialog(
+        format_labels=[("wav", "WAV forensic delivery copy")],
+        parent=window,
+    )
+    try:
+        forensic_dialog.recipient_edit.setText("UI PQ Reviewer")
+        forensic_dialog.share_edit.setText("Private qualification share")
+        forensic_visual = _capture_workflow_widget(
+            harness,
+            forensic_dialog,
+            "ui_pq_forensic_export_dialog",
+        )
+        forensic_format = forensic_dialog.selected_format_id()
+        forensic_recipient = forensic_dialog.recipient_label()
+        forensic_share = forensic_dialog.share_label()
+    finally:
+        forensic_dialog.close()
+        forensic_dialog.deleteLater()
+        harness.process_events(cycles=2)
+    if forensic_format != "wav":
+        raise AssertionError("Forensic export dialog did not preserve the chosen WAV format.")
+
+    forensic_conversion = _QAAudioConversionService()
+    forensic_coordinator = ForensicExportCoordinator(
+        conn=harness.connection,
+        track_service=window.track_service,
+        release_service=window.release_service,
+        tag_service=window.audio_tag_service,
+        key_service=key_service,
+        conversion_service=forensic_conversion,
+    )
+    forensic_result = forensic_coordinator.export(
+        ForensicExportRequest(
+            track_ids=[int(track_id)],
+            output_dir=str(_reset_generated_artifact_dir(harness, "forensic_exports")),
+            output_format="wav",
+            recipient_label=forensic_recipient,
+            share_label=forensic_share,
+            profile_name=window._current_profile_name(),
+            key_id=key_record.key_id,
+        )
+    )
+    if forensic_result.exported != 1 or len(forensic_result.written_paths) != 1:
+        raise AssertionError(f"Forensic export did not produce one artifact: {forensic_result}")
+    forensic_report = forensic_coordinator.inspect_file(forensic_result.written_paths[0])
+    if forensic_report.status != FORENSIC_STATUS_MATCH_FOUND:
+        raise AssertionError(f"Forensic inspection did not resolve the export: {forensic_report}")
+    if forensic_report.forensic_export_id not in forensic_result.forensic_export_ids:
+        raise AssertionError("Forensic inspection did not resolve the created export id.")
+
+    forensic_inspection_dialog = ForensicInspectionDialog(report=forensic_report, parent=window)
+    try:
+        forensic_inspection_visual = _capture_workflow_widget(
+            harness,
+            forensic_inspection_dialog,
+            "ui_pq_forensic_inspection_dialog",
+        )
+    finally:
+        forensic_inspection_dialog.close()
+        forensic_inspection_dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+    harness.evidence.record(
+        "UI-PQ-AUTH-001",
+        status="passed",
+        message=(
+            "Authenticity key, direct watermark export, signed sidecar verification, "
+            "forensic export, forensic inspection, and result dialogs were verified."
+        ),
+        data={
+            "workflow_status": "fully_automated_local_fixture",
+            "track_id": int(track_id),
+            "source_audio_path": str(source_path),
+            "attachment_meta": attachment_meta,
+            "attachment_progress_count": len(attachment_progress),
+            "key_id": key_record.key_id,
+            "manifest_ids": list(export_result.manifest_ids),
+            "exported_audio_path": str(exported_audio_path),
+            "sidecar_path": str(sidecar_path),
+            "verification_status": report.status,
+            "verification_basis": report.verification_basis,
+            "signature_valid": report.signature_valid,
+            "fingerprint_similarity": report.fingerprint_similarity,
+            "extraction_confidence": report.extraction_confidence,
+            "forensic_batch_id": forensic_result.batch_public_id,
+            "forensic_export_ids": list(forensic_result.forensic_export_ids),
+            "forensic_inspection_status": forensic_report.status,
+            "forensic_resolution_basis": forensic_report.resolution_basis,
+            "forensic_exact_hash_match": forensic_report.exact_hash_match,
+            "forensic_conversion_calls": list(forensic_conversion.calls),
+            "visual_evidence": {
+                "authenticity_export_preview": preview_visual,
+                "authenticity_verification_dialog": verification_visual,
+                "forensic_export_dialog": forensic_visual,
+                "forensic_inspection_dialog": forensic_inspection_visual,
+            },
+            "help_reference": _require_help_reference(
+                harness,
+                "Export and Verify Authenticity Watermarked Audio",
+            ),
+        },
+    )
+
+
+def run_media_audio_workflow(harness: Any, *, track_id: int) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Media PQ requires an open application window.")
+    if getattr(window, "track_service", None) is None:
+        raise AssertionError("Track service is required for MEDIA PQ.")
+
+    from isrc_manager.media.derivatives import (
+        AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY,
+        MANAGED_DERIVATIVE_KIND_LOSSY,
+        MANAGED_DERIVATIVE_WORKFLOW_KIND,
+        DerivativeLedgerService,
+        ManagedDerivativeExportCoordinator,
+        ManagedDerivativeExportRequest,
+    )
+    from isrc_manager.tags.dialogs import BulkAudioAttachDialog
+
+    source_path, attachment_meta, attachment_progress = _attach_synthetic_audio_to_track(
+        harness,
+        track_id=int(track_id),
+        stem="ui-pq-media-attachment",
+        duration_seconds=6,
+        seed=29,
+    )
+    audio_bytes, audio_mime = window.track_service.fetch_media_bytes(int(track_id), "audio_file")
+    if not audio_bytes:
+        raise AssertionError("Attached QA audio could not be fetched through TrackService.")
+
+    attach_dialog = BulkAudioAttachDialog(
+        title="Bulk Attach Audio Files",
+        intro="Review detected audio files and choose the matching catalog track.",
+        items=[
+            {
+                "source_name": source_path.name,
+                "source_path": str(source_path),
+                "matched_track_id": int(track_id),
+                "candidate_track_ids": [int(track_id)],
+                "match_basis": "UI PQ deterministic fixture",
+                "detected_title": "UI PQ Qualification Track",
+                "detected_artist": "UI PQ Artist",
+                "detected_album": "UI PQ Release",
+            }
+        ],
+        track_choices=[(int(track_id), "UI PQ Qualification Track", "UI PQ Artist")],
+        parent=window,
+    )
+    try:
+        attach_visual = _capture_workflow_widget(
+            harness,
+            attach_dialog,
+            "ui_pq_bulk_audio_attach_dialog",
+        )
+    finally:
+        attach_dialog.close()
+        attach_dialog.deleteLater()
+        harness.process_events(cycles=2)
+
+    class _QAMediaPreviewDialog(QDialog):
+        def __init__(self, app, parent=None) -> None:
+            super().__init__(parent)
+            self.app = app
+            self.opened_track_id: int | None = None
+            self.opened_source_spec: dict[str, object] = {}
+            self.setObjectName("audioPreviewDialog")
+            self.setWindowTitle("Media Player")
+            from PySide6.QtWidgets import QLabel, QVBoxLayout
+
+            layout = QVBoxLayout(self)
+            self.title_label = QLabel("Media Player", self)
+            self.status_label = QLabel("Awaiting track", self)
+            layout.addWidget(self.title_label)
+            layout.addWidget(self.status_label)
+
+        def open_track_preview(
+            self,
+            preview_track_id: int,
+            source_spec: dict[str, object],
+            *,
+            autoplay: bool,
+        ) -> None:
+            self.opened_track_id = int(preview_track_id)
+            self.opened_source_spec = dict(source_spec or {})
+            self.title_label.setText(f"Track {preview_track_id}")
+            self.status_label.setText(f"Autoplay: {bool(autoplay)}")
+
+    from isrc_manager import main_window as app_module
+
+    with (
+        mock.patch.object(app_module, "_AudioPreviewDialog", _QAMediaPreviewDialog, create=True),
+        mock.patch.object(window, "_media_player_default_track_id", return_value=int(track_id)),
+    ):
+        window.open_media_player()
+        harness.process_events(cycles=8)
+    media_dialog = getattr(window, "audio_preview_dialog", None)
+    if not isinstance(media_dialog, _QAMediaPreviewDialog):
+        raise AssertionError("Media player command did not open the preview dialog.")
+    if media_dialog.opened_track_id != int(track_id):
+        raise AssertionError("Media player did not open the QA track.")
+    media_visual = _capture_workflow_widget(
+        harness,
+        media_dialog,
+        "ui_pq_media_player_dialog",
+    )
+
+    conversion_service = _QAAudioConversionService()
+    coordinator = ManagedDerivativeExportCoordinator(
+        conn=harness.connection,
+        track_service=window.track_service,
+        release_service=window.release_service,
+        tag_service=window.audio_tag_service,
+        authenticity_service=window.audio_authenticity_service,
+        conversion_service=conversion_service,
+    )
+    derivative_result = coordinator.export(
+        ManagedDerivativeExportRequest(
+            track_ids=[int(track_id)],
+            output_dir=_reset_generated_artifact_dir(harness, "managed_media_derivatives"),
+            output_format="mp3",
+            derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+            profile_name=window._current_profile_name(),
+        )
+    )
+    if derivative_result.exported != 1 or len(derivative_result.derivative_ids) != 1:
+        raise AssertionError(f"Managed derivative export failed: {derivative_result}")
+
+    ledger = DerivativeLedgerService(harness.connection)
+    batches = ledger.list_batches(
+        derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+        status="completed",
+    )
+    derivatives = ledger.list_derivatives(batch_id=derivative_result.batch_public_id)
+    if len(derivatives) != 1:
+        raise AssertionError("Managed derivative ledger did not list the exported derivative.")
+    derivative = derivatives[0]
+    if derivative.track_id != int(track_id) or derivative.output_format != "mp3":
+        raise AssertionError(f"Unexpected derivative ledger row: {derivative!r}")
+    if derivative.derivative_kind != MANAGED_DERIVATIVE_KIND_LOSSY:
+        raise AssertionError(f"Unexpected derivative kind: {derivative.derivative_kind}")
+    if derivative.authenticity_basis != AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY:
+        raise AssertionError(f"Unexpected derivative authenticity basis: {derivative}")
+
+    ledger_visual: dict[str, object] = {}
+    panel = window.open_derivative_ledger(derivative_result.batch_public_id)
+    if isinstance(panel, QWidget):
+        ledger_visual = _capture_workflow_widget(
+            harness,
+            panel,
+            "ui_pq_derivative_ledger_panel",
+        )
+
+    waveform_cached = None
+    cache_loader = getattr(window, "_audio_waveform_cache_for_track", None)
+    if callable(cache_loader):
+        waveform_cached = cache_loader(int(track_id))
+
+    harness.evidence.record(
+        "UI-PQ-MEDIA-001",
+        status="passed",
+        message=(
+            "Media audio attachment, media player command routing, no-ffmpeg conversion "
+            "boundary, managed derivative export, and derivative ledger drill-in were verified."
+        ),
+        data={
+            "workflow_status": "fully_automated_local_fixture",
+            "track_id": int(track_id),
+            "source_audio_path": str(source_path),
+            "attached_audio_size": len(audio_bytes),
+            "attached_audio_mime": audio_mime,
+            "attachment_meta": attachment_meta,
+            "attachment_progress_count": len(attachment_progress),
+            "media_player_track_id": media_dialog.opened_track_id,
+            "media_player_source_spec": media_dialog.opened_source_spec,
+            "conversion_calls": list(conversion_service.calls),
+            "derivative_batch_id": derivative_result.batch_public_id,
+            "derivative_ids": list(derivative_result.derivative_ids),
+            "derivative_written_paths": list(derivative_result.written_paths),
+            "derivative_kind": derivative_result.derivative_kind,
+            "authenticity_basis": derivative_result.authenticity_basis,
+            "derivative_workflow_kind": MANAGED_DERIVATIVE_WORKFLOW_KIND,
+            "ledger_batch_count": len(batches),
+            "ledger_derivative": {
+                "export_id": derivative.export_id,
+                "track_id": derivative.track_id,
+                "output_filename": derivative.output_filename,
+                "output_format": derivative.output_format,
+                "derivative_kind": derivative.derivative_kind,
+                "authenticity_basis": derivative.authenticity_basis,
+                "status": derivative.status,
+                "managed_file_path": derivative.managed_file_path,
+            },
+            "waveform_cache_available": waveform_cached is not None,
+            "visual_evidence": {
+                "bulk_audio_attach_dialog": attach_visual,
+                "media_player_dialog": media_visual,
+                "derivative_ledger_panel": ledger_visual,
+            },
+            "help_reference": _require_help_reference(
+                harness,
+                "Attach Audio, Preview Playback, and Review Managed Derivatives",
             ),
         },
     )

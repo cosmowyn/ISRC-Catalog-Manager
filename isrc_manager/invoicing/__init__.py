@@ -1,8 +1,7 @@
 """Invoice Workspace and ledger-backed billing foundations."""
 
-from .catalog_service import InvoiceCatalogService
 from .credit_note_service import CreditNoteService
-from .invoice_service import InvoiceService
+from .invoice_service import InvoiceCatalogService, InvoiceService
 from .ledger_service import LedgerPostingService, ensure_default_accounts
 from .models import (
     DEFAULT_CURRENCY,

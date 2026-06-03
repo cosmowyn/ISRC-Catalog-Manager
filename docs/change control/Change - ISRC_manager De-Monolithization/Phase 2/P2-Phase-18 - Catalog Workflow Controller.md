@@ -143,7 +143,7 @@ Execute **Plan 2 / Phase 18 — Catalog Workflow Controller** only.
 - creation or update of `isrc_manager/catalog_table/workflow.py`
 - creation or update of `isrc_manager/catalog_table/context_menu.py`
 - creation or update of `isrc_manager/catalog_table/media_routing.py`
-- creation or update of `isrc_manager/custom_fields/controller.py`
+- creation or update of `isrc_manager/custom_fields/__init__.py`
 - creation or update of `isrc_manager/isrc_registry_controller.py`
 - thin delegation shims in `App`
 - focused catalog workflow validation

@@ -145,6 +145,30 @@ Current validated progression:
     focused touched-test run passed (`194 passed in 3.59s`); compileall, Ruff, Black check, mypy,
     and `git diff --check` all passed; full pytest/coverage passed with coverage scoped only to
     `--cov=isrc_manager`.
+- Latest focused module coverage continuation (`2026-06-03`):
+  - Target module: `isrc_manager/catalog_table/context_menu.py`.
+  - Test file expanded: `tests/test_catalog_table_controller.py`.
+  - Added behavioral coverage for invalid-selection guardrails, standard-media context-menu
+    action routing, database-backed payload fallback, custom blob attach/export/delete/convert
+    actions, and direct blob-preview branches for audio, images, empty values, generic bytes, and
+    exception rollback reporting.
+  - Focused branch-aware module coverage: `95%`.
+  - Focused validation passed:
+    `QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_catalog_table_controller.py --no-cov`;
+    `QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_catalog_table_controller.py --no-cov`;
+    `python3 -m coverage report --include='isrc_manager/catalog_table/context_menu.py' -m --fail-under=90`.
+- Latest focused module coverage continuation (`2026-06-03`):
+  - Target module: `isrc_manager/action_ribbon.py`.
+  - Test file expanded: `tests/test_main_window_layout_helpers.py`.
+  - Added behavioral coverage for action registry setup, shortcut extraction, action-id
+    normalization, saved-layout ribbon payload resolution, preference persistence and write
+    failures, toolbar/widget configuration, saved-layout ribbon controls, visibility toggles,
+    context-menu dispatch, and action-ribbon customizer reject/no-op/apply paths.
+  - Focused branch-aware module coverage: `97%`.
+  - Focused validation passed:
+    `QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_main_window_layout_helpers.py --no-cov`;
+    `QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_main_window_layout_helpers.py --no-cov`;
+    `python3 -m coverage report --include='isrc_manager/action_ribbon.py' -m --fail-under=90`.
 
 The active repo-wide branch-aware coverage gate is `--cov-fail-under=90`. Earlier `95%` references
 below this current-state section are preserved as historical coverage-campaign checkpoints rather

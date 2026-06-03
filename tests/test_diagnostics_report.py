@@ -113,6 +113,43 @@ def test_build_diagnostics_progress_plan_sums_managed_and_storage_units():
     assert report._build_diagnostics_progress_plan(app)["application_storage_units"] == 1
 
 
+def test_diagnostics_progress_tracker_segments_nested_and_deduplicates_updates():
+    progress_events: list[tuple[int, int, str]] = []
+    status_events: list[str] = []
+    tracker = report.DiagnosticsProgressTracker(
+        total_units=10,
+        progress_callback=lambda value, maximum, message: progress_events.append(
+            (value, maximum, message)
+        ),
+        status_callback=status_events.append,
+    )
+
+    tracker.set_status("Starting diagnostics")
+    tracker.set_status("Starting diagnostics")
+    tracker.advance(2, message="Checked schema")
+    tracker.report_nested(
+        start_units=2,
+        span_units=4,
+        value=1,
+        maximum=2,
+        message="Checked managed files",
+    )
+    segment = tracker.segment(3)
+    segment.progress_callback()(1, 3, "Auditing storage")
+    segment.fill_remaining(message="Storage audit complete")
+    tracker.finish("Diagnostics ready.")
+
+    assert progress_events == [
+        (0, 10, "Starting diagnostics"),
+        (2, 10, "Checked schema"),
+        (4, 10, "Checked managed files"),
+        (5, 10, "Auditing storage"),
+        (7, 10, "Storage audit complete"),
+        (10, 10, "Diagnostics ready."),
+    ]
+    assert status_events == [event[2] for event in progress_events]
+
+
 def test_application_storage_admin_service_uses_app_connection_factory(tmp_path):
     opener = mock.Mock()
     layout = SimpleNamespace(
