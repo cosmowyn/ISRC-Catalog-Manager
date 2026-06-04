@@ -63,13 +63,18 @@ class PublicDocsTests(unittest.TestCase):
         )
 
         self.assertIn("QA/QC and UI PQ Dashboard", dashboard)
-        self.assertIn('id="initial-dashboard-data"', dashboard)
+        self.assertNotIn('id="initial-dashboard-data"', dashboard)
         self.assertIn('id="chartGrid"', dashboard)
         self.assertIn('id="historyGraph"', dashboard)
         self.assertIn('id="historyGranularity"', dashboard)
         self.assertIn("renderHistory", dashboard)
-        self.assertIn("refreshHistoryFromCsv", dashboard)
-        self.assertIn("reloadArtifactsButton", dashboard)
+        self.assertIn("pollLiveArtifacts", dashboard)
+        self.assertIn("fetchLiveArtifactBundle", dashboard)
+        self.assertIn("artifactPollIntervalMs", dashboard)
+        self.assertIn("window.setInterval(pollLiveArtifacts, artifactPollIntervalMs)", dashboard)
+        self.assertIn("requireCoverageNumber", dashboard)
+        self.assertNotIn("refreshHistoryFromCsv", dashboard)
+        self.assertNotIn("reloadArtifactsButton", dashboard)
         self.assertIn("renderCharts", dashboard)
         self.assertIn("conic-gradient", dashboard)
         self.assertIn("stacked-graph", dashboard)
@@ -78,9 +83,10 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("../../artifacts/ui_pq/evidence.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/deviations.csv", dashboard)
         self.assertIn("raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/", dashboard)
-        self.assertIn("Loaded published UI/PQ artifacts and coverage snapshot.", dashboard)
-        self.assertIn("No stale snapshot is shown.", dashboard)
-        self.assertIn("Clear live data", dashboard)
+        self.assertIn("Loaded actual coverage test artifacts.", dashboard)
+        self.assertIn("No static coverage values are shown.", dashboard)
+        self.assertIn("No artifact updates found.", dashboard)
+        self.assertNotIn("Clear live data", dashboard)
         self.assertNotIn("Use embedded snapshot", dashboard)
         self.assertNotIn("latest embedded dashboard snapshot", dashboard)
         self.assertNotIn("../../coverage.json", dashboard)
@@ -89,21 +95,6 @@ class PublicDocsTests(unittest.TestCase):
         self.assertNotIn("<script src=", dashboard)
         self.assertIn("qa_pq_dashboard.html", dashboard_entrypoint)
         self.assertIn('rel="canonical"', dashboard_entrypoint)
-
-        match = re.search(
-            r'<script id="initial-dashboard-data" type="application/json">\s*(\{.*?\})\s*</script>',
-            dashboard,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(match, "Dashboard must include parseable embedded data")
-        snapshot = json.loads(match.group(1))
-
-        self.assertEqual(snapshot["coverage"]["linePercent"], 0)
-        self.assertEqual(snapshot["coverage"]["branchPercent"], 0)
-        self.assertFalse(snapshot["coverage"]["lowestFiles"])
-        self.assertFalse(snapshot["pq"]["events"])
-        self.assertFalse(snapshot["pq"]["visualManifests"])
-        self.assertFalse(snapshot["history"])
 
         coverage_snapshot = json.loads(
             (repo_root / "docs" / "validation" / "coverage_snapshot.json").read_text(
