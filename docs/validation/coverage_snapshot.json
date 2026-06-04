@@ -1,13 +1,6 @@
 {
-  "branchPercent": 82.0,
+  "branchPercent": 62.11,
   "coverageWins": [
-    {
-      "branch": 88.31,
-      "missing": 62,
-      "path": "isrc_manager/media/preview_dialogs.py",
-      "percent": 95.74,
-      "statements": 2636
-    },
     {
       "branch": 92.29,
       "missing": 37,
@@ -16,17 +9,10 @@
       "statements": 1613
     },
     {
-      "branch": 94.05,
-      "missing": 8,
-      "path": "isrc_manager/tracks/edit_dialog.py",
-      "percent": 98.05,
-      "statements": 1167
-    },
-    {
       "branch": 67.11,
-      "missing": 24,
+      "missing": 23,
       "path": "isrc_manager/main_window_shell.py",
-      "percent": 95.64,
+      "percent": 95.73,
       "statements": 1049
     },
     {
@@ -51,109 +37,123 @@
       "statements": 758
     },
     {
-      "branch": 90.0,
-      "missing": 12,
-      "path": "isrc_manager/media/equalizer.py",
-      "percent": 96.76,
-      "statements": 724
-    }
-  ],
-  "coveredBranches": 20375,
-  "coveredLines": 78557,
-  "excludedFiles": [],
-  "filesExcluded": 0,
-  "filesMeasured": 279,
-  "linePercent": 90.53,
-  "lowestFiles": [
-    {
-      "branch": 63.16,
-      "missing": 44,
-      "path": "isrc_manager/custom_fields/__init__.py",
-      "percent": 74.47,
-      "statements": 206
+      "branch": 100.0,
+      "missing": 0,
+      "path": "isrc_manager/action_ribbon.py",
+      "percent": 100.0,
+      "statements": 259
     },
     {
-      "branch": 50.0,
-      "missing": 6,
-      "path": "isrc_manager/domain/timecode.py",
-      "percent": 75.0,
-      "statements": 28
-    },
-    {
-      "branch": 63.89,
-      "missing": 41,
-      "path": "isrc_manager/media/waveform_cache_worker.py",
-      "percent": 75.64,
-      "statements": 203
-    },
-    {
-      "branch": 43.75,
-      "missing": 21,
-      "path": "isrc_manager/startup_progress.py",
-      "percent": 75.81,
-      "statements": 108
-    },
-    {
-      "branch": 64.1,
-      "missing": 44,
-      "path": "isrc_manager/media/conversion.py",
-      "percent": 76.62,
+      "branch": 96.77,
+      "missing": 1,
+      "path": "isrc_manager/catalog_table/context_menu.py",
+      "percent": 98.97,
       "statements": 230
     },
     {
-      "branch": 60.0,
-      "missing": 8,
-      "path": "isrc_manager/invoicing/travel_distance.py",
-      "percent": 76.92,
-      "statements": 42
+      "branch": 86.96,
+      "missing": 7,
+      "path": "isrc_manager/services/settings_transfer.py",
+      "percent": 95.22,
+      "statements": 226
+    }
+  ],
+  "coveredBranches": 15433,
+  "coveredLines": 64573,
+  "excludedFiles": [],
+  "filesExcluded": 0,
+  "filesMeasured": 279,
+  "linePercent": 73.21,
+  "lowestFiles": [
+    {
+      "branch": 0.0,
+      "missing": 3378,
+      "path": "isrc_manager/invoicing/workspace.py",
+      "percent": 5.68,
+      "statements": 3637
     },
     {
       "branch": 0.0,
-      "missing": 6,
-      "path": "isrc_manager/conversion/adapters/base.py",
-      "percent": 76.92,
-      "statements": 26
+      "missing": 133,
+      "path": "isrc_manager/invoicing/royalty_import_dialog.py",
+      "percent": 7.74,
+      "statements": 146
     },
     {
-      "branch": 72.83,
-      "missing": 56,
-      "path": "isrc_manager/catalog_table/media_routing.py",
-      "percent": 77.56,
-      "statements": 269
+      "branch": 0.0,
+      "missing": 156,
+      "path": "isrc_manager/invoicing/royalty_service.py",
+      "percent": 9.51,
+      "statements": 181
     },
     {
-      "branch": 67.5,
-      "missing": 112,
-      "path": "isrc_manager/media/equalizer_player.py",
-      "percent": 77.69,
-      "statements": 575
+      "branch": 0.0,
+      "missing": 162,
+      "path": "isrc_manager/tracks/album_ordering_dialog.py",
+      "percent": 10.04,
+      "statements": 185
     },
     {
-      "branch": 63.01,
-      "missing": 152,
-      "path": "isrc_manager/profile_session.py",
-      "percent": 77.87,
-      "statements": 852
+      "branch": 0.0,
+      "missing": 160,
+      "path": "isrc_manager/invoicing/credit_note_service.py",
+      "percent": 10.7,
+      "statements": 189
     },
     {
-      "branch": 74.36,
-      "missing": 43,
-      "path": "isrc_manager/authenticity/controller.py",
-      "percent": 78.2,
-      "statements": 211
+      "branch": 0.0,
+      "missing": 391,
+      "path": "isrc_manager/invoicing/template_service.py",
+      "percent": 11.27,
+      "statements": 463
     },
     {
-      "branch": 63.64,
-      "missing": 42,
-      "path": "isrc_manager/application_settings_gs1.py",
-      "percent": 78.25,
-      "statements": 267
+      "branch": 0.0,
+      "missing": 571,
+      "path": "isrc_manager/integrations/soundcloud/workflow.py",
+      "percent": 11.5,
+      "statements": 674
+    },
+    {
+      "branch": 6.85,
+      "missing": 325,
+      "path": "isrc_manager/settings_controller.py",
+      "percent": 11.52,
+      "statements": 375
+    },
+    {
+      "branch": 0.0,
+      "missing": 176,
+      "path": "isrc_manager/invoicing/invoice_service.py",
+      "percent": 12.24,
+      "statements": 212
+    },
+    {
+      "branch": 0.0,
+      "missing": 99,
+      "path": "isrc_manager/reporting/dialogs.py",
+      "percent": 13.45,
+      "statements": 115
+    },
+    {
+      "branch": 3.85,
+      "missing": 96,
+      "path": "isrc_manager/invoicing/ledger_service.py",
+      "percent": 16.57,
+      "statements": 123
+    },
+    {
+      "branch": 0.0,
+      "missing": 186,
+      "path": "isrc_manager/reporting/collectors.py",
+      "percent": 16.61,
+      "statements": 237
     }
   ],
-  "missingBranches": 4473,
-  "missingLines": 5875,
+  "missingBranches": 9415,
+  "missingLines": 19859,
   "schemaVersion": 1,
-  "statementPercent": 93.04,
+  "statementPercent": 76.48,
   "statements": 84432,
-  "timestamp": "2026-06-04T19:28:11.906942"
+  "timestamp": "2026-06-04T18:25:37.588831"
 }
