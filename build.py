@@ -61,7 +61,12 @@ SPLASH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 WINDOWS_ICON_EXTENSIONS = (".ico", ".png", ".jpg", ".jpeg", ".bmp")
 MACOS_ICON_EXTENSIONS = (".icns", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif")
 LINUX_ICON_EXTENSIONS = (".png", ".ico", ".icns")
-PYINSTALLER_HIDDEN_IMPORTS = ("keyring", "sqlcipher3")
+PYINSTALLER_HIDDEN_IMPORTS = (
+    "keyring",
+    "sqlcipher3",
+    "isrc_manager.forensics.service",
+    "isrc_manager.forensics.watermark",
+)
 PYINSTALLER_COLLECT_SUBMODULES = ("keyring.backends",)
 PYINSTALLER_COPY_METADATA = ("keyring", "sqlcipher3")
 SPLASH_VERSION_FONT_SIZE = 12

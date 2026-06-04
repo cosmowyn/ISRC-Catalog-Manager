@@ -908,6 +908,24 @@ class CatalogTableContextMenuTests(unittest.TestCase):
         self.assertIn(("track_has_media", (7, "album_art"), {}), app.calls)
         self.assertIn(("_preview_standard_media_for_track", (7, "album_art"), {}), app.calls)
 
+    def test_context_menu_omits_primary_release_action_when_lookup_returns_none(self):
+        target = _target()
+        app = _FakeContextMenuApp(target, _FakeIndex(text="track"))
+        app.release_service = SimpleNamespace(
+            find_primary_release_for_track=lambda track_id: (
+                app._record("find_primary_release_for_track", track_id) or None
+            )
+        )
+
+        with self._patched_context_menu_widgets():
+            context_menu._on_catalog_table_context_menu(app, (0, 0))
+
+        menu = _FakeMenu.instances[0]
+        self.assertIn(("find_primary_release_for_track", (7,), {}), app.calls)
+        self.assertFalse(
+            any(text.startswith("Open Primary Release") for text in _action_texts(menu))
+        )
+
     def test_standard_media_context_menu_skips_payload_actions_when_file_is_absent(self):
         target = _target(kind="standard", standard_media_key="album_art")
         app = _FakeContextMenuApp(

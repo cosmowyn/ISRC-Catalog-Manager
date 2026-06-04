@@ -470,6 +470,66 @@ class ConversionServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "usable source sheet"):
             adapter.inspect_source(empty_path)
 
+    def test_xlsx_source_adapter_select_scope_supports_workbooks_without_callable_close(self):
+        class _FakeCell:
+            def __init__(self, value=None):
+                self.value = value
+
+        class _FakeWorksheet:
+            max_column = 2
+            max_row = 3
+
+            def __init__(self):
+                self.values = {
+                    (1, 1): "Catalog Number",
+                    (1, 2): "Title",
+                    (2, 1): "CAT-1",
+                    (2, 2): "First",
+                    (3, 1): "",
+                    (3, 2): "",
+                }
+
+            def cell(self, *, row, column):
+                return _FakeCell(self.values.get((row, column)))
+
+        class _FakeWorkbook:
+            close = None
+
+            def __getitem__(self, sheet_name):
+                if sheet_name != "Data":
+                    raise KeyError(sheet_name)
+                return _FakeWorksheet()
+
+        profile = ConversionSourceProfile(
+            source_mode=SOURCE_MODE_FILE,
+            format_name="xlsx",
+            source_label="fake.xlsx",
+            source_path=str(self.root / "fake.xlsx"),
+            headers=(),
+            rows=(),
+            preview_rows=(),
+            available_scopes=(("Data", "Data"),),
+            chosen_scope="Data",
+            adapter_state={
+                "sheet_profiles": {
+                    "Data": {
+                        "header_row_index": 1,
+                    }
+                }
+            },
+        )
+
+        with mock.patch.object(
+            xlsx_adapter_module,
+            "load_workbook",
+            return_value=_FakeWorkbook(),
+        ):
+            selected = XlsxSourceAdapter().select_scope(profile, "Data")
+
+        self.assertEqual(selected.headers, ("Catalog Number", "Title"))
+        self.assertEqual(selected.rows, ({"Catalog Number": "CAT-1", "Title": "First"},))
+        self.assertEqual(selected.preview_rows, selected.rows)
+
     def test_xml_template_export_preserves_tree_and_xml_declaration(self):
         template_path = self.root / "template.xml"
         template_path.write_text(

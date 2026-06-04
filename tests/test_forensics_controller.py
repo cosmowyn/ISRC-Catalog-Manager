@@ -705,6 +705,46 @@ class ForensicsControllerTests(unittest.TestCase):
         self.assertEqual(request.recipient_label, "SoundCloud")
         self.assertIn("label=Premiere", request.share_label)
 
+    def test_export_soundcloud_forensic_audio_cancels_when_dialog_rejected(self):
+        app = SimpleNamespace(
+            track_service=mock.Mock(),
+            forensic_export_service=mock.Mock(),
+            audio_conversion_service=mock.Mock(
+                capabilities=mock.Mock(
+                    return_value=SimpleNamespace(
+                        managed_forensic_targets=[
+                            SimpleNamespace(id="wav", label="WAV", lossy=False),
+                        ]
+                    )
+                )
+            ),
+            exports_dir=Path("/tmp"),
+            conn=None,
+            _audio_conversion_unavailable_message=mock.Mock(return_value=None),
+            _selected_track_ids_with_audio=mock.Mock(return_value=[7]),
+            _submit_background_bundle_task=mock.Mock(),
+        )
+        dialog_instance = mock.Mock(exec=mock.Mock(return_value=0))
+        dialog_factory = mock.Mock(return_value=dialog_instance)
+
+        with mock.patch(
+            "isrc_manager.forensics.controller._root_attr",
+            side_effect=lambda name, fallback: (
+                dialog_factory if name == "ForensicExportDialog" else fallback
+            ),
+        ):
+            export_soundcloud_forensic_watermarked_audio(app)
+
+        app._submit_background_bundle_task.assert_not_called()
+        dialog_factory.assert_called_once_with(
+            format_labels=[("wav", "WAV (lossless forensic copy)")],
+            fixed_recipient_label="SoundCloud",
+            share_label_caption="SoundCloud Label",
+            share_label_placeholder="Optional upload, campaign, or release label",
+            parent=app,
+        )
+        dialog_instance.exec.assert_called_once_with()
+
     def test_inspect_forensic_watermark_warns_when_service_missing(self):
         app = SimpleNamespace(forensic_export_service=None)
         with mock.patch("isrc_manager.forensics.controller._message_box") as message_box:

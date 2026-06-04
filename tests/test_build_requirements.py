@@ -646,6 +646,14 @@ class CommandConstructionTests(unittest.TestCase):
 
         self.assertIn("keyring", _option_values(cmd, "--hidden-import"))
         self.assertIn("sqlcipher3", _option_values(cmd, "--hidden-import"))
+        self.assertIn(
+            "isrc_manager.forensics.service",
+            _option_values(cmd, "--hidden-import"),
+        )
+        self.assertIn(
+            "isrc_manager.forensics.watermark",
+            _option_values(cmd, "--hidden-import"),
+        )
         self.assertIn("keyring.backends", _option_values(cmd, "--collect-submodules"))
         self.assertIn("keyring", _option_values(cmd, "--copy-metadata"))
         self.assertIn("sqlcipher3", _option_values(cmd, "--copy-metadata"))
