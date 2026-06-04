@@ -1,0 +1,157 @@
+{
+  "branchPercent": 81.34,
+  "coverageWins": [
+    {
+      "branch": 88.31,
+      "missing": 62,
+      "path": "isrc_manager/media/preview_dialogs.py",
+      "percent": 95.74,
+      "statements": 2636
+    },
+    {
+      "branch": 92.29,
+      "missing": 37,
+      "path": "isrc_manager/history/manager.py",
+      "percent": 96.07,
+      "statements": 1613
+    },
+    {
+      "branch": 94.05,
+      "missing": 8,
+      "path": "isrc_manager/tracks/edit_dialog.py",
+      "percent": 98.05,
+      "statements": 1167
+    },
+    {
+      "branch": 67.11,
+      "missing": 24,
+      "path": "isrc_manager/main_window_shell.py",
+      "percent": 95.64,
+      "statements": 1049
+    },
+    {
+      "branch": 85.05,
+      "missing": 28,
+      "path": "isrc_manager/conversion/dialogs.py",
+      "percent": 95.12,
+      "statements": 1016
+    },
+    {
+      "branch": 86.92,
+      "missing": 10,
+      "path": "isrc_manager/code_registry/workspace.py",
+      "percent": 96.97,
+      "statements": 762
+    },
+    {
+      "branch": 93.83,
+      "missing": 6,
+      "path": "isrc_manager/releases/dialogs.py",
+      "percent": 98.26,
+      "statements": 758
+    },
+    {
+      "branch": 89.41,
+      "missing": 15,
+      "path": "isrc_manager/media/equalizer.py",
+      "percent": 96.31,
+      "statements": 724
+    }
+  ],
+  "coveredBranches": 20680,
+  "coveredLines": 80349,
+  "filesMeasured": 292,
+  "linePercent": 90.18,
+  "lowestFiles": [
+    {
+      "branch": 63.16,
+      "missing": 44,
+      "path": "isrc_manager/custom_fields/__init__.py",
+      "percent": 74.47,
+      "statements": 206
+    },
+    {
+      "branch": 50.0,
+      "missing": 6,
+      "path": "isrc_manager/domain/timecode.py",
+      "percent": 75.0,
+      "statements": 28
+    },
+    {
+      "branch": 63.89,
+      "missing": 41,
+      "path": "isrc_manager/media/waveform_cache_worker.py",
+      "percent": 75.64,
+      "statements": 203
+    },
+    {
+      "branch": 43.75,
+      "missing": 21,
+      "path": "isrc_manager/startup_progress.py",
+      "percent": 75.81,
+      "statements": 108
+    },
+    {
+      "branch": 64.1,
+      "missing": 44,
+      "path": "isrc_manager/media/conversion.py",
+      "percent": 76.62,
+      "statements": 230
+    },
+    {
+      "branch": 60.0,
+      "missing": 8,
+      "path": "isrc_manager/invoicing/travel_distance.py",
+      "percent": 76.92,
+      "statements": 42
+    },
+    {
+      "branch": 100.0,
+      "missing": 6,
+      "path": "isrc_manager/conversion/adapters/base.py",
+      "percent": 76.92,
+      "statements": 26
+    },
+    {
+      "branch": 66.88,
+      "missing": 113,
+      "path": "isrc_manager/media/equalizer_player.py",
+      "percent": 77.41,
+      "statements": 575
+    },
+    {
+      "branch": 72.83,
+      "missing": 56,
+      "path": "isrc_manager/catalog_table/media_routing.py",
+      "percent": 77.56,
+      "statements": 269
+    },
+    {
+      "branch": 63.01,
+      "missing": 152,
+      "path": "isrc_manager/profile_session.py",
+      "percent": 77.87,
+      "statements": 852
+    },
+    {
+      "branch": 74.36,
+      "missing": 43,
+      "path": "isrc_manager/authenticity/controller.py",
+      "percent": 78.2,
+      "statements": 211
+    },
+    {
+      "branch": 63.64,
+      "missing": 42,
+      "path": "isrc_manager/application_settings_gs1.py",
+      "percent": 78.25,
+      "statements": 267
+    }
+  ],
+  "missingBranches": 4744,
+  "missingLines": 6253,
+  "schemaVersion": 1,
+  "statementPercent": 92.78,
+  "statements": 86602,
+  "timestamp": "2026-06-04T11:02:20.144918"
+}

@@ -42,6 +42,7 @@ VISUAL_MANIFESTS = (
     "visual/business_workflow_manifest.json",
     "visual/generated_output_manifest.json",
 )
+DEFAULT_COVERAGE_SNAPSHOT_PATH = Path("docs/validation/coverage_snapshot.json")
 
 
 def _utc_now() -> str:
@@ -77,6 +78,13 @@ def _format_int(value: object) -> str:
         return str(int(value))
     except TypeError, ValueError:
         return "0"
+
+
+def _rounded_float(value: object) -> float:
+    try:
+        return round(float(value), 2)
+    except TypeError, ValueError:
+        return 0.0
 
 
 def _git_value(repo_root: Path, args: Sequence[str], default: str = "") -> str:
@@ -143,6 +151,72 @@ def _visual_counts(pq_artifacts: Path) -> tuple[int, int]:
         total += len(comparisons)
         failed += sum(1 for comparison in comparisons if not comparison.get("passed"))
     return total, failed
+
+
+def _coverage_display_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    marker = "/isrc_manager/"
+    if marker in normalized:
+        return f"isrc_manager/{normalized.split(marker, 1)[1]}"
+    if normalized.endswith("/ISRC_manager.py"):
+        return "ISRC_manager.py"
+    return normalized.lstrip("/")
+
+
+def collect_coverage_snapshot(coverage_path: Path) -> dict[str, Any]:
+    coverage = _read_json(coverage_path)
+    totals = coverage.get("totals", {}) if isinstance(coverage, dict) else {}
+    files = coverage.get("files", {}) if isinstance(coverage, dict) else {}
+    measured_files: list[dict[str, object]] = []
+    for path, info in files.items():
+        summary = info.get("summary", {}) if isinstance(info, dict) else {}
+        statements = int(summary.get("num_statements") or 0)
+        if statements <= 0:
+            continue
+        measured_files.append(
+            {
+                "path": _coverage_display_path(str(path)),
+                "percent": _rounded_float(summary.get("percent_covered")),
+                "branch": _rounded_float(summary.get("percent_branches_covered")),
+                "missing": int(summary.get("missing_lines") or 0),
+                "statements": statements,
+            }
+        )
+
+    lowest_files = sorted(
+        measured_files,
+        key=lambda row: (float(row["percent"]), -int(row["statements"])),
+    )[:12]
+    coverage_wins = sorted(
+        (row for row in measured_files if float(row["percent"]) >= 95.0),
+        key=lambda row: -int(row["statements"]),
+    )[:8]
+
+    return {
+        "schemaVersion": 1,
+        "timestamp": (
+            coverage.get("meta", {}).get("timestamp", "") if isinstance(coverage, dict) else ""
+        ),
+        "linePercent": _rounded_float(totals.get("percent_covered")),
+        "statementPercent": _rounded_float(
+            totals.get("percent_statements_covered", totals.get("percent_covered"))
+        ),
+        "branchPercent": _rounded_float(totals.get("percent_branches_covered")),
+        "coveredLines": int(totals.get("covered_lines") or 0),
+        "statements": int(totals.get("num_statements") or 0),
+        "missingLines": int(totals.get("missing_lines") or 0),
+        "coveredBranches": int(totals.get("covered_branches") or 0),
+        "missingBranches": int(totals.get("missing_branches") or 0),
+        "filesMeasured": len(measured_files),
+        "lowestFiles": lowest_files,
+        "coverageWins": coverage_wins,
+    }
+
+
+def write_coverage_snapshot(path: Path, snapshot: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
 
 
 def collect_snapshot(
@@ -216,6 +290,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("docs/validation/qa_pq_history.csv"),
     )
+    parser.add_argument(
+        "--coverage-snapshot",
+        type=Path,
+        default=None,
+        help="Optional compact dashboard coverage snapshot JSON to write.",
+    )
     parser.add_argument("--timestamp")
     parser.add_argument("--source", default="local")
     parser.add_argument("--branch")
@@ -235,6 +315,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         pq_artifacts = repo_root / pq_artifacts
     if not history_path.is_absolute():
         history_path = repo_root / history_path
+    coverage_snapshot_path = args.coverage_snapshot
+    if coverage_snapshot_path is not None and not coverage_snapshot_path.is_absolute():
+        coverage_snapshot_path = repo_root / coverage_snapshot_path
 
     row = collect_snapshot(
         repo_root=repo_root,
@@ -248,6 +331,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     append_snapshot(history_path, row)
     print(f"Appended QA/PQ history row to {history_path}")
+    if coverage_snapshot_path is not None:
+        write_coverage_snapshot(
+            coverage_snapshot_path,
+            collect_coverage_snapshot(coverage_path),
+        )
+        print(f"Wrote QA/PQ coverage snapshot to {coverage_snapshot_path}")
     return 0
 
 

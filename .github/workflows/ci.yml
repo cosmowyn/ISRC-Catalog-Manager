@@ -344,22 +344,25 @@ jobs:
             --coverage coverage.json \
             --pq-artifacts artifacts/ui_pq \
             --history docs/validation/qa_pq_history.csv \
+            --coverage-snapshot docs/validation/coverage_snapshot.json \
             --source github-actions \
             --branch "${{ github.ref_name }}" \
             --commit-sha "${{ github.sha }}"
 
-      - name: Upload QA/PQ dashboard history
+      - name: Upload QA/PQ dashboard data
         uses: actions/upload-artifact@v7
         with:
-          name: qa-pq-dashboard-history
-          path: docs/validation/qa_pq_history.csv
+          name: qa-pq-dashboard-data
+          path: |
+            docs/validation/qa_pq_history.csv
+            docs/validation/coverage_snapshot.json
 
-      - name: Commit QA/PQ dashboard history on main
+      - name: Commit QA/PQ dashboard data on main
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         env:
           MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
         run: |
-          if ! git diff --quiet -- docs/validation/qa_pq_history.csv; then
+          if ! git diff --quiet -- docs/validation/qa_pq_history.csv docs/validation/coverage_snapshot.json; then
             if [ -z "${MAIN_AUTOMATION_DEPLOY_KEY:-}" ]; then
               echo "MAIN_AUTOMATION_DEPLOY_KEY is required to push QA/PQ history through the protected main ruleset." >&2
               exit 1
@@ -381,8 +384,8 @@ jobs:
 
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add docs/validation/qa_pq_history.csv
-            git commit -m "Update QA/PQ dashboard history [skip ci]"
+            git add docs/validation/qa_pq_history.csv docs/validation/coverage_snapshot.json
+            git commit -m "Update QA/PQ dashboard data [skip ci]"
             git push origin HEAD:main
           fi
 

@@ -74,14 +74,15 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("conic-gradient", dashboard)
         self.assertIn("stacked-graph", dashboard)
         self.assertIn("qa_pq_history.csv", dashboard)
+        self.assertIn("coverage_snapshot.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/evidence.json", dashboard)
         self.assertIn("../../artifacts/ui_pq/deviations.csv", dashboard)
         self.assertIn("raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/", dashboard)
-        self.assertIn(
-            "Coverage is shown from the latest embedded dashboard snapshot.",
-            dashboard,
-        )
-        self.assertIn("Could not load published artifacts", dashboard)
+        self.assertIn("Loaded published UI/PQ artifacts and coverage snapshot.", dashboard)
+        self.assertIn("No stale snapshot is shown.", dashboard)
+        self.assertIn("Clear live data", dashboard)
+        self.assertNotIn("Use embedded snapshot", dashboard)
+        self.assertNotIn("latest embedded dashboard snapshot", dashboard)
         self.assertNotIn("../../coverage.json", dashboard)
         self.assertNotIn("coverage.json is not published", dashboard)
         self.assertNotIn("python3 -m http.server", dashboard)
@@ -97,15 +98,22 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIsNotNone(match, "Dashboard must include parseable embedded data")
         snapshot = json.loads(match.group(1))
 
-        self.assertGreaterEqual(snapshot["coverage"]["linePercent"], 0)
-        self.assertGreaterEqual(snapshot["coverage"]["branchPercent"], 0)
-        self.assertTrue(snapshot["coverage"]["lowestFiles"])
-        self.assertIn(
-            "UI-PQ-HELP-001",
-            {event["testId"] for event in snapshot["pq"]["events"]},
+        self.assertEqual(snapshot["coverage"]["linePercent"], 0)
+        self.assertEqual(snapshot["coverage"]["branchPercent"], 0)
+        self.assertFalse(snapshot["coverage"]["lowestFiles"])
+        self.assertFalse(snapshot["pq"]["events"])
+        self.assertFalse(snapshot["pq"]["visualManifests"])
+        self.assertFalse(snapshot["history"])
+
+        coverage_snapshot = json.loads(
+            (repo_root / "docs" / "validation" / "coverage_snapshot.json").read_text(
+                encoding="utf-8"
+            )
         )
-        self.assertTrue(snapshot["pq"]["visualManifests"])
-        self.assertTrue(snapshot["history"])
+        self.assertGreater(coverage_snapshot["linePercent"], 0)
+        self.assertGreater(coverage_snapshot["branchPercent"], 0)
+        self.assertTrue(coverage_snapshot["lowestFiles"])
+        self.assertTrue(coverage_snapshot["coverageWins"])
 
     def test_qa_pq_history_csv_has_dashboard_columns(self):
         repo_root = Path(__file__).resolve().parents[1]

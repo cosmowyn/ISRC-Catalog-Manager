@@ -28,4 +28,5 @@ demo/.runtime/
 .coverage.*
 coverage.json
 coverage_*.json
+!docs/validation/coverage_snapshot.json
 htmlcov/

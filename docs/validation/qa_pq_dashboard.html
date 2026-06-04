@@ -776,7 +776,7 @@
       </div>
       <div class="header-actions">
         <button id="reloadArtifactsButton" class="button">Reload artifacts</button>
-        <button id="resetSnapshotButton" class="button secondary">Use embedded snapshot</button>
+        <button id="resetSnapshotButton" class="button secondary">Clear live data</button>
       </div>
     </div>
   </header>
@@ -939,113 +939,36 @@
 
   <script id="initial-dashboard-data" type="application/json">
 {
-  "sourceLabel": "Embedded snapshot from local artifacts",
-  "generatedAt": "2026-06-03",
-  "history": [
-    {
-      "timestamp": "2026-06-02T18:22:14Z",
-      "source": "local-seed",
-      "branch": "main",
-      "commit_sha": "e358726a6e9ff1a07a3c39c99529fd65ae389cce",
-      "app_loc": 183406,
-      "app_loc_delta": 0,
-      "total_coverage": 90.0119,
-      "statement_coverage": 92.6514,
-      "branch_coverage": 81.0187,
-      "total_tests": 14,
-      "passed_tests": 14,
-      "failed_tests": 0,
-      "partial_tests": 0,
-      "total_deviations": 32,
-      "open_deviations": 0,
-      "pending_manual_deviations": 32,
-      "traceability_rows": 413,
-      "traceability_covered": 381,
-      "visual_checks_total": 71,
-      "visual_checks_failed": 0
-    }
-  ],
+  "sourceLabel": "Waiting for live published artifacts",
+  "generatedAt": "",
+  "history": [],
   "coverage": {
-    "timestamp": "2026-06-04T11:02:20.144918",
-    "linePercent": 90.18,
-    "statementPercent": 92.78,
-    "branchPercent": 81.34,
-    "coveredLines": 80349,
-    "statements": 86602,
-    "missingLines": 6253,
-    "coveredBranches": 20680,
-    "missingBranches": 4744,
-    "filesMeasured": 292,
-    "lowestFiles": [
-      {"path": "isrc_manager/custom_fields/__init__.py", "percent": 74.47, "branch": 63.16, "missing": 44, "statements": 206},
-      {"path": "isrc_manager/domain/timecode.py", "percent": 75.0, "branch": 50.0, "missing": 6, "statements": 28},
-      {"path": "isrc_manager/media/waveform_cache_worker.py", "percent": 75.64, "branch": 63.89, "missing": 41, "statements": 203},
-      {"path": "isrc_manager/startup_progress.py", "percent": 75.81, "branch": 43.75, "missing": 21, "statements": 108},
-      {"path": "isrc_manager/media/conversion.py", "percent": 76.62, "branch": 64.1, "missing": 44, "statements": 230},
-      {"path": "isrc_manager/invoicing/travel_distance.py", "percent": 76.92, "branch": 60.0, "missing": 8, "statements": 42},
-      {"path": "isrc_manager/conversion/adapters/base.py", "percent": 76.92, "branch": 100.0, "missing": 6, "statements": 26},
-      {"path": "isrc_manager/media/equalizer_player.py", "percent": 77.41, "branch": 66.88, "missing": 113, "statements": 575},
-      {"path": "isrc_manager/catalog_table/media_routing.py", "percent": 77.56, "branch": 72.83, "missing": 56, "statements": 269},
-      {"path": "isrc_manager/profile_session.py", "percent": 77.87, "branch": 63.01, "missing": 152, "statements": 852},
-      {"path": "isrc_manager/authenticity/controller.py", "percent": 78.2, "branch": 74.36, "missing": 43, "statements": 211},
-      {"path": "isrc_manager/application_settings_gs1.py", "percent": 78.25, "branch": 63.64, "missing": 42, "statements": 267}
-    ],
-    "coverageWins": [
-      {"path": "isrc_manager/media/preview_dialogs.py", "percent": 95.74, "branch": 88.31, "missing": 62, "statements": 2636},
-      {"path": "isrc_manager/history/manager.py", "percent": 96.07, "branch": 92.29, "missing": 37, "statements": 1613},
-      {"path": "isrc_manager/tracks/edit_dialog.py", "percent": 98.05, "branch": 94.05, "missing": 8, "statements": 1167},
-      {"path": "isrc_manager/main_window_shell.py", "percent": 95.64, "branch": 67.11, "missing": 24, "statements": 1049},
-      {"path": "isrc_manager/conversion/dialogs.py", "percent": 95.12, "branch": 85.05, "missing": 28, "statements": 1016},
-      {"path": "isrc_manager/code_registry/workspace.py", "percent": 96.97, "branch": 86.92, "missing": 10, "statements": 762},
-      {"path": "isrc_manager/releases/dialogs.py", "percent": 98.26, "branch": 93.83, "missing": 6, "statements": 758},
-      {"path": "isrc_manager/media/equalizer.py", "percent": 96.31, "branch": 89.41, "missing": 15, "statements": 724}
-    ]
+    "timestamp": "",
+    "linePercent": 0,
+    "statementPercent": 0,
+    "branchPercent": 0,
+    "coveredLines": 0,
+    "statements": 0,
+    "missingLines": 0,
+    "coveredBranches": 0,
+    "missingBranches": 0,
+    "filesMeasured": 0,
+    "lowestFiles": [],
+    "coverageWins": []
   },
   "pq": {
-    "eventCount": 14,
-    "eventStatusCounts": {"passed": 14},
-    "events": [
-      {"testId": "UI-PQ-INV-001", "status": "passed", "message": "Runtime UI inventory and traceability matrix were generated."},
-      {"testId": "UI-PQ-SMOKE-001", "status": "passed", "message": "Main window, menu bar, and QA database are reachable."},
-      {"testId": "UI-PQ-MENU-001", "status": "passed", "message": "Runtime menu/action inventory was generated."},
-      {"testId": "UI-PQ-SET-001", "status": "passed", "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed."},
-      {"testId": "UI-PQ-HELP-001", "status": "passed", "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references."},
-      {"testId": "UI-PQ-CAT-001", "status": "passed", "message": "Track was created through Add Track UI and edited through Edit Track UI."},
-      {"testId": "UI-PQ-REL-001", "status": "passed", "message": "Party, Work, and Release relationships were created or verified through manager UI."},
-      {"testId": "UI-PQ-CON-001", "status": "passed", "message": "Contract and Rights Matrix records were created through UI and verified in the database."},
-      {"testId": "UI-PQ-ACC-001", "status": "passed", "message": "Invoice, payment, credit note, royalty statement, payout, report, and ledger checks were executed through UI controls."},
-      {"testId": "UI-PQ-SC-001", "status": "passed", "message": "SoundCloud publish dialog and no-network publish boundary were verified."},
-      {"testId": "UI-PQ-DIAG-001", "status": "passed", "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed."},
-      {"testId": "UI-PQ-IMP-001", "status": "passed", "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines."},
-      {"testId": "UI-PQ-AUTH-001", "status": "passed", "message": "Authenticity key, direct watermark export, signed sidecar verification, forensic export, forensic inspection, and result dialogs were verified."},
-      {"testId": "UI-PQ-MEDIA-001", "status": "passed", "message": "Media audio attachment, media player command routing, no-ffmpeg conversion boundary, managed derivative export, and derivative ledger drill-in were verified."}
-    ],
-    "help": {
-      "status": "passed",
-      "coverage_percent": 100.0,
-      "finding_count": 0,
-      "chapter_count": 41,
-      "chapter_screenshot_required_count": 38,
-      "chapter_screenshot_exempt_count": 3,
-      "workflow_example_count": 7
-    },
-    "deviationCount": 32,
-    "deviationStatusCounts": {"pending_manual": 32},
-    "deviationSeverityCounts": {"medium": 32},
-    "topDeviations": [
-      {"id": "UI-PQ-DEV-0001", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_and_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
-      {"id": "UI-PQ-DEV-0002", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "action:deliverables_asset_versions", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
-      {"id": "UI-PQ-DEV-0003", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "button:qt_dockwidget_closebutton:370", "status": "pending_manual", "followup": "feature-specific workflow automation pending"},
-      {"id": "UI-PQ-DEV-0004", "testId": "UI-PQ-MISC-001", "severity": "medium", "area": "assets_deliverables", "object": "button:qt_dockwidget_floatbutton:369", "status": "pending_manual", "followup": "feature-specific workflow automation pending"}
-    ],
-    "traceabilityRows": 413,
-    "traceabilityStatusCounts": {"covered": 381, "pending_manual": 32},
-    "automationStatusCounts": {"automated": 381, "pending": 32},
-    "visualManifests": [
-      {"path": "artifacts/ui_pq/visual/visual_manifest.json", "captures": 32, "comparisons": 33, "passed": 33, "failed": 0},
-      {"path": "artifacts/ui_pq/visual/business_workflow_manifest.json", "captures": 34, "comparisons": 34, "passed": 34, "failed": 0},
-      {"path": "artifacts/ui_pq/visual/generated_output_manifest.json", "captures": 0, "comparisons": 4, "passed": 4, "failed": 0}
-    ]
+    "eventCount": 0,
+    "eventStatusCounts": {},
+    "events": [],
+    "help": {},
+    "deviationCount": 0,
+    "deviationStatusCounts": {},
+    "deviationSeverityCounts": {},
+    "topDeviations": [],
+    "traceabilityRows": 0,
+    "traceabilityStatusCounts": {},
+    "automationStatusCounts": {},
+    "visualManifests": []
   }
 }
   </script>
@@ -1059,6 +982,7 @@
       visual: "../../artifacts/ui_pq/visual/visual_manifest.json",
       business: "../../artifacts/ui_pq/visual/business_workflow_manifest.json",
       generated: "../../artifacts/ui_pq/visual/generated_output_manifest.json",
+      coverage: "coverage_snapshot.json",
       history: "qa_pq_history.csv"
     };
     const rawGithubBase = "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/";
@@ -1659,52 +1583,52 @@
       };
     }
 
+    function emptyCoverageSnapshot() {
+      return {
+        timestamp: "",
+        linePercent: 0,
+        statementPercent: 0,
+        branchPercent: 0,
+        coveredLines: 0,
+        statements: 0,
+        missingLines: 0,
+        coveredBranches: 0,
+        missingBranches: 0,
+        filesMeasured: 0,
+        lowestFiles: [],
+        coverageWins: []
+      };
+    }
+
+    function normalizeCoverageSnapshot(coverage) {
+      if (!coverage || typeof coverage !== "object") return emptyCoverageSnapshot();
+      return {
+        timestamp: coverage.timestamp || "",
+        linePercent: Number(coverage.linePercent || 0),
+        statementPercent: Number(coverage.statementPercent || 0),
+        branchPercent: Number(coverage.branchPercent || 0),
+        coveredLines: Number(coverage.coveredLines || 0),
+        statements: Number(coverage.statements || 0),
+        missingLines: Number(coverage.missingLines || 0),
+        coveredBranches: Number(coverage.coveredBranches || 0),
+        missingBranches: Number(coverage.missingBranches || 0),
+        filesMeasured: Number(coverage.filesMeasured || 0),
+        lowestFiles: Array.isArray(coverage.lowestFiles) ? coverage.lowestFiles : [],
+        coverageWins: Array.isArray(coverage.coverageWins) ? coverage.coverageWins : []
+      };
+    }
+
     function snapshotFromArtifacts(files) {
-      const coverage = files.coverage || {};
-      const fallbackCoverage = dashboardData.coverage || initialData.coverage || {};
-      const measuredFiles = Object.entries(coverage.files || {})
-        .map(([path, info]) => {
-          const summary = info.summary || {};
-          return {
-            path,
-            percent: Number(summary.percent_covered || 0),
-            branch: Number(summary.percent_branches_covered || 0),
-            missing: Number(summary.missing_lines || 0),
-            statements: Number(summary.num_statements || 0)
-          };
-        })
-        .filter((file) => file.statements > 0);
-      const lowestFiles = measuredFiles
-        .slice()
-        .sort((a, b) => a.percent - b.percent || b.statements - a.statements)
-        .slice(0, 12);
-      const coverageWins = measuredFiles
-        .filter((file) => file.percent >= 95)
-        .sort((a, b) => b.statements - a.statements)
-        .slice(0, 8);
       const events = files.evidence || [];
       const deviations = files.deviations || [];
       const traceability = files.traceability || [];
-      const totals = coverage.totals || {};
+      const coverage = normalizeCoverageSnapshot(files.coverage);
 
       return {
         sourceLabel: "Live UI/PQ artifacts loaded",
         generatedAt: new Date().toISOString(),
         history: files.history || [],
-        coverage: {
-          timestamp: coverage.meta?.timestamp || fallbackCoverage.timestamp || "",
-          linePercent: Number(totals.percent_covered ?? fallbackCoverage.linePercent ?? 0),
-          statementPercent: Number(totals.percent_statements_covered ?? totals.percent_covered ?? fallbackCoverage.statementPercent ?? 0),
-          branchPercent: Number(totals.percent_branches_covered ?? fallbackCoverage.branchPercent ?? 0),
-          coveredLines: Number(totals.covered_lines ?? fallbackCoverage.coveredLines ?? 0),
-          statements: Number(totals.num_statements ?? fallbackCoverage.statements ?? 0),
-          missingLines: Number(totals.missing_lines ?? fallbackCoverage.missingLines ?? 0),
-          coveredBranches: Number(totals.covered_branches ?? fallbackCoverage.coveredBranches ?? 0),
-          missingBranches: Number(totals.missing_branches ?? fallbackCoverage.missingBranches ?? 0),
-          filesMeasured: measuredFiles.length || fallbackCoverage.filesMeasured || 0,
-          lowestFiles: measuredFiles.length ? lowestFiles : fallbackCoverage.lowestFiles || [],
-          coverageWins: measuredFiles.length ? coverageWins : fallbackCoverage.coverageWins || []
-        },
+        coverage,
         pq: {
           eventCount: events.length,
           eventStatusCounts: countBy(events, "status"),
@@ -1762,7 +1686,7 @@
     async function loadLiveArtifacts() {
       els.loadState.textContent = "Loading artifact files...";
       try {
-        const [evidence, help, deviations, traceability, visual, business, generated, history] = await Promise.all([
+        const [evidence, help, deviations, traceability, visual, business, generated, coverage, history] = await Promise.all([
           fetchText(artifactPaths.evidence).then(JSON.parse),
           fetchText(artifactPaths.help).then(JSON.parse),
           fetchText(artifactPaths.deviations).then(parseCsv),
@@ -1770,13 +1694,16 @@
           fetchText(artifactPaths.visual).then(JSON.parse),
           fetchText(artifactPaths.business).then(JSON.parse),
           fetchText(artifactPaths.generated).then(JSON.parse),
-          fetchText(artifactPaths.history).then(parseCsv).catch(() => initialData.history || [])
+          fetchText(artifactPaths.coverage).then(JSON.parse),
+          fetchText(artifactPaths.history).then(parseCsv).catch(() => [])
         ]);
-        dashboardData = snapshotFromArtifacts({evidence, help, deviations, traceability, visual, business, generated, history});
-        els.loadState.textContent = "Loaded published UI/PQ artifacts. Coverage is shown from the latest embedded dashboard snapshot.";
+        dashboardData = snapshotFromArtifacts({evidence, help, deviations, traceability, visual, business, generated, coverage, history});
+        els.loadState.textContent = "Loaded published UI/PQ artifacts and coverage snapshot.";
         render();
       } catch (error) {
-        els.loadState.textContent = `Could not load published artifacts: ${error.message}. The embedded snapshot is still shown.`;
+        dashboardData = initialData;
+        render();
+        els.loadState.textContent = `Could not load live dashboard data: ${error.message}. No stale snapshot is shown.`;
       }
     }
 
@@ -1790,14 +1717,14 @@
           els.loadState.textContent = "Loaded dashboard history CSV.";
         }
       } catch (error) {
-        // The embedded history keeps the dashboard usable when the CSV cannot be fetched.
+        // Keep the current live view unchanged when the history CSV cannot be fetched.
       }
     }
 
     document.getElementById("reloadArtifactsButton").addEventListener("click", loadLiveArtifacts);
     document.getElementById("resetSnapshotButton").addEventListener("click", () => {
       dashboardData = initialData;
-      els.loadState.textContent = "Embedded snapshot restored.";
+      els.loadState.textContent = "Live dashboard reset to empty state.";
       render();
     });
     [els.eventSearch, els.eventFilter, els.deviationSearch, els.deviationFilter].forEach((control) => {
@@ -1810,7 +1737,7 @@
     });
 
     render();
-    refreshHistoryFromCsv();
+    loadLiveArtifacts();
   </script>
 </body>
 </html>

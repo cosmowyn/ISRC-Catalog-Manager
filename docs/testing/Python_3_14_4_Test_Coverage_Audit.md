@@ -209,6 +209,11 @@ Current validated progression:
     UI PQ tests failed locally because `UI-PQ-IMP-001` and `UI-PQ-SET-001` reported failed event
     statuses and the visual-framework assertion could not find `manifest_path` in the failed event.
     The module coverage JSON was still written and used to refresh the dashboard snapshot.
+  - Dashboard truthfulness follow-up: `scripts/update_qa_pq_history.py` now writes
+    `docs/validation/coverage_snapshot.json` from the real coverage artifact, CI commits that compact
+    snapshot with `docs/validation/qa_pq_history.csv`, and the dashboard starts from empty metrics
+    until live coverage/PQ artifacts are loaded. If live data cannot be fetched, stale embedded
+    metrics are not shown.
 
 The active repo-wide branch-aware coverage gate is `--cov-fail-under=90`. Earlier `95%` references
 below this current-state section are preserved as historical coverage-campaign checkpoints rather
