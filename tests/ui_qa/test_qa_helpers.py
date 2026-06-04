@@ -378,6 +378,27 @@ def test_scenario_low_level_helpers_cover_success_and_error_edges(monkeypatch) -
             ("missing",),
             label="missing",
         )
+    assert (
+        scenarios._try_wait_for_row(
+            harness,
+            "SELECT id FROM qa_probe WHERE label=?",
+            ("missing",),
+            attempts=1,
+        )
+        is None
+    )
+    fake_button = SimpleNamespace(
+        text=lambda: "Create Work + Save Track",
+        isEnabled=lambda: False,
+    )
+    fake_window = SimpleNamespace(
+        save_button=fake_button,
+        _current_work_track_context=lambda: {"mode": "create_new_work"},
+    )
+    failure_context = scenarios._catalog_track_persistence_failure_context(fake_window)
+    assert "Create Work + Save Track" in failure_context
+    assert "save_button_enabled=False" in failure_context
+    assert "create_new_work" in failure_context
 
     table = QTableWidget(3, 1)
     table.setItem(0, 0, QTableWidgetItem("not-int"))

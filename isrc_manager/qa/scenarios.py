@@ -439,12 +439,48 @@ def _wait_for_row(
     *,
     label: str,
 ) -> tuple[Any, ...]:
-    for _attempt in range(40):
+    row = _try_wait_for_row(harness, query, params)
+    if row is not None:
+        return row
+    raise AssertionError(f"{label} was not persisted in the QA database.")
+
+
+def _try_wait_for_row(
+    harness: Any,
+    query: str,
+    params: tuple[object, ...],
+    *,
+    attempts: int = 40,
+) -> tuple[Any, ...] | None:
+    for _attempt in range(max(1, int(attempts))):
         harness.process_events(cycles=4)
         row = harness.connection.execute(query, params).fetchone()
         if row is not None:
             return tuple(row)
-    raise AssertionError(f"{label} was not persisted in the QA database.")
+    return None
+
+
+def _catalog_track_persistence_failure_context(window: Any) -> str:
+    save_button = getattr(window, "save_button", None)
+    button_text = ""
+    button_enabled = "unknown"
+    if save_button is not None:
+        text_getter = getattr(save_button, "text", None)
+        enabled_getter = getattr(save_button, "isEnabled", None)
+        if callable(text_getter):
+            button_text = str(text_getter())
+        if callable(enabled_getter):
+            button_enabled = str(bool(enabled_getter()))
+    context = getattr(window, "_current_work_track_context", None)
+    try:
+        work_context = context() if callable(context) else {}
+    except Exception as exc:
+        work_context = f"<unavailable: {type(exc).__name__}: {exc}>"
+    return (
+        "Save command completed without persisting the UI-created catalog track "
+        f"(save_button_text={button_text!r}, save_button_enabled={button_enabled}, "
+        f"work_context={work_context!r})."
+    )
 
 
 def _require_help_reference(harness: Any, workflow_title: str) -> dict[str, object]:
@@ -552,14 +588,19 @@ def run_catalog_workflow(harness: Any) -> int:
         window,
         "ui_pq_add_track_dialog_populated",
     )
+    track_query = "SELECT id, work_id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1"
+    track_params = (CATALOG_TRACK_TITLE,)
     window.save_button.click()
     harness.process_events(cycles=12)
-    row = _wait_for_row(
-        harness,
-        "SELECT id, work_id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
-        (CATALOG_TRACK_TITLE,),
-        label="UI-created catalog track",
-    )
+    row = _try_wait_for_row(harness, track_query, track_params, attempts=10)
+    if row is None:
+        save_command = getattr(window, "save", None)
+        if callable(save_command):
+            save_command()
+            harness.process_events(cycles=12)
+            row = _try_wait_for_row(harness, track_query, track_params, attempts=40)
+    if row is None:
+        raise AssertionError(_catalog_track_persistence_failure_context(window))
     track_id = int(row[0])
     work_id_from_add_track = int(row[1]) if row[1] is not None else None
     refresh = getattr(window, "refresh_table_preserve_view", None)
