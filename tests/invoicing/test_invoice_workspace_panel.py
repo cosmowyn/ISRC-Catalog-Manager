@@ -9,10 +9,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
+    QGridLayout,
     QGroupBox,
     QLineEdit,
     QScrollArea,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
 
@@ -35,15 +38,19 @@ from isrc_manager.invoicing.template_service import InvoiceTemplateService
 from isrc_manager.invoicing.travel_distance import TravelDistanceResult
 from isrc_manager.invoicing.workspace import (
     InvoiceWorkspacePanel,
+    _add_kpi_card,
     _contract_placeholder_token,
     _display_date,
     _invoice_template_symbol_key,
+    _scrollable_page,
+    _set_table_rows,
     _status_label,
     _template_value_preview,
 )
-from isrc_manager.parties import PartyPayload, PartyService
+from isrc_manager.parties import PartyPayload, PartyRecord, PartyService
 from isrc_manager.rights import OwnershipInterestPayload, RightPayload, RightsService
 from isrc_manager.services import DatabaseSchemaService
+from isrc_manager.services.settings_reads import OwnerPartySettings
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 
@@ -287,6 +294,471 @@ def test_invoice_workspace_panel_exposes_royalties_accounting_navigation():
     assert preview_toolbar is not None
     assert preview_toolbar.maximumHeight() == 56
     assert preview_toolbar.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
+
+    panel.deleteLater()
+    conn.close()
+
+
+def test_invoice_workspace_helpers_and_no_connection_command_paths(monkeypatch):
+    _app()
+    parent = QWidget()
+    grid = QGridLayout(parent)
+    kpi = _add_kpi_card(
+        grid,
+        row=0,
+        column=0,
+        title="Open",
+        value="3",
+        detail="Overdue",
+        parent=parent,
+    )
+    scroll, content, layout = _scrollable_page(parent)
+    table = QTableWidget(parent)
+
+    _set_table_rows(table, ("Name", "Value"), [], empty_message="Empty")
+    assert kpi.text() == "Open\n3\nOverdue"
+    assert isinstance(scroll, QScrollArea)
+    assert content.property("role") == "workspaceCanvas"
+    assert layout.count() == 0
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Empty"
+    assert not bool(table.item(0, 0).flags() & Qt.ItemFlag.ItemIsSelectable)
+
+    _set_table_rows(table, ("Name", "Value"), [("A",)], empty_message="Empty")
+    assert table.item(0, 0).text() == "A"
+    assert table.item(0, 1).text() == ""
+
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        workspace_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    monkeypatch.setattr(
+        workspace_module.QFileDialog,
+        "getOpenFileName",
+        lambda *_args, **_kwargs: ("", ""),
+    )
+    panel = InvoiceWorkspacePanel(conn_provider=lambda: None)
+
+    for command in (
+        panel.refresh_dashboard,
+        panel.refresh_contracts,
+        panel.refresh_rights_titles,
+        panel.refresh_imports,
+        panel.refresh_statements,
+        panel.refresh_invoices,
+        panel.refresh_invoice_lines,
+        panel.refresh_accounting,
+        panel.refresh_payments,
+        panel.refresh_reports,
+        panel.refresh_royalty_context,
+        panel.refresh_royalty_terms,
+        panel.refresh_royalty_source_events,
+        panel.refresh_royalties,
+        panel.create_draft_invoice,
+        panel.add_manual_invoice_line,
+        panel.add_catalog_invoice_line,
+        panel.add_travel_invoice_line,
+        panel.remove_selected_draft_line,
+        panel.clear_draft_lines,
+        panel.save_catalog_preset,
+        panel.issue_selected_invoice,
+        panel.void_selected_invoice,
+        panel.record_payment_for_selected_invoice,
+        panel.create_credit_note_for_selected_invoice,
+        panel.create_royalty_calculation,
+        panel.record_royalty_source_event,
+        panel.generate_contract_royalty_calculations,
+        panel.approve_selected_royalty_calculation,
+        panel.generate_statement_for_selected_royalty,
+        panel.record_artist_payout_for_selected_royalty,
+        panel.upload_template,
+        panel.browse_template_file,
+        lambda: panel._render_selected_invoice(export=True),
+    ):
+        command()
+
+    original_preview = panel.preview_output
+    panel.preview_output = SimpleNamespace()
+    assert panel._current_invoice_preview_zoom_percent() == 100
+    panel.preview_output = original_preview
+
+    panel.description_field.clear()
+    panel.quantity_field.setText("2")
+    panel.unit_price_field.setText("12.50")
+    panel.vat_rate_field.setText("2100")
+    panel.add_manual_invoice_line()
+    assert panel.draft_line_table.item(0, 1).text() == "Manual item"
+    panel.travel_description_field.setText("Mileage")
+    panel.travel_origin_field.setText("Amsterdam")
+    panel.travel_destination_field.setText("Rotterdam")
+    panel.travel_km_field.setText("10")
+    panel.travel_rate_field.setText("0.35")
+    panel.travel_round_trip_check.setChecked(True)
+    panel.add_travel_invoice_line()
+    assert "round trip" in panel.draft_line_table.item(1, 1).text()
+    panel.draft_line_table.selectRow(0)
+    panel.remove_selected_draft_line()
+    assert len(panel._draft_invoice_lines) == 1
+    panel.clear_draft_lines()
+    assert panel.draft_line_table.rowCount() == 0
+
+    class _TravelService:
+        def estimate_one_way_km(self, origin: str, destination: str) -> TravelDistanceResult:
+            assert origin == "Amsterdam"
+            assert destination == "Rotterdam"
+            return TravelDistanceResult("Amsterdam", "Rotterdam", "61.4")
+
+    monkeypatch.setattr(workspace_module, "TravelDistanceService", _TravelService)
+    panel.travel_description_field.clear()
+    panel.calculate_travel_km()
+    assert panel.travel_km_field.text() == "61.4"
+    assert panel.travel_description_field.text() == "Travel costs"
+
+    assert panel._template_party_choices() == ()
+    assert panel._template_track_choices() == ()
+    for command in (
+        panel._refresh_company_settings,
+        panel._refresh_users_roles_settings,
+        panel._refresh_vat_tax_settings,
+        panel._browse_integration_statement_file,
+        panel._inspect_integrations_statement,
+        panel._open_integrations_import_wizard,
+        panel._refresh_integrations_settings,
+        panel._refresh_workflows_settings,
+        panel._refresh_parties,
+        panel._refresh_invoice_catalog,
+        panel._refresh_royalty_contracts,
+        panel._refresh_royalty_parties,
+        panel._refresh_selected_royalty_contract_context,
+        lambda: panel._populate_context_entity_choices(None),
+        lambda: panel._scalar("SELECT 1"),
+        lambda: panel._refresh_dashboard_kpi_labels(),
+        lambda: panel._refresh_dashboard_tables(()),
+    ):
+        command()
+    selected_statement = Path("/tmp/dsp-statement.csv")
+    monkeypatch.setattr(
+        workspace_module.QFileDialog,
+        "getOpenFileName",
+        lambda *_args, **_kwargs: (str(selected_statement), ""),
+    )
+    refresh_calls: list[str] = []
+    panel._refresh_integrations_settings = lambda: refresh_calls.append("integrations")
+    panel._browse_integration_statement_file()
+    assert panel.integration_file_path_field.text() == str(selected_statement)
+    assert refresh_calls == ["integrations"]
+    assert warnings
+
+    panel.deleteLater()
+    parent.deleteLater()
+
+
+def test_invoice_workspace_template_preview_and_selection_helpers(tmp_path: Path):
+    _app()
+    panel = InvoiceWorkspacePanel(conn_provider=lambda: None)
+
+    assert _display_date(None) == ""
+    assert _display_date("2026-02-03") == "03-Feb-2026"
+    assert _display_date("2026-02-03T04:05:06") == "03-Feb-2026"
+    assert _display_date("not-a-date") == "not-a-date"
+    assert _status_label(None) == "Unknown"
+    assert _status_label("needs_setup") == "Needs Setup"
+    assert _contract_placeholder_token(None) is None
+    assert _contract_placeholder_token("{{ bad placeholder }}") is None
+    assert _invoice_template_symbol_key("{{ manual.footer_note }}") == "{{manual.footer_note}}"
+    assert (
+        _invoice_template_symbol_key("{{ db.party.display_name }}") == "invoice.party.display_name"
+    )
+    assert _invoice_template_symbol_key("manual.custom-field") == "{{manual.custom_field}}"
+    assert _invoice_template_symbol_key("manual.bad placeholder") == "custom.bad placeholder"
+    assert _template_value_preview(None) == ""
+    assert _template_value_preview({"a": 1}) == "{'a': 1}"
+
+    panel.restore_layout_state(None)
+    panel.restore_layout_state(
+        {
+            "tab": 3,
+            "tab_schema": "legacy_with_home",
+            "invoice_tab": 0,
+            "royalty_tab": 0,
+            "invoice_id": 99,
+            "royalty_calculation_id": 88,
+        }
+    )
+    assert panel.tabs.currentIndex() == 2
+    panel.restore_layout_state({"tab_key": "reports"})
+    assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Reports"
+
+    template_path = tmp_path / "preview-template.html"
+    template_path.write_text("<html><head></head><body>Template</body></html>", encoding="utf-8")
+    panel.template_path_field.setText(str(template_path))
+    assert panel._active_template_source_path() == template_path
+    panel.template_path_field.setText(str(tmp_path / "missing.html"))
+    assert panel._active_template_source_path() is None
+
+    assert (
+        panel._inject_invoice_preview_base_href("<html></html>", source_path=None)
+        == "<html></html>"
+    )
+    assert (
+        panel._inject_invoice_preview_base_href(
+            "<html><head><base href='x'></head></html>",
+            source_path=template_path,
+        )
+        == "<html><head><base href='x'></head></html>"
+    )
+    assert "<base href=" in panel._inject_invoice_preview_base_href(
+        "<html><head></head><body></body></html>",
+        source_path=template_path,
+    )
+    assert panel._inject_invoice_preview_base_href(
+        "<!doctype html><html></html>",
+        source_path=template_path,
+    ).startswith("<!doctype html><head><base")
+    assert panel._inject_invoice_preview_base_href(
+        "<section>Invoice</section>",
+        source_path=template_path,
+    ).startswith("<head><base")
+
+    class _PreviewSurface:
+        def __init__(self) -> None:
+            self.html = ""
+            self.loaded_url = None
+            self.zoom_requests: list[tuple[int, bool]] = []
+            self.reset_called = False
+            self.reload_marked = False
+
+        def setHtml(self, value: str) -> None:
+            self.html = value
+
+        def mark_programmatic_reload(self) -> None:
+            self.reload_marked = True
+
+        def load(self, url) -> None:
+            self.loaded_url = url
+
+        def reset_to_fit(self) -> None:
+            self.reset_called = True
+
+        def current_zoom_percent(self) -> int:
+            return 133
+
+        def set_zoom_percent(self, value: int, *, user_initiated: bool) -> None:
+            self.zoom_requests.append((value, user_initiated))
+
+    original_preview = panel.preview_output
+    fake_preview = _PreviewSurface()
+    panel.preview_output = fake_preview
+    panel._set_invoice_preview_html("<html><body>Preview</body></html>", source_path=template_path)
+    assert fake_preview.reload_marked
+    assert fake_preview.loaded_url is not None
+    assert panel._invoice_preview_session_dir is not None
+    panel._reset_invoice_html_preview_to_fit()
+    assert fake_preview.reset_called
+    assert panel.invoice_preview_zoom_label.text() == "133%"
+    panel._step_invoice_html_preview_zoom(7)
+    assert fake_preview.zoom_requests == [(140, True)]
+    panel._clear_invoice_preview_surface()
+    assert fake_preview.html == ""
+    assert panel.invoice_preview_zoom_label.text() == "100%"
+    panel.preview_output = original_preview
+
+    panel.invoice_table = SimpleNamespace(selectedItems=lambda: [])
+    assert panel._selected_invoice_id() is None
+    invoice_item = QTableWidgetItem("12")
+    selected_cell = SimpleNamespace(row=lambda: 0)
+    panel.invoice_table = SimpleNamespace(
+        selectedItems=lambda: [selected_cell],
+        item=lambda _row, _column: invoice_item,
+    )
+    assert panel._selected_invoice_id() == 12
+    invoice_item.setData(Qt.ItemDataRole.UserRole, 13)
+    assert panel._selected_invoice_id() == 13
+
+    panel.catalog_table = SimpleNamespace(selectedItems=lambda: [])
+    assert panel._selected_catalog_item_id() is None
+    catalog_item = QTableWidgetItem("21")
+    catalog_item.setData(Qt.ItemDataRole.UserRole, "22")
+    panel.catalog_table = SimpleNamespace(
+        selectedItems=lambda: [selected_cell],
+        item=lambda _row, _column: catalog_item,
+    )
+    assert panel._selected_catalog_item_id() == 22
+
+    rights_item = QTableWidgetItem("right")
+    rights_item.setData(Qt.ItemDataRole.UserRole, "31")
+    rights_item.setData(Qt.ItemDataRole.UserRole + 1, "32")
+    panel.rights_titles_table = SimpleNamespace(selectedItems=lambda: [rights_item])
+    assert panel._selected_rights_titles_work_id() == 31
+    assert panel._selected_rights_titles_right_id() == 32
+    assert panel._rights_titles_item_id(None, Qt.ItemDataRole.UserRole) is None
+    invalid_item = QTableWidgetItem("invalid")
+    invalid_item.setData(Qt.ItemDataRole.UserRole, "not-int")
+    assert panel._rights_titles_item_id(invalid_item, Qt.ItemDataRole.UserRole) is None
+
+    empty_combo = QComboBox()
+    assert panel._combo_int_data(empty_combo) is None
+    empty_combo.addItem("Nine", "9")
+    empty_combo.setCurrentIndex(0)
+    assert panel._combo_int_data(empty_combo) == 9
+    assert panel._format_named_ids("Tracks", ()) == "none"
+    assert panel._optional_id_label("Tracks", 5) == "#5"
+    assert panel._party_label(None) == ""
+    assert panel._party_label(8) == "Party #8"
+
+    panel.deleteLater()
+
+
+def test_invoice_workspace_settings_role_formatting_and_error_edges(monkeypatch):
+    _app()
+    panel = InvoiceWorkspacePanel(conn_provider=lambda: None)
+
+    no_owner_text = panel._format_owner_ledger_settings(OwnerPartySettings())
+    assert "No current Owner Party is set" in no_owner_text
+
+    owner_text = panel._format_owner_ledger_settings(
+        OwnerPartySettings(
+            party_id=44,
+            display_name="",
+            legal_name="",
+            company_name="",
+            notes="Owner setup note",
+        )
+    )
+    assert "Party #44" in owner_text
+    assert "Owner notes" in owner_text
+    assert "company/legal name" in owner_text
+    assert "billing address" in owner_text
+    assert "VAT number" in owner_text
+    assert "bank account" in owner_text
+
+    def party_record(**overrides) -> PartyRecord:
+        values = {
+            "id": 9,
+            "legal_name": "",
+            "display_name": None,
+            "artist_name": None,
+            "company_name": None,
+            "first_name": None,
+            "middle_name": None,
+            "last_name": None,
+            "party_type": "artist",
+            "contact_person": None,
+            "email": None,
+            "alternative_email": None,
+            "phone": None,
+            "website": None,
+            "street_name": None,
+            "street_number": None,
+            "address_line1": None,
+            "address_line2": None,
+            "city": None,
+            "region": None,
+            "postal_code": None,
+            "country": None,
+            "bank_account_number": None,
+            "chamber_of_commerce_number": None,
+            "tax_id": None,
+            "vat_number": None,
+            "pro_affiliation": None,
+            "pro_number": None,
+            "ipi_cae": None,
+            "notes": None,
+            "profile_name": None,
+            "created_at": "2026-01-01",
+            "updated_at": "2026-01-02",
+            "artist_aliases": (),
+        }
+        values.update(overrides)
+        return PartyRecord(**values)
+
+    artist = party_record(id=10, artist_name="Artist", party_type="artist")
+    licensee = party_record(id=11, legal_name="Client BV", party_type="licensee")
+    distributor = party_record(id=12, legal_name="DSP", party_type="distributor")
+    manager = party_record(id=13, legal_name="Manager", party_type="manager")
+    other = party_record(id=14, legal_name="Other", party_type="other", notes="Party note")
+
+    assert panel._party_display_label(artist) == "Artist"
+    assert panel._party_contact_summary(artist) == "-"
+    assert panel._party_accounting_role(artist, is_owner=True) == "Current owner / invoice issuer"
+    assert "Royalty payee" in panel._party_accounting_role(artist, is_owner=False)
+    assert "Customer" in panel._party_accounting_role(licensee, is_owner=False)
+    assert "General" in panel._party_accounting_role(other, is_owner=False)
+    assert "Seller identity" in panel._party_workflow_use(artist, is_owner=True)
+    assert "Royalty calculations" in panel._party_workflow_use(artist, is_owner=False)
+    assert "Sales invoices" in panel._party_workflow_use(licensee, is_owner=False)
+    assert "DSP imports" in panel._party_workflow_use(distributor, is_owner=False)
+    assert "Contract review" in panel._party_workflow_use(manager, is_owner=False)
+    assert "audit traceability" in panel._party_workflow_use(other, is_owner=False)
+    assert panel._party_role_readiness_gaps(artist, is_owner=False) == [
+        "contact",
+        "payout bank",
+        "tax/rights ID",
+    ]
+    assert panel._party_role_readiness_gaps(licensee, is_owner=False) == [
+        "contact",
+        "billing address",
+        "VAT/tax ID",
+    ]
+    assert panel._party_role_readiness_gaps(other, is_owner=True) == [
+        "contact",
+        "billing address",
+        "VAT",
+        "bank",
+    ]
+    formatted = panel._format_party_role_settings(other, is_owner=False)
+    assert "Party notes" in formatted
+    assert "Party note" in formatted
+
+    invalid_item = QTableWidgetItem("bad")
+    invalid_item.setData(Qt.ItemDataRole.UserRole, "bad")
+    panel.users_roles_table = SimpleNamespace(selectedItems=lambda: [invalid_item])
+    assert panel._selected_users_roles_party_id() is None
+    assert panel._users_roles_party_id_from_item(None) is None
+    assert panel._users_roles_party_id_from_item(invalid_item) is None
+
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        workspace_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    opened: list[int | None] = []
+    panel._open_party_manager = None
+    panel.open_selected_users_roles_party()
+    panel._open_party_manager = lambda party_id: opened.append(party_id)
+    good_item = QTableWidgetItem("good")
+    good_item.setData(Qt.ItemDataRole.UserRole, "55")
+    panel.open_selected_users_roles_party(good_item)
+    assert warnings[-1][0] == "Party Manager"
+    assert opened == [55]
+
+    panel._conn_provider = lambda: None
+    panel._refresh_users_roles_detail()
+    conn = _connection()
+    panel._conn_provider = lambda: conn
+    panel.users_roles_table = SimpleNamespace(selectedItems=lambda: [good_item])
+    panel._refresh_users_roles_detail()
+    assert "no longer exists" in panel.users_roles_detail_output.toPlainText()
+
+    class _BrokenSettingsReadService:
+        def __init__(self, _conn) -> None:
+            pass
+
+        def load_owner_party_settings(self):
+            raise RuntimeError("owner failed")
+
+    monkeypatch.setattr(workspace_module, "SettingsReadService", _BrokenSettingsReadService)
+    panel._refresh_company_settings()
+    assert "Unable to load" in panel.company_owner_output.toPlainText()
+    panel._refresh_vat_tax_settings()
+    assert "Unable to load VAT" in panel.vat_tax_detail_output.toPlainText()
+
+    panel.integration_file_path_field.setText(str(Path("/tmp/missing-dsp.csv")))
+    panel._open_integrations_import_wizard()
+    assert warnings[-1][0] == "DSP Import"
 
     panel.deleteLater()
     conn.close()

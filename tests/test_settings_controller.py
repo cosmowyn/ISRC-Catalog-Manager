@@ -376,6 +376,93 @@ def test_apply_settings_changes_persists_changed_sections_and_confirmation(
     settings_controller.QMessageBox.information.assert_called_once()
 
 
+def test_settings_bool_coercion_and_soundcloud_focus_opener(monkeypatch: pytest.MonkeyPatch):
+    assert settings_controller._coerce_bool(True) is True
+    assert settings_controller._coerce_bool(None, default=True) is True
+    assert settings_controller._coerce_bool("off", default=True) is False
+
+    opener = mock.Mock()
+    monkeypatch.setattr(settings_controller, "open_settings_dialog", opener)
+    app = _fake_app()
+
+    settings_controller.open_soundcloud_settings_dialog(app)
+
+    opener.assert_called_once_with(app, initial_focus=settings_controller.SOUNDCLOUD_SETTINGS_FOCUS)
+
+
+def test_apply_settings_changes_handles_gs1_template_path_clear_and_convert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _fake_app()
+    app.gs1_settings_service = mock.Mock()
+    app.gs1_integration_service = mock.Mock()
+    app.gs1_integration_service.import_template_workbook.return_value = SimpleNamespace(
+        source_path="/tmp/template.xlsx",
+        filename="template.xlsx",
+        storage_mode="managed_file",
+    )
+    before = _base_values()
+    after = dict(
+        before,
+        gs1_template_import_path="/tmp/template.xlsx",
+        gs1_template_storage_mode="managed_file",
+    )
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    app.gs1_integration_service.import_template_workbook.assert_called_once_with(
+        "/tmp/template.xlsx",
+        storage_mode="managed_file",
+    )
+
+    app = _fake_app()
+    app.gs1_settings_service = mock.Mock()
+    before = dict(_base_values(), gs1_template_asset=SimpleNamespace(storage_mode="database"))
+    after = dict(before, gs1_template_clear_existing=True)
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    app.gs1_settings_service.clear_stored_template.assert_called_once()
+
+    app = _fake_app()
+    app.gs1_settings_service = mock.Mock()
+    app.gs1_settings_service.convert_template_storage_mode.return_value = SimpleNamespace(
+        filename="template.xlsx",
+        storage_mode="managed_file",
+    )
+    before = dict(_base_values(), gs1_template_asset=SimpleNamespace(storage_mode="database"))
+    after = dict(before, gs1_template_storage_mode="managed_file")
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    app.gs1_settings_service.convert_template_storage_mode.assert_called_once_with("managed_file")
+
+    app = _fake_app()
+    app.gs1_settings_service = mock.Mock()
+    before = dict(_base_values(), gs1_contract_entries=("contract-a",))
+    after = dict(before, gs1_contract_entries=())
+
+    changed = settings_controller._apply_settings_changes(app, before, after)
+
+    assert changed == 1
+    app.gs1_settings_service.clear_contracts.assert_called_once()
+
+    app = _fake_app()
+    app.gs1_settings_service = mock.Mock()
+    app.conn = mock.Mock()
+    app.gs1_settings_service.import_template_from_path.side_effect = RuntimeError("bad template")
+    before = _base_values()
+    after = dict(before, gs1_template_import_path="/tmp/bad-template.xlsx")
+
+    with pytest.raises(RuntimeError, match="bad template"):
+        settings_controller._apply_settings_changes(app, before, after)
+
+    app.conn.rollback.assert_called_once()
+
+
 def test_export_and_import_settings_bundle_dialog_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1,17 +1,23 @@
+import builtins
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 from PySide6.QtGui import QAction, QColor, QImage, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
+    QLineEdit,
     QMainWindow,
     QPushButton,
+    QSpinBox,
     QTableView,
     QTableWidget,
     QTableWidgetItem,
+    QWidget,
 )
 
 from isrc_manager.code_registry import CodeRegistryService
@@ -319,7 +325,10 @@ def test_fixture_helpers_create_full_repertoire_records() -> None:
     conn.close()
 
 
-def test_scenario_low_level_helpers_cover_success_and_error_edges(monkeypatch) -> None:
+def test_scenario_low_level_helpers_cover_success_and_error_edges(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     _app()
     conn = _connection()
     harness = _Harness(conn)
@@ -422,6 +431,209 @@ def test_scenario_low_level_helpers_cover_success_and_error_edges(monkeypatch) -
     assert scenarios._single_int(conn, "SELECT id FROM qa_probe WHERE label='not-there'") == 0
     assert scenarios._single_int(conn, "SELECT COUNT(*) FROM qa_probe WHERE label='x'") == 0
 
+    real_import = builtins.__import__
+
+    def _raise_for_optional_audio_packages(name, *args, **kwargs):
+        if name in {"numpy", "soundfile"}:
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    with monkeypatch.context() as import_patch:
+        import_patch.setattr(builtins, "__import__", _raise_for_optional_audio_packages)
+        fallback_wav = scenarios._write_synthetic_wav_fixture(
+            tmp_path / "fallback.wav",
+            duration_seconds=0,
+            seed=11,
+        )
+    assert fallback_wav.exists()
+    assert fallback_wav.stat().st_size > 44
+
+    converter = scenarios._QAAudioConversionService()
+    source = tmp_path / "source.wav"
+    destination = tmp_path / "converted" / "copy.mp3"
+    source.write_bytes(b"audio")
+    result = converter.transcode(
+        source_path=source,
+        destination_path=destination,
+        target_id="MP3",
+        metadata_behavior="strip",
+    )
+    assert converter.is_available()
+    assert converter.is_supported_target("mp3", capability_group="managed_lossy")
+    assert not converter.is_supported_target("wav", capability_group="managed_lossy")
+    assert converter.is_supported_target("wav", capability_group="managed_forensic")
+    assert not converter.is_supported_target("mp3", capability_group="managed_forensic")
+    assert converter.is_supported_target("wav", capability_group="managed")
+    assert not converter.is_supported_target("flac", capability_group="managed_any")
+    assert converter.is_supported_target("mp3")
+    assert result.destination_path == destination
+    assert destination.read_bytes() == b"audio"
+    assert converter.calls[-1]["metadata_behavior"] == "strip"
+
+    class _TrackService:
+        def __init__(self, *, persisted: bool = True) -> None:
+            self.persisted = persisted
+
+        def set_media_path(self, track_id, media_key, path, *, storage_mode, progress_callback):
+            progress_callback(1, 1, f"{track_id}:{media_key}:{storage_mode}")
+            assert Path(path).exists()
+            return {"path": str(path)}
+
+        def has_media(self, _track_id, _media_key):
+            return self.persisted
+
+    def _write_stub_wav(path, **_kwargs):
+        clean_path = Path(path)
+        clean_path.parent.mkdir(parents=True, exist_ok=True)
+        clean_path.write_bytes(b"wav")
+        return clean_path
+
+    monkeypatch.setattr(scenarios, "_write_synthetic_wav_fixture", _write_stub_wav)
+    media_harness = SimpleNamespace(
+        window=SimpleNamespace(track_service=_TrackService()),
+        artifact_dir=tmp_path,
+        connection=SimpleNamespace(commit=mock.Mock()),
+    )
+    fixture_path, meta, messages = scenarios._attach_synthetic_audio_to_track(
+        media_harness,
+        track_id=7,
+        stem="attached",
+        duration_seconds=1,
+        seed=3,
+    )
+    assert fixture_path.read_bytes() == b"wav"
+    assert meta["path"] == str(fixture_path)
+    assert messages == ["7:audio_file:managed_file"]
+    media_harness.connection.commit.assert_called_once()
+    with pytest.raises(AssertionError, match="Track service is required"):
+        scenarios._attach_synthetic_audio_to_track(
+            SimpleNamespace(window=None, artifact_dir=tmp_path),
+            track_id=1,
+            stem="missing",
+            duration_seconds=1,
+            seed=1,
+        )
+    with pytest.raises(AssertionError, match="not persisted"):
+        scenarios._attach_synthetic_audio_to_track(
+            SimpleNamespace(
+                window=SimpleNamespace(track_service=_TrackService(persisted=False)),
+                artifact_dir=tmp_path,
+                connection=SimpleNamespace(commit=mock.Mock()),
+            ),
+            track_id=8,
+            stem="unpersisted",
+            duration_seconds=1,
+            seed=4,
+        )
+
+    artifact_harness = SimpleNamespace(artifact_dir=tmp_path)
+    stale_dir = scenarios._reset_generated_artifact_dir(artifact_harness, "stale")
+    (stale_dir / "old.txt").write_text("old", encoding="utf-8")
+    reset_dir = scenarios._reset_generated_artifact_dir(artifact_harness, "stale")
+    assert reset_dir.is_dir()
+    assert not (reset_dir / "old.txt").exists()
+    stale_file = tmp_path / "single-artifact"
+    stale_file.write_text("old", encoding="utf-8")
+    assert scenarios._reset_generated_artifact_dir(artifact_harness, "single-artifact").is_dir()
+    with pytest.raises(AssertionError, match="outside"):
+        scenarios._reset_generated_artifact_dir(artifact_harness, "../outside")
+
+    visual_service = VisualQualificationService(
+        tmp_path,
+        manifest_name="business_workflow_manifest.json",
+    )
+    visual_harness = SimpleNamespace(
+        artifact_dir=tmp_path,
+        _business_workflow_visual_service=visual_service,
+    )
+    assert scenarios._workflow_visual_service(visual_harness) is visual_service
+    new_visual_harness = SimpleNamespace(artifact_dir=tmp_path)
+    assert scenarios._workflow_visual_service(new_visual_harness).manifest_path.name == (
+        "business_workflow_manifest.json"
+    )
+
+    capture_calls: list[str] = []
+    monkeypatch.setattr(
+        scenarios,
+        "_capture_help_surface",
+        lambda *_args, **_kwargs: capture_calls.append("capture"),
+    )
+    dialog = QDialog()
+    dialog.close = lambda: capture_calls.append("close")
+    dialog.deleteLater = lambda: capture_calls.append("delete")
+    help_harness = SimpleNamespace(process_events=lambda **_kwargs: capture_calls.append("events"))
+    scenarios._capture_help_dialog_surface(
+        help_harness,
+        mock.Mock(),
+        tmp_path,
+        dialog,
+        "help-dialog",
+        [],
+    )
+    assert capture_calls == ["capture", "close", "delete", "events"]
+
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios._ensure_help_visual_track(SimpleNamespace(window=None))
+    missing_services_conn = sqlite3.connect(":memory:")
+    missing_services_conn.execute("CREATE TABLE Tracks(id INTEGER PRIMARY KEY, track_title TEXT)")
+    with pytest.raises(AssertionError, match="Track and Work services"):
+        scenarios._ensure_help_visual_track(
+            SimpleNamespace(
+                window=SimpleNamespace(track_service=None, work_service=None),
+                connection=missing_services_conn,
+            )
+        )
+    missing_services_conn.close()
+    help_conn = sqlite3.connect(":memory:")
+    help_conn.execute("CREATE TABLE Tracks(id INTEGER PRIMARY KEY, track_title TEXT)")
+    help_conn.execute(
+        "INSERT INTO Tracks(id, track_title) VALUES(42, 'Help Screenshot Reference Track')"
+    )
+    assert (
+        scenarios._ensure_help_visual_track(SimpleNamespace(window=object(), connection=help_conn))
+        == 42
+    )
+    help_conn.close()
+    help_create_conn = sqlite3.connect(":memory:")
+    help_create_conn.execute("CREATE TABLE Tracks(id INTEGER PRIMARY KEY, track_title TEXT)")
+    refresh_calls: list[dict[str, object]] = []
+
+    class _HelpWorkService:
+        def create_work(self, payload):
+            assert payload.title == "Help Screenshot Reference Work"
+            return 71
+
+    class _HelpTrackService:
+        def create_track(self, payload):
+            assert payload.work_id == 71
+            help_create_conn.execute(
+                "INSERT INTO Tracks(id, track_title) VALUES(73, ?)",
+                (payload.track_title,),
+            )
+            return 73
+
+    created_help_track = scenarios._ensure_help_visual_track(
+        SimpleNamespace(
+            window=SimpleNamespace(
+                track_service=_HelpTrackService(),
+                work_service=_HelpWorkService(),
+                refresh_table_preserve_view=lambda **kwargs: refresh_calls.append(kwargs),
+            ),
+            connection=help_create_conn,
+            process_events=lambda **kwargs: refresh_calls.append({"events": kwargs}),
+        )
+    )
+    assert created_help_track == 73
+    assert refresh_calls[0] == {"focus_id": 73}
+    help_create_conn.close()
+
+    failing_context_window = SimpleNamespace(
+        save_button=fake_button,
+        _current_work_track_context=lambda: (_ for _ in ()).throw(RuntimeError("context bad")),
+    )
+    failing_context = scenarios._catalog_track_persistence_failure_context(failing_context_window)
+    assert "RuntimeError: context bad" in failing_context
+
     window = QMainWindow()
     window.setWindowTitle("QA Window")
     window.menuBar().addMenu("File")
@@ -469,6 +681,273 @@ def test_scenario_low_level_helpers_cover_success_and_error_edges(monkeypatch) -
         scenarios._require_help_reference(harness, "Workflow")
 
     conn.close()
+
+
+def test_scenario_defensive_workflow_guards_and_pending_evidence() -> None:
+    _app()
+
+    panel = object()
+    assert scenarios._asset_panel_from_window(SimpleNamespace(asset_registry_panel=panel)) is panel
+    assert (
+        scenarios._asset_panel_from_window(
+            SimpleNamespace(
+                asset_registry_panel=None, asset_registry_dock=SimpleNamespace(widget=lambda: panel)
+            )
+        )
+        is panel
+    )
+    assert scenarios._asset_panel_from_window(SimpleNamespace()) is None
+
+    with pytest.raises(AssertionError, match="Application window"):
+        scenarios.run_assets_deliverables_workflow(SimpleNamespace(window=None), track_id=1)
+    with pytest.raises(AssertionError, match="Asset service"):
+        scenarios.run_assets_deliverables_workflow(
+            SimpleNamespace(window=SimpleNamespace()), track_id=1
+        )
+    with pytest.raises(AssertionError, match="catalog track id"):
+        scenarios.run_assets_deliverables_workflow(
+            SimpleNamespace(window=SimpleNamespace(asset_service=object())),
+            track_id=0,
+        )
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios.run_authenticity_workflow(SimpleNamespace(window=None), track_id=1)
+    with pytest.raises(AssertionError, match="Audio authenticity service"):
+        scenarios.run_authenticity_workflow(SimpleNamespace(window=SimpleNamespace()), track_id=1)
+    with pytest.raises(AssertionError, match="Authenticity key service"):
+        scenarios.run_authenticity_workflow(
+            SimpleNamespace(window=SimpleNamespace(audio_authenticity_service=object())),
+            track_id=1,
+        )
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios.run_media_audio_workflow(SimpleNamespace(window=None), track_id=1)
+    with pytest.raises(AssertionError, match="Track service"):
+        scenarios.run_media_audio_workflow(SimpleNamespace(window=SimpleNamespace()), track_id=1)
+
+    deviation_records: list[dict[str, object]] = []
+    evidence = _Evidence()
+    evidence.evidence_path = "evidence.json"
+    harness = SimpleNamespace(
+        inventory=[
+            SimpleNamespace(inventory_id="asset.action", ui_area="assets"),
+            SimpleNamespace(inventory_id="asset.button", ui_area="assets"),
+        ],
+        evidence=evidence,
+        deviations=SimpleNamespace(add=lambda **kwargs: deviation_records.append(kwargs)),
+        database_path="qa.db",
+    )
+    scenarios.run_pending_area(
+        harness,
+        test_id="UI-PQ-ASSET-PENDING",
+        ui_area="assets",
+        message="Assets pending",
+    )
+    scenarios.run_pending_area(
+        harness,
+        test_id="UI-PQ-MISSING-PENDING",
+        ui_area="missing",
+        message="Missing pending",
+    )
+
+    assert harness.evidence.records[0][1] == "partial"
+    assert harness.evidence.records[0][3]["sample"] == ["asset.action", "asset.button"]
+    assert harness.evidence.records[1][1] == "pending"
+    assert [record["test_id"] for record in deviation_records] == [
+        "UI-PQ-ASSET-PENDING",
+        "UI-PQ-MISSING-PENDING",
+    ]
+
+
+def test_scenario_pq_workflow_guard_branches(monkeypatch, tmp_path: Path) -> None:
+    _app()
+
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios.run_diagnostics_workflow(SimpleNamespace(window=None))
+
+    missing_db = tmp_path / "missing.db"
+    with pytest.raises(AssertionError, match="database path is not on disk"):
+        scenarios.run_diagnostics_workflow(
+            SimpleNamespace(window=SimpleNamespace(), database_path=missing_db)
+        )
+
+    database_path = tmp_path / "qa.db"
+    database_path.write_bytes(b"sqlite")
+    with pytest.raises(AssertionError, match="database maintenance"):
+        scenarios.run_diagnostics_workflow(
+            SimpleNamespace(window=SimpleNamespace(), database_path=database_path)
+        )
+    with pytest.raises(AssertionError, match="report builder"):
+        scenarios.run_diagnostics_workflow(
+            SimpleNamespace(
+                window=SimpleNamespace(database_maintenance=object()),
+                database_path=database_path,
+            )
+        )
+
+    ok_checks = [
+        {"title": "SQLite integrity", "status": "ok"},
+        {"title": "Foreign-key consistency", "status": "ok"},
+        {"title": "Schema layout", "status": "ok"},
+        {"title": "Schema version", "status": "ok"},
+    ]
+    bad_checks = [*ok_checks[:-1], {"title": "Schema version", "status": "failed"}]
+    with pytest.raises(AssertionError, match="Core diagnostics checks"):
+        scenarios.run_diagnostics_workflow(
+            SimpleNamespace(
+                window=SimpleNamespace(
+                    database_maintenance=object(),
+                    _build_diagnostics_report=lambda **_kwargs: {"checks": bad_checks},
+                ),
+                database_path=database_path,
+            )
+        )
+
+    class _Maintenance:
+        def __init__(self, results: list[str]) -> None:
+            self.results = results
+
+        def verify_integrity(self, _path):
+            return self.results.pop(0)
+
+        def create_backup(self, _conn, _path):
+            return SimpleNamespace(backup_path=tmp_path / "backup.db")
+
+        def restore_database(self, _backup_path, restore_target):
+            Path(restore_target).write_bytes(b"restored")
+            return SimpleNamespace(restored_path=restore_target)
+
+    for results, message in (
+        (["bad"], "Active QA database integrity failed"),
+        (["ok", "bad"], "Diagnostics backup integrity failed"),
+        (["ok", "ok", "bad"], "Diagnostics restore target integrity failed"),
+    ):
+        with pytest.raises(AssertionError, match=message):
+            scenarios.run_diagnostics_workflow(
+                SimpleNamespace(
+                    window=SimpleNamespace(
+                        database_maintenance=_Maintenance(list(results)),
+                        _build_diagnostics_report=lambda **_kwargs: {"checks": ok_checks},
+                    ),
+                    connection=object(),
+                    artifact_dir=tmp_path,
+                    database_path=database_path,
+                )
+            )
+
+    class _VisualService:
+        def __init__(self, artifact_dir, *args, **kwargs) -> None:
+            self.artifact_dir = Path(artifact_dir)
+            self.captures = []
+            self.comparisons = []
+
+        def capture_widget(self, _widget, name):
+            path = self.artifact_dir / f"{name}.png"
+            path.write_bytes(b"png")
+            return SimpleNamespace(path=path)
+
+        def compare_capture_to_baseline(self, _capture):
+            return SimpleNamespace(to_dict=lambda: {"status": "matched"})
+
+        def compare_json_report(self, *_args, **_kwargs):
+            return SimpleNamespace(to_dict=lambda: {"status": "matched"})
+
+        def write_manifest(self):
+            path = self.artifact_dir / "visual_manifest.json"
+            path.write_text("{}", encoding="utf-8")
+            return path
+
+    monkeypatch.setattr(scenarios, "VisualQualificationService", _VisualService)
+    monkeypatch.setattr(scenarios, "help_screenshot_source_dir", lambda: tmp_path / "help-shots")
+    monkeypatch.setattr(scenarios, "_ensure_help_visual_track", lambda _harness: 101)
+    monkeypatch.setattr(scenarios, "_capture_help_surface", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios.run_visual_qualification_workflow(SimpleNamespace(window=None))
+    with pytest.raises(AssertionError, match="Catalog table workspace"):
+        scenarios.run_visual_qualification_workflow(
+            SimpleNamespace(
+                window=SimpleNamespace(open_catalog_workspace=lambda: None),
+                artifact_dir=tmp_path,
+            )
+        )
+    with pytest.raises(AssertionError, match="Add Track workspace"):
+        scenarios.run_visual_qualification_workflow(
+            SimpleNamespace(
+                window=SimpleNamespace(
+                    open_catalog_workspace=lambda: QWidget(),
+                    open_add_track_workspace=lambda: None,
+                ),
+                artifact_dir=tmp_path,
+            )
+        )
+
+    fields_window = SimpleNamespace(
+        open_catalog_workspace=lambda: QWidget(),
+        open_add_track_workspace=lambda: QWidget(),
+        artist_field=QComboBox(),
+        album_title_field=QComboBox(),
+        genre_field=QComboBox(),
+        track_title_field=QLineEdit(),
+        track_number_field=QSpinBox(),
+        track_len_m=QSpinBox(),
+        track_len_s=QSpinBox(),
+    )
+    for name in (
+        "open_release_browser",
+        "open_code_registry_workspace",
+        "open_promo_code_ledger",
+        "open_global_search",
+        "open_contract_template_workspace",
+        "open_asset_registry",
+        "open_invoice_workspace",
+        "open_work_manager",
+        "open_party_manager",
+        "open_contract_manager",
+        "open_rights_matrix",
+        "open_quality_dashboard",
+    ):
+        setattr(fields_window, name, (lambda: None) if name == "open_release_browser" else QWidget)
+    with pytest.raises(AssertionError, match="release_browser"):
+        scenarios.run_visual_qualification_workflow(
+            SimpleNamespace(window=fields_window, artifact_dir=tmp_path)
+        )
+
+    with pytest.raises(AssertionError, match="open application window"):
+        scenarios.run_help_documentation_workflow(SimpleNamespace(window=None))
+
+    help_file = tmp_path / "help.html"
+    help_file.write_text("<html>help</html>", encoding="utf-8")
+    finding = SimpleNamespace(
+        severity="high",
+        subject="chapter",
+        category="screenshot",
+        expected="chapter screenshot",
+        actual="missing screenshot",
+        recommended_update="refresh screenshot",
+    )
+    deviation_records: list[dict[str, object]] = []
+    monkeypatch.setattr(scenarios, "refresh_help_chapter_screenshots", lambda _path: [])
+    monkeypatch.setattr(scenarios, "copy_help_screenshots", lambda _path: [])
+    monkeypatch.setattr(
+        scenarios,
+        "validate_help_coverage",
+        lambda *_args, **_kwargs: SimpleNamespace(findings=[finding]),
+    )
+    monkeypatch.setattr(
+        scenarios,
+        "write_help_coverage_report",
+        lambda path, _report: Path(path),
+    )
+    with pytest.raises(AssertionError, match="Help documentation coverage failed"):
+        scenarios.run_help_documentation_workflow(
+            SimpleNamespace(
+                window=SimpleNamespace(_ensure_help_file=lambda: help_file),
+                artifact_dir=tmp_path,
+                inventory=[],
+                deviations=SimpleNamespace(add=lambda **kwargs: deviation_records.append(kwargs)),
+                database_path="qa.db",
+            )
+        )
+    assert deviation_records[0]["recommended_followup"] == "refresh screenshot"
 
 
 def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Path) -> None:

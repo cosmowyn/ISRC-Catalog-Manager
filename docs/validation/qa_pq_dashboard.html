@@ -772,11 +772,7 @@
     <div class="header-inner">
       <div>
         <h1>QA/QC and UI PQ Dashboard</h1>
-        <p class="subtitle">Compact product qualification view for ISRC Catalog Manager test coverage, UI process qualification, visual baselines, deviations, and current wins.</p>
-      </div>
-      <div class="header-actions">
-        <button id="reloadArtifactsButton" class="button">Reload artifacts</button>
-        <button id="resetSnapshotButton" class="button secondary">Clear live data</button>
+        <p class="subtitle">Compact product qualification view for ISRC Catalog Manager production-code coverage, UI process qualification, visual baselines, deviations, and current wins.</p>
       </div>
     </div>
   </header>
@@ -786,7 +782,7 @@
       <section class="section">
         <h2>Current Snapshot</h2>
         <div class="source-line" id="snapshotSource"></div>
-        <p class="load-state" id="loadState">Ready.</p>
+        <p class="load-state" id="loadState">Loading actual coverage test artifacts...</p>
       </section>
       <section class="section">
         <h2>Artifact Inputs</h2>
@@ -796,6 +792,7 @@
           <li title="artifacts/ui_pq/deviations.csv"><span class="artifact-label">Deviations</span><code>artifacts/ui_pq/deviations.csv</code></li>
           <li title="artifacts/ui_pq/traceability_matrix.csv"><span class="artifact-label">Traceability</span><code>artifacts/ui_pq/traceability_matrix.csv</code></li>
           <li title="artifacts/ui_pq/visual/*_manifest.json"><span class="artifact-label">Visual Baselines</span><code>artifacts/ui_pq/visual/*_manifest.json</code></li>
+          <li title="docs/validation/coverage_snapshot.json"><span class="artifact-label">Coverage</span><code>docs/validation/coverage_snapshot.json</code></li>
           <li title="docs/validation/qa_pq_history.csv"><span class="artifact-label">History</span><code>docs/validation/qa_pq_history.csv</code></li>
         </ul>
       </section>
@@ -805,7 +802,7 @@
       <div class="history-header">
         <div>
           <h2>Historic Trend</h2>
-          <p class="small">Default view shows the latest seven-day window. Lines are normalized so coverage, fails, deviations, and code size can share one compact graph.</p>
+          <p class="small">Default view shows the latest seven-day window. Lines are normalized so production coverage, fails, deviations, and production code size can share one compact graph.</p>
         </div>
         <div class="history-controls">
           <label>
@@ -937,42 +934,6 @@
     </div>
   </main>
 
-  <script id="initial-dashboard-data" type="application/json">
-{
-  "sourceLabel": "Waiting for live published artifacts",
-  "generatedAt": "",
-  "history": [],
-  "coverage": {
-    "timestamp": "",
-    "linePercent": 0,
-    "statementPercent": 0,
-    "branchPercent": 0,
-    "coveredLines": 0,
-    "statements": 0,
-    "missingLines": 0,
-    "coveredBranches": 0,
-    "missingBranches": 0,
-    "filesMeasured": 0,
-    "lowestFiles": [],
-    "coverageWins": []
-  },
-  "pq": {
-    "eventCount": 0,
-    "eventStatusCounts": {},
-    "events": [],
-    "help": {},
-    "deviationCount": 0,
-    "deviationStatusCounts": {},
-    "deviationSeverityCounts": {},
-    "topDeviations": [],
-    "traceabilityRows": 0,
-    "traceabilityStatusCounts": {},
-    "automationStatusCounts": {},
-    "visualManifests": []
-  }
-}
-  </script>
-
   <script>
     const artifactPaths = {
       evidence: "../../artifacts/ui_pq/evidence.json",
@@ -986,9 +947,12 @@
       history: "qa_pq_history.csv"
     };
     const rawGithubBase = "https://raw.githubusercontent.com/cosmowyn/ISRC-Catalog-Manager/main/";
+    const artifactPollIntervalMs = 30000;
 
-    const initialData = JSON.parse(document.getElementById("initial-dashboard-data").textContent);
-    let dashboardData = initialData;
+    let dashboardData = null;
+    let lastArtifactSignature = "";
+    let artifactPollHandle = null;
+    let artifactPollInFlight = false;
 
     const chartColors = {
       pass: "var(--green)",
@@ -999,10 +963,10 @@
     };
 
     const historyMetrics = [
-      {key: "total_coverage", label: "Coverage", color: "#17845f", unit: "%", direction: "up"},
+      {key: "total_coverage", label: "Production Coverage", color: "#17845f", unit: "%", direction: "up"},
       {key: "failed_tests", label: "Fails", color: "#bd2b38", unit: "", direction: "down"},
       {key: "total_deviations", label: "Deviations", color: "#a16207", unit: "", direction: "down"},
-      {key: "app_loc", label: "App LOC", color: "#2764d8", unit: "", direction: "neutral"}
+      {key: "app_loc", label: "Production LOC", color: "#2764d8", unit: "", direction: "neutral"}
     ];
 
     const els = {
@@ -1324,7 +1288,7 @@
         {
           title: "Statement Coverage",
           value: fmtPercent(statementPercent),
-          subtitle: "Covered versus missing measured statement lines.",
+          subtitle: "Covered versus missing production statement lines.",
           ariaLabel: `Statement coverage ${fmtPercent(statementPercent)}`,
           parts: [
             {label: "Covered", value: coveredLines, color: chartColors.pass},
@@ -1400,7 +1364,7 @@
       const visualFailed = (pq.visualManifests || []).reduce((sum, item) => sum + Number(item.failed || 0), 0);
       const statementPct = Number(c.statementPercent || pct(c.coveredLines || 0, c.statements || 0));
       const cards = [
-        ["Overall Coverage", fmtPercent(c.linePercent), `${fmtPercent(statementPct)} statement-only coverage`, c.linePercent],
+        ["Production Coverage", fmtPercent(c.linePercent), `${fmtPercent(statementPct)} statement-only coverage`, c.linePercent],
         ["Branch Coverage", fmtPercent(c.branchPercent), `${fmtNumber(c.coveredBranches)} covered, ${fmtNumber(c.missingBranches)} missing`, c.branchPercent],
         ["UI PQ Events", `${pq.eventStatusCounts?.passed || 0}/${pq.eventCount}`, `${pq.eventStatusCounts?.partial || 0} partial, ${pq.eventStatusCounts?.failed || 0} failed`, pq.eventCount ? ((pq.eventStatusCounts?.passed || 0) / pq.eventCount) * 100 : 0],
         ["Help Coverage", fmtPercent(help.coverage_percent), `${help.chapter_screenshot_required_count || 0} screenshots, ${help.finding_count || 0} findings`, help.coverage_percent || 0],
@@ -1482,7 +1446,7 @@
           <td><span class="pill ${statusClass(deviation.status)}">${escapeHtml(deviation.status)}</span></td>
           <td>${escapeHtml(deviation.followup)}</td>
         </tr>
-      `).join("") || '<tr><td colspan="4" class="empty">No matching deviations in the dashboard sample.</td></tr>';
+      `).join("") || '<tr><td colspan="4" class="empty">No matching deviations in the loaded artifact data.</td></tr>';
     }
 
     function renderCoverageTable(data) {
@@ -1514,11 +1478,31 @@
       }).join("") || '<div class="empty">No visual manifest rows available.</div>';
     }
 
+    function renderEmptyDashboard(message) {
+      els.source.innerHTML = '<span class="pill info">Waiting for actual coverage artifacts</span>';
+      els.historyTrendCards.innerHTML = "";
+      els.historyGraph.innerHTML = `<div class="history-empty">${escapeHtml(message)}</div>`;
+      els.historyLegend.innerHTML = "";
+      els.kpiGrid.innerHTML = "";
+      els.chartGrid.innerHTML = "";
+      els.coverageWins.innerHTML = '<li class="empty">No coverage artifact loaded.</li>';
+      els.coverageAttention.innerHTML = '<li class="empty">No coverage artifact loaded.</li>';
+      els.statusMix.innerHTML = '<div class="empty">No UI/PQ artifact data loaded.</div>';
+      els.eventRows.innerHTML = '<tr><td colspan="3" class="empty">No UI/PQ evidence artifact loaded.</td></tr>';
+      els.deviationRows.innerHTML = '<tr><td colspan="4" class="empty">No deviation artifact loaded.</td></tr>';
+      els.coverageRows.innerHTML = '<tr><td colspan="4" class="empty">No coverage snapshot loaded.</td></tr>';
+      els.visualRows.innerHTML = '<div class="empty">No visual artifact manifests loaded.</div>';
+    }
+
     function render(data = dashboardData) {
+      if (!data) {
+        renderEmptyDashboard("Loading actual coverage test artifacts...");
+        return;
+      }
       els.source.innerHTML = `
         <span class="pill info">${escapeHtml(data.sourceLabel || "Snapshot")}</span>
         <span>Coverage timestamp <code>${escapeHtml(data.coverage.timestamp || "unknown")}</code></span>
-        <span>Generated <code>${escapeHtml(data.generatedAt || "unknown")}</code></span>
+        <span>Artifact timestamp <code>${escapeHtml(data.generatedAt || "unknown")}</code></span>
       `;
       renderHistory(data);
       renderKpis(data);
@@ -1583,36 +1567,31 @@
       };
     }
 
-    function emptyCoverageSnapshot() {
-      return {
-        timestamp: "",
-        linePercent: 0,
-        statementPercent: 0,
-        branchPercent: 0,
-        coveredLines: 0,
-        statements: 0,
-        missingLines: 0,
-        coveredBranches: 0,
-        missingBranches: 0,
-        filesMeasured: 0,
-        lowestFiles: [],
-        coverageWins: []
-      };
+    function requireCoverageNumber(coverage, key) {
+      const value = Number(coverage?.[key]);
+      if (!Number.isFinite(value)) {
+        throw new Error(`coverage_snapshot.json is missing ${key}`);
+      }
+      return value;
     }
 
     function normalizeCoverageSnapshot(coverage) {
-      if (!coverage || typeof coverage !== "object") return emptyCoverageSnapshot();
+      if (!coverage || typeof coverage !== "object") {
+        throw new Error("coverage_snapshot.json is missing coverage data");
+      }
       return {
         timestamp: coverage.timestamp || "",
-        linePercent: Number(coverage.linePercent || 0),
-        statementPercent: Number(coverage.statementPercent || 0),
-        branchPercent: Number(coverage.branchPercent || 0),
-        coveredLines: Number(coverage.coveredLines || 0),
-        statements: Number(coverage.statements || 0),
-        missingLines: Number(coverage.missingLines || 0),
-        coveredBranches: Number(coverage.coveredBranches || 0),
-        missingBranches: Number(coverage.missingBranches || 0),
-        filesMeasured: Number(coverage.filesMeasured || 0),
+        linePercent: requireCoverageNumber(coverage, "linePercent"),
+        statementPercent: requireCoverageNumber(coverage, "statementPercent"),
+        branchPercent: requireCoverageNumber(coverage, "branchPercent"),
+        coveredLines: requireCoverageNumber(coverage, "coveredLines"),
+        statements: requireCoverageNumber(coverage, "statements"),
+        missingLines: requireCoverageNumber(coverage, "missingLines"),
+        coveredBranches: requireCoverageNumber(coverage, "coveredBranches"),
+        missingBranches: requireCoverageNumber(coverage, "missingBranches"),
+        filesMeasured: requireCoverageNumber(coverage, "filesMeasured"),
+        filesExcluded: Number(coverage.filesExcluded || 0),
+        excludedFiles: Array.isArray(coverage.excludedFiles) ? coverage.excludedFiles : [],
         lowestFiles: Array.isArray(coverage.lowestFiles) ? coverage.lowestFiles : [],
         coverageWins: Array.isArray(coverage.coverageWins) ? coverage.coverageWins : []
       };
@@ -1623,11 +1602,13 @@
       const deviations = files.deviations || [];
       const traceability = files.traceability || [];
       const coverage = normalizeCoverageSnapshot(files.coverage);
+      const history = files.history || [];
+      const latestHistory = history[history.length - 1] || {};
 
       return {
-        sourceLabel: "Live UI/PQ artifacts loaded",
-        generatedAt: new Date().toISOString(),
-        history: files.history || [],
+        sourceLabel: "Actual coverage and UI/PQ artifacts loaded",
+        generatedAt: coverage.timestamp || latestHistory.timestamp || "",
+        history,
         coverage,
         pq: {
           eventCount: events.length,
@@ -1683,50 +1664,92 @@
       return response.text();
     }
 
-    async function loadLiveArtifacts() {
-      els.loadState.textContent = "Loading artifact files...";
-      try {
-        const [evidence, help, deviations, traceability, visual, business, generated, coverage, history] = await Promise.all([
-          fetchText(artifactPaths.evidence).then(JSON.parse),
-          fetchText(artifactPaths.help).then(JSON.parse),
-          fetchText(artifactPaths.deviations).then(parseCsv),
-          fetchText(artifactPaths.traceability).then(parseCsv),
-          fetchText(artifactPaths.visual).then(JSON.parse),
-          fetchText(artifactPaths.business).then(JSON.parse),
-          fetchText(artifactPaths.generated).then(JSON.parse),
-          fetchText(artifactPaths.coverage).then(JSON.parse),
-          fetchText(artifactPaths.history).then(parseCsv).catch(() => [])
-        ]);
-        dashboardData = snapshotFromArtifacts({evidence, help, deviations, traceability, visual, business, generated, coverage, history});
-        els.loadState.textContent = "Loaded published UI/PQ artifacts and coverage snapshot.";
-        render();
-      } catch (error) {
-        dashboardData = initialData;
-        render();
-        els.loadState.textContent = `Could not load live dashboard data: ${error.message}. No stale snapshot is shown.`;
-      }
+    async function fetchLiveArtifactBundle() {
+      const [
+        evidenceText,
+        helpText,
+        deviationsText,
+        traceabilityText,
+        visualText,
+        businessText,
+        generatedText,
+        coverageText,
+        historyText
+      ] = await Promise.all([
+        fetchText(artifactPaths.evidence),
+        fetchText(artifactPaths.help),
+        fetchText(artifactPaths.deviations),
+        fetchText(artifactPaths.traceability),
+        fetchText(artifactPaths.visual),
+        fetchText(artifactPaths.business),
+        fetchText(artifactPaths.generated),
+        fetchText(artifactPaths.coverage),
+        fetchText(artifactPaths.history).catch(() => "")
+      ]);
+      return {
+        signature: [
+          evidenceText,
+          helpText,
+          deviationsText,
+          traceabilityText,
+          visualText,
+          businessText,
+          generatedText,
+          coverageText,
+          historyText
+        ].join("\n--- artifact boundary ---\n"),
+        evidence: JSON.parse(evidenceText),
+        help: JSON.parse(helpText),
+        deviations: parseCsv(deviationsText),
+        traceability: parseCsv(traceabilityText),
+        visual: JSON.parse(visualText),
+        business: JSON.parse(businessText),
+        generated: JSON.parse(generatedText),
+        coverage: JSON.parse(coverageText),
+        history: historyText ? parseCsv(historyText) : []
+      };
     }
 
-    async function refreshHistoryFromCsv() {
+    async function pollLiveArtifacts() {
+      if (artifactPollInFlight) return;
+      artifactPollInFlight = true;
+      const firstLoad = !dashboardData;
+      els.loadState.textContent = firstLoad
+        ? "Loading actual coverage test artifacts..."
+        : "Checking for updated coverage test artifacts...";
       try {
-        const history = await fetchText(artifactPaths.history).then(parseCsv);
-        if (!history.length) return;
-        dashboardData = {...dashboardData, history};
-        render();
-        if (els.loadState.textContent === "Ready.") {
-          els.loadState.textContent = "Loaded dashboard history CSV.";
+        const bundle = await fetchLiveArtifactBundle();
+        const changed = bundle.signature !== lastArtifactSignature;
+        if (changed) {
+          lastArtifactSignature = bundle.signature;
+          dashboardData = snapshotFromArtifacts(bundle);
+          render();
+          els.loadState.textContent = firstLoad
+            ? "Loaded actual coverage test artifacts."
+            : "Updated page from actual coverage test artifacts.";
+        } else {
+          els.loadState.textContent = `No artifact updates found. Last checked ${new Date().toISOString()}.`;
         }
       } catch (error) {
-        // Keep the current live view unchanged when the history CSV cannot be fetched.
+        if (dashboardData) {
+          els.loadState.textContent = `Could not poll actual coverage artifacts: ${error.message}. Keeping the last loaded artifact data.`;
+        } else {
+          dashboardData = null;
+          renderEmptyDashboard(`Could not load actual coverage artifacts: ${error.message}. No static coverage values are shown.`);
+          els.loadState.textContent = `Could not load actual coverage artifacts: ${error.message}. No static coverage values are shown.`;
+        }
+      } finally {
+        artifactPollInFlight = false;
       }
     }
 
-    document.getElementById("reloadArtifactsButton").addEventListener("click", loadLiveArtifacts);
-    document.getElementById("resetSnapshotButton").addEventListener("click", () => {
-      dashboardData = initialData;
-      els.loadState.textContent = "Live dashboard reset to empty state.";
-      render();
-    });
+    function startArtifactPolling() {
+      pollLiveArtifacts();
+      if (!artifactPollHandle) {
+        artifactPollHandle = window.setInterval(pollLiveArtifacts, artifactPollIntervalMs);
+      }
+    }
+
     [els.eventSearch, els.eventFilter, els.deviationSearch, els.deviationFilter].forEach((control) => {
       control.addEventListener("input", () => render());
       control.addEventListener("change", () => render());
@@ -1736,8 +1759,8 @@
       control.addEventListener("change", () => render());
     });
 
-    render();
-    loadLiveArtifacts();
+    renderEmptyDashboard("Loading actual coverage test artifacts...");
+    startArtifactPolling();
   </script>
 </body>
 </html>

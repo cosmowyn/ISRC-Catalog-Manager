@@ -117,6 +117,77 @@ def test_create_draft_invoice_snapshots_catalog_line_and_vat_breakdown():
     conn.close()
 
 
+def test_catalog_items_update_filter_and_validation_edges(monkeypatch):
+    conn = _connection()
+    service = InvoiceService(conn)
+    catalog = service.catalog_service
+    active_id = catalog.create_item(
+        InvoiceCatalogItemPayload(
+            name="Mixing",
+            default_unit_price_minor=5_000,
+            default_vat_rate_basis_points=2100,
+            category="Studio",
+            default_account_code="4200",
+        )
+    )
+    catalog.create_item(
+        InvoiceCatalogItemPayload(
+            name="Inactive",
+            default_unit_price_minor=1_000,
+            active=False,
+        )
+    )
+
+    updated = catalog.update_item(
+        active_id,
+        InvoiceCatalogItemPayload(
+            name=" Mastering ",
+            description="Final master",
+            default_quantity="2.5",
+            default_unit_price_minor=7_500,
+            default_vat_rate_basis_points=900,
+            vat_country_code="NL",
+            category="Delivery",
+            default_account_code="4300",
+            active=True,
+        ),
+    )
+    active_items = catalog.list_items(active_only=True)
+
+    assert updated.name == "Mastering"
+    assert updated.description == "Final master"
+    assert updated.default_quantity_value == 25
+    assert updated.default_quantity_scale == 1
+    assert updated.default_unit_price_minor == 7_500
+    assert updated.default_vat_rate_basis_points == 900
+    assert updated.vat_country_code == "NL"
+    assert updated.category == "Delivery"
+    assert updated.default_account_code == "4300"
+    assert [item.id for item in active_items] == [active_id]
+    assert catalog.fetch_item(9999) is None
+
+    with pytest.raises(ValueError, match="name is required"):
+        catalog.update_item(active_id, InvoiceCatalogItemPayload(name=" "))
+    with pytest.raises(ValueError, match="unit price"):
+        catalog.update_item(
+            active_id,
+            InvoiceCatalogItemPayload(name="Bad price", default_unit_price_minor=-1),
+        )
+    with pytest.raises(ValueError, match="VAT rate"):
+        catalog.update_item(
+            active_id,
+            InvoiceCatalogItemPayload(name="Bad VAT", default_vat_rate_basis_points=-1),
+        )
+    with pytest.raises(ValueError, match="was not found"):
+        catalog.update_item(9999, InvoiceCatalogItemPayload(name="Missing"))
+
+    monkeypatch.setattr(catalog, "fetch_item", lambda _item_id: None)
+    with pytest.raises(RuntimeError, match="could not be reloaded"):
+        catalog.update_item(active_id, InvoiceCatalogItemPayload(name="Reload failure"))
+
+    conn.close()
+
+
 def test_issue_invoice_generates_number_posts_ledger_and_is_idempotent():
     conn = _connection()
     party_id = _party_id(conn)
@@ -187,6 +258,42 @@ def test_issuing_already_issued_invoice_with_new_command_is_rejected():
 
     assert conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM AccountingTransactions").fetchone()[0] == 1
+
+    conn.close()
+
+
+def test_invoice_issue_and_void_validation_edges():
+    conn = _connection()
+    party_id = _party_id(conn)
+    service = InvoiceService(conn)
+
+    with pytest.raises(ValueError, match="command key"):
+        service.issue_invoice(1, command_key=" ")
+    with pytest.raises(ValueError, match="was not found"):
+        service.issue_invoice(999, command_key="issue-missing")
+    with pytest.raises(ValueError, match="Void invoice command key"):
+        service.void_issued_invoice(1, command_key="")
+    with pytest.raises(ValueError, match="was not found"):
+        service.void_issued_invoice(999, command_key="void-missing")
+    with pytest.raises(ValueError, match="has no entries"):
+        service._reversal_entries_for_transaction(999)
+
+    draft = service.create_draft_invoice(
+        InvoiceDraftPayload(
+            party_id=party_id,
+            lines=(
+                InvoiceLinePayload(
+                    description="Zero total",
+                    quantity="1",
+                    unit_price_minor=0,
+                ),
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="greater than zero"):
+        service.issue_invoice(draft.id, command_key="issue-zero-total")
+    with pytest.raises(ValueError, match="Only issued or sent invoices"):
+        service.void_issued_invoice(draft.id, command_key="void-draft")
 
     conn.close()
 

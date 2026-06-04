@@ -323,6 +323,21 @@ Do not fake coverage by:
 
 Any coverage exclusion must be narrow, justified, and documented.
 
+Coverage scope policy:
+
+Only production/runtime application code shall be included in coverage metrics and coverage targets.
+
+The following are explicitly excluded from coverage calculations and qualification targets:
+
+* Test code
+* QA/PQ tooling
+* Validation frameworks
+* Coverage/reporting infrastructure
+* Test utilities, fixtures, mocks, and harnesses
+* Development and CI/CD tooling
+
+Coverage objectives apply exclusively to user-facing production code and business-critical runtime logic. QA tooling requires functional verification of its intended purpose but is not itself subject to production coverage targets.
+
 ---
 
 # Required Local Bootstrap

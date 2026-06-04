@@ -5652,3 +5652,80 @@ target is explicitly reintroduced.
   prompts/services.
 - Lower-value visual-only or platform-defensive branches should remain out of the main campaign
   unless they become tied to a real bug or user workflow.
+
+## Checkpoint 4.45 - Production-Scope Coverage Gate Handoff
+
+Timestamp: `2026-06-04`
+
+This continuation aligned the coverage campaign with the production-scope policy: branch-aware
+coverage targets apply to user-facing runtime application code and business-critical logic only.
+QA/PQ tooling remains functionally verified by tests, but `isrc_manager/qa/*` is now omitted from
+production coverage totals.
+
+### Coverage delta
+
+Authoritative result from the production-scope full-suite report:
+
+- Full branch-aware production coverage: `90.5307467057101%`.
+- Combined line/branch points: `98932 / 109280`.
+- Full pytest result: `2714 passed`, `23 skipped`, `804 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted runtime module coverage:
+
+- `isrc_manager/invoicing/workspace.py`: `90.19092%`.
+- `isrc_manager/invoicing/royalty_import_dialog.py`: `95.83333%`.
+- `isrc_manager/invoicing/royalty_service.py`: `94.29658%`.
+- `isrc_manager/tracks/album_ordering_dialog.py`: `99.12664%`.
+- `isrc_manager/invoicing/credit_note_service.py`: `92.98893%`.
+- `isrc_manager/invoicing/template_service.py`: `97.96557%`.
+- `isrc_manager/integrations/soundcloud/workflow.py`: `91.18304%`.
+- `isrc_manager/settings_controller.py`: `95.00960%`.
+- `isrc_manager/invoicing/invoice_service.py`: `94.55782%`.
+- `isrc_manager/reporting/dialogs.py`: `97.47899%`.
+
+### Tests and scope updates
+
+Expanded behavioral coverage in:
+
+- `tests/invoicing/test_invoice_workspace_panel.py`: invoice workspace no-connection command
+  guards, draft/manual/travel line staging, template preview/session helpers, selection helpers,
+  settings role formatting, VAT/settings failure branches, and DSP import guard paths.
+- `tests/invoicing/test_invoice_issue_service.py`: catalog item validation/update edges and
+  invoice issue/void validation and reversal guard branches.
+- `tests/test_album_ordering_dialog.py`: drag/drop destination, ignored event, no-selection, and
+  move/acceptance paths.
+- `tests/test_settings_controller.py`: boolean coercion, SoundCloud settings focus delegation, GS1
+  template path import/clear/convert, contract clearing, and rollback.
+- `tests/ui_qa/test_qa_helpers.py`: functional verification of QA/PQ helper behavior. These tests
+  intentionally verify QA tooling without making QA modules part of production coverage targets.
+
+Scope/configuration updates:
+
+- `pyproject.toml`: added `isrc_manager/qa/*` to `[tool.coverage.run].omit`.
+- `docs/testing/quality_scope_governance.md`: documented the QA/PQ tooling coverage exclusion and
+  the current `90%` production coverage gate.
+
+### Validation
+
+Commands run:
+
+```bash
+python3 -m compileall ISRC_manager.py isrc_manager tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --no-cov tests/ui_qa/test_qa_helpers.py tests/invoicing/test_invoice_workspace_panel.py tests/invoicing/test_invoice_issue_service.py tests/test_album_ordering_dialog.py tests/test_settings_controller.py
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Compileall: passed.
+- Focused affected tests: passed (`66 passed`).
+- Ruff: passed.
+- Black check: passed.
+- Full production-scope pytest/coverage: passed (`2714 passed`, `23 skipped`, `804 warnings`,
+  `119 subtests passed in 680.38s`; required coverage of `90%` reached at `90.53%`).
+
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail this checkpoint and was not hidden.

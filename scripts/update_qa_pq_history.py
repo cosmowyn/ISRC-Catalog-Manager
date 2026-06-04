@@ -37,6 +37,16 @@ HISTORY_COLUMNS = (
 
 DEFAULT_APPLICATION_PATHS = ("ISRC_manager.py", "isrc_manager")
 EXCLUDED_APPLICATION_FILES = {Path("isrc_manager/help_content.py")}
+EXCLUDED_APPLICATION_DIRS = {Path("isrc_manager/qa")}
+PRODUCTION_COVERAGE_ROOT_FILES = {"ISRC_manager.py"}
+PRODUCTION_COVERAGE_PREFIXES = ("isrc_manager/",)
+EXCLUDED_PRODUCTION_COVERAGE_PREFIXES = (
+    "isrc_manager/qa/",
+    "tests/",
+    "scripts/",
+    "docs/",
+    "artifacts/",
+)
 VISUAL_MANIFESTS = (
     "visual/visual_manifest.json",
     "visual/business_workflow_manifest.json",
@@ -114,6 +124,11 @@ def _application_files(repo_root: Path) -> list[Path]:
         relative = path.relative_to(repo_root)
         if relative in EXCLUDED_APPLICATION_FILES:
             continue
+        if any(
+            relative == excluded or excluded in relative.parents
+            for excluded in EXCLUDED_APPLICATION_DIRS
+        ):
+            continue
         if "__pycache__" in relative.parts:
             continue
         filtered.append(path)
@@ -163,25 +178,111 @@ def _coverage_display_path(path: str) -> str:
     return normalized.lstrip("/")
 
 
-def collect_coverage_snapshot(coverage_path: Path) -> dict[str, Any]:
-    coverage = _read_json(coverage_path)
-    totals = coverage.get("totals", {}) if isinstance(coverage, dict) else {}
+def _is_production_coverage_path(path: str) -> bool:
+    display_path = _coverage_display_path(path)
+    if any(display_path.startswith(prefix) for prefix in EXCLUDED_PRODUCTION_COVERAGE_PREFIXES):
+        return False
+    if display_path in PRODUCTION_COVERAGE_ROOT_FILES:
+        return True
+    return any(display_path.startswith(prefix) for prefix in PRODUCTION_COVERAGE_PREFIXES)
+
+
+def _summary_int(summary: dict[str, Any], key: str) -> int:
+    try:
+        return int(summary.get(key) or 0)
+    except TypeError, ValueError:
+        return 0
+
+
+def _percent(covered: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return (covered / total) * 100.0
+
+
+def _collect_production_coverage(
+    coverage: dict[str, Any],
+) -> tuple[dict[str, float | int], list[dict[str, object]], list[str]]:
     files = coverage.get("files", {}) if isinstance(coverage, dict) else {}
+    totals: dict[str, float | int] = {
+        "covered_lines": 0,
+        "num_statements": 0,
+        "missing_lines": 0,
+        "covered_branches": 0,
+        "num_branches": 0,
+        "missing_branches": 0,
+        "percent_covered": 0.0,
+        "percent_statements_covered": 0.0,
+        "percent_branches_covered": 0.0,
+    }
     measured_files: list[dict[str, object]] = []
-    for path, info in files.items():
+    excluded_files: list[str] = []
+
+    for raw_path, info in files.items():
+        display_path = _coverage_display_path(str(raw_path))
         summary = info.get("summary", {}) if isinstance(info, dict) else {}
-        statements = int(summary.get("num_statements") or 0)
+        statements = _summary_int(summary, "num_statements")
         if statements <= 0:
             continue
+
+        if not _is_production_coverage_path(display_path):
+            excluded_files.append(display_path)
+            continue
+
+        covered_lines = (
+            _summary_int(summary, "covered_lines")
+            if "covered_lines" in summary
+            else max(0, statements - _summary_int(summary, "missing_lines"))
+        )
+        missing_lines = (
+            _summary_int(summary, "missing_lines")
+            if "missing_lines" in summary
+            else max(0, statements - covered_lines)
+        )
+        branches = _summary_int(summary, "num_branches")
+        covered_branches = (
+            _summary_int(summary, "covered_branches")
+            if "covered_branches" in summary
+            else max(0, branches - _summary_int(summary, "missing_branches"))
+        )
+        missing_branches = (
+            _summary_int(summary, "missing_branches")
+            if "missing_branches" in summary
+            else max(0, branches - covered_branches)
+        )
+        combined_total = statements + branches
+        combined_covered = covered_lines + covered_branches
+
+        totals["covered_lines"] = int(totals["covered_lines"]) + covered_lines
+        totals["num_statements"] = int(totals["num_statements"]) + statements
+        totals["missing_lines"] = int(totals["missing_lines"]) + missing_lines
+        totals["covered_branches"] = int(totals["covered_branches"]) + covered_branches
+        totals["num_branches"] = int(totals["num_branches"]) + branches
+        totals["missing_branches"] = int(totals["missing_branches"]) + missing_branches
+
         measured_files.append(
             {
-                "path": _coverage_display_path(str(path)),
-                "percent": _rounded_float(summary.get("percent_covered")),
-                "branch": _rounded_float(summary.get("percent_branches_covered")),
-                "missing": int(summary.get("missing_lines") or 0),
+                "path": display_path,
+                "percent": _rounded_float(_percent(combined_covered, combined_total)),
+                "branch": _rounded_float(_percent(covered_branches, branches)),
+                "missing": missing_lines,
                 "statements": statements,
             }
         )
+
+    covered_lines = int(totals["covered_lines"])
+    statements = int(totals["num_statements"])
+    covered_branches = int(totals["covered_branches"])
+    branches = int(totals["num_branches"])
+    totals["percent_covered"] = _percent(covered_lines + covered_branches, statements + branches)
+    totals["percent_statements_covered"] = _percent(covered_lines, statements)
+    totals["percent_branches_covered"] = _percent(covered_branches, branches)
+    return totals, measured_files, sorted(excluded_files)
+
+
+def collect_coverage_snapshot(coverage_path: Path) -> dict[str, Any]:
+    coverage = _read_json(coverage_path)
+    totals, measured_files, excluded_files = _collect_production_coverage(coverage)
 
     lowest_files = sorted(
         measured_files,
@@ -208,6 +309,8 @@ def collect_coverage_snapshot(coverage_path: Path) -> dict[str, Any]:
         "coveredBranches": int(totals.get("covered_branches") or 0),
         "missingBranches": int(totals.get("missing_branches") or 0),
         "filesMeasured": len(measured_files),
+        "filesExcluded": len(excluded_files),
+        "excludedFiles": excluded_files[:25],
         "lowestFiles": lowest_files,
         "coverageWins": coverage_wins,
     }
@@ -231,7 +334,7 @@ def collect_snapshot(
     commit_sha: str | None = None,
 ) -> dict[str, str]:
     coverage = _read_json(coverage_path)
-    totals = coverage.get("totals", {}) if isinstance(coverage, dict) else {}
+    totals, _, _ = _collect_production_coverage(coverage)
     events = _read_json(pq_artifacts / "evidence.json")
     if not isinstance(events, list):
         events = []

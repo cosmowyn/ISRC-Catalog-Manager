@@ -33,10 +33,16 @@ class QAPQHistoryTests(unittest.TestCase):
             repo_root = Path(tmpdir)
             package = repo_root / "isrc_manager"
             package.mkdir()
+            qa_package = package / "qa"
+            qa_package.mkdir()
             (repo_root / "ISRC_manager.py").write_text("print('entry')\n", encoding="utf-8")
             (package / "__init__.py").write_text("", encoding="utf-8")
             (package / "main.py").write_text(
                 "# comment\n" "\n" "def run():\n" "    value = 1\n" "    return value\n",
+                encoding="utf-8",
+            )
+            (qa_package / "scenarios.py").write_text(
+                "def validate_dashboard():\n" "    return 'qa-only'\n",
                 encoding="utf-8",
             )
             (package / "help_content.py").write_text(
@@ -49,30 +55,65 @@ class QAPQHistoryTests(unittest.TestCase):
                 {
                     "meta": {"timestamp": "2026-06-02T11:59:00"},
                     "totals": {
-                        "percent_covered": 90.5,
-                        "percent_statements_covered": 93.25,
-                        "percent_branches_covered": 81.0,
-                        "covered_lines": 905,
+                        "percent_covered": 99.9,
+                        "percent_statements_covered": 99.8,
+                        "percent_branches_covered": 99.7,
+                        "covered_lines": 999,
                         "num_statements": 1000,
-                        "missing_lines": 95,
-                        "covered_branches": 81,
-                        "missing_branches": 19,
+                        "missing_lines": 1,
+                        "covered_branches": 997,
+                        "num_branches": 1000,
+                        "missing_branches": 3,
                     },
                     "files": {
                         str(repo_root / "isrc_manager" / "low.py"): {
                             "summary": {
-                                "percent_covered": 55.125,
-                                "percent_branches_covered": 25.0,
+                                "covered_lines": 11,
                                 "missing_lines": 9,
                                 "num_statements": 20,
+                                "covered_branches": 1,
+                                "missing_branches": 3,
+                                "num_branches": 4,
                             }
                         },
                         "isrc_manager/high.py": {
                             "summary": {
-                                "percent_covered": 98.75,
-                                "percent_branches_covered": 95.0,
+                                "covered_lines": 79,
                                 "missing_lines": 1,
                                 "num_statements": 80,
+                                "covered_branches": 19,
+                                "missing_branches": 1,
+                                "num_branches": 20,
+                            }
+                        },
+                        "isrc_manager/qa/scenarios.py": {
+                            "summary": {
+                                "covered_lines": 100,
+                                "missing_lines": 0,
+                                "num_statements": 100,
+                                "covered_branches": 40,
+                                "missing_branches": 0,
+                                "num_branches": 40,
+                            }
+                        },
+                        "tests/test_dashboard.py": {
+                            "summary": {
+                                "covered_lines": 50,
+                                "missing_lines": 0,
+                                "num_statements": 50,
+                                "covered_branches": 20,
+                                "missing_branches": 0,
+                                "num_branches": 20,
+                            }
+                        },
+                        "scripts/dashboard_tool.py": {
+                            "summary": {
+                                "covered_lines": 30,
+                                "missing_lines": 0,
+                                "num_statements": 30,
+                                "covered_branches": 10,
+                                "missing_branches": 0,
+                                "num_branches": 10,
                             }
                         },
                     },
@@ -160,9 +201,9 @@ class QAPQHistoryTests(unittest.TestCase):
             self.assertEqual(snapshot["commit_sha"], "abc123")
             self.assertEqual(snapshot["app_loc"], "4")
             self.assertEqual(snapshot["app_loc_delta"], "1")
-            self.assertEqual(snapshot["total_coverage"], "90.5000")
-            self.assertEqual(snapshot["statement_coverage"], "93.2500")
-            self.assertEqual(snapshot["branch_coverage"], "81.0000")
+            self.assertEqual(snapshot["total_coverage"], "88.7097")
+            self.assertEqual(snapshot["statement_coverage"], "90.0000")
+            self.assertEqual(snapshot["branch_coverage"], "83.3333")
             self.assertEqual(snapshot["total_tests"], "3")
             self.assertEqual(snapshot["passed_tests"], "1")
             self.assertEqual(snapshot["failed_tests"], "1")
@@ -177,13 +218,20 @@ class QAPQHistoryTests(unittest.TestCase):
 
             coverage_snapshot = json.loads(coverage_snapshot_path.read_text(encoding="utf-8"))
             self.assertEqual(coverage_snapshot["timestamp"], "2026-06-02T11:59:00")
-            self.assertEqual(coverage_snapshot["linePercent"], 90.5)
-            self.assertEqual(coverage_snapshot["statementPercent"], 93.25)
-            self.assertEqual(coverage_snapshot["branchPercent"], 81.0)
-            self.assertEqual(coverage_snapshot["coveredLines"], 905)
+            self.assertEqual(coverage_snapshot["linePercent"], 88.71)
+            self.assertEqual(coverage_snapshot["statementPercent"], 90.0)
+            self.assertEqual(coverage_snapshot["branchPercent"], 83.33)
+            self.assertEqual(coverage_snapshot["coveredLines"], 90)
+            self.assertEqual(coverage_snapshot["statements"], 100)
+            self.assertEqual(coverage_snapshot["coveredBranches"], 20)
+            self.assertEqual(coverage_snapshot["missingBranches"], 4)
             self.assertEqual(coverage_snapshot["filesMeasured"], 2)
+            self.assertEqual(coverage_snapshot["filesExcluded"], 3)
+            self.assertIn("isrc_manager/qa/scenarios.py", coverage_snapshot["excludedFiles"])
+            self.assertIn("tests/test_dashboard.py", coverage_snapshot["excludedFiles"])
+            self.assertIn("scripts/dashboard_tool.py", coverage_snapshot["excludedFiles"])
             self.assertEqual(coverage_snapshot["lowestFiles"][0]["path"], "isrc_manager/low.py")
-            self.assertEqual(coverage_snapshot["lowestFiles"][0]["percent"], 55.12)
+            self.assertEqual(coverage_snapshot["lowestFiles"][0]["percent"], 50.0)
             self.assertEqual(
                 coverage_snapshot["coverageWins"][0]["path"],
                 "isrc_manager/high.py",
@@ -231,6 +279,25 @@ class QAPQHistoryTests(unittest.TestCase):
         self.assertIn("docs/validation/coverage_snapshot.json", workflow)
         self.assertIn("Upload QA/PQ dashboard data", workflow)
         self.assertIn("Update QA/PQ dashboard data [skip ci]", workflow)
+
+    def test_dashboard_html_requires_live_coverage_artifacts(self) -> None:
+        dashboard = Path("docs/validation/qa_pq_dashboard.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("initial-dashboard-data", dashboard)
+        self.assertNotIn("Waiting for live published artifacts", dashboard)
+        self.assertNotIn("reloadArtifactsButton", dashboard)
+        self.assertNotIn("resetSnapshotButton", dashboard)
+        self.assertNotIn("Reload artifacts", dashboard)
+        self.assertNotIn("Clear live data", dashboard)
+        self.assertIn('coverage: "coverage_snapshot.json"', dashboard)
+        self.assertIn("artifactPollIntervalMs", dashboard)
+        self.assertIn("pollLiveArtifacts", dashboard)
+        self.assertIn("window.setInterval(pollLiveArtifacts, artifactPollIntervalMs)", dashboard)
+        self.assertIn("fetchLiveArtifactBundle", dashboard)
+        self.assertIn("fetchText(artifactPaths.coverage)", dashboard)
+        self.assertIn("requireCoverageNumber", dashboard)
+        self.assertIn("No static coverage values are shown", dashboard)
+        self.assertIn("let dashboardData = null", dashboard)
 
 
 if __name__ == "__main__":

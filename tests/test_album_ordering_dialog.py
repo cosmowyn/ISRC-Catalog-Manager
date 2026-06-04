@@ -96,6 +96,74 @@ def test_album_ordering_table_drag_drop_helpers_handle_bounds_and_external_event
     assert table._drop_row_for_event(1, position_event) >= 0
     table.dropIndicatorPosition = lambda: QAbstractItemView.BelowItem
     assert table._drop_row_for_event(0, fallback_event) >= 0
+    table.dropIndicatorPosition = lambda: QAbstractItemView.OnItem
+    assert table._drop_row_for_event(0, fallback_event) >= 0
+    bottom_event = SimpleNamespace(position=lambda: QPointF(1, 100000))
+    assert table._drop_row_for_event(0, bottom_event) == table.rowCount() - 1
+
+
+def test_album_ordering_table_drop_event_paths(monkeypatch) -> None:
+    require_qapplication()
+    table = _AlbumTrackOrderingTable()
+    _populate_table(table)
+
+    class _Event:
+        def __init__(self, source):
+            self._source = source
+            self.calls: list[str] = []
+
+        def source(self):
+            return self._source
+
+        def ignore(self):
+            self.calls.append("ignore")
+
+        def setDropAction(self, action):
+            self.calls.append(f"drop:{action.name}")
+
+        def accept(self):
+            self.calls.append("accept")
+
+        def acceptProposedAction(self):
+            self.calls.append("accept-proposed")
+
+        def position(self):
+            return QPointF(1, 10)
+
+    external = _Event(QWidget())
+    table.dropEvent(external)
+    assert external.calls == ["ignore"]
+
+    table.clearSelection()
+    no_selection = _Event(table)
+    table.dropEvent(no_selection)
+    assert no_selection.calls == ["ignore"]
+
+    table.selectRow(0)
+    table.setCurrentCell(0, 0)
+    monkeypatch.setattr(table, "_drop_row_for_event", lambda _source_row, _event: -1)
+    invalid_drop = _Event(table)
+    table.dropEvent(invalid_drop)
+    assert invalid_drop.calls[-1] == "ignore"
+
+    monkeypatch.setattr(table, "_drop_row_for_event", lambda _source_row, _event: 0)
+    same_row_drop = _Event(table)
+    table.dropEvent(same_row_drop)
+    assert same_row_drop.calls[-1] == "accept"
+
+    monkeypatch.setattr(table, "_drop_row_for_event", lambda _source_row, _event: 2)
+    moved_drop = _Event(table)
+    table.dropEvent(moved_drop)
+    assert moved_drop.calls[-1] == "accept-proposed"
+    assert [table.item(row, 0).data(Qt.UserRole) for row in range(3)] == [2, 3, 1]
+
+    internal_drag = _Event(table)
+    table.dragEnterEvent(internal_drag)
+    assert internal_drag.calls == ["accept-proposed"]
+
+    external_move = _Event(QWidget())
+    table.dragMoveEvent(external_move)
+    assert external_move.calls == ["ignore"]
 
 
 def test_album_track_ordering_dialog_reports_ids_and_button_states() -> None:
@@ -125,6 +193,8 @@ def test_album_track_ordering_dialog_reports_ids_and_button_states() -> None:
 
     dialog.table.item(1, 0).setData(Qt.UserRole, "not-an-int")
     assert dialog.ordered_track_ids() == [2, 3]
+    dialog.table.takeItem(0, 0)
+    assert dialog.ordered_track_ids() == [3]
 
 
 def test_album_track_ordering_dialog_handles_empty_album() -> None:
