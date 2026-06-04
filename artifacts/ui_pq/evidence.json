@@ -8,18 +8,18 @@
     "message": "Runtime UI inventory and traceability matrix were generated.",
     "status": "passed",
     "test_id": "UI-PQ-INV-001",
-    "timestamp": "2026-06-03T20:41:50.745495+00:00"
+    "timestamp": "2026-06-04T05:19:36.494440+00:00"
   },
   {
     "data": {
-      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/Database/default.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/Database/default.db",
       "menu_count": 38,
       "window_title": "Music Catalog Manager"
     },
     "message": "Main window, menu bar, and QA database are reachable.",
     "status": "passed",
     "test_id": "UI-PQ-SMOKE-001",
-    "timestamp": "2026-06-03T20:41:50.745553+00:00"
+    "timestamp": "2026-06-04T05:19:36.494480+00:00"
   },
   {
     "data": {
@@ -29,7 +29,7 @@
     "message": "Runtime menu/action inventory was generated.",
     "status": "passed",
     "test_id": "UI-PQ-MENU-001",
-    "timestamp": "2026-06-03T20:41:50.745575+00:00"
+    "timestamp": "2026-06-04T05:19:36.494499+00:00"
   },
   {
     "data": {
@@ -142,13 +142,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
             "sample_count": 289,
-            "sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+            "sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
             "unique_sample_colors": 15,
             "width": 1233
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-            "actual_sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+            "actual_sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
             "baseline_sha256": "713b99fa31de7a7355f44d38a92a764638817441dab1122b5123f4e55e737c93",
@@ -160,14 +160,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
                 "sample_count": 289,
-                "sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+                "sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
                 "unique_sample_colors": 15,
                 "width": 1233
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.010101010101010102,
-                "changed_samples": 11,
-                "mean_channel_delta": 0.9387052341597796,
+                "changed_sample_ratio": 0.009182736455463728,
+                "changed_samples": 10,
+                "mean_channel_delta": 1.065426997245179,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -192,13 +192,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
             "sample_count": 272,
-            "sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+            "sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
             "unique_sample_colors": 22,
             "width": 720
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-            "actual_sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+            "actual_sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
             "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -210,14 +210,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
                 "sample_count": 272,
-                "sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+                "sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
                 "unique_sample_colors": 22,
                 "width": 720
               },
               "comparison_profile": {
                 "changed_sample_ratio": 0.004591368227731864,
                 "changed_samples": 5,
-                "mean_channel_delta": 0.4297520661157025,
+                "mean_channel_delta": 0.25550964187327824,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -542,13 +542,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
             "sample_count": 289,
-            "sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+            "sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
             "unique_sample_colors": 20,
             "width": 1220
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-            "actual_sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+            "actual_sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
             "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -560,14 +560,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
                 "sample_count": 289,
-                "sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+                "sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
                 "unique_sample_colors": 20,
                 "width": 1220
               },
               "comparison_profile": {
                 "changed_sample_ratio": 0.00089126559714795,
                 "changed_samples": 1,
-                "mean_channel_delta": 0.1557486631016043,
+                "mean_channel_delta": 0.17045454545454544,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1122,
@@ -592,13 +592,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
             "sample_count": 289,
-            "sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
-            "unique_sample_colors": 25,
+            "sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
+            "unique_sample_colors": 29,
             "width": 860
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-            "actual_sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
+            "actual_sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
             "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -610,14 +610,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
                 "sample_count": 289,
-                "sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
-                "unique_sample_colors": 25,
+                "sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
+                "unique_sample_colors": 29,
                 "width": 860
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.010380622837370242,
-                "changed_samples": 12,
-                "mean_channel_delta": 1.2294550173010381,
+                "changed_sample_ratio": 0.012110726643598616,
+                "changed_samples": 14,
+                "mean_channel_delta": 1.1639273356401385,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1156,
@@ -1694,13 +1694,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
             "sample_count": 289,
-            "sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+            "sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
             "unique_sample_colors": 15,
             "width": 1233
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-            "actual_sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+            "actual_sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
             "baseline_sha256": "713b99fa31de7a7355f44d38a92a764638817441dab1122b5123f4e55e737c93",
@@ -1712,14 +1712,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
                 "sample_count": 289,
-                "sha256": "34faf3dd5fadc1afbecd9d4ccab8380b3709c6eb12bb786bbc6cc7c0768c74cb",
+                "sha256": "3f94ce70e21df76ea71fd365a55c9bc0bad2ec2c1de6f68eb60fc904883d7dfe",
                 "unique_sample_colors": 15,
                 "width": 1233
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.010101010101010102,
-                "changed_samples": 11,
-                "mean_channel_delta": 0.9387052341597796,
+                "changed_sample_ratio": 0.009182736455463728,
+                "changed_samples": 10,
+                "mean_channel_delta": 1.065426997245179,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -1744,13 +1744,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
             "sample_count": 272,
-            "sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+            "sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
             "unique_sample_colors": 22,
             "width": 720
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-            "actual_sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+            "actual_sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
             "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -1762,14 +1762,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
                 "sample_count": 272,
-                "sha256": "e8ba474d9a69b7cf7f600831b6f3b06d51befc28aa13f71f8185a1ab10baafe4",
+                "sha256": "d82e4899c668296486efc99fe69afe112487771761cda07e68ebee349bd9e907",
                 "unique_sample_colors": 22,
                 "width": 720
               },
               "comparison_profile": {
                 "changed_sample_ratio": 0.004591368227731864,
                 "changed_samples": 5,
-                "mean_channel_delta": 0.4297520661157025,
+                "mean_channel_delta": 0.25550964187327824,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1089,
@@ -2094,13 +2094,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
             "sample_count": 289,
-            "sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+            "sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
             "unique_sample_colors": 20,
             "width": 1220
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-            "actual_sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+            "actual_sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
             "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -2112,14 +2112,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
                 "sample_count": 289,
-                "sha256": "b6a6a1238712b34039f25f2ee38a7cfa20fbc33bbfd0d3d1d4f8ca44fb97220a",
+                "sha256": "1805b615990f808dc352570d376b18725d96b8ed0ea1d12fbb0b7cb12a7a706f",
                 "unique_sample_colors": 20,
                 "width": 1220
               },
               "comparison_profile": {
                 "changed_sample_ratio": 0.00089126559714795,
                 "changed_samples": 1,
-                "mean_channel_delta": 0.1557486631016043,
+                "mean_channel_delta": 0.17045454545454544,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1122,
@@ -2144,13 +2144,13 @@
             "non_blank": true,
             "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
             "sample_count": 289,
-            "sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
-            "unique_sample_colors": 25,
+            "sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
+            "unique_sample_colors": 29,
             "width": 860
           },
           "comparison": {
             "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-            "actual_sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
+            "actual_sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
             "baseline_created": false,
             "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
             "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -2162,14 +2162,14 @@
                 "non_blank": true,
                 "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
                 "sample_count": 289,
-                "sha256": "d5e8dea40260d2815c2a712f70f4593ade22dc8d9c3baf1562ae9f2772212d56",
-                "unique_sample_colors": 25,
+                "sha256": "d8ee4a1a726e78a784922ce203f56134fd005d56d2d45b6abad208833d4aea86",
+                "unique_sample_colors": 29,
                 "width": 860
               },
               "comparison_profile": {
-                "changed_sample_ratio": 0.010380622837370242,
-                "changed_samples": 12,
-                "mean_channel_delta": 1.2294550173010381,
+                "changed_sample_ratio": 0.012110726643598616,
+                "changed_samples": 14,
+                "mean_channel_delta": 1.1639273356401385,
                 "passed": true,
                 "same_size": true,
                 "sample_count": 1156,
@@ -2543,7 +2543,7 @@
     "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed.",
     "status": "passed",
     "test_id": "UI-PQ-SET-001",
-    "timestamp": "2026-06-03T20:41:53.115366+00:00"
+    "timestamp": "2026-06-04T05:19:39.102275+00:00"
   },
   {
     "data": {
@@ -2612,7 +2612,7 @@
     "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references.",
     "status": "passed",
     "test_id": "UI-PQ-HELP-001",
-    "timestamp": "2026-06-03T20:41:53.888812+00:00"
+    "timestamp": "2026-06-04T05:19:39.913967+00:00"
   },
   {
     "data": {
@@ -2648,7 +2648,7 @@
     "message": "Track was created through Add Track UI and edited through Edit Track UI.",
     "status": "passed",
     "test_id": "UI-PQ-CAT-001",
-    "timestamp": "2026-06-03T20:41:54.200681+00:00"
+    "timestamp": "2026-06-04T05:19:40.255565+00:00"
   },
   {
     "data": {
@@ -2707,7 +2707,7 @@
     "message": "Party, Work, and Release relationships were created or verified through manager UI.",
     "status": "passed",
     "test_id": "UI-PQ-REL-001",
-    "timestamp": "2026-06-03T20:41:54.597030+00:00"
+    "timestamp": "2026-06-04T05:19:40.669642+00:00"
   },
   {
     "data": {
@@ -2759,7 +2759,7 @@
     "message": "Contract and Rights Matrix records were created through UI and verified in the database.",
     "status": "passed",
     "test_id": "UI-PQ-CON-001",
-    "timestamp": "2026-06-03T20:41:54.895867+00:00"
+    "timestamp": "2026-06-04T05:19:40.962696+00:00"
   },
   {
     "data": {
@@ -2904,7 +2904,7 @@
     "message": "Invoice creation, invoice posting, payment entry, credit note creation, royalty statement generation, payout creation, report generation, and balanced ledger checks were executed through UI controls.",
     "status": "passed",
     "test_id": "UI-PQ-ACC-001",
-    "timestamp": "2026-06-03T20:41:56.013111+00:00"
+    "timestamp": "2026-06-04T05:19:42.180249+00:00"
   },
   {
     "data": {
@@ -2964,14 +2964,14 @@
     "message": "SoundCloud publish dialog options, private preflight, watermarked source, artwork, mocked publish action, progress UI, completion UI, run state, and no-secret storage were verified without network.",
     "status": "passed",
     "test_id": "UI-PQ-SC-001",
-    "timestamp": "2026-06-03T20:41:56.174844+00:00"
+    "timestamp": "2026-06-04T05:19:42.356215+00:00"
   },
   {
     "data": {
       "backup_integrity": "ok",
       "backup_method": "backup_api",
-      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/backups/default_20260603_224156.db",
-      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/Database/default.db",
+      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/backups/default_20260604_071942.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/Database/default.db",
       "diagnostics_check_statuses": {
         "Audio waveform cache": "ok",
         "Backup artifacts": "ok",
@@ -2990,7 +2990,7 @@
       "progress_message_count": 40,
       "restore_integrity": "ok",
       "restore_target": "artifacts/ui_pq/diagnostics-restore-target.db",
-      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260603_224156.db",
+      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260604_071942.db",
       "status_messages": [
         "Collecting environment details...",
         "Collected environment details.",
@@ -3037,7 +3037,7 @@
     "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed against the QA profile.",
     "status": "passed",
     "test_id": "UI-PQ-DIAG-001",
-    "timestamp": "2026-06-03T20:41:56.241408+00:00"
+    "timestamp": "2026-06-04T05:19:42.432526+00:00"
   },
   {
     "data": {
@@ -3088,7 +3088,7 @@
       "pdf_profile": {
         "ends_with_eof": true,
         "page_count": 1,
-        "sha256": "18d8e338505bb66e2d6bbdfabd90954d92eca4b5b49ba74c5c28035fd8a51d42",
+        "sha256": "f064748e43aee821e97dbf9a2c63ec4ecff0ebc1bf6d76690d2d31415075d965",
         "size_bytes": 13551,
         "starts_with_pdf_header": true,
         "valid": true
@@ -3111,7 +3111,32 @@
     "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines.",
     "status": "passed",
     "test_id": "UI-PQ-IMP-001",
-    "timestamp": "2026-06-03T20:41:56.249981+00:00"
+    "timestamp": "2026-06-04T05:19:42.441949+00:00"
+  },
+  {
+    "data": {
+      "asset_filename": "ui-pq-deliverables-master.wav",
+      "asset_id": 1,
+      "asset_primary_flag": true,
+      "dock_object_name": "assetRegistryDock",
+      "inventory_ids": [
+        "action:deliverables_and_asset_versions",
+        "action:deliverables_asset_versions",
+        "button:qt_dockwidget_closebutton:370",
+        "button:qt_dockwidget_floatbutton:369",
+        "dock:assetregistrydock"
+      ],
+      "panel_object_name": "assetBrowserPanel",
+      "tab_labels": [
+        "Asset Registry",
+        "Derivative Ledger"
+      ],
+      "track_id": 2
+    },
+    "message": "Deliverables and Asset Versions action, dock, asset table, search, and derivative ledger navigation were qualified.",
+    "status": "passed",
+    "test_id": "UI-PQ-ASSET-001",
+    "timestamp": "2026-06-04T05:19:42.469014+00:00"
   },
   {
     "data": {
@@ -3131,20 +3156,20 @@
       },
       "attachment_progress_count": 8,
       "exported_audio_path": "artifacts/ui_pq/authenticity_exports/UI PQ Release/UI PQ Qualification Track Edited.wav",
-      "extraction_confidence": 0.9660493827160493,
-      "fingerprint_similarity": 0.9999998807907104,
-      "forensic_batch_id": "FEX-20260603T204156Z-582ae019",
+      "extraction_confidence": 0.9675925925925926,
+      "fingerprint_similarity": 1.0,
+      "forensic_batch_id": "FEX-20260604T051942Z-a079a163",
       "forensic_conversion_calls": [
         {
-          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/forensic-export-FEX-20260603T204156Z-582ae019-m4yxf43x/UI PQ Qualification Track Edited.wav",
+          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/forensic-export-FEX-20260604T051942Z-a079a163-8iif7zft/UI PQ Qualification Track Edited.wav",
           "metadata_behavior": "inherit",
-          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/track_media/audio/85189beb021e_ui-pq-authenticity-master.wav",
+          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/track_media/audio/85189beb021e_ui-pq-authenticity-master.wav",
           "target_id": "wav"
         }
       ],
       "forensic_exact_hash_match": true,
       "forensic_export_ids": [
-        "FWX-20260603T204156Z-18b581a8ee"
+        "FWX-20260604T051943Z-2105e65202"
       ],
       "forensic_inspection_status": "forensic_match_found",
       "forensic_resolution_basis": "exact_output_hash",
@@ -3157,9 +3182,9 @@
         "help_status": "passed",
         "workflow": "Export and Verify Authenticity Watermarked Audio"
       },
-      "key_id": "ed25519-d2055361a0c9aec6",
+      "key_id": "ed25519-e782bdf7885c5062",
       "manifest_ids": [
-        "7314c311b0ee90d7d08c31c206eebde4"
+        "b0c32b71c44666d80b829555b30d0dee"
       ],
       "sidecar_path": "artifacts/ui_pq/authenticity_exports/UI PQ Release/UI PQ Qualification Track Edited.wav.authenticity.json",
       "signature_valid": true,
@@ -3202,7 +3227,7 @@
     "message": "Authenticity key, direct watermark export, signed sidecar verification, forensic export, forensic inspection, and result dialogs were verified.",
     "status": "passed",
     "test_id": "UI-PQ-AUTH-001",
-    "timestamp": "2026-06-03T20:41:57.039629+00:00"
+    "timestamp": "2026-06-04T05:19:43.315466+00:00"
   },
   {
     "data": {
@@ -3226,15 +3251,15 @@
       "authenticity_basis": "catalog_lineage_only",
       "conversion_calls": [
         {
-          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/managed-derivative-AEX-20260603T204157Z-11952a9a-pn2c090l/UI PQ Qualification Track Edited.mp3",
+          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/managed-derivative-AEX-20260604T051943Z-fb091c2b-vt4gjyt5/UI PQ Qualification Track Edited.mp3",
           "metadata_behavior": "inherit",
-          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpoeey18gu/qt-settings/AppLocalDataLocation/track_media/audio/27fcbad1778b_ui-pq-media-attachment.wav",
+          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpos9bio6p/qt-settings/AppLocalDataLocation/track_media/audio/27fcbad1778b_ui-pq-media-attachment.wav",
           "target_id": "mp3"
         }
       ],
-      "derivative_batch_id": "AEX-20260603T204157Z-11952a9a",
+      "derivative_batch_id": "AEX-20260604T051943Z-fb091c2b",
       "derivative_ids": [
-        "41fe9b1a667442aa83f34fea145777ed"
+        "402b8dd0607d47ee89c017448ef29ed2"
       ],
       "derivative_kind": "lossy_derivative",
       "derivative_workflow_kind": "managed_audio_derivative",
@@ -3254,7 +3279,7 @@
       "ledger_derivative": {
         "authenticity_basis": "catalog_lineage_only",
         "derivative_kind": "lossy_derivative",
-        "export_id": "41fe9b1a667442aa83f34fea145777ed",
+        "export_id": "402b8dd0607d47ee89c017448ef29ed2",
         "managed_file_path": "artifacts/ui_pq/managed_media_derivatives/UI PQ Release/UI PQ Qualification Track Edited.mp3",
         "output_filename": "UI PQ Qualification Track Edited.mp3",
         "output_format": "mp3",
@@ -3297,6 +3322,6 @@
     "message": "Media audio attachment, media player command routing, no-ffmpeg conversion boundary, managed derivative export, and derivative ledger drill-in were verified.",
     "status": "passed",
     "test_id": "UI-PQ-MEDIA-001",
-    "timestamp": "2026-06-03T20:41:57.613166+00:00"
+    "timestamp": "2026-06-04T05:19:43.923663+00:00"
   }
 ]

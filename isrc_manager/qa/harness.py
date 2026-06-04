@@ -20,6 +20,7 @@ from .inventory import UIInventoryItem, discover_ui_inventory, write_inventory
 from .mocks import NoNetworkGuard
 from .scenarios import (
     run_accounting_workflow,
+    run_assets_deliverables_workflow,
     run_authenticity_workflow,
     run_catalog_workflow,
     run_contract_workflow,
@@ -412,6 +413,11 @@ class UIQualificationHarness:
         )
         workflow_track_id = int(self.qa_data.get("track_id") or track_id or 0)
         if workflow_track_id > 0:
+            self._run_step(
+                "UI-PQ-ASSET-001",
+                "assets, deliverables, and derivative ledger workflow",
+                lambda: run_assets_deliverables_workflow(self, track_id=workflow_track_id),
+            )
             self._run_step(
                 "UI-PQ-AUTH-001",
                 "authenticity, watermark, and forensic workflow",

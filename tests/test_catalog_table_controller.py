@@ -803,6 +803,22 @@ class CatalogTableContextMenuTests(unittest.TestCase):
 
         self.assertEqual(_FakeMenu.instances, [])
 
+    def test_context_menu_without_track_id_limits_track_specific_actions(self):
+        app = _FakeContextMenuApp(_target(track_id=None), _FakeIndex(text="orphan cell"))
+
+        with self._patched_context_menu_widgets():
+            context_menu._on_catalog_table_context_menu(app, (9, 10))
+
+        menu = _FakeMenu.instances[0]
+        texts = _action_texts(menu)
+        self.assertIn("Edit Track", texts)
+        self.assertIn("GS1 Metadata…", texts)
+        self.assertIn("Delete Track", texts)
+        self.assertIn("Set Filter: 'orphan cell'", texts)
+        self.assertNotIn("Album Track Ordering", texts)
+        self.assertFalse(any(text.startswith("Publish to SoundCloud") for text in texts))
+        self.assertFalse(any(text.startswith("Export Audio Derivatives") for text in texts))
+
     def test_standard_media_context_menu_actions_execute_callbacks(self):
         target = _target(kind="standard", standard_media_key="audio_file")
         index = _FakeIndex(text="needle")
@@ -892,6 +908,37 @@ class CatalogTableContextMenuTests(unittest.TestCase):
         self.assertIn(("track_has_media", (7, "album_art"), {}), app.calls)
         self.assertIn(("_preview_standard_media_for_track", (7, "album_art"), {}), app.calls)
 
+    def test_standard_media_context_menu_skips_payload_actions_when_file_is_absent(self):
+        target = _target(kind="standard", standard_media_key="album_art")
+        app = _FakeContextMenuApp(
+            target,
+            _FakeIndex(text="missing cover"),
+            columns={"base:album_art": 2},
+            standard_payload=False,
+            track_media=False,
+            proxy_model=None,
+            standard_targets=("database",),
+        )
+
+        with self._patched_context_menu_widgets():
+            context_menu._on_catalog_table_context_menu(app, (0, 0))
+
+        menu = _FakeMenu.instances[0]
+        texts = _action_texts(menu)
+        self.assertIn("Attach/Replace File…", texts)
+        self.assertIn("Move to database (0)", texts)
+        self.assertFalse(any(text.startswith("Preview File") for text in texts))
+        self.assertFalse(any(text.startswith("Export 'track-7-album_art'") for text in texts))
+        self.assertFalse(any(text.startswith("Delete File") for text in texts))
+
+        _find_action(menu, "Attach/Replace File").trigger()
+        _find_action(menu, "Move to database").trigger()
+        self.assertIn(("_attach_standard_media_for_track", (7, "album_art"), {}), app.calls)
+        self.assertIn(
+            ("_convert_standard_media_for_track", ([], "album_art", "database"), {}),
+            app.calls,
+        )
+
     def test_custom_blob_context_menu_actions_confirm_and_report_failures(self):
         target = _target(
             kind="custom",
@@ -938,6 +985,37 @@ class CatalogTableContextMenuTests(unittest.TestCase):
         self.assertEqual(app.conn.rollbacks, 1)
         self.assertTrue(app.logger.exceptions)
         self.assertTrue(_FakeMessageBox.criticals)
+
+    def test_custom_blob_context_menu_uses_visible_title_and_skips_payload_actions_when_empty(self):
+        target = _target(
+            kind="custom",
+            custom_field={"id": 9, "name": "Cover"},
+            custom_field_id=9,
+            custom_field_type="blob_image",
+        )
+        app = _FakeContextMenuApp(
+            target,
+            _FakeIndex(row=1, column=5, text="", siblings={2: "Visible Title"}),
+            columns={"base:track_title": 2},
+            custom_payload=False,
+            custom_targets=("external",),
+        )
+
+        with self._patched_context_menu_widgets():
+            context_menu._on_catalog_table_context_menu(app, (3, 4))
+
+        menu = _FakeMenu.instances[0]
+        texts = _action_texts(menu)
+        self.assertIn("Attach/Replace File…", texts)
+        self.assertIn("Move to external (0)", texts)
+        self.assertFalse(any(text.startswith("Preview File") for text in texts))
+        self.assertFalse(any(text.startswith("Export 'Visible Title'") for text in texts))
+        self.assertFalse(any(text.startswith("Delete File") for text in texts))
+
+        _find_action(menu, "Attach/Replace File").trigger()
+        _find_action(menu, "Move to external").trigger()
+        self.assertIn(("_attach_blob_for_cell", (7, 9, "blob_image", "Cover"), {}), app.calls)
+        self.assertIn(("_convert_custom_blob_storage_mode", ([], 9, "external"), {}), app.calls)
 
     def test_preview_catalog_blob_handles_standard_and_guard_paths(self):
         app = _FakeContextMenuApp(
@@ -1032,6 +1110,27 @@ class CatalogTableContextMenuTests(unittest.TestCase):
         self.assertIn(
             ("_preview_blob_bytes", (b"blob", "Document Track"), {}),
             generic_app.calls,
+        )
+
+    def test_preview_catalog_blob_falls_back_when_track_title_lookup_fails(self):
+        target = _target(
+            kind="custom",
+            custom_field={"name": "Cover"},
+            custom_field_id=9,
+            custom_field_type="blob_image",
+        )
+        app = _FakeContextMenuApp(
+            target,
+            custom_field_name="Cover",
+            cf_fetch_blob=b"image-bytes",
+        )
+        app.track_title_raises = True
+
+        context_menu._preview_catalog_blob_for_cell(app, 0, 1)
+
+        self.assertIn(
+            ("_open_image_preview", (b"image-bytes", "track_7 \u2014 Cover"), {}),
+            app.calls,
         )
 
     def test_preview_catalog_blob_rolls_back_and_reports_exceptions(self):

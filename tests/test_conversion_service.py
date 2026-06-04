@@ -5,12 +5,14 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
+from isrc_manager.conversion.adapters import xlsx as xlsx_adapter_module
 from isrc_manager.conversion.adapters.xlsx import XlsxSourceAdapter, XlsxTemplateAdapter
 from isrc_manager.conversion.models import (
     MAPPING_KIND_CONSTANT,
@@ -311,6 +313,92 @@ class ConversionServiceTests(unittest.TestCase):
             self.assertIsNone(sheet["B4"].value)
         finally:
             exported.close()
+
+    def test_xlsx_template_export_supports_workbooks_without_callable_close(self):
+        class _FakeCell:
+            def __init__(self):
+                self.value = None
+
+        class _FakeWorksheet:
+            max_row = 1
+
+            def __init__(self):
+                self.cells = {}
+
+            def cell(self, *, row, column, value=None):
+                key = (row, column)
+                cell = self.cells.setdefault(key, _FakeCell())
+                if value is not None:
+                    cell.value = value
+                return cell
+
+        class _FakeWorkbook:
+            close = None
+
+            def __init__(self):
+                self.worksheet = _FakeWorksheet()
+                self.saved_path = None
+
+            def __getitem__(self, sheet_name):
+                if sheet_name != "Data":
+                    raise KeyError(sheet_name)
+                return self.worksheet
+
+            def save(self, path):
+                self.saved_path = path
+
+        fake_workbook = _FakeWorkbook()
+        template_path = self.root / "fake-template.xlsx"
+        preview = ConversionPreview(
+            template_profile=ConversionTemplateProfile(
+                template_path=template_path,
+                format_name="xlsx",
+                output_suffix=".xlsx",
+                structure_label="Fake workbook",
+                target_fields=(
+                    ConversionTargetField(
+                        field_key="catalog_number",
+                        display_name="Catalog Number",
+                        location="Data!A1",
+                        required_status=REQUIRED_STATUS_REQUIRED,
+                        metadata={"column_index": 1},
+                    ),
+                ),
+                template_signature="xlsx|sheet:Data|catalog_number",
+                chosen_scope="Data",
+                adapter_state={
+                    "sheet_profiles": {
+                        "Data": {
+                            "header_row_index": 1,
+                            "sample_start": 2,
+                            "sample_end": 1,
+                        }
+                    }
+                },
+            ),
+            source_profile=ConversionSourceProfile(
+                source_mode=SOURCE_MODE_FILE,
+                format_name="json",
+                source_label="memory",
+                headers=(),
+                rows=(),
+                preview_rows=(),
+            ),
+            mapping_entries=(),
+            included_row_indices=(0,),
+            rendered_rows=(("CAT-77",),),
+        )
+
+        with mock.patch.object(
+            xlsx_adapter_module,
+            "_open_workbook",
+            return_value=fake_workbook,
+        ):
+            result = XlsxTemplateAdapter().export_preview(preview, self.root / "fake-output.xlsx")
+
+        self.assertEqual(result.exported_row_count, 1)
+        self.assertEqual(fake_workbook.worksheet.cells[(2, 1)].value, "CAT-77")
+        self.assertEqual(fake_workbook.saved_path, str(self.root / "fake-output.xlsx"))
 
     def test_xlsx_template_row_style_clone_copies_full_style_and_respects_noop_guards(self):
         workbook = Workbook()

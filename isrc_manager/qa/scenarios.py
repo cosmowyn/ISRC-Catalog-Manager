@@ -13,6 +13,7 @@ from unittest import mock
 
 from PySide6.QtWidgets import QAbstractButton, QComboBox, QDialog, QMenu, QWidget
 
+from isrc_manager.assets.models import AssetVersionPayload
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,
     BUILTIN_CATEGORY_INVOICE_NUMBER,
@@ -1998,6 +1999,127 @@ def run_generated_output_qualification_workflow(harness: Any) -> None:
             "pdf_path": str(pdf_path),
             "pdf_profile": pdf_profile,
             "pdf_comparison": pdf_comparison.to_dict(),
+        },
+    )
+
+
+def _asset_panel_from_window(window: Any):
+    panel = getattr(window, "asset_registry_panel", None)
+    if panel is not None:
+        return panel
+    dock = getattr(window, "asset_registry_dock", None)
+    widget = dock.widget() if dock is not None and callable(getattr(dock, "widget", None)) else None
+    return widget
+
+
+def run_assets_deliverables_workflow(harness: Any, *, track_id: int) -> None:
+    window = harness.window
+    if window is None:
+        raise AssertionError("Application window is required for assets-deliverables PQ.")
+    service = getattr(window, "asset_service", None)
+    if service is None:
+        raise AssertionError("Asset service is required for assets-deliverables PQ.")
+    if int(track_id or 0) <= 0:
+        raise AssertionError("A catalog track id is required for assets-deliverables PQ.")
+
+    asset_filename = "ui-pq-deliverables-master.wav"
+    asset_id = int(
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                filename=asset_filename,
+                track_id=int(track_id),
+                approved_for_use=True,
+                primary_flag=True,
+                version_status="approved",
+                notes="Created by the automated UI PQ assets-deliverables workflow.",
+            )
+        )
+    )
+    harness.connection.commit()
+
+    action = getattr(window, "asset_registry_action", None)
+    if action is None or not action.isEnabled():
+        raise AssertionError("Deliverables and Asset Versions action is not available.")
+    action.trigger()
+    harness.process_events()
+
+    dock = getattr(window, "asset_registry_dock", None)
+    if dock is None or dock.objectName() != "assetRegistryDock":
+        raise AssertionError("Asset registry dock did not open with the expected objectName.")
+    panel = _asset_panel_from_window(window)
+    if panel is None or panel.objectName() != "assetBrowserPanel":
+        raise AssertionError("Asset registry panel did not open with the expected objectName.")
+
+    panel.refresh()
+    panel.focus_asset(asset_id)
+    harness.process_events()
+    if panel._selected_asset_id() != asset_id:
+        raise AssertionError("Seeded asset was not selected in the asset registry panel.")
+    if not table_contains_text(panel.table, asset_filename):
+        raise AssertionError("Seeded asset filename was not visible in the asset registry table.")
+
+    panel.search_edit.setText("deliverables-master")
+    panel.refresh()
+    harness.process_events()
+    if panel.table.rowCount() != 1 or not table_contains_text(panel.table, asset_filename):
+        raise AssertionError("Asset registry search did not isolate the seeded asset.")
+    panel.search_edit.clear()
+    panel.refresh()
+
+    panel.focus_tab("derivatives")
+    harness.process_events()
+    if panel.workspace_tabs.currentWidget() is not panel.derivative_ledger_tab:
+        raise AssertionError(
+            "Derivative ledger tab was not reachable from the asset registry panel."
+        )
+    panel.focus_tab("assets")
+    harness.process_events()
+    if panel.workspace_tabs.currentWidget() is not panel.asset_registry_tab:
+        raise AssertionError(
+            "Asset registry tab was not reachable after derivative ledger navigation."
+        )
+
+    inventory_ids = sorted(
+        item.inventory_id for item in harness.inventory if item.ui_area == "assets_deliverables"
+    )
+    required_inventory_ids = {
+        "action:deliverables_and_asset_versions",
+        "action:deliverables_asset_versions",
+    }
+    missing_inventory_ids = sorted(required_inventory_ids.difference(inventory_ids))
+    required_button_prefixes = {
+        "button:qt_dockwidget_closebutton": "asset registry dock close button",
+        "button:qt_dockwidget_floatbutton": "asset registry dock float button",
+    }
+    for prefix, label in required_button_prefixes.items():
+        if not any(inventory_id.startswith(prefix) for inventory_id in inventory_ids):
+            missing_inventory_ids.append(label)
+    if missing_inventory_ids:
+        raise AssertionError(
+            "Assets-deliverables inventory controls were not discovered: "
+            + ", ".join(missing_inventory_ids)
+        )
+
+    asset = service.fetch_asset(asset_id)
+    harness.evidence.record(
+        "UI-PQ-ASSET-001",
+        status="passed",
+        message=(
+            "Deliverables and Asset Versions action, dock, asset table, search, and derivative "
+            "ledger navigation were qualified."
+        ),
+        data={
+            "track_id": int(track_id),
+            "asset_id": asset_id,
+            "asset_filename": asset_filename,
+            "asset_primary_flag": bool(getattr(asset, "primary_flag", False)),
+            "dock_object_name": dock.objectName(),
+            "panel_object_name": panel.objectName(),
+            "tab_labels": [
+                panel.workspace_tabs.tabText(index) for index in range(panel.workspace_tabs.count())
+            ],
+            "inventory_ids": inventory_ids,
         },
     )
 

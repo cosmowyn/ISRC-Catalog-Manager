@@ -169,6 +169,27 @@ Current validated progression:
     `QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_main_window_layout_helpers.py --no-cov`;
     `QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_main_window_layout_helpers.py --no-cov`;
     `python3 -m coverage report --include='isrc_manager/action_ribbon.py' -m --fail-under=90`.
+- Latest focused six-module coverage continuation (`2026-06-04`):
+  - New test file added: `tests/contract_templates/test_formatting.py`.
+  - Added behavioral coverage for manual contract-template date-format normalization, parsing of
+    supported date inputs, malformed/empty values, month-name tokens, numeric month/day tokens, and
+    literal text preservation.
+  - Kept existing governing coverage for contracts, forensic export orchestration, XLSX conversion,
+    catalog-table context menus, and action-ribbon behavior.
+  - Narrow production import-stability change: `isrc_manager/forensics/__init__.py` now exposes
+    service/watermark exports lazily, and `isrc_manager/forensics/controller.py` imports only
+    dialog/model dependencies directly. This keeps controller tests from importing the heavy
+    watermark/authenticity stack before orchestration paths need it.
+  - Combined branch-aware targeted validation passed:
+    `QT_QPA_PLATFORM=offscreen python3 -m pytest -q -o addopts='' tests/test_contract_controller.py tests/test_forensics_controller.py tests/test_conversion_service.py tests/contract_templates/test_export_service.py tests/contract_templates/test_formatting.py tests/test_catalog_table_controller.py tests/test_main_window_layout_helpers.py tests/app/test_app_shell_editor_surfaces.py tests/app/test_app_shell_startup_core.py --cov=isrc_manager.contracts.controller --cov=isrc_manager.forensics.controller --cov=isrc_manager.conversion.adapters.xlsx --cov=isrc_manager.contract_templates.formatting --cov=isrc_manager.catalog_table.context_menu --cov=isrc_manager.action_ribbon --cov-branch --cov-report=term-missing:skip-covered --cov-report=json:coverage-target.json --cov-fail-under=0`.
+  - Result: `141 passed, 103 skipped, 28 subtests passed`.
+  - Target module coverage:
+    `isrc_manager/contracts/controller.py` `100%` lines / `100%` branches;
+    `isrc_manager/forensics/controller.py` `99%` lines / `98%` branches;
+    `isrc_manager/conversion/adapters/xlsx.py` `97%` lines / `91%` branches;
+    `isrc_manager/contract_templates/formatting.py` `100%` lines / `100%` branches;
+    `isrc_manager/catalog_table/context_menu.py` `99%` lines / `95%` branches;
+    `isrc_manager/action_ribbon.py` `100%` lines / `100%` branches.
 
 The active repo-wide branch-aware coverage gate is `--cov-fail-under=90`. Earlier `95%` references
 below this current-state section are preserved as historical coverage-campaign checkpoints rather

@@ -186,6 +186,13 @@ class ActionRibbonHelperTests(unittest.TestCase):
             "action_ids": ["default"],
             "visible": True,
         }
+        prefs._action_ribbon_action_ids = ["save"]
+        prefs._normalize_action_ribbon_ids = lambda ids: list(ids or [])
+        assert action_ribbon._capture_current_action_ribbon_layout_snapshot(prefs) == {
+            "schema_version": 1,
+            "action_ids": ["save"],
+            "visible": True,
+        }
 
         assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot_payload(
             {
@@ -211,6 +218,13 @@ class ActionRibbonHelperTests(unittest.TestCase):
             default_action_ids=["default"],
             known_action_ids=["save", "default"],
         ) == (["default"], False)
+        assert action_ribbon._resolve_saved_layout_action_ribbon_snapshot_payload(
+            {"action_ribbon_visible": True},
+            current_action_ids=["save"],
+            current_visible=False,
+            default_action_ids=["default"],
+            known_action_ids=["save", "default"],
+        ) == (["save"], True)
 
         wrapper_app = SimpleNamespace(
             _action_ribbon_action_ids=["save"],
@@ -305,6 +319,14 @@ class ActionRibbonHelperTests(unittest.TestCase):
         )
         assert fallback_height >= 1
         assert media_button.toolButtonStyle() == original_style
+        nonmatching_toolbar = QToolBar()
+        nonmatching_toolbar.addWidget(QWidget())
+        nonmatching_height = action_ribbon._action_ribbon_text_button_height(
+            SimpleNamespace(action_ribbon_toolbar=nonmatching_toolbar),
+            media_button,
+        )
+        assert nonmatching_height >= 1
+        assert media_button.toolButtonStyle() == original_style
 
         action_ribbon._configure_action_ribbon_button_widget(
             app,
@@ -367,6 +389,32 @@ class ActionRibbonHelperTests(unittest.TestCase):
         action_ribbon._rebuild_action_ribbon_toolbar(rebuild_app)
         assert [entry[0] for entry in configured] == ["save", "customize_action_ribbon"]
 
+        class NullCustomizeWidgetToolbar(QToolBar):
+            def __init__(self, action_without_widget):
+                super().__init__()
+                self.action_without_widget = action_without_widget
+
+            def widgetForAction(self, action):
+                if action is self.action_without_widget:
+                    return None
+                return super().widgetForAction(action)
+
+        null_customize_action = QAction("Customize", rebuild_toolbar)
+        null_configured: list[tuple[str, object]] = []
+        null_customize_app = SimpleNamespace(
+            action_ribbon_toolbar=NullCustomizeWidgetToolbar(null_customize_action),
+            _action_ribbon_action_ids=[],
+            _action_ribbon_specs_by_id={},
+            customize_action_ribbon_action=null_customize_action,
+            _normalize_action_ribbon_ids=lambda ids: list(ids or []),
+            _configure_action_ribbon_button_widget=lambda action_id, widget, _spec: null_configured.append(
+                (action_id, widget)
+            ),
+            _build_saved_layout_ribbon_widget=lambda parent: QWidget(parent),
+        )
+        action_ribbon._rebuild_action_ribbon_toolbar(null_customize_app)
+        assert null_configured == []
+
         apply_events: list[tuple[str, object]] = []
         rebuild_app._rebuild_action_ribbon_toolbar = lambda: apply_events.append(("rebuild", None))
         rebuild_app._set_action_checked_silently = lambda action, checked: apply_events.append(
@@ -376,6 +424,13 @@ class ActionRibbonHelperTests(unittest.TestCase):
         action_ribbon._apply_action_ribbon_configuration(rebuild_app, ["save"], False)
         assert ("checked", (rebuild_app.action_ribbon_visibility_action, False)) in apply_events
         assert rebuild_toolbar.isVisible() is False
+        minimal_apply_app = SimpleNamespace(
+            _normalize_action_ribbon_ids=lambda ids: list(ids or []),
+            _rebuild_action_ribbon_toolbar=lambda: apply_events.append(("minimal_rebuild", None)),
+        )
+        action_ribbon._apply_action_ribbon_configuration(minimal_apply_app, ["save"], True)
+        assert minimal_apply_app._action_ribbon_action_ids == ["save"]
+        assert ("minimal_rebuild", None) in apply_events
 
         class FakeMenu:
             instances = []
@@ -443,6 +498,13 @@ class ActionRibbonHelperTests(unittest.TestCase):
         assert profile_app.toolbar.visible is True
         assert profile_app.toolbar.geometry_updates == 1
         assert ("queue", None) in profile_events
+        minimal_profile_app = SimpleNamespace(
+            _queue_top_chrome_boundary_refresh=lambda: profile_events.append(
+                ("minimal_queue", None)
+            )
+        )
+        action_ribbon._apply_profiles_toolbar_visibility(minimal_profile_app, False)
+        assert ("minimal_queue", None) in profile_events
 
         settings = _Settings()
         toggle_events: list[tuple[str, object]] = []

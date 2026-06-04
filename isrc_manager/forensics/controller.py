@@ -6,11 +6,10 @@ import sys
 
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
-from isrc_manager.forensics import (
-    ForensicExportDialog,
+from isrc_manager.forensics.dialogs import ForensicExportDialog, ForensicInspectionDialog
+from isrc_manager.forensics.models import (
     ForensicExportRequest,
     ForensicExportResult,
-    ForensicInspectionDialog,
     ForensicInspectionReport,
 )
 
