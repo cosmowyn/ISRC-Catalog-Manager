@@ -190,6 +190,25 @@ Current validated progression:
     `isrc_manager/contract_templates/formatting.py` `100%` lines / `100%` branches;
     `isrc_manager/catalog_table/context_menu.py` `99%` lines / `95%` branches;
     `isrc_manager/action_ribbon.py` `100%` lines / `100%` branches.
+- Dashboard follow-up (`2026-06-04`):
+  - The public QA/PQ dashboard still showed the previous low six-module snapshot because
+    `docs/validation/qa_pq_dashboard.html` embeds fallback coverage data and does not load the
+    latest GitHub Actions `coverage.json` artifact from Pages.
+  - `tests/test_contract_controller.py` was also still written as pytest-style module functions.
+    The grouped CI coverage runner executes modules through `unittest.defaultTestLoader`, so those
+    contract-controller tests did not contribute to grouped CI coverage until they were converted to
+    `unittest.TestCase` methods.
+  - Full local branch-aware pytest coverage generated `coverage.json` with the target modules at:
+    `isrc_manager/contracts/controller.py` `100%` lines / `100%` branches;
+    `isrc_manager/forensics/controller.py` `100%` lines / `100%` branches;
+    `isrc_manager/conversion/adapters/xlsx.py` `97.61%` lines / `91.89%` branches;
+    `isrc_manager/contract_templates/formatting.py` `100%` lines / `100%` branches;
+    `isrc_manager/catalog_table/context_menu.py` `98.97%` lines / `96.77%` branches;
+    `isrc_manager/action_ribbon.py` `100%` lines / `100%` branches.
+  - The same full local run produced total branch-aware package coverage of `90.18%`, but three
+    UI PQ tests failed locally because `UI-PQ-IMP-001` and `UI-PQ-SET-001` reported failed event
+    statuses and the visual-framework assertion could not find `manifest_path` in the failed event.
+    The module coverage JSON was still written and used to refresh the dashboard snapshot.
 
 The active repo-wide branch-aware coverage gate is `--cov-fail-under=90`. Earlier `95%` references
 below this current-state section are preserved as historical coverage-campaign checkpoints rather
