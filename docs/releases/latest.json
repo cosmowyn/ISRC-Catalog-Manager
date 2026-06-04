@@ -1,7 +1,7 @@
 {
-  "version": "6.0.9",
-  "released_at": "2026-06-03",
-  "summary": "Improve modular coverage and UI PQ evidence",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.9.md",
+  "version": "6.0.10",
+  "released_at": "2026-06-04",
+  "summary": "Stabilize help PQ and coverage evidence",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.0.10.md",
   "minimum_supported_version": null
 }
