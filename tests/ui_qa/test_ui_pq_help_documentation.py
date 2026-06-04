@@ -1,12 +1,22 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from isrc_manager.qa import UIQualificationHarness
 from isrc_manager.qa.assertions import require_artifact
 
 
-def test_ui_pq_help_documentation_is_fully_validated(ui_pq_harness):
+@pytest.fixture(scope="module")
+def help_pq_harness():
+    with UIQualificationHarness() as harness:
+        harness.run_help_documentation_qualification()
+        yield harness
+
+
+def test_ui_pq_help_documentation_is_fully_validated(help_pq_harness):
     event = next(
-        event for event in ui_pq_harness.evidence.events if event.test_id == "UI-PQ-HELP-001"
+        event for event in help_pq_harness.evidence.events if event.test_id == "UI-PQ-HELP-001"
     )
     assert event.status == "passed"
     assert event.data["finding_count"] == 0
@@ -48,5 +58,5 @@ def test_ui_pq_help_documentation_is_fully_validated(ui_pq_harness):
     assert "Visual UI Reference" not in help_html
     assert "Back to Table of Contents" in help_html
     assert not any(
-        deviation.test_id == "UI-PQ-HELP-001" for deviation in ui_pq_harness.deviations.deviations
+        deviation.test_id == "UI-PQ-HELP-001" for deviation in help_pq_harness.deviations.deviations
     )

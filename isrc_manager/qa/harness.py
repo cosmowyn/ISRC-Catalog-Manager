@@ -428,6 +428,25 @@ class UIQualificationHarness:
             )
         self.finalize()
 
+    def run_help_documentation_qualification(self) -> None:
+        if self._has_run:
+            return
+        self._has_run = True
+        self._run_step("UI-PQ-INV-001", "inventory", self.run_inventory)
+        self._run_step("UI-PQ-SMOKE-001", "startup smoke", lambda: run_startup_smoke(self))
+        self._run_step("UI-PQ-MENU-001", "menu/action inventory", lambda: run_menu_inventory(self))
+        self._run_step(
+            "UI-PQ-SET-001",
+            "visual/theme/dialog workflow",
+            lambda: run_visual_qualification_workflow(self),
+        )
+        self._run_step(
+            "UI-PQ-HELP-001",
+            "help documentation coverage",
+            lambda: run_help_documentation_workflow(self),
+        )
+        self.finalize()
+
     def run_inventory(self) -> None:
         if self.window is None:
             raise RuntimeError("Cannot inventory UI before the main window is open.")
