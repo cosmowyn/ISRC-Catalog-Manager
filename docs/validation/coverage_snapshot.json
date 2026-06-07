@@ -1,5 +1,5 @@
 {
-  "branchPercent": 62.11,
+  "branchPercent": 65.39,
   "coverageWins": [
     {
       "branch": 92.29,
@@ -23,6 +23,13 @@
       "statements": 1016
     },
     {
+      "branch": 94.04,
+      "missing": 28,
+      "path": "isrc_manager/storage_migration.py",
+      "percent": 95.86,
+      "statements": 808
+    },
+    {
       "branch": 86.92,
       "missing": 10,
       "path": "isrc_manager/code_registry/workspace.py",
@@ -37,33 +44,26 @@
       "statements": 758
     },
     {
-      "branch": 100.0,
-      "missing": 0,
-      "path": "isrc_manager/action_ribbon.py",
-      "percent": 100.0,
-      "statements": 259
+      "branch": 87.07,
+      "missing": 4,
+      "path": "isrc_manager/tracks/album_entry_dialog.py",
+      "percent": 97.81,
+      "statements": 753
     },
     {
-      "branch": 96.77,
-      "missing": 1,
-      "path": "isrc_manager/catalog_table/context_menu.py",
-      "percent": 98.97,
-      "statements": 230
-    },
-    {
-      "branch": 86.96,
-      "missing": 7,
-      "path": "isrc_manager/services/settings_transfer.py",
-      "percent": 95.22,
-      "statements": 226
+      "branch": 97.09,
+      "missing": 5,
+      "path": "isrc_manager/catalog_table/workflow.py",
+      "percent": 98.64,
+      "statements": 600
     }
   ],
-  "coveredBranches": 15433,
-  "coveredLines": 64573,
+  "coveredBranches": 16249,
+  "coveredLines": 65944,
   "excludedFiles": [],
   "filesExcluded": 0,
   "filesMeasured": 279,
-  "linePercent": 73.21,
+  "linePercent": 75.21,
   "lowestFiles": [
     {
       "branch": 0.0,
@@ -150,10 +150,10 @@
       "statements": 237
     }
   ],
-  "missingBranches": 9415,
-  "missingLines": 19859,
+  "missingBranches": 8599,
+  "missingLines": 18488,
   "schemaVersion": 1,
-  "statementPercent": 76.48,
+  "statementPercent": 78.1,
   "statements": 84432,
-  "timestamp": "2026-06-04T18:25:37.588831"
+  "timestamp": "2026-06-07T20:44:56.283216"
 }
