@@ -11,16 +11,22 @@ from isrc_manager.constants import SCHEMA_TARGET
 from isrc_manager.services import DatabaseSchemaService
 from isrc_manager.services.database_security import (
     SQLCIPHER_MEMORY_SECURITY_ENV,
+    DatabaseMigrationError,
     DatabasePasswordPolicyError,
     DatabasePasswordRequiredError,
+    DatabaseSecurityError,
     DatabaseSessionPasswordManager,
     InvalidDatabasePasswordError,
     KeyringCredentialError,
     KeyringDatabaseCredentialStore,
     SQLCipherDatabaseService,
+    SQLCipherUnavailableError,
     apply_sqlcipher_key,
+    database_profile_id,
+    detect_database_keyring_backend,
     is_plaintext_sqlite_database,
     is_probably_encrypted_database,
+    normalize_database_path,
     sqlcipher_memory_security_enabled,
     validate_database_password,
 )
@@ -66,6 +72,10 @@ class RecordingSQLCipherConnection:
         if self.fail_memory_security and "cipher_memory_security" in statement:
             raise RuntimeError("secure memory unavailable")
         return self
+
+
+class MissingMethodsBackend:
+    available = True
 
 
 def test_database_password_policy_rejects_blank_short_and_mismatch() -> None:
@@ -122,6 +132,62 @@ def test_sqlcipher_memory_security_failure_does_not_prevent_key_application() ->
         "PRAGMA key = 'valid-secret-123'",
         "PRAGMA cipher_memory_security = ON",
     ]
+
+
+def test_database_path_ids_session_clear_and_sqlcipher_import_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "profiles" / "catalog.db"
+    normalized = normalize_database_path(db_path)
+
+    assert database_profile_id(db_path) == database_profile_id(normalized)
+
+    passwords = DatabaseSessionPasswordManager()
+    passwords.set_password(db_path, "valid-secret-123")
+    assert passwords.password_for_database(db_path) == "valid-secret-123"
+    passwords.clear()
+    assert passwords.password_for_database(db_path) is None
+
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security.importlib.import_module",
+        lambda _name: (_ for _ in ()).throw(ImportError("sqlcipher missing")),
+    )
+    with pytest.raises(SQLCipherUnavailableError):
+        SQLCipherDatabaseService().open(db_path, "valid-secret-123")
+
+
+def test_keyring_backend_detection_covers_unavailable_and_missing_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_methods = detect_database_keyring_backend(MissingMethodsBackend())
+    assert missing_methods.available is False
+    assert "required credential methods" in missing_methods.reason
+
+    unavailable = detect_database_keyring_backend(FakeKeyringBackend(available=False))
+    assert unavailable.available is False
+    assert "unavailable" in unavailable.reason
+
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security.importlib.import_module",
+        lambda _name: (_ for _ in ()).throw(ImportError("keyring missing")),
+    )
+    missing_keyring = detect_database_keyring_backend()
+    assert missing_keyring.available is False
+    assert missing_keyring.backend_name == "none"
+
+    class FailingKeyringModule:
+        @staticmethod
+        def get_keyring():
+            raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security.importlib.import_module",
+        lambda _name: FailingKeyringModule,
+    )
+    failing_keyring = detect_database_keyring_backend()
+    assert failing_keyring.available is False
+    assert failing_keyring.backend_name == "unavailable"
 
 
 def test_connection_factory_creates_sqlcipher_database_when_session_password_is_set(
@@ -291,6 +357,38 @@ def test_sqlcipher_database_service_changes_password(tmp_path: Path) -> None:
         reopened.close()
 
 
+def test_sqlcipher_database_service_change_password_rolls_back_failures() -> None:
+    class FailingConnection:
+        def __init__(self):
+            self.closed = False
+            self.rollback_called = False
+
+        def execute(self, _statement: str):
+            raise sqlite3.DatabaseError("rekey failed")
+
+        def commit(self):
+            raise AssertionError("commit should not run after execute failure")
+
+        def rollback(self):
+            self.rollback_called = True
+            raise sqlite3.DatabaseError("rollback failed")
+
+        def close(self):
+            self.closed = True
+
+    conn = FailingConnection()
+
+    class FailingService(SQLCipherDatabaseService):
+        def open(self, path, password):
+            return conn
+
+    with pytest.raises(DatabaseSecurityError, match="Could not change"):
+        FailingService().change_password("catalog.db", "current-secret-123", "changed-secret-123")
+
+    assert conn.rollback_called is True
+    assert conn.closed is True
+
+
 def test_sqlcipher_database_service_migrates_plaintext_database_safely(tmp_path: Path) -> None:
     db_path = tmp_path / "catalog.db"
     with sqlite3.connect(db_path) as conn:
@@ -416,6 +514,91 @@ def test_sqlcipher_database_service_uses_explicit_backup_path(tmp_path: Path) ->
     assert is_probably_encrypted_database(db_path)
 
 
+def test_sqlcipher_database_service_encrypt_plaintext_database_guardrails(
+    tmp_path: Path,
+) -> None:
+    service = SQLCipherDatabaseService()
+    missing_db = tmp_path / "missing.db"
+    with pytest.raises(DatabaseMigrationError, match="does not exist"):
+        service.encrypt_plaintext_database(missing_db, "migrate-secret-123")
+
+    not_sqlite = tmp_path / "not-sqlite.db"
+    not_sqlite.write_bytes(b"not a sqlite database")
+    with pytest.raises(DatabaseMigrationError, match="not an unencrypted SQLite"):
+        service.encrypt_plaintext_database(not_sqlite, "migrate-secret-123")
+
+    plaintext = tmp_path / "catalog.db"
+    with sqlite3.connect(plaintext) as conn:
+        conn.execute("CREATE TABLE demo(value TEXT)")
+        conn.commit()
+    backup = tmp_path / "catalog.backup.db"
+    backup.write_bytes(b"existing")
+    with pytest.raises(DatabaseMigrationError, match="Backup path already exists"):
+        service.encrypt_plaintext_database(
+            plaintext,
+            "migrate-secret-123",
+            backup_path=backup,
+        )
+
+
+def test_sqlcipher_database_service_encrypt_plaintext_database_verification_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "catalog.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE demo(value TEXT)")
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
+
+    class ExecuteResult:
+        def __init__(self, value):
+            self.value = value
+
+        def fetchone(self):
+            return (self.value,)
+
+    class FakeSourceConnection:
+        def __init__(self):
+            self.closed = False
+
+        def execute(self, statement: str):
+            if statement == "PRAGMA user_version":
+                return ExecuteResult(7)
+            return ExecuteResult(None)
+
+        def close(self):
+            self.closed = True
+
+    class FakeSQLCipherModule:
+        @staticmethod
+        def connect(_path, timeout):
+            return FakeSourceConnection()
+
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security._sqlcipher_module",
+        lambda: FakeSQLCipherModule,
+    )
+
+    class BadIntegrityConnection:
+        def execute(self, statement: str):
+            if statement == "PRAGMA integrity_check":
+                return ExecuteResult("corrupt")
+            return ExecuteResult(None)
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    service = SQLCipherDatabaseService()
+    service.open = lambda _path, _password: BadIntegrityConnection()
+
+    with pytest.raises(DatabaseMigrationError, match="verification failed"):
+        service.encrypt_plaintext_database(db_path, "migrate-secret-123")
+
+
 def test_keyring_store_remembers_expires_and_clears_database_password(tmp_path: Path) -> None:
     db_path = tmp_path / "catalog.db"
     backend = FakeKeyringBackend()
@@ -429,6 +612,39 @@ def test_keyring_store_remembers_expires_and_clears_database_password(tmp_path: 
     )
     assert store.load(db_path, now=datetime(2026, 7, 5, tzinfo=timezone.utc)) is None
     assert backend.values == {}
+
+
+def test_keyring_store_handles_naive_timestamps_missing_values_and_io_errors(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "catalog.db"
+    backend = FakeKeyringBackend()
+    store = KeyringDatabaseCredentialStore(backend=backend, ttl_days=30)
+
+    store.remember(db_path, "remember-secret-123", authenticated_at=datetime(2026, 6, 1))
+    assert store.load(db_path, now=datetime(2026, 6, 2)) == "remember-secret-123"
+
+    store.clear(db_path)
+    assert store.load(db_path, now=datetime(2026, 6, 2, tzinfo=timezone.utc)) is None
+
+    backend.set_password(store.service_name, store._password_key(db_path), "remember-secret-123")
+    backend.set_password(store.service_name, store._timestamp_key(db_path), "not-a-date")
+    assert store.load(db_path, now=datetime(2026, 6, 2, tzinfo=timezone.utc)) is None
+    assert backend.values == {}
+
+    failing_read_store = KeyringDatabaseCredentialStore(backend=FakeKeyringBackend(fail_reads=True))
+    with pytest.raises(KeyringCredentialError, match="Could not read"):
+        failing_read_store.load(db_path)
+
+    class FailingDeleteBackend(FakeKeyringBackend):
+        def delete_password(self, service_name: str, account_key: str) -> None:
+            raise RuntimeError("delete failed")
+
+    failing_delete_store = KeyringDatabaseCredentialStore(backend=FailingDeleteBackend())
+    failing_delete_store.clear(db_path)
+
+    unavailable_store = KeyringDatabaseCredentialStore(backend=FakeKeyringBackend(available=False))
+    unavailable_store.clear(db_path)
 
 
 def test_keyring_store_removes_invalid_stored_password(tmp_path: Path) -> None:
@@ -456,3 +672,28 @@ def test_keyring_store_rejects_unsafe_or_failing_backends(tmp_path: Path) -> Non
     failing_store = KeyringDatabaseCredentialStore(backend=FakeKeyringBackend(fail_writes=True))
     with pytest.raises(KeyringCredentialError):
         failing_store.remember(db_path, "remember-secret-123")
+
+
+def test_keyring_store_initializes_without_importable_or_working_keyring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security.importlib.import_module",
+        lambda _name: (_ for _ in ()).throw(ImportError("keyring missing")),
+    )
+    missing_store = KeyringDatabaseCredentialStore()
+    assert missing_store.backend is None
+    assert missing_store.persistent_available is False
+
+    class FailingKeyringModule:
+        @staticmethod
+        def get_keyring():
+            raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(
+        "isrc_manager.services.database_security.importlib.import_module",
+        lambda _name: FailingKeyringModule,
+    )
+    failing_store = KeyringDatabaseCredentialStore()
+    assert failing_store.backend is None
+    assert failing_store.persistent_available is False

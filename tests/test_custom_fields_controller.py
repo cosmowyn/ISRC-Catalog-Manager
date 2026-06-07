@@ -150,6 +150,64 @@ def test_apply_custom_field_configuration_handles_conflicts_unchanged_success_an
     assert messages[-1][0] == "critical"
 
 
+def test_apply_custom_field_configuration_covers_history_and_summary_fallbacks(monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        controller,
+        "_root_attr",
+        lambda name, fallback: _message_box(messages) if name == "QMessageBox" else fallback,
+    )
+    app = SimpleNamespace(
+        active_custom_fields=[{"id": 1, "name": "Mood", "field_type": "text"}],
+        _custom_field_config_summary=lambda fields: controller._custom_field_config_summary(
+            None, fields
+        ),
+        custom_field_definitions=SimpleNamespace(sync_fields=mock.Mock()),
+        history_manager=None,
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+        _on_custom_fields_changed=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+    )
+
+    unserializable_fields = [{"id": object(), "name": "Energy", "field_type": "text"}]
+    assert (
+        controller._apply_custom_field_configuration(
+            app,
+            unserializable_fields,
+            action_label="Rename",
+            action_type="fields.manage",
+        )
+        is True
+    )
+    app._audit.assert_called_once_with(
+        "FIELDS", "CustomFieldDefs", ref_id="batch", details="fields changed"
+    )
+    app._refresh_history_actions.assert_not_called()
+
+    before = SimpleNamespace(snapshot_id=44)
+    app.history_manager = SimpleNamespace(
+        capture_snapshot=mock.Mock(return_value=before),
+        delete_snapshot=mock.Mock(side_effect=RuntimeError("snapshot delete failed")),
+    )
+    app.custom_field_definitions.sync_fields = mock.Mock(side_effect=RuntimeError("sync failed"))
+
+    assert (
+        controller._apply_custom_field_configuration(
+            app,
+            [{"id": 1, "name": "Tempo", "field_type": "text"}],
+            action_label="Fail",
+            action_type="fields.manage",
+        )
+        is False
+    )
+    app.history_manager.delete_snapshot.assert_called_once_with(44)
+    app.conn.rollback.assert_called_once()
+    assert messages[-1][0] == "critical"
+
+
 def test_prompt_new_custom_field_builds_dropdown_and_blob_fields(monkeypatch):
     messages = []
 
@@ -207,6 +265,67 @@ def test_prompt_new_custom_field_builds_dropdown_and_blob_fields(monkeypatch):
     assert messages[-1][0] == "warning"
 
 
+def test_prompt_new_custom_field_covers_cancel_reserved_and_blob_reject(monkeypatch):
+    messages = []
+
+    class FakeInputDialog:
+        text_result = ("", False)
+        item_result = ("text", True)
+        multiline_result = ("Ignored", False)
+
+        @classmethod
+        def getText(cls, *args):
+            return cls.text_result
+
+        @classmethod
+        def getItem(cls, *args, **kwargs):
+            return cls.item_result
+
+        @classmethod
+        def getMultiLineText(cls, *args, **kwargs):
+            return cls.multiline_result
+
+    class RejectingBlobIconDialog:
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return QDialog.Rejected
+
+        def current_spec(self):
+            raise AssertionError("rejected dialog must not expose an icon spec")
+
+    def root_attr(name, fallback):
+        return {
+            "QInputDialog": FakeInputDialog,
+            "BlobIconDialog": RejectingBlobIconDialog,
+            "QMessageBox": _message_box(messages),
+        }.get(name, fallback)
+
+    monkeypatch.setattr(controller, "_root_attr", root_attr)
+    app = SimpleNamespace(active_custom_fields=[])
+
+    assert controller._prompt_new_custom_field(app) is None
+
+    FakeInputDialog.text_result = (next(iter(controller.PROMOTED_CUSTOM_FIELD_NAMES)), True)
+    assert controller._prompt_new_custom_field(app) is None
+    assert messages[-1][0] == "warning"
+
+    FakeInputDialog.text_result = ("Tempo", True)
+    FakeInputDialog.item_result = ("text", False)
+    assert controller._prompt_new_custom_field(app) is None
+
+    FakeInputDialog.item_result = ("dropdown", True)
+    dropdown = controller._prompt_new_custom_field(app)
+    assert dropdown["options"] is None
+
+    FakeInputDialog.text_result = ("Cover", True)
+    FakeInputDialog.item_result = ("blob_image", True)
+    blob = controller._prompt_new_custom_field(app)
+    assert blob["field_type"] == "blob_image"
+    assert blob["blob_icon_payload"] is None
+
+
 def test_add_remove_and_manage_custom_columns_delegate_to_configuration(monkeypatch):
     messages = []
 
@@ -251,6 +370,90 @@ def test_add_remove_and_manage_custom_columns_delegate_to_configuration(monkeypa
     empty_app = SimpleNamespace(active_custom_fields=[])
     controller.remove_custom_column(empty_app)
     assert messages[-1][0] == "information"
+
+
+def test_add_remove_and_manage_custom_columns_cover_cancel_paths(monkeypatch):
+    messages = []
+
+    class CancelingInputDialog:
+        @classmethod
+        def getItem(cls, *args, **kwargs):
+            return ("", False)
+
+    class NoMessageBox(_message_box(messages)):
+        @classmethod
+        def question(cls, *args):
+            messages.append(("question", args))
+            return cls.No
+
+    class RejectedDialog:
+        def __init__(self, fields, app):
+            self.fields = fields
+            self.app = app
+
+        def exec(self):
+            return QDialog.Rejected
+
+        def get_fields(self):
+            raise AssertionError("rejected dialog must not be queried")
+
+    def root_attr(name, fallback):
+        return {
+            "QInputDialog": CancelingInputDialog,
+            "QMessageBox": NoMessageBox,
+            "CustomColumnsDialog": RejectedDialog,
+        }.get(name, fallback)
+
+    monkeypatch.setattr(controller, "_root_attr", root_attr)
+    app = SimpleNamespace(
+        active_custom_fields=[{"name": "Mood", "field_type": "text"}],
+        _prompt_new_custom_field=mock.Mock(return_value=None),
+        _apply_custom_field_configuration=mock.Mock(),
+    )
+
+    controller.add_custom_column(app)
+    app._apply_custom_field_configuration.assert_not_called()
+
+    controller.remove_custom_column(app)
+    app._apply_custom_field_configuration.assert_not_called()
+
+    CancelingInputDialog.getItem = classmethod(lambda cls, *args, **kwargs: ("Mood (text)", True))
+    controller.remove_custom_column(app)
+    assert messages[-1][0] == "question"
+    app._apply_custom_field_configuration.assert_not_called()
+
+    controller.manage_custom_columns(app)
+    app._apply_custom_field_configuration.assert_not_called()
+
+
+def test_on_custom_fields_changed_logs_header_state_failures():
+    class HistorySuspender:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    viewport = SimpleNamespace(update=mock.Mock())
+    app = SimpleNamespace(
+        _suspend_table_layout_history=mock.Mock(return_value=HistorySuspender()),
+        load_active_custom_fields=mock.Mock(return_value=[{"name": "Mood"}]),
+        _rebuild_table_headers=mock.Mock(),
+        _bind_header_state_signals=mock.Mock(side_effect=RuntimeError("bind failed")),
+        _load_header_state=mock.Mock(side_effect=RuntimeError("load failed")),
+        _save_header_state=mock.Mock(side_effect=RuntimeError("save failed")),
+        logger=mock.Mock(),
+        refresh_table=mock.Mock(),
+        _sync_catalog_count_label=mock.Mock(),
+        table=SimpleNamespace(viewport=mock.Mock(return_value=viewport)),
+    )
+
+    controller._on_custom_fields_changed(app)
+
+    assert app.active_custom_fields == [{"name": "Mood"}]
+    assert app.logger.warning.call_count == 3
+    app.refresh_table.assert_called_once_with()
+    viewport.update.assert_called_once_with()
 
 
 def test_catalog_editor_focus_target_resolves_standard_media_and_field_keys():
@@ -301,6 +504,48 @@ def test_double_click_standard_cell_opens_editor_or_warns(monkeypatch):
     catalog_controller.cell_target.return_value = SimpleNamespace(kind="standard", track_id=None)
     controller._on_catalog_index_double_clicked(app, object())
     assert messages[-1][0] == "warning"
+
+
+def test_double_click_custom_cell_ignores_incomplete_targets():
+    catalog_controller = SimpleNamespace(
+        cell_target=mock.Mock(
+            side_effect=[
+                SimpleNamespace(
+                    kind="custom",
+                    track_id=1,
+                    custom_field=None,
+                    custom_field_id=2,
+                    custom_field_type="text",
+                ),
+                SimpleNamespace(
+                    kind="custom",
+                    track_id=None,
+                    custom_field={"name": "Mood"},
+                    custom_field_id=2,
+                    custom_field_type="text",
+                ),
+                SimpleNamespace(
+                    kind="custom",
+                    track_id=1,
+                    custom_field={"name": "Mood"},
+                    custom_field_id=None,
+                    custom_field_type="text",
+                ),
+            ]
+        )
+    )
+    app = SimpleNamespace(
+        BASE_HEADERS=[],
+        active_custom_fields=[],
+        _catalog_table_controller=mock.Mock(return_value=catalog_controller),
+        custom_field_values=SimpleNamespace(get_text_value=mock.Mock()),
+    )
+
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+
+    app.custom_field_values.get_text_value.assert_not_called()
 
 
 def test_double_click_blob_custom_field_attaches_file_with_storage_choice(monkeypatch, tmp_path):
@@ -355,6 +600,67 @@ def test_double_click_blob_custom_field_attaches_file_with_storage_choice(monkey
     app.refresh_table_preserve_view.assert_called_once_with(focus_id=9)
 
 
+def test_double_click_blob_custom_field_covers_cancel_and_error_paths(monkeypatch, tmp_path):
+    messages = []
+    image_path = tmp_path / "cover.png"
+    image_path.write_bytes(b"PNG")
+
+    class FakeFileDialog:
+        result = (str(image_path), "")
+
+        @classmethod
+        def getOpenFileName(cls, *args):
+            return cls.result
+
+    storage_choices = [None, STORAGE_MODE_DATABASE]
+
+    def root_attr(name, fallback):
+        return {
+            "QFileDialog": FakeFileDialog,
+            "QMessageBox": _message_box(messages),
+            "_prompt_storage_mode_choice": lambda *args, **kwargs: storage_choices.pop(0),
+        }.get(name, fallback)
+
+    monkeypatch.setattr(controller, "_root_attr", root_attr)
+    catalog_controller = SimpleNamespace(
+        cell_target=mock.Mock(
+            return_value=SimpleNamespace(
+                kind="custom",
+                track_id=9,
+                custom_field={"name": "Cover"},
+                custom_field_id=3,
+                custom_field_type="blob_image",
+            )
+        )
+    )
+    app = SimpleNamespace(
+        BASE_HEADERS=[],
+        active_custom_fields=[],
+        _catalog_table_controller=mock.Mock(return_value=catalog_controller),
+        _run_snapshot_history_action=mock.Mock(),
+        cf_save_value=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+
+    FakeFileDialog.result = ("", "")
+    controller._on_catalog_index_double_clicked(app, object())
+    app._run_snapshot_history_action.assert_not_called()
+
+    FakeFileDialog.result = (str(image_path), "")
+    controller._on_catalog_index_double_clicked(app, object())
+    app._run_snapshot_history_action.assert_not_called()
+
+    app._run_snapshot_history_action = mock.Mock(side_effect=RuntimeError("save failed"))
+    controller._on_catalog_index_double_clicked(app, object())
+
+    app.conn.rollback.assert_called_once_with()
+    app.logger.exception.assert_called_once()
+    assert messages[-1][0] == "critical"
+    app.refresh_table_preserve_view.assert_not_called()
+
+
 def test_double_click_dropdown_custom_field_updates_options_and_value(monkeypatch):
     class FakeInputDialog:
         @classmethod
@@ -400,3 +706,243 @@ def test_double_click_dropdown_custom_field_updates_options_and_value(monkeypatc
     )
     app.custom_field_values.save_value.assert_called_once_with(4, 2, value="New Choice")
     app.refresh_table_preserve_view.assert_called_once_with(focus_id=4)
+
+
+def test_double_click_custom_field_covers_dropdown_cancel_and_unchanged(monkeypatch):
+    class FakeInputDialog:
+        item_result = ("", False)
+
+        @classmethod
+        def getItem(cls, *args, **kwargs):
+            return cls.item_result
+
+    monkeypatch.setattr(
+        controller,
+        "_root_attr",
+        lambda name, fallback: FakeInputDialog if name == "QInputDialog" else fallback,
+    )
+    catalog_controller = SimpleNamespace(
+        cell_target=mock.Mock(
+            return_value=SimpleNamespace(
+                kind="custom",
+                track_id=4,
+                custom_field={"name": "Mood", "options": json.dumps(["Known"])},
+                custom_field_id=2,
+                custom_field_type="dropdown",
+            )
+        )
+    )
+    app = SimpleNamespace(
+        BASE_HEADERS=[],
+        active_custom_fields=[],
+        _catalog_table_controller=mock.Mock(return_value=catalog_controller),
+        custom_field_values=SimpleNamespace(
+            get_text_value=mock.Mock(side_effect=["Legacy", "Known"]),
+            save_value=mock.Mock(),
+        ),
+        custom_field_definitions=SimpleNamespace(update_dropdown_options=mock.Mock()),
+        _run_snapshot_history_action=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+
+    controller._on_catalog_index_double_clicked(app, object())
+    app._run_snapshot_history_action.assert_not_called()
+
+    FakeInputDialog.item_result = ("Known", True)
+    controller._on_catalog_index_double_clicked(app, object())
+    app._run_snapshot_history_action.assert_not_called()
+
+
+def test_double_click_checkbox_date_and_text_custom_fields(monkeypatch):
+    class FakeInputDialog:
+        item_result = ("False", True)
+        multiline_result = ("New notes", True)
+
+        @classmethod
+        def getItem(cls, *args, **kwargs):
+            return cls.item_result
+
+        @classmethod
+        def getMultiLineText(cls, *args, **kwargs):
+            return cls.multiline_result
+
+    class FakeDatePickerDialog:
+        result = QDialog.Accepted
+        selected = "2026-06-07"
+        created_with = []
+
+        def __init__(self, *args, **kwargs):
+            self.created_with.append(kwargs)
+
+        def exec(self):
+            return self.result
+
+        def selected_iso(self):
+            return self.selected
+
+    def root_attr(name, fallback):
+        return {
+            "QInputDialog": FakeInputDialog,
+            "DatePickerDialog": FakeDatePickerDialog,
+        }.get(name, fallback)
+
+    monkeypatch.setattr(controller, "_root_attr", root_attr)
+    targets = [
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Licensed"},
+            custom_field_id=2,
+            custom_field_type="checkbox",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Review Date"},
+            custom_field_id=3,
+            custom_field_type="date",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Notes"},
+            custom_field_id=4,
+            custom_field_type="text",
+        ),
+    ]
+    catalog_controller = SimpleNamespace(cell_target=mock.Mock(side_effect=targets))
+    saved_values = []
+    app = SimpleNamespace(
+        BASE_HEADERS=[],
+        active_custom_fields=[],
+        _catalog_table_controller=mock.Mock(return_value=catalog_controller),
+        custom_field_values=SimpleNamespace(
+            get_text_value=mock.Mock(side_effect=["True", "bad-date", "Old notes"]),
+            save_value=mock.Mock(
+                side_effect=lambda track, field, *, value: saved_values.append(value)
+            ),
+        ),
+        custom_field_definitions=SimpleNamespace(update_dropdown_options=mock.Mock()),
+        _run_snapshot_history_action=lambda **kwargs: kwargs["mutation"](),
+        refresh_table_preserve_view=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+
+    assert saved_values == ["False", "2026-06-07", "New notes"]
+    assert FakeDatePickerDialog.created_with[0]["initial_iso_date"] is None
+    assert app.refresh_table_preserve_view.call_count == 3
+
+
+def test_double_click_date_text_and_save_error_paths(monkeypatch):
+    messages = []
+
+    class CancelingInputDialog:
+        item_result = ("True", False)
+        multiline_result = ("", False)
+
+        @classmethod
+        def getItem(cls, *args, **kwargs):
+            return cls.item_result
+
+        @classmethod
+        def getMultiLineText(cls, *args, **kwargs):
+            return cls.multiline_result
+
+    class FakeDatePickerDialog:
+        result = QDialog.Rejected
+        selected = None
+
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return self.result
+
+        def selected_iso(self):
+            return self.selected
+
+    def root_attr(name, fallback):
+        return {
+            "QInputDialog": CancelingInputDialog,
+            "DatePickerDialog": FakeDatePickerDialog,
+            "QMessageBox": _message_box(messages),
+        }.get(name, fallback)
+
+    monkeypatch.setattr(controller, "_root_attr", root_attr)
+    targets = [
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Licensed"},
+            custom_field_id=2,
+            custom_field_type="checkbox",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Review Date"},
+            custom_field_id=3,
+            custom_field_type="date",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Notes"},
+            custom_field_id=4,
+            custom_field_type="text",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Review Date"},
+            custom_field_id=3,
+            custom_field_type="date",
+        ),
+        SimpleNamespace(
+            kind="custom",
+            track_id=4,
+            custom_field={"name": "Notes"},
+            custom_field_id=4,
+            custom_field_type="text",
+        ),
+    ]
+    catalog_controller = SimpleNamespace(cell_target=mock.Mock(side_effect=targets))
+    app = SimpleNamespace(
+        BASE_HEADERS=[],
+        active_custom_fields=[],
+        _catalog_table_controller=mock.Mock(return_value=catalog_controller),
+        custom_field_values=SimpleNamespace(
+            get_text_value=mock.Mock(
+                side_effect=["True", "2026-06-07", "Old notes", "2026-06-07", "Old notes"]
+            ),
+            save_value=mock.Mock(),
+        ),
+        custom_field_definitions=SimpleNamespace(update_dropdown_options=mock.Mock()),
+        _run_snapshot_history_action=mock.Mock(side_effect=RuntimeError("save failed")),
+        refresh_table_preserve_view=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+    controller._on_catalog_index_double_clicked(app, object())
+    app._run_snapshot_history_action.assert_not_called()
+
+    FakeDatePickerDialog.result = QDialog.Accepted
+    FakeDatePickerDialog.selected = None
+    controller._on_catalog_index_double_clicked(app, object())
+
+    CancelingInputDialog.multiline_result = ("New notes", True)
+    controller._on_catalog_index_double_clicked(app, object())
+
+    assert app.conn.rollback.call_count == 2
+    assert app.logger.exception.call_count == 2
+    assert messages[-1][0] == "critical"

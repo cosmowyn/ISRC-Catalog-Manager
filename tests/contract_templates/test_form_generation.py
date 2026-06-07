@@ -8,6 +8,7 @@ from isrc_manager.contract_templates.catalog import ContractTemplateCatalogServi
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
 from isrc_manager.contract_templates.models import (
     ContractTemplateCatalogEntry,
+    ContractTemplatePlaceholderBindingRecord,
     ContractTemplatePlaceholderRecord,
 )
 from isrc_manager.services import (
@@ -730,4 +731,209 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(
             self.form_service._asset_label(SimpleNamespace(id=10, filename="", asset_type="")),
             "Asset #10",
+        )
+
+    def test_unresolved_and_empty_selector_choices_are_reported_in_form_definition(self):
+        template = self._create_template()
+        source_path = self.root / "selector-warning-form.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Missing scope ", "{{db.unknown.value}}"),
+                    ("Release ", "{{db.release.title}}"),
+                    (
+                        "Indexed asset ",
+                        "{{duplicate.start}}",
+                        "{{db.asset.filename.indexed}}",
+                        "{{duplicate.end}}",
+                        "{{duplicate.number}}",
+                    ),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+
+        self.assertEqual(definition.unresolved_placeholders, ("{{db.unknown.value}}",))
+        self.assertIn(
+            "No selector mapping could be derived for {{db.unknown.value}}.",
+            definition.warnings,
+        )
+        self.assertIn("Release Selection has no selectable records yet.", definition.warnings)
+        self.assertIn(
+            "Indexed Asset Selection has no selectable records yet.",
+            definition.warnings,
+        )
+        self.assertEqual(definition.selector_fields[0].choices, ())
+        self.assertEqual(definition.indexed_selector_fields[0].choices, ())
+
+    def test_form_service_payload_binding_and_choice_fallback_branches(self):
+        payload = self.form_service.build_editable_payload(
+            "12",
+            db_selections={"track": 1},
+            manual_values={"notes": "approved"},
+            manual_formats={"notes": " markdown ", "": "ignored", "blank": " "},
+            type_overrides={"notes": "text"},
+        )
+        self.assertEqual(payload["revision_id"], 12)
+        self.assertEqual(payload["db_selections"], {"track": 1})
+        self.assertEqual(payload["manual_values"], {"notes": "approved"})
+        self.assertEqual(payload["type_overrides"], {"notes": "text"})
+        self.assertEqual(payload["manual_formats"], {"notes": " markdown "})
+
+        owner_placeholder = ContractTemplatePlaceholderRecord(
+            placeholder_id=11,
+            revision_id=12,
+            canonical_symbol="{{db.owner.phone}}",
+            binding_kind="db",
+            namespace="owner",
+            placeholder_key="phone",
+            display_label=None,
+            inferred_field_type=None,
+            required=True,
+            source_occurrence_count=1,
+            metadata=None,
+        )
+        missing_db_payload = self.form_service._db_binding_payload(
+            owner_placeholder,
+            catalog_entry=None,
+        )
+        self.assertEqual(missing_db_payload.scope_entity_type, "owner")
+        self.assertEqual(missing_db_payload.scope_policy, "owner_settings_context")
+        self.assertEqual(missing_db_payload.metadata, {"catalog_missing": True})
+
+        current_binding = ContractTemplatePlaceholderBindingRecord(
+            binding_id=1,
+            revision_id=12,
+            placeholder_id=11,
+            canonical_symbol="{{db.owner.phone}}",
+            resolver_kind=" ",
+            resolver_target="{{db.owner.custom_phone}}",
+            scope_entity_type=None,
+            scope_policy="owner_settings_context",
+            widget_hint="owner_phone_selector",
+            validation={"field_type": "tel"},
+            metadata={"catalog_label": "Owner Hotline"},
+            created_at=None,
+            updated_at=None,
+        )
+        merged = self.form_service._merged_binding_payload(
+            owner_placeholder,
+            catalog_entry=None,
+            current=current_binding,
+        )
+        self.assertEqual(merged.resolver_kind, "db")
+        self.assertEqual(merged.resolver_target, "{{db.owner.custom_phone}}")
+        self.assertEqual(merged.scope_entity_type, "owner")
+        self.assertEqual(merged.widget_hint, "owner_phone_selector")
+        self.assertEqual(merged.validation, {"field_type": "tel"})
+        self.assertEqual(merged.metadata, {"catalog_label": "Owner Hotline"})
+
+        auto_field = self.form_service._auto_field(
+            owner_placeholder,
+            binding=current_binding,
+            catalog_entry=None,
+        )
+        self.assertIn("Owner Hotline resolves automatically", auto_field.description)
+
+        manual_placeholder = ContractTemplatePlaceholderRecord(
+            placeholder_id=12,
+            revision_id=12,
+            canonical_symbol="{{manual.approved_flag}}",
+            binding_kind="manual",
+            namespace=None,
+            placeholder_key="approved_flag",
+            display_label=None,
+            inferred_field_type=None,
+            required=False,
+            source_occurrence_count=2,
+            metadata=None,
+        )
+        manual_binding = ContractTemplatePlaceholderBindingRecord(
+            binding_id=2,
+            revision_id=12,
+            placeholder_id=12,
+            canonical_symbol="{{manual.approved_flag}}",
+            resolver_kind="manual",
+            resolver_target="{{manual.approved_flag}}",
+            scope_entity_type=None,
+            scope_policy="manual_entry",
+            widget_hint="segmented_choice",
+            validation={"field_type": "choice", "options": ("yes", 0)},
+            metadata=None,
+            created_at=None,
+            updated_at=None,
+        )
+        manual_field = self.form_service._manual_field(
+            manual_placeholder,
+            binding=manual_binding,
+        )
+        self.assertEqual(manual_field.field_type, "choice")
+        self.assertEqual(manual_field.widget_kind, "segmented_choice")
+        self.assertEqual(manual_field.options, ("yes", "0"))
+        self.assertEqual(
+            self.form_service._manual_field_type("anything", "date"),
+            ("date", "date_input"),
+        )
+        self.assertEqual(
+            self.form_service._manual_field_type("anything", "checkbox"),
+            ("boolean", "checkbox"),
+        )
+        self.assertEqual(
+            self.form_service._manual_field_type("approved_flag", None),
+            ("boolean", "checkbox"),
+        )
+
+        self.assertEqual(self.form_service._choices_for_entity_type("release"), ())
+        self.assertEqual(self.form_service._choices_for_entity_type("work"), ())
+        self.assertEqual(self.form_service._choices_for_entity_type("right"), ())
+        self.assertEqual(self.form_service._choices_for_entity_type("asset"), ())
+
+        rich_choice_service = ContractTemplateFormService(
+            template_service=SimpleNamespace(conn=self.conn),
+            catalog_service=self.catalog_service,
+            release_service=SimpleNamespace(
+                list_releases=lambda: (
+                    SimpleNamespace(
+                        id=21,
+                        title="Signal Bloom",
+                        primary_artist="Moonwake",
+                        album_artist="",
+                    ),
+                )
+            ),
+            work_service=SimpleNamespace(
+                list_works=lambda: (SimpleNamespace(id=22, title="Orbit Sketch", iswc="T-123"),)
+            ),
+            rights_service=SimpleNamespace(
+                list_rights=lambda: (
+                    SimpleNamespace(id=23, title="Sync Right", right_type="", territory="NL"),
+                )
+            ),
+            asset_service=SimpleNamespace(
+                list_assets=lambda: (
+                    SimpleNamespace(id=24, filename="stem.wav", asset_type="audio"),
+                )
+            ),
+        )
+        self.assertEqual(
+            rich_choice_service._choices_for_entity_type("release")[0].label,
+            "Signal Bloom - Moonwake",
+        )
+        self.assertEqual(
+            rich_choice_service._choices_for_entity_type("work")[0].label,
+            "Orbit Sketch (T-123)",
+        )
+        self.assertEqual(
+            rich_choice_service._choices_for_entity_type("right")[0].label,
+            "Sync Right [NL]",
+        )
+        self.assertEqual(
+            rich_choice_service._choices_for_entity_type("asset")[0].label,
+            "stem.wav (audio)",
         )

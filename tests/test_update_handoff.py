@@ -147,6 +147,98 @@ class UpdateBackupHandoffTests(unittest.TestCase):
             self.assertFalse(workspace.exists())
             self.assertFalse(package.exists())
 
+    def test_handoff_read_and_state_mutation_noop_error_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            malformed_state = root / "malformed.json"
+            malformed_state.write_text("{not json", encoding="utf-8")
+            list_state = root / "list.json"
+            list_state.write_text("[]", encoding="utf-8")
+
+            self.assertIsNone(update_handoff.read_update_backup_handoff(state_path=malformed_state))
+            self.assertIsNone(update_handoff.read_update_backup_handoff(state_path=list_state))
+            self.assertIsNone(
+                update_handoff.mark_update_backup_ready_for_deletion(
+                    state_path=root / "missing.json"
+                )
+            )
+            self.assertIsNone(
+                update_handoff.mark_update_backup_destroyed(state_path=root / "missing.json")
+            )
+
+            empty_backup_state = root / "empty-backup.json"
+            empty_backup_state.write_text(
+                json.dumps(
+                    {
+                        "status": update_handoff.UPDATE_BACKUP_STATUS_READY_FOR_DELETION,
+                        "backup_path": "  ",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = update_handoff.cleanup_ready_update_backup(state_path=empty_backup_state)
+
+            self.assertEqual(state["status"], update_handoff.UPDATE_BACKUP_STATUS_DESTROYED)
+            self.assertEqual(state["error"], "Backup path was empty.")
+            self.assertTrue(state["destroyed_at"])
+
+    def test_cleanup_helpers_handle_empty_versions_missing_roots_and_self_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed_with_marker = root / "App.backup-before-v3.5.4-current"
+            installed_with_marker.mkdir()
+            removable = root / "Other.backup-before-v3.5.4-old"
+            removable.mkdir()
+
+            self.assertEqual(
+                update_handoff.cleanup_legacy_update_backups_for_version(installed_with_marker, ""),
+                [],
+            )
+            self.assertEqual(
+                update_handoff.cleanup_legacy_update_backups_for_version(
+                    root / "missing-parent" / "App",
+                    "3.5.4",
+                ),
+                [],
+            )
+
+            removed = update_handoff.cleanup_legacy_update_backups_for_version(
+                installed_with_marker,
+                "v3.5.4",
+            )
+
+            self.assertEqual(removed, [removable.resolve()])
+            self.assertTrue(installed_with_marker.exists())
+            self.assertFalse(removable.exists())
+            self.assertEqual(
+                update_handoff.cleanup_update_backup_siblings(root / "missing-parent" / "App"),
+                [],
+            )
+            self.assertEqual(
+                update_handoff.cleanup_update_cache_artifacts(update_root=root / "missing"), []
+            )
+
+    def test_sibling_cleanup_keeps_working_when_candidate_resolve_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "Music Catalog Manager.app"
+            installed.mkdir()
+            broken_candidate = root / "Music Catalog Manager.app.backup-before-v3.7.5-broken"
+            broken_candidate.mkdir()
+            original_resolve = Path.resolve
+
+            def _resolve(path, *args, **kwargs):
+                if path == broken_candidate:
+                    raise OSError("cannot resolve")
+                return original_resolve(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "resolve", _resolve):
+                removed = update_handoff.cleanup_update_backup_siblings(installed)
+
+            self.assertEqual([path.name for path in removed], [broken_candidate.name])
+            self.assertFalse(broken_candidate.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

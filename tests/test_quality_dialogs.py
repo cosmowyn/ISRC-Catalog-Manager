@@ -3,7 +3,7 @@ from unittest import mock
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QListView, QMessageBox
+    from PySide6.QtWidgets import QApplication, QFileDialog, QListView, QMessageBox
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
     QApplication = None
@@ -20,9 +20,17 @@ from isrc_manager.quality.models import QualityIssue, QualityScanResult
 class _DummyQualityService:
     def __init__(self, result: QualityScanResult):
         self._result = result
+        self.csv_exports = []
+        self.json_exports = []
 
     def scan(self) -> QualityScanResult:
         return self._result
+
+    def export_csv(self, result: QualityScanResult, path: str) -> None:
+        self.csv_exports.append((result, path))
+
+    def export_json(self, result: QualityScanResult, path: str) -> None:
+        self.json_exports.append((result, path))
 
 
 class QualityDialogTests(unittest.TestCase):
@@ -188,6 +196,191 @@ class QualityDialogTests(unittest.TestCase):
             self.assertEqual(dialog.issue_table.rowCount(), 1)
             self.assertIn("work missing creators", dialog.details.toPlainText().lower())
             self.assertEqual(dialog.open_button.text(), "Open Related Surface")
+        finally:
+            dialog.close()
+
+    def test_quality_dashboard_task_manager_busy_and_failure_paths(self):
+        result = QualityScanResult(issues=[])
+        service = _DummyQualityService(result)
+
+        class _BusyTaskManager:
+            def __init__(self):
+                self.submissions = []
+
+            def submit(self, **kwargs):
+                self.submissions.append(kwargs)
+                return None
+
+        task_manager = _BusyTaskManager()
+        dialog = QualityDashboardDialog(
+            service=service,
+            scan_callback=service.scan,
+            task_manager=task_manager,
+            release_choices_provider=lambda: [],
+            apply_fix_callback=lambda _issue: "",
+            open_issue_callback=lambda _issue: None,
+        )
+        try:
+            self.assertEqual(len(task_manager.submissions), 1)
+            self.assertTrue(dialog.refresh_button.isEnabled())
+            self.assertEqual(dialog.details.toPlainText(), "A quality scan is already running.")
+
+            dialog._active_scan_task_id = "scan-1"
+            dialog.details.setPlainText("unchanged")
+            dialog.refresh_scan()
+            self.assertEqual(dialog.details.toPlainText(), "unchanged")
+            self.assertEqual(dialog._active_scan_task_id, "scan-1")
+
+            dialog._finish_scan_request()
+            self.assertIsNone(dialog._active_scan_task_id)
+            self.assertTrue(dialog.refresh_button.isEnabled())
+
+            with mock.patch.object(QMessageBox, "critical", return_value=None) as critical:
+                dialog._fail_scan("scan exploded")
+            critical.assert_called_once()
+            self.assertEqual(dialog.details.toPlainText(), "scan exploded")
+            self.assertFalse(dialog.open_button.isEnabled())
+            self.assertFalse(dialog.fix_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_quality_dashboard_filters_selection_guards_and_fix_errors(self):
+        issues = [
+            QualityIssue(
+                issue_type="missing_isrc",
+                severity="warning",
+                title="Missing ISRC",
+                details="Track is missing an ISRC.",
+                entity_type="track",
+                entity_id=1,
+                release_id=1,
+                track_id=1,
+            ),
+            QualityIssue(
+                issue_type="broken_media",
+                severity="error",
+                title="Broken Media",
+                details="Media file is missing.",
+                entity_type="asset",
+                entity_id=2,
+                release_id=2,
+                fix_key="repair_media",
+            ),
+        ]
+        result = QualityScanResult(
+            issues=issues,
+            counts_by_severity={"warning": 1, "error": 1},
+            counts_by_type={"missing_isrc": 1, "broken_media": 1},
+        )
+        opened = []
+        dialog = QualityDashboardDialog(
+            service=_DummyQualityService(result),
+            scan_callback=None,
+            task_manager=None,
+            release_choices_provider=lambda: [(1, "Release One"), (2, "Release Two")],
+            apply_fix_callback=lambda _issue: (_ for _ in ()).throw(RuntimeError("repair failed")),
+            open_issue_callback=lambda issue: opened.append(issue),
+        )
+        try:
+            dialog.severity_combo.setCurrentText("error")
+            self.app.processEvents()
+            self.assertEqual(dialog.issue_table.rowCount(), 1)
+            self.assertIn("Broken Media", dialog.details.toPlainText())
+
+            dialog.severity_combo.setCurrentText("All severities")
+            dialog.issue_type_combo.setCurrentIndex(
+                dialog.issue_type_combo.findData("missing_isrc")
+            )
+            self.app.processEvents()
+            self.assertEqual(dialog.issue_table.rowCount(), 1)
+            self.assertIn("Missing ISRC", dialog.details.toPlainText())
+
+            dialog.release_combo.setCurrentIndex(dialog.release_combo.findData(2))
+            self.app.processEvents()
+            self.assertEqual(dialog.issue_table.rowCount(), 0)
+            self.assertEqual(dialog.details.toPlainText(), "")
+            self.assertFalse(dialog.open_button.isEnabled())
+            self.assertFalse(dialog.fix_button.isEnabled())
+
+            dialog.issue_table.setRowCount(1)
+            dialog.issue_table.setCurrentCell(0, 0)
+            self.assertIsNone(dialog._selected_issue())
+            dialog._load_issue_details()
+            dialog._open_selected_issue()
+            dialog._apply_selected_fix()
+            self.assertEqual(opened, [])
+
+            dialog.issue_type_combo.setCurrentIndex(0)
+            dialog.release_combo.setCurrentIndex(dialog.release_combo.findData(2))
+            self.app.processEvents()
+            self.assertEqual(dialog.issue_table.rowCount(), 1)
+            dialog._open_selected_issue()
+            self.assertEqual(opened, [issues[1]])
+            with mock.patch.object(QMessageBox, "critical", return_value=None) as critical:
+                dialog._apply_selected_fix()
+            critical.assert_called_once()
+        finally:
+            dialog.close()
+
+    def test_quality_dashboard_export_cancel_and_filtered_payloads(self):
+        issues = [
+            QualityIssue(
+                issue_type="missing_isrc",
+                severity="warning",
+                title="Missing ISRC",
+                details="Track is missing an ISRC.",
+                entity_type="track",
+                entity_id=1,
+                release_id=1,
+                track_id=1,
+            ),
+            QualityIssue(
+                issue_type="broken_media",
+                severity="error",
+                title="Broken Media",
+                details="Media file is missing.",
+                entity_type="asset",
+                entity_id=2,
+                release_id=2,
+            ),
+        ]
+        result = QualityScanResult(
+            issues=issues,
+            counts_by_severity={"warning": 1, "error": 1},
+            counts_by_type={"missing_isrc": 1, "broken_media": 1},
+        )
+        service = _DummyQualityService(result)
+        dialog = QualityDashboardDialog(
+            service=service,
+            scan_callback=None,
+            task_manager=None,
+            release_choices_provider=lambda: [(1, "Release One"), (2, "Release Two")],
+            apply_fix_callback=lambda _issue: "",
+            open_issue_callback=lambda _issue: None,
+        )
+        try:
+            dialog.severity_combo.setCurrentText("warning")
+            self.app.processEvents()
+
+            with mock.patch.object(QFileDialog, "getSaveFileName", return_value=("", "")):
+                dialog._export_csv()
+                dialog._export_json()
+            self.assertEqual(service.csv_exports, [])
+            self.assertEqual(service.json_exports, [])
+
+            with mock.patch.object(
+                QFileDialog,
+                "getSaveFileName",
+                side_effect=[("/tmp/quality.csv", ""), ("/tmp/quality.json", "")],
+            ):
+                dialog._export_csv()
+                dialog._export_json()
+
+            self.assertEqual(service.csv_exports[0][1], "/tmp/quality.csv")
+            self.assertEqual(service.json_exports[0][1], "/tmp/quality.json")
+            self.assertEqual(service.csv_exports[0][0].issues, [issues[0]])
+            self.assertEqual(service.json_exports[0][0].issues, [issues[0]])
+            self.assertEqual(service.csv_exports[0][0].counts_by_type, result.counts_by_type)
         finally:
             dialog.close()
 

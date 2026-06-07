@@ -211,9 +211,151 @@ class AuthenticityControllerTests(unittest.TestCase):
         self.assertEqual(second_call["title"], "Export Authentic Masters")
         self.assertEqual(second_call["kind"], "write")
         self.assertEqual(second_call["unique_key"], "authenticity.export_audio")
+        bundle = SimpleNamespace(
+            audio_authenticity_service=mock.Mock(
+                export_watermarked_audio=mock.Mock(
+                    return_value=SimpleNamespace(exported=1, skipped=0, warnings=["signed"])
+                )
+            )
+        )
+        ctx = SimpleNamespace(
+            report_progress=mock.Mock(),
+            is_cancelled=mock.Mock(return_value=False),
+        )
+        result = second_call["task_fn"](bundle, ctx)
+        app._advance_task_ui_progress = mock.Mock()
+        second_call["on_success_before_cleanup"](result, mock.Mock())
+        with mock.patch(
+            "isrc_manager.authenticity.controller._message_box",
+            return_value=mock.Mock(),
+        ) as message_box:
+            second_call["on_success_after_cleanup"](result)
+        second_call["on_cancelled"]()
+
+        bundle.audio_authenticity_service.export_watermarked_audio.assert_called_once()
+        app._log_event.assert_called_once()
+        app._audit.assert_called_once_with(
+            "EXPORT",
+            "AudioAuthenticity",
+            ref_id="/tmp/out",
+            details="exported=1; skipped=0",
+        )
+        message_box.return_value.information.assert_called_once()
+        app.statusBar().showMessage.assert_called_with("Authentic master export cancelled.", 5000)
 
         preview_dialog_factory.assert_called_once_with(plan=plan, parent=app)
         preview_dialog_instance.exec.assert_called_once_with()
+
+    def test_export_authenticity_watermarked_audio_preview_empty_cancel_and_folder_cancel(self):
+        empty_plan = AuthenticityExportPlan(
+            key_id="k",
+            signer_label="Signer",
+            items=[],
+            warnings=["unsupported"],
+        )
+        ready_plan = AuthenticityExportPlan(
+            key_id="k",
+            signer_label="Signer",
+            items=[
+                AuthenticityExportPlanItem(
+                    track_id=1,
+                    track_title="Track One",
+                    source_label="track.wav",
+                    source_suffix=".wav",
+                    suggested_name="track_one",
+                    key_id="k",
+                )
+            ],
+        )
+        app = SimpleNamespace(
+            audio_authenticity_service=mock.Mock(
+                build_export_plan=mock.Mock(return_value=ready_plan)
+            ),
+            _catalog_table_controller=mock.Mock(
+                selected_or_visible_track_ids=mock.Mock(return_value=[1])
+            ),
+            _normalize_track_ids=mock.Mock(return_value=[1]),
+            _submit_background_bundle_task=mock.Mock(),
+            exports_dir=Path("/tmp"),
+            _show_background_task_error=mock.Mock(),
+            _current_profile_name=mock.Mock(return_value="Profile"),
+        )
+        messages = mock.Mock()
+        cancelled_dialog = mock.Mock(exec=mock.Mock(return_value=0))
+        accepted_dialog = mock.Mock(exec=mock.Mock(return_value=1))
+        preview_dialog_factory = mock.Mock(side_effect=[cancelled_dialog, accepted_dialog])
+        file_dialog = mock.Mock(getExistingDirectory=mock.Mock(return_value=""))
+
+        with (
+            mock.patch("isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True),
+            mock.patch(
+                "isrc_manager.authenticity.controller._root_attr",
+                return_value=preview_dialog_factory,
+            ),
+            mock.patch(
+                "isrc_manager.authenticity.controller._file_dialog", return_value=file_dialog
+            ),
+            mock.patch("isrc_manager.authenticity.controller._message_box", return_value=messages),
+        ):
+            export_authenticity_watermarked_audio(app, [1])
+            preview_success = app._submit_background_bundle_task.call_args.kwargs[
+                "on_success_after_cleanup"
+            ]
+            preview_success(empty_plan)
+            preview_success(ready_plan)
+            preview_success(ready_plan)
+
+        messages.information.assert_called_once()
+        self.assertEqual(app._submit_background_bundle_task.call_count, 1)
+        self.assertEqual(preview_dialog_factory.call_count, 2)
+        file_dialog.getExistingDirectory.assert_called_once()
+
+    def test_export_authenticity_provenance_audio_guardrails(self):
+        app = SimpleNamespace(audio_authenticity_service=mock.Mock())
+        with (
+            mock.patch(
+                "isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", False
+            ),
+            mock.patch("isrc_manager.authenticity.controller._message_box") as message_box,
+        ):
+            box = mock.Mock()
+            message_box.return_value = box
+            export_authenticity_provenance_audio(app)
+            box.warning.assert_called_once()
+
+        app = SimpleNamespace(audio_authenticity_service=None)
+        with (
+            mock.patch("isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True),
+            mock.patch("isrc_manager.authenticity.controller._message_box") as message_box,
+        ):
+            box = mock.Mock()
+            message_box.return_value = box
+            export_authenticity_provenance_audio(app)
+            box.warning.assert_called_once_with(
+                app,
+                "Export Provenance Copies",
+                "Open a profile first.",
+            )
+
+        app = SimpleNamespace(
+            audio_authenticity_service=mock.Mock(),
+            _catalog_table_controller=mock.Mock(
+                selected_or_visible_track_ids=mock.Mock(return_value=[1])
+            ),
+            _normalize_track_ids=mock.Mock(return_value=[]),
+        )
+        with (
+            mock.patch("isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True),
+            mock.patch("isrc_manager.authenticity.controller._message_box") as message_box,
+        ):
+            box = mock.Mock()
+            message_box.return_value = box
+            export_authenticity_provenance_audio(app)
+            box.information.assert_called_once_with(
+                app,
+                "Export Provenance Copies",
+                "Select one or more tracks or apply a filter first.",
+            )
 
     def test_export_authenticity_provenance_audio_handles_empty_cancel_and_success_paths(self):
         empty_plan = AuthenticityExportPlan(
@@ -325,6 +467,26 @@ class AuthenticityControllerTests(unittest.TestCase):
         )
         self.assertIsNone(_selected_track_audio_verification_option(app))
 
+        app.track_service = None
+        self.assertIsNone(_selected_track_audio_verification_option(app))
+
+        app.track_service = mock.Mock(
+            has_media=mock.Mock(return_value=False),
+            fetch_track_snapshot=mock.Mock(
+                return_value=SimpleNamespace(audio_file_filename="x.wav")
+            ),
+        )
+        app._normalize_track_ids.return_value = [1]
+        self.assertIsNone(_selected_track_audio_verification_option(app))
+
+        app.track_service.has_media.return_value = True
+        app.track_service.fetch_track_snapshot.return_value = SimpleNamespace(
+            audio_file_filename="notes.txt",
+            audio_file_path="/tmp/notes.txt",
+            track_title="Notes",
+        )
+        self.assertIsNone(_selected_track_audio_verification_option(app))
+
     def test_selected_track_audio_verification_option_returns_track(self):
         app = SimpleNamespace(
             track_service=mock.Mock(
@@ -409,6 +571,42 @@ class AuthenticityControllerTests(unittest.TestCase):
             _selected_track_audio_verification_candidate(app, 5),
             (None, None),
         )
+
+    def test_selected_track_audio_verification_candidate_rejects_missing_services_and_blob_errors(
+        self,
+    ):
+        app = SimpleNamespace(track_service=None)
+        self.assertEqual(_selected_track_audio_verification_candidate(app, 1), (None, None))
+
+        app = SimpleNamespace(
+            track_service=mock.Mock(),
+            _selected_track_audio_verification_option=mock.Mock(return_value=None),
+        )
+        self.assertEqual(_selected_track_audio_verification_candidate(app), (None, None))
+
+        app.track_service = mock.Mock(
+            has_media=mock.Mock(return_value=False),
+            fetch_track_snapshot=mock.Mock(
+                return_value=SimpleNamespace(
+                    audio_file_filename="track.wav",
+                    audio_file_path="managed/track.wav",
+                )
+            ),
+        )
+        self.assertEqual(_selected_track_audio_verification_candidate(app, 7), (None, None))
+
+        app.track_service = mock.Mock(
+            has_media=mock.Mock(return_value=True),
+            fetch_track_snapshot=mock.Mock(
+                return_value=SimpleNamespace(
+                    audio_file_filename="track.wav",
+                    audio_file_path="managed/track.wav",
+                )
+            ),
+            resolve_media_path=mock.Mock(return_value=None),
+            fetch_media_bytes=mock.Mock(side_effect=RuntimeError("missing blob")),
+        )
+        self.assertEqual(_selected_track_audio_verification_candidate(app, 8), (None, None))
 
     def test_prompt_audio_authenticity_verification_source_routes_choices(self):
         chooser = mock.Mock()
@@ -508,6 +706,69 @@ class AuthenticityControllerTests(unittest.TestCase):
             details="valid",
         )
         dialog.exec.assert_called_once()
+
+    def test_verify_audio_authenticity_guardrails_and_selection_fallbacks(self):
+        app = SimpleNamespace(audio_authenticity_service=mock.Mock())
+        with (
+            mock.patch(
+                "isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", False
+            ),
+            mock.patch("isrc_manager.authenticity.controller._message_box") as message_box,
+        ):
+            box = mock.Mock()
+            message_box.return_value = box
+            verify_audio_authenticity(app)
+            box.warning.assert_called_once()
+
+        app = SimpleNamespace(audio_authenticity_service=None)
+        with (
+            mock.patch("isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True),
+            mock.patch("isrc_manager.authenticity.controller._message_box") as message_box,
+        ):
+            box = mock.Mock()
+            message_box.return_value = box
+            verify_audio_authenticity(app)
+            box.warning.assert_called_once_with(
+                app, "Verify Audio Authenticity", "Open a profile first."
+            )
+
+        app = SimpleNamespace(
+            audio_authenticity_service=mock.Mock(),
+            _selected_track_audio_verification_option=mock.Mock(return_value=(1, "Demo")),
+            _prompt_audio_authenticity_verification_source=mock.Mock(return_value=None),
+            _submit_background_bundle_task=mock.Mock(),
+        )
+        with mock.patch(
+            "isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True
+        ):
+            verify_audio_authenticity(app)
+        app._submit_background_bundle_task.assert_not_called()
+
+        app._prompt_audio_authenticity_verification_source.return_value = "selected"
+        app._selected_track_audio_verification_candidate = mock.Mock(return_value=(None, None))
+        app._pick_audio_authenticity_verification_file = mock.Mock(return_value=None)
+        with (
+            mock.patch("isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True),
+            mock.patch(
+                "isrc_manager.authenticity.controller._message_box", return_value=mock.Mock()
+            ),
+        ):
+            verify_audio_authenticity(app)
+        app._pick_audio_authenticity_verification_file.assert_called_once()
+        app._submit_background_bundle_task.assert_not_called()
+
+        app = SimpleNamespace(
+            audio_authenticity_service=mock.Mock(),
+            _selected_track_audio_verification_option=mock.Mock(return_value=None),
+            _pick_audio_authenticity_verification_file=mock.Mock(return_value=None),
+            _submit_background_bundle_task=mock.Mock(),
+        )
+        with mock.patch(
+            "isrc_manager.authenticity.controller.AUTHENTICITY_FEATURE_AVAILABLE", True
+        ):
+            verify_audio_authenticity(app)
+        app._pick_audio_authenticity_verification_file.assert_called_once()
+        app._submit_background_bundle_task.assert_not_called()
 
     def test_verify_audio_authenticity_cleans_up_temp_capture_path(self):
         temp_root = tempfile.TemporaryDirectory()

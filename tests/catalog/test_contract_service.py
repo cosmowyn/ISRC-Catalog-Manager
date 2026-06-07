@@ -1,10 +1,15 @@
+import sqlite3
+from pathlib import Path
 from unittest import mock
 
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
     CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
+    GENERATION_STRATEGY_SHA256,
 )
 from isrc_manager.contracts import (
     ContractDocumentPayload,
@@ -500,6 +505,455 @@ class ContractServiceTests(ContractRightsAssetServiceTestCase):
                     contract_id,
                     system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
                 )
+
+    def test_contract_registry_absent_schema_and_assignment_error_branches(self):
+        conn = self._new_minimal_contract_connection()
+        try:
+            service = ContractService(conn, None)
+
+            self.assertIsNone(service.code_registry_service())
+            self.assertEqual(
+                service._contract_identifier_select_sql(BUILTIN_CATEGORY_CONTRACT_NUMBER),
+                "NULL",
+            )
+            self.assertIn(
+                "WHEN 0 THEN 'external'",
+                service._contract_identifier_mode_sql(BUILTIN_CATEGORY_CONTRACT_NUMBER),
+            )
+            with self.assertRaisesRegex(ValueError, "Code registry service is unavailable"):
+                service._assign_contract_registry_entry(
+                    contract_id=1,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                    entry=mock.Mock(id=7, value="CTR-7"),
+                )
+
+            with mock.patch.object(service, "_code_registry_service", return_value=None):
+                service._apply_registry_assignments(
+                    contract_id=1,
+                    payload=ContractPayload(title="No Identifiers"),
+                    cursor=conn.cursor(),
+                    created_via="contract.test",
+                )
+                with self.assertRaisesRegex(ValueError, "Code registry service is unavailable"):
+                    service._apply_registry_assignments(
+                        contract_id=1,
+                        payload=ContractPayload(title="Manual", contract_number="CTR-1"),
+                        cursor=conn.cursor(),
+                        created_via="contract.test",
+                    )
+        finally:
+            conn.close()
+
+        legacy_conn = sqlite3.connect(":memory:")
+        try:
+            legacy_conn.execute("CREATE TABLE ContractDocuments(id INTEGER PRIMARY KEY)")
+            ContractService(legacy_conn, None)
+            columns = {
+                str(row[1])
+                for row in legacy_conn.execute("PRAGMA table_info(ContractDocuments)").fetchall()
+            }
+            self.assertIn("storage_mode", columns)
+            self.assertIn("file_blob", columns)
+        finally:
+            legacy_conn.close()
+
+    def test_contract_registry_generation_capture_and_validation_edges(self):
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(title="Registry Branch Contract")
+        )
+        real_registry = self.contract_service.code_registry_service()
+        assert real_registry is not None
+        real_category = real_registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CONTRACT_NUMBER)
+        assert real_category is not None
+        real_registry.update_category(real_category.id, prefix="CTR")
+        linked_entry = real_registry.generate_next_code(
+            category_id=real_category.id,
+            created_via="contract.test.fk",
+        ).entry
+        external_record = real_registry.store_external_code_identifier(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            value="CTR-EXTERNAL",
+            owner_kind="contract",
+            owner_id=contract_id,
+            source_label="contract.test.fk",
+        )
+        category = mock.Mock(
+            id=10,
+            display_name="Contract Number",
+            generation_strategy="sequence",
+        )
+        sha_category = mock.Mock(
+            id=11,
+            display_name="Registry SHA-256 Key",
+            generation_strategy=GENERATION_STRATEGY_SHA256,
+        )
+        assigned: list[tuple[int, str, object]] = []
+
+        def entry(
+            entry_id: int,
+            value: str,
+            *,
+            category_id: int = 10,
+            category_system_key: str = BUILTIN_CATEGORY_CONTRACT_NUMBER,
+        ):
+            return mock.Mock(
+                id=entry_id,
+                value=value,
+                category_id=category_id,
+                category_system_key=category_system_key,
+            )
+
+        generated_entry = entry(21, "CTR-GEN")
+        captured_entry = entry(22, "CTR-CAP")
+        sha_entry = entry(
+            23,
+            "sha-value",
+            category_id=11,
+            category_system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        )
+        fake_registry = mock.Mock()
+        fake_registry.resolve_identifier_input.side_effect = lambda **kwargs: mock.Mock(
+            mode=kwargs.get("mode"),
+            registry_entry_id=kwargs.get("registry_entry_id"),
+        )
+        fake_registry.assign_identifier_to_owner.side_effect = (
+            lambda owner_id, system_key, resolution, **_kwargs: assigned.append(
+                (owner_id, system_key, resolution)
+            )
+        )
+        fake_registry.fetch_category_by_system_key.side_effect = lambda system_key: (
+            sha_category if system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY else category
+        )
+        fake_registry.generate_next_code.return_value = mock.Mock(entry=generated_entry)
+        fake_registry.generate_sha256_key.return_value = mock.Mock(entry=sha_entry)
+        fake_registry.capture_value_for_category.return_value = captured_entry
+
+        with mock.patch.object(
+            self.contract_service,
+            "_code_registry_service",
+            return_value=fake_registry,
+        ):
+            with self.assertRaisesRegex(ValueError, "Contract #999999 was not found"):
+                self.contract_service.ensure_registry_value_for_contract(
+                    999999,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+            with self.assertRaisesRegex(ValueError, "Contract #999999 was not found"):
+                self.contract_service.generate_registry_value_for_contract(
+                    999999,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+
+            fake_registry.fetch_category_by_system_key.return_value = None
+            fake_registry.fetch_category_by_system_key.side_effect = None
+            with self.assertRaisesRegex(ValueError, "Registry category"):
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+            with self.assertRaisesRegex(ValueError, "Registry category"):
+                self.contract_service.generate_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+
+            fake_registry.fetch_category_by_system_key.side_effect = lambda system_key: (
+                sha_category if system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY else category
+            )
+
+            self.conn.execute(
+                "UPDATE Contracts SET contract_registry_entry_id=?, contract_number=? WHERE id=?",
+                (linked_entry.id, "CTR-OLD", contract_id),
+            )
+            fake_registry.fetch_entry.return_value = None
+            with self.assertRaisesRegex(
+                ValueError,
+                f"entry #{linked_entry.id} is no longer available",
+            ):
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+
+            fake_registry.fetch_entry.return_value = entry(
+                linked_entry.id, "CTR-OLD", category_id=999
+            )
+            with self.assertRaisesRegex(ValueError, "does not belong"):
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+
+            fake_registry.fetch_entry.return_value = entry(linked_entry.id, "CTR-NEW")
+            self.assertEqual(
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                ).value,
+                "CTR-NEW",
+            )
+            self.assertEqual(assigned[-1][1], BUILTIN_CATEGORY_CONTRACT_NUMBER)
+
+            assigned_count = len(assigned)
+            self.conn.execute(
+                "UPDATE Contracts SET contract_registry_entry_id=?, contract_number=? WHERE id=?",
+                (linked_entry.id, "CTR-SAME", contract_id),
+            )
+            fake_registry.fetch_entry.return_value = entry(linked_entry.id, "CTR-SAME")
+            self.assertEqual(
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                ).value,
+                "CTR-SAME",
+            )
+            self.assertEqual(len(assigned), assigned_count)
+
+            self.conn.execute(
+                """
+                UPDATE Contracts
+                SET contract_registry_entry_id=NULL,
+                    contract_external_code_identifier_id=?,
+                    contract_number=?
+                WHERE id=?
+                """,
+                (external_record.id, "CTR-EXTERNAL", contract_id),
+            )
+            self.assertEqual(
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                ),
+                generated_entry,
+            )
+
+            self.conn.execute(
+                """
+                UPDATE Contracts
+                SET contract_external_code_identifier_id=NULL,
+                    contract_number=?
+                WHERE id=?
+                """,
+                ("CTR-CAP", contract_id),
+            )
+            self.assertEqual(
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                ),
+                captured_entry,
+            )
+
+            fake_registry.capture_value_for_category.side_effect = ValueError("bad format")
+            with self.assertRaisesRegex(ValueError, "not valid.*bad format"):
+                self.contract_service.ensure_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                )
+            fake_registry.capture_value_for_category.side_effect = None
+
+            self.assertEqual(
+                self.contract_service.generate_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                ),
+                sha_entry,
+            )
+
+            fake_registry.resolve_identifier_input.side_effect = ValueError("invalid choice")
+            with self.assertRaisesRegex(ValueError, "Contract Number: invalid choice"):
+                self.contract_service._resolve_contract_identifier_resolution(
+                    payload=ContractPayload(title="Bad", contract_number="bad"),
+                    system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                    created_via="contract.test",
+                    cursor=self.conn.cursor(),
+                )
+            fake_registry.resolve_identifier_input.side_effect = lambda **kwargs: mock.Mock(
+                mode=kwargs.get("mode")
+            )
+
+            wrong_entry = entry(
+                99,
+                "LIC-99",
+                category_system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+            )
+            wrong_external = mock.Mock(category_system_key=BUILTIN_CATEGORY_LICENSE_NUMBER)
+            fake_registry.fetch_entry.return_value = wrong_entry
+            fake_registry.fetch_external_code_identifier.return_value = wrong_external
+            issues = self.contract_service.validate_contract(
+                ContractPayload(
+                    title="Wrong registry records",
+                    contract_registry_entry_id=99,
+                    contract_external_code_identifier_id=100,
+                )
+            )
+            messages = "\n".join(issue.message for issue in issues)
+            self.assertIn("belongs to a different registry category", messages)
+            self.assertIn("belongs to a different identifier type", messages)
+
+            with mock.patch.object(
+                self.contract_service,
+                "_code_registry_service",
+                return_value=None,
+            ):
+                with self.assertRaisesRegex(ValueError, "Code registry service is unavailable"):
+                    self.contract_service._resolve_contract_identifier_resolution(
+                        payload=ContractPayload(title="Manual", contract_number="CTR-1"),
+                        system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                        created_via="contract.test",
+                        cursor=self.conn.cursor(),
+                    )
+                issues = self.contract_service.validate_contract(
+                    ContractPayload(
+                        title="Manual external value",
+                        contract_number="CTR-MANUAL",
+                        contract_number_mode=CATALOG_MODE_EXTERNAL,
+                    )
+                )
+            self.assertFalse(any(issue.severity == "error" for issue in issues))
+
+        empty_title_issues = self.contract_service.validate_contract(ContractPayload(title=""))
+        self.assertIn(
+            "Contract title is required.", [issue.message for issue in empty_title_issues]
+        )
+
+        cursor_contract_id = self.contract_service.create_contract(
+            ContractPayload(title="Explicit Cursor Contract"),
+            cursor=self.conn.cursor(),
+        )
+        self.assertIsInstance(cursor_contract_id, int)
+
+    def test_contract_document_storage_payload_and_conversion_failure_edges(self):
+        with self.assertRaises(FileNotFoundError):
+            self.contract_service._write_document_file(self.data_root / "missing-managed.pdf")
+        with self.assertRaises(FileNotFoundError):
+            self.contract_service._write_document_blob(self.data_root / "missing-blob.pdf")
+        existing_source = self.data_root / "unconfigured-source.pdf"
+        existing_source.write_text("source", encoding="utf-8")
+        unconfigured_service = ContractService(self.conn, None, party_service=self.party_service)
+        with self.assertRaisesRegex(ValueError, "storage is not configured"):
+            unconfigured_service._write_document_file(existing_source)
+
+        payload = self.contract_service._build_document_storage_payload(
+            stored_path=None,
+            filename="existing.pdf",
+            checksum_sha256=None,
+            storage_mode="database",
+            existing_file_blob=sqlite3.Binary(b"database bytes"),
+        )
+        self.assertEqual(payload[0], None)
+        self.assertEqual(payload[1], b"database bytes")
+        self.assertEqual(payload[2], "existing.pdf")
+        self.assertTrue(payload[3])
+        self.assertEqual(payload[4], "application/pdf")
+
+        rel_path = self.contract_service.document_store.write_bytes(
+            b"managed bytes",
+            filename="managed.pdf",
+            subdir=None,
+        )
+        payload = self.contract_service._build_document_storage_payload(
+            stored_path=rel_path,
+            filename="",
+            checksum_sha256=None,
+            storage_mode="managed_file",
+        )
+        self.assertEqual(payload[0], rel_path)
+        self.assertEqual(payload[2], Path(rel_path).name)
+        self.assertTrue(payload[3])
+        self.assertEqual(payload[4], "application/pdf")
+        with self.assertRaisesRegex(FileNotFoundError, "contract_documents/missing.pdf"):
+            self.contract_service._build_document_storage_payload(
+                stored_path="contract_documents/missing.pdf",
+                filename="missing.pdf",
+                checksum_sha256=None,
+                storage_mode="managed_file",
+            )
+
+        with mock.patch.object(
+            self.contract_service,
+            "resolve_document_path",
+            return_value=None,
+        ):
+            with self.conn:
+                self.contract_service._delete_document_if_unreferenced(
+                    rel_path,
+                    cursor=self.conn.cursor(),
+                )
+
+        fake_resolved = mock.Mock()
+        fake_resolved.unlink.side_effect = OSError("cannot delete")
+        with (
+            mock.patch.object(
+                self.contract_service,
+                "_is_managed_document_path",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.contract_service,
+                "resolve_document_path",
+                return_value=fake_resolved,
+            ),
+        ):
+            with self.conn:
+                self.contract_service._delete_document_if_unreferenced(
+                    "contract_documents/orphan.pdf",
+                    cursor=self.conn.cursor(),
+                )
+
+        source = self.data_root / "same-mode.txt"
+        source.write_text("same mode", encoding="utf-8")
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Same Mode",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Same",
+                        source_path=str(source),
+                        storage_mode="database",
+                    )
+                ],
+            )
+        )
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        assert detail is not None
+        doc = detail.documents[0]
+        same = self.contract_service.convert_document_storage_mode(doc.id, "database")
+        self.assertEqual(same.id, doc.id)
+
+        wrong_path = self.data_root / "wrong-conversion.txt"
+        wrong_path.write_text("wrong payload", encoding="utf-8")
+        with (
+            mock.patch.object(
+                self.contract_service.document_store,
+                "write_bytes",
+                return_value="contract_documents/wrong-conversion.txt",
+            ),
+            mock.patch.object(
+                self.contract_service,
+                "resolve_document_path",
+                return_value=wrong_path,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "conversion verification failed"):
+                self.contract_service.convert_document_storage_mode(doc.id, "managed_file")
+
+    @staticmethod
+    def _new_minimal_contract_connection() -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.execute("""
+            CREATE TABLE Contracts(
+                id INTEGER PRIMARY KEY,
+                title TEXT,
+                contract_number TEXT,
+                contract_registry_entry_id INTEGER,
+                license_number TEXT,
+                license_registry_entry_id INTEGER,
+                registry_sha256_key TEXT,
+                registry_sha256_key_entry_id INTEGER
+            )
+            """)
+        return conn
 
 
 del ContractRightsAssetServiceTestCase

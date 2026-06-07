@@ -1,8 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 
 from isrc_manager.services import (
     GS1ExcelExportService,
@@ -12,6 +14,7 @@ from isrc_manager.services import (
     GS1RecordContext,
     GS1TemplateVerificationService,
 )
+from isrc_manager.services.gs1_models import GS1TemplateSheetProfile
 
 HEADERS = [
     "GS1 Artikelcode (GTIN)",
@@ -204,6 +207,76 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
         self.assertEqual(target_sheet["A2"].value, "1")
         self.assertEqual(target_sheet["A3"].value, "2")
         self.assertEqual(target_sheet["G3"].value, "Solar Release")
+
+    def test_export_rejects_empty_records(self):
+        with self.assertRaisesRegex(ValueError, "At least one GS1 record"):
+            self.service.export(self.template_profile, [], self.root / "empty.xlsx")
+
+    def test_materialized_template_cleanup_tolerates_unlink_failure(self):
+        embedded_profile = GS1TemplateVerificationService().verify(self.template_path)
+        embedded_profile.source_name = "embedded-template.xlsx"
+        embedded_profile.source_bytes = self.template_path.read_bytes()
+        temp_path = None
+        original_unlink = Path.unlink
+
+        def _raise_for_materialized_template(path, *args, **kwargs):
+            if path == temp_path:
+                raise OSError("cleanup blocked")
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", _raise_for_materialized_template):
+            with self.service._materialized_template_path(embedded_profile) as workbook_path:
+                temp_path = workbook_path
+                self.assertTrue(workbook_path.is_file())
+
+        self.assertTrue(temp_path.is_file())
+        original_unlink(temp_path)
+
+    def test_row_discovery_style_cloning_and_unknown_field_skip(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "10070050"
+        worksheet.append(HEADERS)
+        worksheet.append(["existing", "data"])
+        sheet_profile = self.template_profile.sheet_profile("10070050")
+
+        self.assertEqual(self.service._find_start_row(worksheet, sheet_profile), 3)
+        self.service._clone_row_style(worksheet, 0, 3)
+
+        worksheet["A2"].font = Font(bold=True)
+        worksheet["A2"].fill = PatternFill("solid", fgColor="FF0000")
+        worksheet["A2"].border = Border(left=Side(style="thin"))
+        worksheet["A2"].alignment = Alignment(horizontal="center")
+        worksheet["A2"].protection = Protection(locked=False)
+        worksheet["A2"].number_format = "0"
+        worksheet.row_dimensions[2].height = 42
+        worksheet.row_dimensions[2].hidden = True
+
+        self.service._clone_row_style(worksheet, 2, 4)
+
+        self.assertTrue(worksheet["A4"].font.bold)
+        self.assertEqual(worksheet["A4"].number_format, "0")
+        self.assertEqual(worksheet.row_dimensions[4].height, 42)
+        self.assertTrue(worksheet.row_dimensions[4].hidden)
+
+        custom_profile = GS1TemplateSheetProfile(
+            sheet_name="10070050",
+            header_row=1,
+            column_map={"gtin_request_number": 1, "unknown_field": 2},
+            matched_headers={},
+            score=1.0,
+        )
+        self.service._write_record_row(
+            worksheet,
+            row_number=5,
+            sheet_profile=custom_profile,
+            locale_hint=self.template_profile.locale_hint,
+            prepared_record=prepared_record(99, "Unknown field skip"),
+            sequence_number=7,
+        )
+
+        self.assertEqual(worksheet["A5"].value, "7")
+        self.assertIsNone(worksheet["B5"].value)
 
 
 if __name__ == "__main__":

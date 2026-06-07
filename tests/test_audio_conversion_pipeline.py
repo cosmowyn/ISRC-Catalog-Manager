@@ -16,10 +16,13 @@ from isrc_manager.media.derivatives import (
     MANAGED_DERIVATIVE_KIND_LOSSY,
     MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC,
     MANAGED_DERIVATIVE_WORKFLOW_KIND,
+    DerivativeLedgerService,
     ExternalAudioConversionCoordinator,
     ExternalAudioConversionRequest,
     ManagedDerivativeExportCoordinator,
     ManagedDerivativeExportRequest,
+    _final_audio_filename,
+    managed_derivative_workflow,
 )
 from isrc_manager.releases import ReleasePayload, ReleaseTrackPlacement
 from tests._authenticity_support import AuthenticityWorkflowTestCase
@@ -109,6 +112,262 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
             tag_service=self.audio_tag_service,
             authenticity_service=self.audio_service,
             conversion_service=self.stub_conversion_service,
+        )
+
+    def test_derivative_helpers_and_ledger_filters_update_and_delete_paths(self):
+        track_id, _source_path = self.create_track_with_audio(
+            title="Ledger Search Source",
+            album_title="Ledger Album",
+            duration_seconds=5,
+            seed=31,
+            suffix=".wav",
+        )
+        ledger = DerivativeLedgerService(self.conn)
+
+        with self.assertRaisesRegex(ValueError, "Unsupported managed derivative kind"):
+            managed_derivative_workflow("unknown-kind")
+        self.assertEqual(
+            _final_audio_filename("Ledger Search Source", "mp3"), "Ledger Search Source.mp3"
+        )
+
+        batch_id = ledger.create_batch(
+            batch_public_id="AEX-ledger-filter",
+            track_count=1,
+            output_format="MP3",
+            workflow_kind="",
+            derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+            authenticity_basis=AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY,
+            profile_name="Ledger Profile",
+        )
+        derivative_id = ledger.create_derivative(
+            source_track_id=track_id,
+            export_batch_id=batch_id,
+            workflow_kind=MANAGED_DERIVATIVE_WORKFLOW_KIND,
+            derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+            authenticity_basis=AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY,
+            output_format="MP3",
+            watermark_applied=False,
+            metadata_embedded=True,
+            final_sha256="abc123",
+            output_filename="Ledger Search Source.mp3",
+            source_lineage_ref=f"track-audio/{track_id}/source",
+            source_sha256="source",
+            source_storage_mode="managed_file",
+            authenticity_manifest_id="",
+            output_size_bytes=123,
+            filename_hash_suffix="abc123",
+            output_mime_type="audio/mpeg",
+            managed_file_path="exports/Ledger Search Source.mp3",
+            sidecar_path="exports/Ledger Search Source.json",
+            package_member_path="Ledger Album/Ledger Search Source.mp3",
+        )
+        ledger.update_batch_completion(
+            batch_id,
+            exported_count=1,
+            skipped_count=0,
+            package_mode="zip",
+            status="completed",
+            zip_filename="ledger.zip",
+        )
+
+        batches = ledger.list_batches(
+            search_text="ledger",
+            output_format="mp3",
+            derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+            status="completed",
+            limit=0,
+        )
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0].batch_id, batch_id)
+        self.assertEqual(batches[0].workflow_kind, MANAGED_DERIVATIVE_WORKFLOW_KIND)
+        self.assertEqual(batches[0].package_mode, "zip")
+        self.assertEqual(batches[0].zip_filename, "ledger.zip")
+        self.assertEqual(batches[0].profile_name, "Ledger Profile")
+
+        derivatives = ledger.list_derivatives(
+            batch_id=batch_id,
+            search_text="ledger",
+            output_format="mp3",
+            derivative_kind=MANAGED_DERIVATIVE_KIND_LOSSY,
+            status="completed",
+            limit=0,
+        )
+        self.assertEqual(len(derivatives), 1)
+        self.assertEqual(derivatives[0].export_id, derivative_id)
+        self.assertEqual(derivatives[0].track_id, track_id)
+        self.assertEqual(derivatives[0].track_title, "Ledger Search Source")
+        self.assertEqual(derivatives[0].source_storage_mode, "managed_file")
+        self.assertEqual(derivatives[0].managed_file_path, "exports/Ledger Search Source.mp3")
+        self.assertEqual(derivatives[0].sidecar_path, "exports/Ledger Search Source.json")
+        self.assertEqual(
+            derivatives[0].package_member_path,
+            "Ledger Album/Ledger Search Source.mp3",
+        )
+
+        ledger.update_derivative_artifacts(
+            derivative_id,
+            managed_file_path="",
+            sidecar_path="",
+            package_member_path="Ledger Album/updated.mp3",
+        )
+        updated = ledger.list_derivatives(batch_id=batch_id)[0]
+        self.assertIsNone(updated.managed_file_path)
+        self.assertIsNone(updated.sidecar_path)
+        self.assertEqual(updated.package_member_path, "Ledger Album/updated.mp3")
+
+        ledger.delete_derivative(derivative_id)
+        self.assertEqual(ledger.list_derivatives(batch_id=batch_id), [])
+        ledger.delete_batch(batch_id)
+        self.assertEqual(ledger.list_batches(search_text="AEX-ledger-filter"), [])
+
+    def test_managed_export_validation_default_kind_and_skipped_track_cleanup(self):
+        coordinator = self._managed_coordinator()
+
+        with self.assertRaisesRegex(ValueError, "Unsupported output format"):
+            coordinator.export(
+                ManagedDerivativeExportRequest(
+                    track_ids=[999],
+                    output_dir=self.root / "bad_format",
+                    output_format="not-a-format",
+                )
+            )
+
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported watermarked managed derivative target"
+        ):
+            coordinator.export(
+                ManagedDerivativeExportRequest(
+                    track_ids=[999],
+                    output_dir=self.root / "bad_auth_target",
+                    output_format="mp3",
+                    derivative_kind=MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC,
+                )
+            )
+
+        with self.assertRaisesRegex(InterruptedError, "cancelled"):
+            coordinator.export(
+                ManagedDerivativeExportRequest(
+                    track_ids=[999],
+                    output_dir=self.root / "cancelled_before_scan",
+                    output_format="mp3",
+                ),
+                is_cancelled=lambda: True,
+            )
+
+        progress_updates: list[tuple[int, int, str]] = []
+        result = coordinator.export(
+            ManagedDerivativeExportRequest(
+                track_ids=[999],
+                output_dir=self.root / "skipped_only",
+                output_format="mp3",
+                derivative_kind=None,
+                profile_name="Skipped Profile",
+            ),
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 0)
+        self.assertEqual(result.skipped, 1)
+        self.assertEqual(result.derivative_kind, MANAGED_DERIVATIVE_KIND_LOSSY)
+        self.assertEqual(result.authenticity_basis, AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY)
+        self.assertEqual(result.warnings, ["Track 999 has no attached audio."])
+        self.assertEqual(result.written_paths, [])
+        self.assertTrue(
+            any(
+                "No exportable derivatives were produced" in message
+                for *_rest, message in progress_updates
+            )
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM DerivativeExportBatches").fetchone()[0],
+            0,
+        )
+
+    def test_external_conversion_validation_missing_and_cancellation_paths(self):
+        source = self.write_audio_fixture(
+            "external-cancel-source.wav",
+            duration_seconds=5,
+            seed=32,
+            suffix=".wav",
+        )
+        coordinator = ExternalAudioConversionCoordinator(
+            conversion_service=self.stub_conversion_service
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unsupported external conversion target"):
+            coordinator.export(
+                ExternalAudioConversionRequest(
+                    input_paths=[str(source)],
+                    output_dir=self.root / "external_bad_target",
+                    output_format="not-a-format",
+                )
+            )
+
+        class _ClaimsSupportWithoutProfile:
+            def is_supported_target(self, *_args, **_kwargs):
+                return True
+
+            def transcode(self, **_kwargs):  # pragma: no cover - validation should fail first
+                raise AssertionError("transcode should not run")
+
+        with self.assertRaisesRegex(ValueError, "Unsupported output format"):
+            ExternalAudioConversionCoordinator(
+                conversion_service=_ClaimsSupportWithoutProfile()
+            ).export(
+                ExternalAudioConversionRequest(
+                    input_paths=[str(source)],
+                    output_dir=self.root / "external_missing_profile",
+                    output_format="not-a-format",
+                )
+            )
+
+        with self.assertRaisesRegex(InterruptedError, "cancelled"):
+            coordinator.export(
+                ExternalAudioConversionRequest(
+                    input_paths=[str(source)],
+                    output_dir=self.root / "external_cancelled_before_validation",
+                    output_format="wav",
+                ),
+                is_cancelled=lambda: True,
+            )
+
+        cancel_checks = [False, True]
+        with self.assertRaisesRegex(InterruptedError, "cancelled"):
+            coordinator.export(
+                ExternalAudioConversionRequest(
+                    input_paths=[str(source)],
+                    output_dir=self.root / "external_cancelled_during_conversion",
+                    output_format="wav",
+                ),
+                is_cancelled=lambda: cancel_checks.pop(0),
+            )
+
+        progress_updates: list[tuple[int, int, str]] = []
+        missing_source = self.root / "missing-external.wav"
+        result = coordinator.export(
+            ExternalAudioConversionRequest(
+                input_paths=[str(missing_source)],
+                output_dir=self.root / "external_missing_only",
+                output_format="wav",
+            ),
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.requested, 1)
+        self.assertEqual(result.exported, 0)
+        self.assertEqual(result.skipped, 1)
+        self.assertEqual(result.warnings, [f"Missing source audio: {missing_source}"])
+        self.assertEqual(result.written_paths, [])
+        self.assertIsNone(result.zip_path)
+        self.assertTrue(
+            any(
+                "No external audio files were converted" in message
+                for *_rest, message in progress_updates
+            )
         )
 
     def test_managed_export_from_managed_file_writes_tags_hash_and_ledger(self):

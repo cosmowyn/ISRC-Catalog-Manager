@@ -4,11 +4,11 @@ from unittest import mock
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtWidgets import QDialog, QMessageBox
+    from PySide6.QtWidgets import QDialog, QMessageBox, QTableWidgetItem
 
     from isrc_manager.releases.dialogs import ReleaseEditorDialog
     from isrc_manager.releases.models import ReleaseValidationIssue
-    from isrc_manager.search.dialogs import GlobalSearchDialog
+    from isrc_manager.search.dialogs import GlobalSearchDialog, GlobalSearchPanel
     from isrc_manager.search.models import (
         GlobalSearchResult,
         RelationshipSection,
@@ -29,23 +29,77 @@ else:
 
 
 class _SearchService:
-    def __init__(self):
-        self.saved = [
-            SavedSearchRecord(id=1, name="Tracks", query_text="orbit", entity_types=["track"])
-        ]
-        self.results = [
+    def __init__(self, *, saved=None, results=None):
+        self.saved = list(
+            saved
+            if saved is not None
+            else [
+                SavedSearchRecord(
+                    id=1,
+                    name="Tracks",
+                    query_text="orbit",
+                    entity_types=["track"],
+                )
+            ]
+        )
+        self.results = list(
+            results
+            if results is not None
+            else [
+                GlobalSearchResult(
+                    entity_type="track",
+                    entity_id=7,
+                    title="Orbit",
+                    subtitle="Single",
+                    status="cleared",
+                )
+            ]
+        )
+        self.saved_args = None
+        self.deleted_ids = []
+        self.raise_on_save = None
+        self.last_browse = None
+        self.last_search = None
+
+    @staticmethod
+    def overview_results():
+        return [
             GlobalSearchResult(
                 entity_type="track",
                 entity_id=7,
                 title="Orbit",
                 subtitle="Single",
                 status="cleared",
-            )
+            ),
+            GlobalSearchResult(
+                entity_type="work",
+                entity_id=8,
+                title="Orbit Work",
+                subtitle="composition",
+                status="registered",
+            ),
+            GlobalSearchResult(
+                entity_type="release",
+                entity_id=9,
+                title="Orbit Release",
+                subtitle="EP",
+                status="published",
+            ),
+            GlobalSearchResult(
+                entity_type="contract",
+                entity_id=10,
+                title="Orbit Agreement",
+                subtitle="license",
+                status="draft",
+            ),
+            GlobalSearchResult(
+                entity_type="party",
+                entity_id=11,
+                title="Moonwake",
+                subtitle="artist",
+                status="active",
+            ),
         ]
-        self.saved_args = None
-        self.deleted_ids = []
-        self.raise_on_save = None
-        self.last_browse = None
 
     def list_saved_searches(self):
         return list(self.saved)
@@ -79,7 +133,14 @@ class _SearchService:
 
 
 class _RelationshipService:
+    def __init__(self, sections=None):
+        self.sections = sections
+        self.calls = []
+
     def describe_links(self, entity_type, entity_id):
+        self.calls.append((entity_type, entity_id))
+        if self.sections is not None:
+            return list(self.sections)
         return [
             RelationshipSection(
                 section_title="Contracts",
@@ -234,6 +295,139 @@ class DialogControllerBehaviorTests(unittest.TestCase):
             with mock.patch.object(QMessageBox, "critical", return_value=None) as critical:
                 dialog.save_current_search()
             critical.assert_called_once()
+        finally:
+            dialog.close()
+
+    def test_global_search_panel_no_profile_and_result_edge_paths(self):
+        panel = GlobalSearchPanel(
+            search_service_provider=lambda: None,
+            relationship_service_provider=lambda: None,
+        )
+        try:
+            self.assertEqual(panel.results_table.rowCount(), 0)
+            self.assertIn("Open a profile first", panel.results_status_label.text())
+            self.assertEqual(
+                panel.relationships_edit.toPlainText(),
+                "Select a result to inspect its links.",
+            )
+
+            panel.results_table.setRowCount(1)
+            panel.results_table.selectRow(0)
+            self.assertIsNone(panel._selected_result())
+
+            panel.results_table.setItem(0, 0, QTableWidgetItem("Track"))
+            panel.results_table.setItem(0, 1, QTableWidgetItem("7"))
+            panel.refresh_relationships()
+            self.assertIn("Open a profile first", panel.relationships_edit.toPlainText())
+
+            with mock.patch.object(QMessageBox, "warning", return_value=None) as warning:
+                panel.save_current_search()
+            warning.assert_called_once()
+
+            with mock.patch.object(QMessageBox, "warning", return_value=None) as warning:
+                panel.delete_saved_search()
+            warning.assert_called_once()
+        finally:
+            panel.close()
+
+        class _FailingSelectionModel:
+            def clearCurrentIndex(self):
+                raise RuntimeError("selection model already deleted")
+
+        class _FakeResultsTable:
+            def __init__(self):
+                self.cleared = False
+
+            def clearSelection(self):
+                self.cleared = True
+
+            def selectionModel(self):
+                return _FailingSelectionModel()
+
+        fake_table = _FakeResultsTable()
+        GlobalSearchPanel._clear_result_selection(
+            type("Panel", (), {"results_table": fake_table})()
+        )
+        self.assertTrue(fake_table.cleared)
+
+    def test_global_search_panel_overview_filters_and_empty_relationships(self):
+        search_service = _SearchService(results=_SearchService.overview_results())
+        empty_relationship_service = _RelationshipService(
+            sections=[RelationshipSection(section_title="Empty", results=[])]
+        )
+        dialog = GlobalSearchDialog(
+            search_service=search_service,
+            relationship_service=empty_relationship_service,
+        )
+        try:
+            self.assertIn("more types", dialog.results_status_label.text())
+            self.assertEqual(search_service.last_browse, (None, 200, 8))
+
+            dialog.entity_combo.setCurrentText("Tracks")
+            self.app.processEvents()
+            self.assertEqual(search_service.last_browse, (["track"], 200, 24))
+            self.assertIn("track previews", dialog.results_status_label.text())
+
+            search_service.results = []
+            dialog.refresh_results()
+            self.assertIn("No tracks are available", dialog.results_status_label.text())
+
+            search_service.results = _SearchService.overview_results()
+            dialog.refresh_results()
+            dialog.results_table.selectRow(0)
+            self.app.processEvents()
+            self.assertEqual(empty_relationship_service.calls[-1], ("track", 7))
+            self.assertEqual(dialog.relationships_edit.toPlainText(), "")
+
+            empty_relationship_service.sections = []
+            dialog.refresh_relationships()
+            self.assertEqual(
+                dialog.relationships_edit.toPlainText(),
+                "No linked records found.",
+            )
+        finally:
+            dialog.close()
+
+    def test_global_search_saved_search_application_and_delete_guards(self):
+        saved = [
+            SavedSearchRecord(id=1, name="All", query_text="orbit", entity_types=[]),
+            SavedSearchRecord(id=2, name="Party", query_text="moon", entity_types=["party"]),
+            SavedSearchRecord(
+                id=3,
+                name="Composite",
+                query_text="wide",
+                entity_types=["track", "party"],
+            ),
+        ]
+        search_service = _SearchService(saved=saved)
+        dialog = GlobalSearchDialog(
+            search_service=search_service,
+            relationship_service=_RelationshipService(),
+        )
+        try:
+            dialog.saved_searches_list.setCurrentRow(-1)
+            dialog.apply_saved_search()
+            self.assertEqual(dialog.search_edit.text(), "")
+
+            dialog.saved_searches_list.setCurrentRow(0)
+            dialog.apply_saved_search()
+            self.assertEqual(dialog.search_edit.text(), "orbit")
+            self.assertEqual(dialog.entity_combo.currentText(), "All Entities")
+
+            dialog.saved_searches_list.setCurrentRow(1)
+            dialog.apply_saved_search()
+            self.assertEqual(dialog.search_edit.text(), "moon")
+            self.assertEqual(dialog.entity_combo.currentText(), "Parties")
+
+            dialog.saved_searches_list.setCurrentRow(2)
+            dialog.apply_saved_search()
+            self.assertEqual(dialog.search_edit.text(), "wide")
+            self.assertEqual(dialog.entity_combo.currentText(), "All Entities")
+
+            dialog.saved_searches_list.setCurrentRow(-1)
+            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
+                dialog.delete_saved_search()
+            info.assert_called_once()
         finally:
             dialog.close()
 

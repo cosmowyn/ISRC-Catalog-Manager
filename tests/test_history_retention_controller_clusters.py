@@ -73,6 +73,56 @@ def test_current_settings_and_application_budget_helpers_use_defaults_and_regist
         == 512
     )
     registry.write_history_storage_budget_mb.assert_called_once_with(256)
+    assert (
+        retention._set_application_history_storage_budget_mb(
+            SimpleNamespace(application_isrc_registry=None), 128
+        )
+        == 128
+    )
+
+
+def test_apply_history_snapshot_retention_policy_handles_guards_and_refreshes(monkeypatch):
+    assert (
+        retention._apply_history_snapshot_retention_policy(
+            SimpleNamespace(history_manager=None, settings_reads=object()),
+            trigger_label="startup",
+        )
+        is None
+    )
+    assert (
+        retention._apply_history_snapshot_retention_policy(
+            SimpleNamespace(history_manager=object(), settings_reads=None),
+            trigger_label="startup",
+        )
+        is None
+    )
+
+    status = _StatusBar()
+    result = SimpleNamespace(pruned_snapshot_ids=[1, 2], quarantined_entry_ids=[9])
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def enforce_snapshot_retention(self, settings):
+            assert settings.storage_budget_mb == 111
+            return result
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        _current_history_retention_settings=mock.Mock(
+            return_value=HistoryRetentionSettings(storage_budget_mb=111)
+        ),
+        _refresh_history_actions=mock.Mock(),
+        statusBar=lambda: status,
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+
+    assert retention._apply_history_snapshot_retention_policy(app, trigger_label="save") is result
+    app._current_history_retention_settings.assert_called_once_with()
+    app._refresh_history_actions.assert_called_once_with()
+    assert "removed 2 live snapshot" in status.messages[-1][0]
 
 
 def test_path_size_recursive_counts_files_and_directories_and_tolerates_bad_paths(tmp_path):
@@ -86,6 +136,33 @@ def test_path_size_recursive_counts_files_and_directories_and_tolerates_bad_path
     assert retention._path_size_recursive(object()) == 0
     assert retention._path_size_recursive(file_path) >= 3
     assert retention._path_size_recursive(tmp_path) >= 9
+    assert retention._allocated_path_size(tmp_path / "missing.bin") == 0
+
+
+def test_path_size_recursive_returns_zero_when_directory_walk_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        retention,
+        "_allocated_path_size",
+        mock.Mock(side_effect=RuntimeError("stat failed")),
+    )
+
+    assert retention._path_size_recursive(tmp_path) == 0
+
+
+def test_estimate_history_snapshot_capture_bytes_handles_missing_manager_and_managed_root():
+    assert (
+        retention._estimate_history_snapshot_capture_bytes(SimpleNamespace(history_manager=None))
+        == 0
+    )
+
+    db_path = Path("/tmp/history.sqlite")
+    app = SimpleNamespace(
+        history_manager=SimpleNamespace(db_path=db_path, managed_root=None),
+        _path_size_recursive=mock.Mock(return_value=123),
+    )
+
+    assert retention._estimate_history_snapshot_capture_bytes(app) == 123
+    app._path_size_recursive.assert_called_once_with(db_path)
 
 
 def test_prepare_history_storage_runs_noninteractive_cleanup_when_it_can_make_room(monkeypatch):
@@ -139,6 +216,60 @@ def test_prepare_history_storage_runs_noninteractive_cleanup_when_it_can_make_ro
     dialog.refresh_data.assert_called_once()
 
 
+def test_prepare_history_storage_allows_missing_services_and_under_budget_projection(monkeypatch):
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            SimpleNamespace(history_manager=None, settings_reads=object()),
+            trigger_label="save",
+            additional_bytes=10,
+            interactive=False,
+        )
+        is True
+    )
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            SimpleNamespace(history_manager=object(), settings_reads=None),
+            trigger_label="save",
+            additional_bytes=10,
+            interactive=False,
+        )
+        is True
+    )
+
+    projection = SimpleNamespace(
+        budget_bytes=100,
+        projected_over_budget_bytes=0,
+        candidate_items=[],
+        projected_over_budget_after_cleanup_bytes=0,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def preview_storage_projection(self, settings, *, additional_bytes):
+            assert additional_bytes == 0
+            return projection
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            app,
+            trigger_label="save",
+            additional_bytes=-50,
+            interactive=False,
+        )
+        is True
+    )
+
+
 def test_prepare_history_storage_reports_noninteractive_blocked_projection(monkeypatch):
     status = _StatusBar()
     projection = SimpleNamespace(
@@ -186,6 +317,116 @@ def test_prepare_history_storage_reports_noninteractive_blocked_projection(monke
     assert "manual snapshot" in status.messages[-1][0]
     assert "125 B" in status.messages[-1][0]
     app.logger.info.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected_fragment", "logger_method"),
+    [
+        (
+            HistoryCleanupBlockedError("protected undo boundary"),
+            "cleanup is blocked",
+            "warning",
+        ),
+        (
+            RuntimeError("cleanup crashed"),
+            "could not make room safely",
+            "warning",
+        ),
+    ],
+)
+def test_prepare_history_storage_reports_noninteractive_cleanup_failures(
+    monkeypatch, side_effect, expected_fragment, logger_method
+):
+    status = _StatusBar()
+    projection = SimpleNamespace(
+        budget_bytes=100,
+        projected_over_budget_bytes=25,
+        candidate_items=[SimpleNamespace(item_key="old")],
+        projected_over_budget_after_cleanup_bytes=0,
+        blocked_by_protected_items=False,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def preview_storage_projection(self, settings, *, additional_bytes):
+            return projection
+
+        def cleanup_selected(self, item_keys):
+            assert item_keys == ["old"]
+            raise side_effect
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        logger=mock.Mock(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(
+            auto_cleanup_enabled=True
+        ),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+        statusBar=lambda: status,
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            app,
+            trigger_label="automatic snapshot",
+            additional_bytes=20,
+            interactive=False,
+        )
+        is False
+    )
+    assert expected_fragment in status.messages[-1][0]
+    getattr(app.logger, logger_method).assert_called_once()
+
+
+def test_prepare_history_storage_allows_cleanup_without_removed_items(monkeypatch):
+    projection = SimpleNamespace(
+        budget_bytes=100,
+        projected_over_budget_bytes=25,
+        candidate_items=[SimpleNamespace(item_key="old")],
+        projected_over_budget_after_cleanup_bytes=0,
+        blocked_by_protected_items=False,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def preview_storage_projection(self, settings, *, additional_bytes):
+            return projection
+
+        def cleanup_selected(self, item_keys):
+            return SimpleNamespace(removed_item_keys=[])
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        history_dialog=SimpleNamespace(
+            isVisible=mock.Mock(return_value=False), refresh_data=mock.Mock()
+        ),
+        logger=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(
+            auto_cleanup_enabled=True
+        ),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            app,
+            trigger_label="automatic snapshot",
+            additional_bytes=20,
+            interactive=False,
+        )
+        is True
+    )
+    app._refresh_history_actions.assert_not_called()
+    app.history_dialog.refresh_data.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -281,6 +522,90 @@ def test_prepare_history_storage_interactive_buttons(
     assert app.open_application_storage_admin_dialog.called is opens_admin
 
 
+def test_prepare_history_storage_interactive_message_explains_disabled_cleanup_and_protection(
+    monkeypatch,
+):
+    boxes = []
+
+    class FakeMessageBox:
+        Warning = 1
+        AcceptRole = 2
+        ActionRole = 3
+        Cancel = 4
+
+        def __init__(self, parent):
+            self.parent = parent
+            self.buttons = []
+            boxes.append(self)
+
+        def setIcon(self, icon):
+            self.icon = icon
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def setText(self, text):
+            self.text = text
+
+        def addButton(self, label, role=None):
+            button = object()
+            self.buttons.append((label, role, button))
+            return button
+
+        def setDefaultButton(self, button):
+            self.default_button = button
+
+        def exec(self):
+            return None
+
+        def clickedButton(self):
+            return self.default_button
+
+    projection = SimpleNamespace(
+        budget_bytes=100,
+        projected_over_budget_bytes=10,
+        projected_total_bytes=110,
+        current_total_bytes=80,
+        additional_bytes=30,
+        auto_cleanup_enabled=False,
+        reclaimable_bytes=0,
+        blocked_by_protected_items=True,
+        candidate_items=[],
+        projected_over_budget_after_cleanup_bytes=10,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def preview_storage_projection(self, settings, *, additional_bytes):
+            return projection
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        _human_size=lambda value: f"{value} B",
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(
+            auto_cleanup_enabled=False
+        ),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+    monkeypatch.setattr(retention, "QMessageBox", FakeMessageBox)
+
+    assert (
+        retention._prepare_history_storage_for_projected_growth(
+            app,
+            trigger_label="bulk import",
+            additional_bytes=30,
+            interactive=True,
+        )
+        is True
+    )
+    assert "Automatic cleanup is disabled" in boxes[-1].text
+    assert "still needed by the current undo boundary" in boxes[-1].text
+
+
 def test_enforce_history_storage_budget_handles_removed_items_and_open_admin_prompt(monkeypatch):
     status = _StatusBar()
     refresh_actions = mock.Mock()
@@ -332,6 +657,49 @@ def test_enforce_history_storage_budget_handles_removed_items_and_open_admin_pro
     app.open_application_storage_admin_dialog.assert_called_once()
 
 
+def test_enforce_history_storage_budget_guard_noop_and_clears_warning_under_budget(monkeypatch):
+    retention._enforce_history_storage_budget(
+        SimpleNamespace(history_manager=None, settings_reads=object()),
+        trigger_label="save",
+    )
+    retention._enforce_history_storage_budget(
+        SimpleNamespace(history_manager=object(), settings_reads=None),
+        trigger_label="save",
+    )
+
+    result = SimpleNamespace(
+        removed_item_keys=[],
+        over_budget_bytes=0,
+        total_bytes=100,
+        budget_bytes=200,
+        blocked_by_protected_items=False,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def enforce_storage_budget(self, settings):
+            return result
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        history_dialog=None,
+        logger=mock.Mock(),
+        _last_history_budget_warning_signature=("old", 1, 2, False),
+        _refresh_history_actions=mock.Mock(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+
+    retention._enforce_history_storage_budget(app, trigger_label="save")
+
+    assert app._last_history_budget_warning_signature is None
+    app._refresh_history_actions.assert_not_called()
+
+
 def test_enforce_history_storage_budget_reports_blocked_cleanup_when_interactive(monkeypatch):
     warnings = []
 
@@ -364,6 +732,90 @@ def test_enforce_history_storage_budget_reports_blocked_cleanup_when_interactive
     assert "protected undo boundary" in str(warnings[0])
 
 
+def test_enforce_history_storage_budget_reports_generic_error_when_interactive(monkeypatch):
+    warnings = []
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def enforce_storage_budget(self, settings):
+            raise RuntimeError("database busy")
+
+    class FakeMessageBox:
+        @classmethod
+        def warning(cls, *args):
+            warnings.append(args)
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        logger=mock.Mock(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+    monkeypatch.setattr(retention, "QMessageBox", FakeMessageBox)
+
+    retention._enforce_history_storage_budget(app, trigger_label="cleanup", interactive=True)
+
+    app.logger.warning.assert_called_once()
+    assert "database busy" in str(warnings[0])
+
+
+def test_enforce_history_storage_budget_deduplicates_and_reports_disabled_cleanup(monkeypatch):
+    questions = []
+    result = SimpleNamespace(
+        removed_item_keys=[],
+        over_budget_bytes=64,
+        total_bytes=2048,
+        budget_bytes=1024,
+        blocked_by_protected_items=True,
+    )
+
+    class FakeCleanupService:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def enforce_storage_budget(self, settings):
+            return result
+
+    class FakeMessageBox:
+        Yes = 1
+        No = 2
+
+        @classmethod
+        def question(cls, *args):
+            questions.append(args)
+            return cls.No
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        settings_reads=object(),
+        history_dialog=SimpleNamespace(isVisible=mock.Mock(return_value=False)),
+        logger=mock.Mock(),
+        _last_history_budget_warning_signature=None,
+        _human_size=lambda value: f"{value} B",
+        _refresh_history_actions=mock.Mock(),
+        _current_history_retention_settings=lambda: HistoryRetentionSettings(
+            auto_cleanup_enabled=False
+        ),
+        _apply_history_snapshot_retention_policy=mock.Mock(return_value=None),
+        open_application_storage_admin_dialog=mock.Mock(),
+        statusBar=lambda: _StatusBar(),
+    )
+    monkeypatch.setattr(retention, "HistoryStorageCleanupService", FakeCleanupService)
+    monkeypatch.setattr(retention, "QMessageBox", FakeMessageBox)
+
+    retention._enforce_history_storage_budget(app, trigger_label="save", interactive=False)
+    retention._enforce_history_storage_budget(app, trigger_label="save", interactive=False)
+
+    assert len(questions) == 1
+    assert "Automatic cleanup is disabled" in questions[0][2]
+    assert "still needed by the current undo boundary" in questions[0][2]
+    app.open_application_storage_admin_dialog.assert_not_called()
+
+
 def test_auto_snapshot_marker_skips_file_and_snapshot_boundary_actions():
     entries = {
         3: SimpleNamespace(entry_id=3, action_type="file.export_json", parent_id=2),
@@ -383,6 +835,7 @@ def test_auto_snapshot_marker_skips_file_and_snapshot_boundary_actions():
         parent_id=None,
     )
     assert retention._current_auto_snapshot_marker(SimpleNamespace(history_manager=manager)) is None
+    assert retention._current_auto_snapshot_marker(SimpleNamespace(history_manager=None)) is None
 
 
 def test_refresh_auto_snapshot_schedule_stops_or_clamps_timer_interval():
@@ -412,6 +865,23 @@ def test_refresh_auto_snapshot_schedule_stops_or_clamps_timer_interval():
     app._current_auto_snapshot_settings = lambda: (True, MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES + 999)
     retention._refresh_auto_snapshot_schedule(app)
     assert timer.started[-1] == MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES * 60 * 1000
+
+    retention._refresh_auto_snapshot_schedule(SimpleNamespace())
+
+    app._current_auto_snapshot_settings = lambda: (False, 15)
+    app._last_auto_snapshot_marker = 22
+    retention._refresh_auto_snapshot_schedule(app)
+    assert timer.stopped == 2
+    assert app._last_auto_snapshot_marker is None
+
+    timer._active = True
+    timer._interval = MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES * 60 * 1000
+    app._current_auto_snapshot_settings = lambda: (
+        True,
+        MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    )
+    retention._refresh_auto_snapshot_schedule(app)
+    assert len(timer.started) == 1
 
 
 def test_on_auto_snapshot_timer_captures_snapshot_and_enforces_budget(monkeypatch):
@@ -447,6 +917,89 @@ def test_on_auto_snapshot_timer_captures_snapshot_and_enforces_budget(monkeypatc
     app._current_auto_snapshot_settings = lambda: (False, 15)
     retention._on_auto_snapshot_timer(app)
     app.auto_snapshot_timer.stop.assert_called_once()
+
+    retention._on_auto_snapshot_timer(
+        SimpleNamespace(history_manager=None, settings_reads=object())
+    )
+    retention._on_auto_snapshot_timer(
+        SimpleNamespace(history_manager=object(), settings_reads=None)
+    )
+
+
+def test_on_auto_snapshot_timer_skips_duplicate_or_unprepared_marker_and_logs_failures():
+    app = SimpleNamespace(
+        history_manager=SimpleNamespace(capture_snapshot=mock.Mock()),
+        settings_reads=object(),
+        auto_snapshot_timer=SimpleNamespace(stop=mock.Mock()),
+        _last_auto_snapshot_marker=44,
+        _current_auto_snapshot_settings=lambda: (True, 15),
+        _current_auto_snapshot_marker=mock.Mock(return_value=44),
+        _estimate_history_snapshot_capture_bytes=mock.Mock(return_value=123),
+        _prepare_history_storage_for_projected_growth=mock.Mock(return_value=True),
+        logger=mock.Mock(),
+    )
+
+    retention._on_auto_snapshot_timer(app)
+    app.history_manager.capture_snapshot.assert_not_called()
+
+    app._current_auto_snapshot_marker.return_value = 45
+    app._prepare_history_storage_for_projected_growth.return_value = False
+    retention._on_auto_snapshot_timer(app)
+    app.history_manager.capture_snapshot.assert_not_called()
+
+    app._prepare_history_storage_for_projected_growth.return_value = True
+    app.history_dialog = None
+    app._log_event = mock.Mock()
+    app._enforce_history_storage_budget = mock.Mock()
+    app.statusBar = lambda: _StatusBar()
+    app.history_manager.capture_snapshot.side_effect = RuntimeError("snapshot failed")
+    retention._on_auto_snapshot_timer(app)
+    app.logger.exception.assert_called_once()
+
+
+def test_schedule_history_storage_budget_enforcement_serializes_deferred_run(monkeypatch):
+    callbacks = []
+
+    class FakeTimer:
+        @staticmethod
+        def singleShot(delay_ms, callback):
+            callbacks.append((delay_ms, callback))
+
+    app = SimpleNamespace(
+        _history_budget_enforcement_trigger_label="",
+        _history_budget_enforcement_scheduled=False,
+        _history_budget_enforcement_running=False,
+        _enforce_history_storage_budget=mock.Mock(),
+    )
+    monkeypatch.setattr(retention, "QTimer", FakeTimer)
+
+    retention._schedule_history_storage_budget_enforcement(app, trigger_label="save")
+    assert app._history_budget_enforcement_scheduled is True
+    assert callbacks[0][0] == 0
+
+    retention._schedule_history_storage_budget_enforcement(app, trigger_label="later")
+    assert len(callbacks) == 1
+    assert app._history_budget_enforcement_trigger_label == "later"
+
+    callbacks[0][1]()
+    app._enforce_history_storage_budget.assert_called_once_with(
+        trigger_label="later",
+        interactive=False,
+    )
+    assert app._history_budget_enforcement_running is False
+
+    app._history_budget_enforcement_scheduled = False
+    app._history_budget_enforcement_running = True
+    retention._schedule_history_storage_budget_enforcement(app, trigger_label="")
+    assert len(callbacks) == 1
+
+    app._history_budget_enforcement_running = False
+    app._history_budget_enforcement_scheduled = False
+    retention._schedule_history_storage_budget_enforcement(app, trigger_label="")
+    app._history_budget_enforcement_running = True
+    callbacks[-1][1]()
+    assert app._enforce_history_storage_budget.call_count == 1
+    assert app._history_budget_enforcement_running is True
 
 
 def test_estimate_history_snapshot_capture_bytes_includes_managed_directories(

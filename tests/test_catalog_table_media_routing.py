@@ -119,6 +119,80 @@ def test_model_data_media_payload_and_source_spec_column_resolution():
     assert media_routing._media_cell_has_payload(app, index, media_key="audio_file") is False
 
 
+def test_column_payload_and_source_spec_edge_cases():
+    app = SimpleNamespace(
+        BASE_HEADERS=["Audio File"],
+        active_custom_fields=[{"id": 4, "name": "Stem"}],
+        _standard_media_header_map=lambda: {
+            "Audio File": "audio_file",
+            "Legacy Artwork": "album_art",
+        },
+        _fallback_header_column_key=lambda label, **kwargs: f"{kwargs['prefix']}:{label}:{kwargs['logical_index']}",
+    )
+
+    assert media_routing._standard_media_column_key(app, "album_art") == "base:Legacy Artwork:0"
+    assert media_routing._standard_media_column_key(app, "missing") is None
+    assert media_routing._standard_media_key_for_column_key(app, None) is None
+    assert media_routing._standard_media_key_for_column_key(app, "base:missing") is None
+    assert media_routing._custom_field_for_column_key(app, "base:title") is None
+
+    invalid_index = SimpleNamespace(isValid=lambda: False)
+    assert media_routing._model_data_for_index(app, invalid_index, RawValueRole) is None
+
+    model = SimpleNamespace(data=mock.Mock(return_value=("bad-track", "audio_file")))
+    index = SimpleNamespace(isValid=lambda: True, model=lambda: model)
+    controller = SimpleNamespace(track_id_for_index=mock.Mock(return_value=7))
+    app._model_data_for_index = lambda idx, role: media_routing._model_data_for_index(
+        app, idx, role
+    )
+    app._catalog_table_controller = mock.Mock(return_value=controller)
+    assert media_routing._media_cell_has_payload(app, index) is True
+
+    model.data.return_value = (7, "bad-field")
+    assert media_routing._media_cell_has_payload(app, index, field_id=4) is False
+
+    controller.column_for_key = mock.Mock()
+    app._catalog_table_controller = mock.Mock(return_value=controller)
+    app._custom_field_column_key = lambda field_id: media_routing._custom_field_column_key(field_id)
+    assert media_routing._media_column_for_audio_source_spec(app, None) is None
+    assert (
+        media_routing._media_column_for_audio_source_spec(
+            app,
+            {"kind": "custom", "field_id": "bad"},
+        )
+        is None
+    )
+    assert (
+        media_routing._media_column_for_audio_source_spec(
+            app,
+            {"kind": "custom", "field_id": 0},
+        )
+        is None
+    )
+
+    app._media_cell_has_payload = lambda idx, **kwargs: media_routing._media_cell_has_payload(
+        app, idx, **kwargs
+    )
+    assert media_routing._media_cell_has_payload_for_source_spec(app, index, None) is True
+    assert (
+        media_routing._media_cell_has_payload_for_source_spec(
+            app,
+            index,
+            {"kind": "custom", "field_id": "bad"},
+        )
+        is False
+    )
+    model.data.return_value = (7, 4)
+    assert (
+        media_routing._media_cell_has_payload_for_source_spec(
+            app,
+            index,
+            {"kind": "custom", "field_id": 4},
+        )
+        is True
+    )
+
+
 def test_drop_event_partition_and_route_paths(monkeypatch):
     _MessageBox.messages = []
     monkeypatch.setattr(media_routing, "_root_attr", _root_attr)
@@ -176,6 +250,54 @@ def test_drop_event_partition_and_route_paths(monkeypatch):
     assert _MessageBox.messages[-1][0] == "information"
 
 
+def test_drop_event_and_routing_edge_cases(monkeypatch):
+    _MessageBox.messages = []
+    monkeypatch.setattr(media_routing, "_root_attr", _root_attr)
+
+    assert (
+        media_routing._drop_event_local_file_paths(
+            SimpleNamespace(mimeData=lambda: None),
+            object(),
+        )
+        == []
+    )
+
+    class RaisingLocalUrl:
+        def isLocalFile(self):
+            raise RuntimeError("local check failed")
+
+    class RaisingPathUrl:
+        def isLocalFile(self):
+            return True
+
+        def toLocalFile(self):
+            raise RuntimeError("path failed")
+
+    event = SimpleNamespace(
+        mimeData=lambda: SimpleNamespace(urls=lambda: [RaisingLocalUrl(), RaisingPathUrl()])
+    )
+    assert media_routing._drop_event_local_file_paths(SimpleNamespace(), event) == []
+
+    app = SimpleNamespace(
+        _partition_dropped_media_paths=lambda paths: media_routing._partition_dropped_media_paths(
+            app, paths
+        ),
+        _is_supported_media_attach_path=mock.Mock(
+            side_effect=lambda path, key: (key == "album_art" and path.endswith(".png"))
+        ),
+        bulk_attach_audio_files=mock.Mock(),
+        attach_album_art_file_to_catalog=mock.Mock(),
+    )
+
+    assert media_routing._route_dropped_media_paths(app, ["/tmp/a.png", "/tmp/b.png"]) is True
+    assert "Only audio files" in _MessageBox.messages[-1][1][2]
+    assert (
+        media_routing._route_dropped_media_paths(app, ["/tmp/readme.txt", "/tmp/doc.pdf"]) is True
+    )
+    assert "not supported" in _MessageBox.messages[-1][1][2]
+    assert media_routing._route_dropped_media_paths(app, []) is False
+
+
 def test_track_media_proxy_methods_delegate_to_track_service():
     service = SimpleNamespace(
         get_media_meta=mock.Mock(return_value={"filename": "audio.wav"}),
@@ -229,6 +351,22 @@ def test_choose_storage_modes_prompts_for_present_sources_and_honors_cancel(monk
         audio_default=STORAGE_MODE_MANAGED_FILE,
         album_art_default=STORAGE_MODE_DATABASE,
     ) == (STORAGE_MODE_MANAGED_FILE, STORAGE_MODE_DATABASE)
+
+    monkeypatch.setattr(
+        media_routing,
+        "_root_attr",
+        lambda name, fallback: (
+            (lambda *args, **kwargs: None) if name == "_prompt_storage_mode_choice" else fallback
+        ),
+    )
+    assert (
+        media_routing._choose_track_media_storage_modes(
+            SimpleNamespace(),
+            audio_source_path="/tmp/audio.wav",
+            audio_default=STORAGE_MODE_DATABASE,
+        )
+        is None
+    )
 
 
 def test_attach_standard_media_submits_background_worker_and_success_callbacks(monkeypatch):
@@ -289,6 +427,50 @@ def test_attach_standard_media_submits_background_worker_and_success_callbacks(m
     assert "Attached audio file" in status_messages[-1][0]
 
 
+def test_attach_standard_media_cancel_and_failure_paths(monkeypatch):
+    _MessageBox.messages = []
+
+    app = SimpleNamespace(_browse_track_media_file=mock.Mock(return_value=""))
+    media_routing._attach_standard_media_for_track(app, 4, "audio_file")
+    app._browse_track_media_file.assert_called_once_with("audio_file")
+
+    monkeypatch.setattr(
+        media_routing,
+        "_root_attr",
+        lambda name, fallback: (
+            (lambda *args, **kwargs: None)
+            if name == "_prompt_storage_mode_choice"
+            else _MessageBox if name == "QMessageBox" else fallback
+        ),
+    )
+    app = SimpleNamespace(
+        _browse_track_media_file=mock.Mock(return_value="/tmp/audio.wav"),
+        _confirm_lossy_primary_audio_selection=mock.Mock(),
+    )
+    media_routing._attach_standard_media_for_track(app, 4, "audio_file")
+    app._confirm_lossy_primary_audio_selection.assert_not_called()
+
+    monkeypatch.setattr(media_routing, "_root_attr", _root_attr)
+    app = SimpleNamespace(
+        _browse_track_media_file=mock.Mock(return_value="/tmp/audio.wav"),
+        _confirm_lossy_primary_audio_selection=mock.Mock(return_value=False),
+    )
+    media_routing._attach_standard_media_for_track(app, 4, "audio_file")
+    app._confirm_lossy_primary_audio_selection.assert_called_once()
+
+    app = SimpleNamespace(
+        _browse_track_media_file=mock.Mock(return_value="/tmp/cover.png"),
+        _capture_catalog_refresh_request=mock.Mock(return_value={"focus_id": 4}),
+        _submit_background_bundle_task=mock.Mock(side_effect=RuntimeError("submit failed")),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+    media_routing._attach_standard_media_for_track(app, 4, "album_art")
+    app.conn.rollback.assert_called_once_with()
+    app.logger.exception.assert_called_once()
+    assert _MessageBox.messages[-1][0] == "critical"
+
+
 def test_delete_and_preview_standard_media_paths(monkeypatch):
     _MessageBox.messages = []
     monkeypatch.setattr(media_routing, "_root_attr", _root_attr)
@@ -326,3 +508,60 @@ def test_delete_and_preview_standard_media_paths(monkeypatch):
 
     media_routing._preview_standard_media_for_track(app, 1, "album_art")
     app._open_image_preview.assert_called_once_with(b"image", "Song")
+
+
+def test_delete_and_preview_standard_media_cancel_and_error_paths(monkeypatch):
+    _MessageBox.messages = []
+
+    class NoMessageBox(_MessageBox):
+        @classmethod
+        def question(cls, *args):
+            cls.messages.append(("question", args))
+            return cls.No
+
+    monkeypatch.setattr(
+        media_routing,
+        "_root_attr",
+        lambda name, fallback: NoMessageBox if name == "QMessageBox" else fallback,
+    )
+    app = SimpleNamespace(
+        track_service=None,
+        track_clear_media=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+    )
+    media_routing._delete_standard_media_for_track(app, 1, "audio_file")
+    app.track_clear_media.assert_not_called()
+
+    monkeypatch.setattr(media_routing, "_root_attr", _root_attr)
+    app = SimpleNamespace(
+        __root_attr=mock.Mock(return_value=mock.Mock(side_effect=RuntimeError("history failed"))),
+        track_service=None,
+        track_clear_media=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+    media_routing._delete_standard_media_for_track(app, 1, "audio_file")
+    app.conn.rollback.assert_called_once_with()
+    app.logger.exception.assert_called_once()
+    assert _MessageBox.messages[-1][0] == "critical"
+
+    app = SimpleNamespace(
+        track_has_media=mock.Mock(return_value=True),
+        track_fetch_media=mock.Mock(side_effect=FileNotFoundError("missing")),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+    media_routing._preview_standard_media_for_track(app, 1, "album_art")
+    app.logger.warning.assert_called_once()
+    assert _MessageBox.messages[-1][0] == "information"
+
+    app = SimpleNamespace(
+        track_has_media=mock.Mock(side_effect=RuntimeError("preview failed")),
+        conn=SimpleNamespace(rollback=mock.Mock()),
+        logger=mock.Mock(),
+    )
+    media_routing._preview_standard_media_for_track(app, 1, "audio_file")
+    app.conn.rollback.assert_called_once_with()
+    app.logger.exception.assert_called_once()
+    assert _MessageBox.messages[-1][0] == "critical"

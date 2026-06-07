@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -20,9 +21,15 @@ else:
 from isrc_manager.tasks.manager import (
     BackgroundTaskContext,
     BackgroundTaskManager,
+    _BackgroundTaskWorker,
     _format_progress_dialog_message,
+    _progress_dialog_target_width,
+    _progress_dialog_theme,
+    _repolish_widget_tree,
+    _TaskCallbackRelay,
+    refresh_progress_dialog_theme,
 )
-from isrc_manager.tasks.models import TaskProgressUpdate
+from isrc_manager.tasks.models import TaskFailure, TaskProgressUpdate
 from isrc_manager.theme_builder import effective_theme_settings
 from tests.qt_test_helpers import pump_events, wait_for
 
@@ -34,6 +41,15 @@ class _ThemedProgressOwner(QWidget):
 
     def _effective_theme_settings(self):
         return dict(self._theme_values)
+
+
+class _FallbackThemeOwner(QWidget):
+    def __init__(self, theme_values):
+        super().__init__()
+        self.theme_settings = theme_values
+
+    def _effective_theme_settings(self):
+        raise RuntimeError("theme provider unavailable")
 
 
 class BackgroundTaskManagerTests(unittest.TestCase):
@@ -614,6 +630,56 @@ class BackgroundTaskManagerTests(unittest.TestCase):
             formatted_long,
             "Converting 1 of 1: This is a deliberate... its useful start and end",
         )
+        self.assertEqual(_format_progress_dialog_message(None), "")
+        self.assertEqual(
+            _format_progress_dialog_message("First line\n\nSecond line"),
+            "First line\n\nSecond line",
+        )
+
+    def test_progress_dialog_helper_fallback_branches_are_deterministic(self):
+        fallback_owner = _FallbackThemeOwner({"panel_bg": "#123456", "window_fg": "#ABCDEF"})
+        try:
+            theme = _progress_dialog_theme(fallback_owner)
+            self.assertEqual(theme["panel_bg"], "#123456")
+            self.assertIn("window_fg", theme)
+        finally:
+            fallback_owner.close()
+
+        parent = SimpleNamespace(width=lambda: 900)
+        fake_dialog_with_parent = SimpleNamespace(width=lambda: 0, parentWidget=lambda: parent)
+        fake_dialog_without_parent = SimpleNamespace(width=lambda: 0, parentWidget=lambda: None)
+        self.assertEqual(_progress_dialog_target_width(fake_dialog_with_parent), 360)
+        self.assertEqual(_progress_dialog_target_width(fake_dialog_without_parent), 360)
+
+        refresh_progress_dialog_theme(None)
+        with patch("isrc_manager.tasks.manager._qt_object_is_valid", return_value=False):
+            dialog = QWidget()
+            try:
+                refresh_progress_dialog_theme(dialog)
+            finally:
+                dialog.close()
+
+        class _ExplodingStyle:
+            def unpolish(self, _widget):
+                raise RuntimeError("unpolish failed")
+
+            def polish(self, _widget):
+                raise RuntimeError("polish failed")
+
+        class _ExplodingWidget:
+            def __init__(self, children=()):
+                self._children = list(children)
+
+            def findChildren(self, _kind):
+                return list(self._children)
+
+            def style(self):
+                return _ExplodingStyle()
+
+            def update(self):
+                raise RuntimeError("update failed")
+
+        _repolish_widget_tree(_ExplodingWidget([_ExplodingWidget()]))
 
     def test_background_task_context_accepts_positional_progress_message(self):
         updates = []
@@ -626,6 +692,152 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertEqual(updates[0].value, 5)
         self.assertEqual(updates[0].maximum, 10)
         self.assertEqual(updates[0].message, "Reading package manifest...")
+
+    def test_worker_and_relay_edge_callbacks_are_handled_directly(self):
+        worker_events: list[str] = []
+        cancelled_context = BackgroundTaskContext()
+        cancelled_context.cancel()
+        cancelled_after_result = _BackgroundTaskWorker(lambda _ctx: "ignored", cancelled_context)
+        cancelled_after_result.cancelled.connect(lambda: worker_events.append("cancelled-result"))
+        cancelled_after_result.finished.connect(lambda: worker_events.append("finished-result"))
+        cancelled_after_result.run()
+
+        interrupted_cancel_context = BackgroundTaskContext()
+        interrupted_cancel_context.cancel()
+        interrupted_cancel_worker = _BackgroundTaskWorker(
+            lambda _ctx: (_ for _ in ()).throw(InterruptedError("stop")),
+            interrupted_cancel_context,
+        )
+        interrupted_cancel_worker.cancelled.connect(
+            lambda: worker_events.append("cancelled-interrupted")
+        )
+        interrupted_cancel_worker.run()
+
+        failures: list[TaskFailure] = []
+        interrupted_worker = _BackgroundTaskWorker(
+            lambda _ctx: (_ for _ in ()).throw(InterruptedError("not cancelled")),
+            BackgroundTaskContext(),
+        )
+        interrupted_worker.failed.connect(failures.append)
+        interrupted_worker.run()
+
+        self.assertIn("cancelled-result", worker_events)
+        self.assertIn("finished-result", worker_events)
+        self.assertIn("cancelled-interrupted", worker_events)
+        self.assertEqual(failures[0].message, "The background task was interrupted.")
+
+        relay_events: list[str] = []
+        progress_updates: list[TaskProgressUpdate] = []
+        statuses: list[str] = []
+        errors: list[TaskFailure] = []
+
+        relay = _TaskCallbackRelay(
+            progress_handler=progress_updates.append,
+            status_handler=statuses.append,
+            success_before_cleanup_handler=lambda _result, ui_progress: (
+                ui_progress.report_progress(9, 10, "Almost finished."),
+                ui_progress.set_status("Finalizing."),
+            ),
+            success_handler=lambda result: relay_events.append(f"success:{result}"),
+            success_after_cleanup_handler=lambda result: relay_events.append(f"after:{result}"),
+            error_handler=errors.append,
+            cancelled_handler=lambda: relay_events.append("cancelled"),
+            finished_handler=lambda: relay_events.append("finished"),
+            cleanup_handler=lambda: relay_events.append("cleanup"),
+        )
+        relay.handle_progress("plain progress")
+        relay.handle_status("status")
+        relay.handle_error(TaskFailure(message="typed", traceback_text="trace"))
+        relay.handle_error("untyped")
+        relay.handle_cancelled()
+        relay.handle_finished()
+        relay.handle_success("ok")
+        relay.handle_cleanup()
+
+        self.assertEqual(progress_updates[0].message, "plain progress")
+        self.assertEqual(progress_updates[1].message, "Almost finished.")
+        self.assertEqual(statuses, ["status", "Finalizing."])
+        self.assertEqual([failure.message for failure in errors], ["typed", "untyped"])
+        self.assertEqual(
+            relay_events,
+            ["cancelled", "finished", "success:ok", "cleanup", "after:ok", "finished"],
+        )
+
+        swallowed_errors: list[TaskFailure] = []
+        failing_relay = _TaskCallbackRelay(
+            progress_handler=lambda _update: None,
+            status_handler=lambda _message: None,
+            success_before_cleanup_handler=lambda _result, _ui: (_ for _ in ()).throw(
+                RuntimeError("before failed")
+            ),
+            success_handler=lambda _result: self.fail("success handler should not run"),
+            success_after_cleanup_handler=None,
+            error_handler=swallowed_errors.append,
+            cancelled_handler=None,
+            finished_handler=None,
+            cleanup_handler=lambda: None,
+        )
+        failing_relay.handle_success("bad")
+        self.assertEqual(swallowed_errors[0].message, "before failed")
+
+        no_error_relay = _TaskCallbackRelay(
+            progress_handler=lambda _update: None,
+            status_handler=lambda _message: None,
+            success_before_cleanup_handler=None,
+            success_handler=None,
+            success_after_cleanup_handler=None,
+            error_handler=None,
+            cancelled_handler=None,
+            finished_handler=None,
+            cleanup_handler=lambda: None,
+        )
+        no_error_relay.handle_error("ignored")
+
+    def test_manager_state_guardrails_with_fake_records(self):
+        fake_context = SimpleNamespace(cancel=lambda: None)
+        fake_dialog = SimpleNamespace()
+        self.manager._tasks = {
+            "write": SimpleNamespace(
+                kind="write",
+                title="Write Task",
+                unique_key="same",
+                context=fake_context,
+                dialog=None,
+            )
+        }
+        try:
+            self.assertTrue(self.manager.has_active_write_task())
+            self.assertEqual(self.manager.active_task_titles(), ["Write Task"])
+            self.assertEqual(
+                self.manager.can_start(unique_key="same"),
+                (False, "'Write Task' is already running."),
+            )
+            self.assertEqual(
+                self.manager.can_start(kind="exclusive"),
+                (False, "Another background task is already running."),
+            )
+            self.assertEqual(
+                self.manager.can_start(kind="write"),
+                (False, "Another write operation is already running."),
+            )
+
+            self.manager._tasks = {
+                "exclusive": SimpleNamespace(
+                    kind="exclusive",
+                    title="Exclusive Task",
+                    unique_key=None,
+                    context=fake_context,
+                    dialog=fake_dialog,
+                )
+            }
+            self.assertEqual(
+                self.manager.can_start(kind="read"),
+                (False, "An exclusive database task is currently running."),
+            )
+            with patch("isrc_manager.tasks.manager._qt_object_is_valid", return_value=False):
+                self.manager.refresh_active_progress_dialogs()
+        finally:
+            self.manager._tasks.clear()
 
     def test_success_after_cleanup_runs_only_after_dialog_cleanup(self):
         finished = threading.Event()

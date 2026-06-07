@@ -1,276 +1,497 @@
-import tempfile
-import unittest
+from __future__ import annotations
+
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+from zipfile import ZipFile
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.worksheet.datavalidation import DataValidation
+import pytest
 
-from isrc_manager.services import GS1TemplateVerificationError, GS1TemplateVerificationService
-from isrc_manager.services.gs1_mapping import (
-    COMMON_MARKET_CHOICES,
-    localize_export_value,
-    resolve_header_row,
+from isrc_manager.services.gs1_models import (
+    CORE_GS1_TEMPLATE_FIELDS,
+    GS1TemplateCandidate,
+    GS1TemplateVerificationError,
 )
-
-HEADERS = [
-    "GS1 Artikelcode (GTIN)",
-    "Status",
-    "Productclassificatie",
-    "Gaat naar de consument",
-    "Verpakkings type",
-    "Landen of Regio's",
-    "Productomschrijving (max 300 tekens)",
-    "Taal",
-    "Merk",
-    "Submerk",
-    "Aantal",
-    "Eenheid",
-    "Afbeelding (max 500 tekens)",
-]
+from isrc_manager.services.gs1_template import GS1TemplateVerificationService
 
 
-def build_verified_workbook(path: Path, *, include_placeholder_sheet: bool = True):
-    workbook = Workbook()
-    reference_sheet = workbook.active
-    reference_sheet.title = "Reference Data"
-    reference_sheet["A1"] = "Ampul"
-    reference_sheet["A2"] = "Bag-In-Box"
-    reference_sheet["B1"] = "Netherlands"
-    reference_sheet["B2"] = "United States"
-    reference_sheet["C1"] = "Dutch"
-    reference_sheet["C2"] = "English"
-    reference_sheet["D1"] = "Each"
-    reference_sheet["D2"] = "Box"
-    reference_sheet["E1"] = "Audio"
-    reference_sheet["E2"] = "Music"
-    reference_sheet["F1"] = "Concept"
-    reference_sheet["F2"] = "Active"
-    reference_sheet["G1"] = "Yes"
-    reference_sheet["G2"] = "No"
-    instruction_sheet = workbook.create_sheet("Instructions")
-    instruction_sheet["A1"] = "GS1 article code (GTIN)"
-    instruction_sheet["A2"] = "Upload the workbook after filling the fields."
-    if include_placeholder_sheet:
-        placeholder_sheet = workbook.create_sheet("{ContractNr}")
-        placeholder_sheet.append(HEADERS)
-    target_sheet = workbook.create_sheet("10070050")
-    target_sheet.append(HEADERS)
-    target_sheet["I2"] = "Orbit Label"
-    target_sheet["J2"] = "Digital Series"
-    for cell_range, formula in (
-        ("B2:B200", "'Reference Data'!$F$1:$F$2"),
-        ("C2:C200", "'Reference Data'!$E$1:$E$2"),
-        ("D2:D200", "'Reference Data'!$G$1:$G$2"),
-        ("E2:E200", "'Reference Data'!$A$1:$A$2"),
-        ("F2:F200", "'Reference Data'!$B$1:$B$2"),
-        ("H2:H200", "'Reference Data'!$C$1:$C$2"),
-        ("L2:L200", "'Reference Data'!$D$1:$D$2"),
+class _FakeSheet:
+    def __init__(self, title: str, rows):
+        self.title = title
+        self._rows = list(rows)
+        self.max_row = len(self._rows)
+        self.max_column = max((len(row) for row in self._rows), default=1)
+
+    def iter_rows(self, **kwargs):
+        min_row = max(1, int(kwargs.get("min_row", 1)))
+        max_row = min(self.max_row, int(kwargs.get("max_row", self.max_row)))
+        min_col = max(1, int(kwargs.get("min_col", 1)))
+        max_col = min(self.max_column, int(kwargs.get("max_col", self.max_column)))
+        rows = []
+        for row in self._rows[min_row - 1 : max_row]:
+            rows.append(tuple(row[min_col - 1 : max_col]))
+        return iter(rows)
+
+
+class _FakeWorkbook:
+    def __init__(self, sheets: dict[str, _FakeSheet], *, defined_names=None):
+        self._sheets = dict(sheets)
+        self.worksheets = list(self._sheets.values())
+        self.defined_names = defined_names or SimpleNamespace(get=lambda _name: None)
+        self.closed = False
+
+    def __getitem__(self, sheet_name: str):
+        try:
+            return self._sheets[sheet_name]
+        except KeyError as exc:
+            raise KeyError(sheet_name) from exc
+
+    def close(self):
+        self.closed = True
+
+
+def _write_zip(path: Path, files: dict[str, str]) -> None:
+    with ZipFile(path, "w") as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+
+
+def test_verify_wraps_workbook_open_failures(tmp_path):
+    service = GS1TemplateVerificationService()
+    with pytest.raises(GS1TemplateVerificationError, match="was not found"):
+        service.verify(tmp_path / "missing.xlsx")
+
+    wrong_suffix = tmp_path / "template.txt"
+    wrong_suffix.write_text("not a workbook", encoding="utf-8")
+    with pytest.raises(GS1TemplateVerificationError, match="supported Excel workbook"):
+        service.verify(wrong_suffix)
+
+    workbook_path = tmp_path / "template.xlsx"
+    workbook_path.write_bytes(b"placeholder")
+
+    class InvalidWorkbook(Exception):
+        pass
+
+    def raise_invalid(**_kwargs):
+        raise InvalidWorkbook("bad workbook")
+
+    with mock.patch(
+        "isrc_manager.services.gs1_template._load_openpyxl",
+        return_value=(raise_invalid, InvalidWorkbook),
     ):
-        validation = DataValidation(type="list", formula1=formula, allow_blank=True)
-        target_sheet.add_data_validation(validation)
-        validation.add(cell_range)
-    workbook.save(path)
+        with pytest.raises(GS1TemplateVerificationError, match="could not be opened"):
+            service.verify(workbook_path)
+
+    def raise_os_error(**_kwargs):
+        raise OSError("locked")
+
+    with mock.patch(
+        "isrc_manager.services.gs1_template._load_openpyxl",
+        return_value=(raise_os_error, InvalidWorkbook),
+    ):
+        with pytest.raises(GS1TemplateVerificationError, match="could not be read"):
+            service.verify(workbook_path)
 
 
-class GS1HeaderMappingTests(unittest.TestCase):
-    def test_resolve_header_row_maps_canonical_fields(self):
-        column_map, matched_headers, total_score = resolve_header_row(HEADERS)
+def test_verify_reports_no_candidates_and_missing_core_columns(tmp_path):
+    service = GS1TemplateVerificationService()
+    workbook_path = tmp_path / "template.xlsx"
+    workbook_path.write_bytes(b"placeholder")
+    workbook = _FakeWorkbook({"Input": _FakeSheet("Input", [])})
 
-        self.assertEqual(column_map["gtin_request_number"], 1)
-        self.assertEqual(column_map["consumer_unit_flag"], 4)
-        self.assertEqual(column_map["product_description"], 7)
-        self.assertEqual(column_map["image_url"], 13)
-        self.assertEqual(matched_headers["brand"], "Merk")
-        self.assertGreater(total_score, 20.0)
+    with (
+        mock.patch(
+            "isrc_manager.services.gs1_template._load_openpyxl",
+            return_value=(mock.Mock(return_value=workbook), RuntimeError),
+        ),
+        mock.patch.object(service, "_collect_workbook_markers", return_value=[]),
+        mock.patch.object(service, "_scan_sheet_candidates", return_value=[]),
+    ):
+        with pytest.raises(GS1TemplateVerificationError, match="recognized GS1 upload template"):
+            service.verify(workbook_path)
 
-    def test_localize_export_value_handles_known_dutch_variants(self):
-        self.assertEqual(localize_export_value("consumer_unit_flag", True, "nl"), "Ja")
-        self.assertEqual(localize_export_value("status", "Active", "nl"), "Actief")
-        self.assertEqual(localize_export_value("language", "English", "nl"), "Engels")
+    partial_candidate = GS1TemplateCandidate(
+        sheet_name="Input",
+        header_row=1,
+        column_map={
+            "gtin_request_number": 1,
+            "product_description": 2,
+            "target_market": 3,
+            "packaging_type": 4,
+            "product_classification": 5,
+            "consumer_unit_flag": 6,
+        },
+        matched_headers={},
+        score=25.0,
+        workbook_markers=[],
+    )
+    with (
+        mock.patch(
+            "isrc_manager.services.gs1_template._load_openpyxl",
+            return_value=(mock.Mock(return_value=workbook), RuntimeError),
+        ),
+        mock.patch.object(service, "_collect_workbook_markers", return_value=[]),
+        mock.patch.object(service, "_scan_sheet_candidates", return_value=[partial_candidate]),
+    ):
+        with pytest.raises(GS1TemplateVerificationError, match="required export columns"):
+            service.verify(workbook_path)
 
-    def test_common_market_choices_include_non_country_specific_gs1_markets(self):
-        self.assertIn("Global Market", COMMON_MARKET_CHOICES)
-        self.assertIn("European Union", COMMON_MARKET_CHOICES)
-        self.assertIn("Non-EU", COMMON_MARKET_CHOICES)
-        self.assertIn("Developing Countries Support", COMMON_MARKET_CHOICES)
-        self.assertIn("Europese Unie", COMMON_MARKET_CHOICES)
-        self.assertIn("Niet EU", COMMON_MARKET_CHOICES)
 
-    def test_localize_export_value_handles_non_country_specific_target_markets(self):
-        self.assertEqual(
-            localize_export_value("target_market", "Global Market", "nl"), "Global Market"
-        )
-        self.assertEqual(
-            localize_export_value("target_market", "European Union", "nl"), "Europese Unie"
-        )
-        self.assertEqual(localize_export_value("target_market", "Non-EU", "nl"), "Niet EU")
-        self.assertEqual(
-            localize_export_value("target_market", "Developing Countries Support", "nl"),
-            "Ontwikkelingslanden ondersteuning",
-        )
+def test_verify_preserves_profile_when_field_option_extraction_fails(tmp_path):
+    service = GS1TemplateVerificationService()
+    workbook_path = tmp_path / "template.xlsx"
+    workbook_path.write_bytes(b"placeholder")
+    workbook = _FakeWorkbook({"{Template}": _FakeSheet("{Template}", [])})
+    column_map = {field: index for index, field in enumerate(CORE_GS1_TEMPLATE_FIELDS, start=1)}
+    candidate = GS1TemplateCandidate(
+        sheet_name="{Template}",
+        header_row=2,
+        column_map=column_map,
+        matched_headers={field: field for field in column_map},
+        score=50.0,
+        workbook_markers=["GS1"],
+    )
+
+    with (
+        mock.patch(
+            "isrc_manager.services.gs1_template._load_openpyxl",
+            return_value=(mock.Mock(return_value=workbook), RuntimeError),
+        ),
+        mock.patch.object(service, "_collect_workbook_markers", return_value=["GS1"]),
+        mock.patch.object(service, "_scan_sheet_candidates", return_value=[candidate]),
+        mock.patch.object(
+            service, "_extract_field_options", side_effect=RuntimeError("xml failed")
+        ),
+    ):
+        profile = service.verify(workbook_path)
+
+    assert profile.sheet_name == "{Template}"
+    assert profile.field_options == {}
+    assert workbook.closed is True
 
 
-class GS1TemplateVerificationServiceTests(unittest.TestCase):
-    def setUp(self):
-        self.service = GS1TemplateVerificationService()
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmpdir.name)
+def test_verify_merges_sheet_field_options_without_duplicates(tmp_path):
+    service = GS1TemplateVerificationService()
+    workbook_path = tmp_path / "template.xlsx"
+    workbook_path.write_bytes(b"placeholder")
+    workbook = _FakeWorkbook(
+        {
+            "Input": _FakeSheet("Input", []),
+            "Upload": _FakeSheet("Upload", []),
+        }
+    )
+    column_map = {field: index for index, field in enumerate(CORE_GS1_TEMPLATE_FIELDS, start=1)}
+    candidates = [
+        GS1TemplateCandidate(
+            sheet_name="Input",
+            header_row=2,
+            column_map=column_map,
+            matched_headers={field: field for field in column_map},
+            score=50.0,
+            workbook_markers=["GS1"],
+        ),
+        GS1TemplateCandidate(
+            sheet_name="Upload",
+            header_row=2,
+            column_map=column_map,
+            matched_headers={field: field for field in column_map},
+            score=49.0,
+            workbook_markers=["GS1"],
+        ),
+    ]
 
-    def tearDown(self):
-        self.tmpdir.cleanup()
+    with (
+        mock.patch(
+            "isrc_manager.services.gs1_template._load_openpyxl",
+            return_value=(mock.Mock(return_value=workbook), RuntimeError),
+        ),
+        mock.patch.object(service, "_collect_workbook_markers", return_value=["GS1"]),
+        mock.patch.object(service, "_scan_sheet_candidates", return_value=candidates),
+        mock.patch.object(
+            service,
+            "_extract_field_options",
+            side_effect=[
+                {"brand": ("Acme", "Other")},
+                {"brand": ("Other", "New"), "language": ("", "en")},
+            ],
+        ),
+    ):
+        profile = service.verify(workbook_path)
 
-    def test_verify_selects_actual_contract_sheet(self):
-        workbook_path = self.root / "official_template.xlsx"
-        build_verified_workbook(workbook_path)
+    assert profile.field_options == {"brand": ("Acme", "Other", "New"), "language": ("en",)}
 
-        result = self.service.verify(workbook_path)
 
-        self.assertEqual(result.sheet_name, "10070050")
-        self.assertEqual(result.available_sheet_names, ("10070050",))
-        self.assertEqual(result.header_row, 1)
-        self.assertEqual(result.column_map["gtin_request_number"], 1)
-        self.assertEqual(result.column_map["quantity"], 11)
-        self.assertEqual(result.locale_hint, "nl")
-        self.assertEqual(result.field_options["packaging_type"], ("Ampul", "Bag-In-Box"))
-        self.assertEqual(result.field_options["target_market"], ("Netherlands", "United States"))
-        self.assertEqual(result.field_options["language"], ("Dutch", "English"))
-        self.assertEqual(result.field_options["product_classification"], ("Audio", "Music"))
-        self.assertEqual(result.field_options["brand"], ("Orbit Label",))
-        self.assertEqual(result.field_options["subbrand"], ("Digital Series",))
-
-    def test_verify_rejects_arbitrary_workbook(self):
-        workbook_path = self.root / "random.xlsx"
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "Sheet1"
-        sheet.append(["First Name", "Last Name", "Email"])
-        workbook.save(workbook_path)
-
-        with self.assertRaises(GS1TemplateVerificationError):
-            self.service.verify(workbook_path)
-
-    def test_verify_rejects_missing_and_unsupported_paths_before_loading_workbook(self):
-        with self.assertRaisesRegex(GS1TemplateVerificationError, "was not found"):
-            self.service.verify(self.root / "missing.xlsx")
-
-        unsupported = self.root / "template.csv"
-        unsupported.write_text("not an excel workbook", encoding="utf-8")
-        with self.assertRaisesRegex(GS1TemplateVerificationError, "supported Excel workbook"):
-            self.service.verify(unsupported)
-
-    def test_verify_rejects_workbook_with_missing_required_headers(self):
-        workbook_path = self.root / "missing_headers.xlsx"
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "Products"
-        sheet.append(
-            [
-                "GS1 Artikelcode (GTIN)",
+def test_scan_sheet_candidates_skips_blank_and_incomplete_rows():
+    service = GS1TemplateVerificationService()
+    sheet = _FakeSheet(
+        "Input 2",
+        [
+            ("", "", ""),
+            (
+                "GTIN",
+                "Product Description",
+                "GPC",
+                "Consumer Unit",
+                "Packaging Type",
+                "Target Market",
+            ),
+            (
+                "GTIN",
                 "Status",
-                "Productclassificatie",
-                "Gaat naar de consument",
-                "Verpakkings type",
-                "Landen of Regio's",
-                "Productomschrijving (max 300 tekens)",
-                "Taal",
-                "Merk",
-            ]
-        )
-        workbook.save(workbook_path)
-
-        with self.assertRaises(GS1TemplateVerificationError):
-            self.service.verify(workbook_path)
-
-    def test_helper_scoring_formula_resolution_and_column_value_fallbacks(self):
-        loaded = Workbook()
-        loaded.remove(loaded.active)
-        ref = loaded.create_sheet("Reference Data")
-        ref["A1"] = "One"
-        ref["A2"] = "Two"
-        sheet = loaded.create_sheet("Product Upload")
-        sheet.append(HEADERS)
-        sheet["I2"] = "Brand A"
-        sheet["I3"] = "Brand B"
-
-        self.assertEqual(self.service._sheet_name_priority("Instructions"), -2.0)
-        self.assertEqual(self.service._sheet_name_priority("{ContractNr}"), -1.0)
-        self.assertGreater(self.service._sheet_name_priority("Product Upload"), 0)
-        self.assertEqual(self.service._field_name_for_sqref("$I$2:$I$200", {9: "brand"}), "brand")
-        self.assertEqual(self.service._field_name_for_sqref("not-a-cell", {9: "brand"}), "")
-        self.assertEqual(
-            self.service._resolve_validation_formula_values(loaded, '"A, B, A"'),
-            ["A", "B"],
-        )
-        self.assertEqual(
-            self.service._resolve_validation_formula_values(
-                loaded,
-                "'Reference Data'!$A$1:$A$2",
+                "GPC",
+                "Consumer Unit",
+                "Packaging Type",
+                "Target Market",
+                "Brand",
             ),
-            ["One", "Two"],
-        )
-        self.assertEqual(
-            self.service._resolve_validation_formula_values(loaded, "MissingName"),
-            [],
-        )
-        self.assertEqual(
-            self.service._read_cell_range_values(loaded, "Missing", "$A$1:$A$2"),
-            [],
-        )
-        self.assertEqual(
-            self.service._read_cell_range_values(loaded, "Reference Data", "not-a-range"),
-            [],
-        )
-        self.assertEqual(
-            self.service._collect_existing_column_values(sheet, 9, start_row=2),
-            ["Brand A", "Brand B"],
-        )
-        self.assertEqual(
-            self.service._dedupe_preserve_order([" One ", "", "Two", "One"]),
-            ["One", "Two"],
-        )
+            (
+                "GTIN",
+                "Status",
+                "GPC",
+                "Consumer Unit",
+                "Packaging Type",
+                "Target Market",
+                "Product Description",
+                "Language",
+                "Brand",
+                "Quantity",
+                "Unit",
+            ),
+        ],
+    )
 
-    def test_xml_validation_helpers_extract_sheet_options(self):
-        workbook_path = self.root / "validation-options.xlsx"
-        build_verified_workbook(workbook_path)
-        workbook = load_workbook(
-            workbook_path,
-            read_only=True,
-            data_only=False,
-        )
-        self.addCleanup(workbook.close)
+    candidates = service._scan_sheet_candidates(sheet, workbook_markers=[])
 
-        worksheet_xml_path = self.service._resolve_sheet_xml_path(workbook_path, "10070050")
-        entries = self.service._read_validation_entries(workbook_path, worksheet_xml_path)
-        options = self.service._validation_options_from_sheet_xml(
-            workbook_path,
+    assert [candidate.header_row for candidate in candidates] == [2, 4]
+    assert all(candidate.sheet_name == "Input 2" for candidate in candidates)
+
+
+def test_sheet_name_priority_handles_empty_generic_placeholder_and_neutral_names():
+    service = GS1TemplateVerificationService()
+
+    assert service._sheet_name_priority("") == 0.0
+    assert service._sheet_name_priority("Instructions") == -2.0
+    assert service._sheet_name_priority("{Template}") == -1.0
+    assert service._sheet_name_priority("GS1 Upload") == 1.25
+    assert service._sheet_name_priority("Input 2") == 1.0
+    assert service._sheet_name_priority("Metadata") == 0.0
+
+
+def test_collect_workbook_markers_skips_blank_titles_and_non_keywords():
+    service = GS1TemplateVerificationService()
+    workbook = _FakeWorkbook({"": _FakeSheet("", [("ordinary", None)])})
+
+    assert service._collect_workbook_markers(workbook) == []
+
+
+def test_extract_field_options_collects_existing_values_when_validation_is_missing(tmp_path):
+    service = GS1TemplateVerificationService()
+    worksheet = _FakeSheet(
+        "Input",
+        [
+            ("Brand",),
+            ("Acme",),
+            ("",),
+            ("Acme",),
+            ("Other",),
+        ],
+    )
+    workbook = _FakeWorkbook({"Input": worksheet})
+
+    with mock.patch.object(service, "_validation_options_from_sheet_xml", return_value={}):
+        options = service._extract_field_options(
+            tmp_path / "template.xlsx",
             workbook,
-            {
-                "status": 2,
-                "product_classification": 3,
-                "consumer_unit_flag": 4,
-                "packaging_type": 5,
-                "target_market": 6,
-                "language": 8,
-                "unit": 12,
-            },
-            "10070050",
+            {"brand": 1},
+            "Input",
+            1,
         )
 
-        self.assertTrue(worksheet_xml_path.endswith(".xml"))
-        self.assertTrue(any("B2:B200" in sqref for sqref, _formula in entries))
-        self.assertEqual(options["status"], ["Concept", "Active"])
-        self.assertEqual(options["packaging_type"], ["Ampul", "Bag-In-Box"])
-        self.assertEqual(
-            self.service._validation_options_from_sheet_xml(
-                workbook_path / "missing",
-                workbook,
-                {"status": 2},
-                "10070050",
-            ),
-            {},
+    assert options == {"brand": ("Acme", "Other")}
+
+    with mock.patch.object(
+        service,
+        "_validation_options_from_sheet_xml",
+        return_value={"brand": ["Template Brand"]},
+    ):
+        options = service._extract_field_options(
+            tmp_path / "template.xlsx",
+            workbook,
+            {"brand": 1},
+            "Input",
+            1,
         )
-        self.assertEqual(self.service._resolve_sheet_xml_path(workbook_path, "Missing"), "")
+
+    assert options == {"brand": ("Template Brand",)}
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_validation_options_skip_unmapped_empty_and_duplicate_values(tmp_path):
+    service = GS1TemplateVerificationService()
+
+    with (
+        mock.patch.object(
+            service, "_resolve_sheet_xml_path", return_value="xl/worksheets/sheet1.xml"
+        ),
+        mock.patch.object(
+            service,
+            "_read_validation_entries",
+            return_value=[
+                ("Z2:Z5", '"Ignored"'),
+                ("A2:A5", ""),
+                ("A2:A5", '"Active,Active,Inactive"'),
+            ],
+        ),
+    ):
+        options = service._validation_options_from_sheet_xml(
+            tmp_path / "template.xlsx",
+            workbook=object(),
+            column_map={"status": 1},
+            sheet_name="Input",
+        )
+
+    assert options == {"status": ["Active", "Inactive"]}
+
+    with (
+        mock.patch.object(
+            service, "_resolve_sheet_xml_path", return_value="xl/worksheets/sheet1.xml"
+        ),
+        mock.patch.object(service, "_read_validation_entries", return_value=[("A2:A5", "Named")]),
+        mock.patch.object(
+            service,
+            "_resolve_validation_formula_values",
+            return_value=["Active", "Active", "Inactive"],
+        ),
+    ):
+        assert service._validation_options_from_sheet_xml(
+            tmp_path / "template.xlsx",
+            workbook=object(),
+            column_map={"status": 1},
+            sheet_name="Input",
+        ) == {"status": ["Active", "Inactive"]}
+
+    with mock.patch.object(service, "_resolve_sheet_xml_path", side_effect=RuntimeError("zip")):
+        assert (
+            service._validation_options_from_sheet_xml(
+                tmp_path / "template.xlsx",
+                workbook=object(),
+                column_map={"status": 1},
+                sheet_name="Input",
+            )
+            == {}
+        )
+
+    with mock.patch.object(service, "_resolve_sheet_xml_path", return_value=""):
+        assert (
+            service._validation_options_from_sheet_xml(
+                tmp_path / "template.xlsx",
+                workbook=object(),
+                column_map={"status": 1},
+                sheet_name="Input",
+            )
+            == {}
+        )
+
+
+def test_resolve_sheet_xml_path_handles_relative_absolute_and_missing_targets(tmp_path):
+    service = GS1TemplateVerificationService()
+    workbook_path = tmp_path / "template.xlsx"
+
+    workbook_xml = """\
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Input" sheetId="1" r:id="rId1"/>
+    <sheet name="Absolute" sheetId="2" r:id="rId2"/>
+    <sheet name="Broken" sheetId="3" r:id="rId3"/>
+  </sheets>
+</workbook>
+"""
+    rels_xml = """\
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Target="/xl/worksheets/sheet2.xml"/>
+</Relationships>
+"""
+    _write_zip(
+        workbook_path,
+        {
+            "xl/workbook.xml": workbook_xml,
+            "xl/_rels/workbook.xml.rels": rels_xml,
+        },
+    )
+
+    assert service._resolve_sheet_xml_path(workbook_path, "Input") == "xl/worksheets/sheet1.xml"
+    assert service._resolve_sheet_xml_path(workbook_path, "Absolute") == "xl/worksheets/sheet2.xml"
+    assert service._resolve_sheet_xml_path(workbook_path, "Missing") == ""
+    assert service._resolve_sheet_xml_path(workbook_path, "Broken") == ""
+
+
+def test_read_validation_entries_supports_modern_and_legacy_excel_xml(tmp_path):
+    service = GS1TemplateVerificationService()
+    workbook_path = tmp_path / "template.xlsx"
+    worksheet_xml = """\
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+           xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+  <x14:dataValidations>
+    <x14:dataValidation type="whole" sqref="A2"><x14:formula1><xm:f>"Skip"</xm:f></x14:formula1><xm:sqref>A2</xm:sqref></x14:dataValidation>
+    <x14:dataValidation type="list"><x14:formula1><xm:f>"A,B"</xm:f></x14:formula1><xm:sqref>A2:A3</xm:sqref></x14:dataValidation>
+    <x14:dataValidation type="list" sqref="B2:B3"><x14:formula1><xm:f>"C,D"</xm:f></x14:formula1></x14:dataValidation>
+    <x14:dataValidation type="list" sqref="D2:D3"></x14:dataValidation>
+  </x14:dataValidations>
+  <dataValidations>
+    <dataValidation type="whole" sqref="C2"><formula1>"Skip"</formula1></dataValidation>
+    <dataValidation type="list" sqref="C2:C3"><formula1>"E,F"</formula1></dataValidation>
+    <dataValidation type="list" sqref="D2:D3"></dataValidation>
+  </dataValidations>
+</worksheet>
+"""
+    _write_zip(workbook_path, {"xl/worksheets/sheet1.xml": worksheet_xml})
+
+    entries = service._read_validation_entries(workbook_path, "xl/worksheets/sheet1.xml")
+
+    assert entries == [
+        ("A2:A3", '"A,B"'),
+        ("B2:B3", '"C,D"'),
+        ("C2:C3", '"E,F"'),
+    ]
+
+
+def test_validation_formula_values_cover_inline_ranges_defined_names_and_failures():
+    service = GS1TemplateVerificationService()
+    worksheet = _FakeSheet("Lists", [("Active",), ("",), ("Inactive",), ("Active",)])
+
+    class _DefinedNames:
+        def get(self, name):
+            if name == "Broken":
+                raise RuntimeError("unreadable names")
+            if name == "NamedChoices":
+                return SimpleNamespace(destinations=[("Lists", "$A$1:$A$4")])
+            return None
+
+    workbook = _FakeWorkbook({"Lists": worksheet}, defined_names=_DefinedNames())
+
+    assert service._resolve_validation_formula_values(workbook, "") == []
+    assert service._resolve_validation_formula_values(workbook, '="One, Two, One"') == [
+        "One",
+        "Two",
+    ]
+    assert service._resolve_validation_formula_values(workbook, "'Lists'!$A$1:$A$4") == [
+        "Active",
+        "Inactive",
+    ]
+    assert service._resolve_validation_formula_values(workbook, "NamedChoices") == [
+        "Active",
+        "Inactive",
+    ]
+    assert service._resolve_validation_formula_values(workbook, "Broken") == []
+    assert service._read_cell_range_values(workbook, "Lists", "") == []
+    assert service._read_cell_range_values(workbook, "Missing", "$A$1:$A$4") == []
+    assert service._read_cell_range_values(workbook, "Lists", "not-a-range") == []
+
+
+def test_field_name_for_sqref_uses_first_mapped_column_and_skips_invalid_tokens():
+    service = GS1TemplateVerificationService()
+
+    assert service._field_name_for_sqref("1:3 AAAA1 $Z$2 $B$4:$B$9", {2: "brand"}) == "brand"
+    assert service._field_name_for_sqref("1:3 $Z$2", {2: "brand"}) == ""

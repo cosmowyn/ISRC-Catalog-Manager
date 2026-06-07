@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -661,5 +662,229 @@ def test_update_asset_raises_when_database_mode_missing_source_blob(tmp_path: Pa
                 track_id=73,
             ),
         )
+
+    conn.close()
+
+
+def test_asset_file_io_metadata_and_fetch_error_branches(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    source = tmp_path / "master.wav"
+    source.write_bytes(b"wave-data")
+
+    with mock.patch("isrc_manager.assets.service.MutagenFile", None):
+        assert service._extract_media_metadata(source) == {
+            "duration_sec": None,
+            "sample_rate": None,
+            "bit_depth": None,
+        }
+
+    fake_media = SimpleNamespace(
+        info=SimpleNamespace(length=2.6, sample_rate=48_000, bits_per_sample=24)
+    )
+    with mock.patch("isrc_manager.assets.service.MutagenFile", return_value=fake_media):
+        assert service._extract_media_metadata(source) == {
+            "duration_sec": 3,
+            "sample_rate": 48_000,
+            "bit_depth": 24,
+        }
+
+    with pytest.raises(FileNotFoundError):
+        service._write_asset_file(tmp_path / "missing.wav")
+    unconfigured = AssetService(conn, data_root=None)
+    with pytest.raises(ValueError, match="not configured"):
+        unconfigured._write_asset_file(source)
+
+    stored_path, filename, checksum, metadata = service._write_asset_file(source)
+    resolved = service.resolve_asset_path(stored_path)
+    assert filename == "master.wav"
+    assert checksum == service._hash_file(resolved)
+    assert resolved is not None and resolved.exists()
+    assert "audio/" in stored_path
+    assert metadata["duration_sec"] is None
+
+    image_source = tmp_path / "cover.png"
+    image_source.write_bytes(b"image-data")
+    image_stored_path, *_ = service._write_asset_file(image_source)
+    assert "images/" in image_stored_path
+
+    managed_filename, managed_bytes, managed_mime, managed_metadata = service._managed_asset_bytes(
+        source
+    )
+    assert managed_filename == "master.wav"
+    assert managed_bytes == b"wave-data"
+    assert managed_mime == "audio/x-wav"
+    assert managed_metadata["sample_rate"] is None
+
+    with pytest.raises(FileNotFoundError, match="Asset 404 not found"):
+        service.fetch_asset_bytes(404)
+
+    conn.execute(
+        """
+        INSERT INTO AssetVersions(asset_type, filename, stored_path, storage_mode, track_id)
+        VALUES ('other', 'missing.bin', 'asset_registry/files/missing.bin', ?, 1)
+        """,
+        (STORAGE_MODE_MANAGED_FILE,),
+    )
+    missing_file_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    with pytest.raises(FileNotFoundError, match="missing.bin"):
+        service.fetch_asset_bytes(missing_file_id)
+
+    with pytest.raises(FileNotFoundError):
+        service._build_asset_payload(source_path=tmp_path / "gone.wav")
+
+    with pytest.raises(ValueError, match="filename or a source file"):
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="other",
+                track_id=1,
+            )
+        )
+
+    conn.close()
+
+
+def test_asset_cursor_release_filter_delete_and_validation_paths(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    source = tmp_path / "release-cover.png"
+    source.write_bytes(b"cover")
+
+    with conn:
+        cur = conn.cursor()
+        release_primary_id = service.create_asset(
+            AssetVersionPayload(
+                asset_type="cover_art",
+                source_path=str(source),
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                release_id=55,
+                primary_flag=True,
+                version_status="approved",
+            ),
+            cursor=cur,
+        )
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="cover_art",
+                source_path=str(source),
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                release_id=56,
+                version_status="draft",
+            ),
+            cursor=cur,
+        )
+
+    matches = service.list_assets(release_id=55, search_text="cover")
+    assert [item.id for item in matches] == [release_primary_id]
+
+    with conn:
+        service.update_asset(
+            release_primary_id,
+            AssetVersionPayload(
+                asset_type="cover_art",
+                filename="updated-cover.png",
+                stored_path=matches[0].stored_path,
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                release_id=55,
+                primary_flag=True,
+                version_status="approved",
+            ),
+            cursor=conn.cursor(),
+        )
+
+    updated = service.fetch_asset(release_primary_id)
+    assert updated is not None
+    assert updated.filename == "updated-cover.png"
+    assert updated.primary_flag
+
+    db_asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="other",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_DATABASE,
+            release_id=57,
+        )
+    )
+    service.delete_asset(db_asset_id)
+    assert service.fetch_asset(db_asset_id) is None
+
+    conn.execute(
+        """
+        INSERT INTO AssetVersions(
+            asset_type,
+            filename,
+            storage_mode,
+            file_blob,
+            release_id,
+            approved_for_use,
+            primary_flag
+        )
+        VALUES ('other', 'missing-db.bin', ?, NULL, 58, 0, 0)
+        """,
+        (STORAGE_MODE_DATABASE,),
+    )
+    issues = service.validate_assets()
+    assert any(
+        issue.issue_type == "broken_asset_reference"
+        and issue.message == "Asset blob is missing from the database."
+        for issue in issues
+    )
+    assert any(row["id"] == release_primary_id for row in service.export_rows())
+
+    conn.close()
+
+
+def test_sync_track_audio_attachment_updates_same_checksum_and_versions_new_sources(
+    tmp_path: Path,
+) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    first_source = tmp_path / "primary.wav"
+    second_source = tmp_path / "replacement.wav"
+    first_source.write_bytes(b"same-bytes")
+    second_source.write_bytes(b"new-bytes")
+
+    with pytest.raises(FileNotFoundError):
+        service.sync_track_audio_attachment(
+            track_id=77,
+            source_path=tmp_path / "missing.wav",
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+        )
+
+    first = service.sync_track_audio_attachment(
+        track_id=77,
+        source_path=first_source,
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+    assert first is not None
+    assert first.asset_type == "main_master"
+    assert first.primary_flag
+    assert first.derived_from_asset_id is None
+
+    updated_same = service.sync_track_audio_attachment(
+        track_id=77,
+        source_path=first_source,
+        storage_mode=STORAGE_MODE_DATABASE,
+    )
+    assert updated_same is not None
+    assert updated_same.id == first.id
+    assert updated_same.storage_mode == STORAGE_MODE_DATABASE
+
+    replacement = service.sync_track_audio_attachment(
+        track_id=77,
+        source_path=second_source,
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+    assert replacement is not None
+    assert replacement.id != first.id
+    assert replacement.derived_from_asset_id == first.id
+    assert replacement.primary_flag
+
+    all_track_assets = service.list_assets(track_id=77)
+    assert {item.id for item in all_track_assets} == {first.id, replacement.id}
+    assert sum(1 for item in all_track_assets if item.primary_flag) == 1
 
     conn.close()

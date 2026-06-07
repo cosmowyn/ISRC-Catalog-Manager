@@ -20,7 +20,9 @@ else:
 from isrc_manager.catalog_table.header_state import (
     COLUMNS_MOVABLE_KEY,
     HEADER_COLUMN_KEYS_JSON_KEY,
+    HEADER_LABELS_JSON_KEY,
     HEADER_LABELS_KEY,
+    HEADER_STATE_KEY,
     HIDDEN_COLUMN_KEYS_JSON_KEY,
     HIDDEN_COLUMNS_JSON_KEY,
     CatalogHeaderStateManager,
@@ -203,6 +205,131 @@ class CatalogHeaderStateManagerTests(unittest.TestCase):
         self.assertTrue(header.isSectionHidden(3))
         self.assertFalse(header.sectionsMovable())
 
+    def test_prefix_no_settings_and_json_loading_edges(self):
+        column_specs = (
+            CatalogColumnSpec(key="id", header_text="ID"),
+            CatalogColumnSpec(key="title", header_text="Title", hidden_by_default=True),
+        )
+        view, _ = self._make_view(column_specs)
+        header = view.horizontalHeader()
+        manager = CatalogHeaderStateManager(None, settings_prefix="/profile//")
+
+        self.assertEqual(manager.settings_prefix(), "profile")
+        manager.set_settings_prefix("/profile/one/")
+        self.assertEqual(manager.settings_prefix(), "profile/one")
+        self.assertEqual(manager.settings_key(" /header "), "profile/one/header")
+        self.assertEqual(manager.settings_key("header", settings_prefix=""), "header")
+        self.assertEqual(manager.settings_key("", settings_prefix="profile/two"), "profile/two")
+
+        manager.save_state(header, column_specs=column_specs)
+        self.assertFalse(manager.restore_state(header, column_specs=column_specs))
+        self.assertTrue(header.isSectionHidden(1))
+        self.assertFalse(manager.restore_visibility(header, column_specs=column_specs))
+        self.assertTrue(manager.load_columns_movable_state(default=True))
+        self.assertEqual(manager.load_column_key_order(), [])
+        self.assertEqual(manager.load_hidden_column_keys(), [])
+        self.assertEqual(manager.load_legacy_header_labels(), [])
+        self.assertEqual(manager.load_legacy_hidden_columns(), [])
+
+        self.settings.setValue("list", ["a", ""])
+        self.settings.setValue("dict", {"key": "value"})
+        self.settings.setValue("bad-json", "{")
+        self.settings.setValue("number", 42)
+        self.assertEqual(
+            CatalogHeaderStateManager._load_json_value(self.settings, "list", default=[]),
+            ["a", ""],
+        )
+        self.assertEqual(
+            CatalogHeaderStateManager._load_json_value(self.settings, "dict", default={}),
+            {"key": "value"},
+        )
+        self.assertEqual(
+            CatalogHeaderStateManager._load_json_value(self.settings, "bad-json", default=[]),
+            [],
+        )
+        self.assertEqual(
+            CatalogHeaderStateManager._load_json_value(self.settings, "number", default=[]),
+            [],
+        )
+
+    def test_restore_state_can_use_native_state_with_legacy_labels_only(self):
+        column_specs = (
+            CatalogColumnSpec(key="id", header_text="ID"),
+            CatalogColumnSpec(key="title", header_text="Title"),
+            CatalogColumnSpec(key="length", header_text="Length"),
+        )
+        view, _ = self._make_view(column_specs)
+        header = view.horizontalHeader()
+        header.moveSection(header.visualIndex(2), 0)
+        header.setSectionHidden(1, True)
+        self.settings.setValue(self.manager.settings_key(HEADER_STATE_KEY), header.saveState())
+        self.settings.setValue(
+            self.manager.settings_key(HEADER_LABELS_KEY),
+            ["Length", "ID", "Title"],
+        )
+        self.settings.setValue(self.manager.settings_key(COLUMNS_MOVABLE_KEY), True)
+        self.settings.sync()
+
+        restored_view, _ = self._make_view(column_specs)
+        restored_header = restored_view.horizontalHeader()
+
+        self.assertTrue(self.manager.restore_state(restored_header, column_specs=column_specs))
+        self.assertEqual(
+            self._visual_key_order(restored_view, column_specs),
+            ["length", "id", "title"],
+        )
+        self.assertFalse(restored_header.isSectionHidden(1))
+
+    def test_restore_visibility_and_loaders_handle_legacy_and_malformed_payloads(self):
+        column_specs = (
+            CatalogColumnSpec(key="id", header_text="ID"),
+            CatalogColumnSpec(key="title", header_text="Title", hidden_by_default=True),
+            CatalogColumnSpec(key="custom_a", header_text="Custom"),
+            CatalogColumnSpec(key="custom_b", header_text="Custom"),
+        )
+        view, _ = self._make_view(column_specs)
+        header = view.horizontalHeader()
+        self.settings.setValue(
+            self.manager.settings_key(HEADER_LABELS_JSON_KEY),
+            json.dumps([" ID ", "", "Title"]),
+        )
+        self.settings.setValue(
+            self.manager.settings_key(HIDDEN_COLUMNS_JSON_KEY),
+            json.dumps(
+                [
+                    "not-a-dict",
+                    {"label": ""},
+                    {"label": "Custom", "occurrence": "bad"},
+                    {"label": "Title", "occurrence": -3},
+                ]
+            ),
+        )
+        self.settings.sync()
+
+        self.assertEqual(self.manager.load_legacy_header_labels(), ["ID", "Title"])
+        self.assertEqual(
+            self.manager.load_legacy_hidden_columns(),
+            [("Custom", 0), ("Title", 0)],
+        )
+
+        self.assertTrue(self.manager.restore_visibility(header, column_specs=column_specs))
+        self.assertFalse(header.isSectionHidden(0))
+        self.assertTrue(header.isSectionHidden(1))
+        self.assertTrue(header.isSectionHidden(2))
+        self.assertFalse(header.isSectionHidden(3))
+
+        self.settings.setValue(
+            self.manager.settings_key(HIDDEN_COLUMN_KEYS_JSON_KEY),
+            json.dumps(["id", " ", "custom_b"]),
+        )
+        self.settings.sync()
+        self.assertEqual(self.manager.load_hidden_column_keys(), ["id", "custom_b"])
+        self.assertTrue(self.manager.restore_visibility(header, column_specs=column_specs))
+        self.assertTrue(header.isSectionHidden(0))
+        self.assertFalse(header.isSectionHidden(1))
+        self.assertFalse(header.isSectionHidden(2))
+        self.assertTrue(header.isSectionHidden(3))
+
 
 class CatalogZoomControllerTests(unittest.TestCase):
     @classmethod
@@ -268,6 +395,63 @@ class CatalogZoomControllerTests(unittest.TestCase):
         time.sleep(0.16)
         pump_events(app=self.app, cycles=4)
         self.assertEqual(applied, [140])
+
+    def test_zoom_throttle_changes_flush_or_reschedule_pending_apply(self):
+        controller = CatalogZoomController(throttle_ms=100)
+        applied: list[int] = []
+        changed: list[int] = []
+        controller.set_apply_callback(lambda view, percent: applied.append(percent))
+        controller.zoom_percent_changed.connect(changed.append)
+
+        self.assertEqual(controller.pending_zoom_percent(), None)
+        controller.set_zoom_percent(125)
+        self.assertEqual(controller.pending_zoom_percent(), 125)
+
+        controller.set_throttle_ms(30)
+        self.assertEqual(controller.throttle_ms(), 30)
+        self.assertEqual(applied, [])
+
+        controller.set_throttle_ms(0)
+        self.assertEqual(applied, [125])
+        self.assertEqual(controller.pending_zoom_percent(), None)
+
+        controller.set_zoom_percent(125)
+        self.assertEqual(applied, [125, 125])
+        self.assertEqual(changed, [125])
+
+    def test_zoom_invalid_inputs_and_layout_restore_edges(self):
+        controller = CatalogZoomController(throttle_ms=0)
+        applied: list[int] = []
+        emitted: list[int] = []
+        controller.zoom_applied.connect(emitted.append)
+
+        self.assertEqual(controller.apply_pinch_scale("bad", immediate=True), 100)
+        self.assertEqual(controller.apply_pinch_scale(-2, immediate=True), 100)
+        self.assertEqual(controller.clamp_zoom_percent("bad"), 100)
+        self.assertEqual(controller.flush_pending_apply(), 100)
+        self.assertEqual(emitted, [100, 100])
+
+        self.assertEqual(controller.restore_layout_state(None, immediate=True), 100)
+        self.assertEqual(
+            controller.restore_layout_state(
+                {CATALOG_ZOOM_LAYOUT_KEY: "bad"},
+                immediate=True,
+            ),
+            100,
+        )
+        self.assertEqual(
+            controller.restore_layout_state(
+                {CATALOG_ZOOM_LAYOUT_KEY: 250},
+                reset_on_profile_change=True,
+                immediate=True,
+            ),
+            100,
+        )
+
+        view = object()
+        controller.bind_view(view, apply_callback=lambda bound_view, pct: applied.append(pct))
+        self.assertEqual(controller.set_zoom_percent(333, immediate=True), 300)
+        self.assertEqual(applied, [300])
 
 
 if __name__ == "__main__":

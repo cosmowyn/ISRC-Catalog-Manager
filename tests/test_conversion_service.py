@@ -12,8 +12,23 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 
 from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
+from isrc_manager.conversion.adapters import csv as csv_adapter_module
 from isrc_manager.conversion.adapters import xlsx as xlsx_adapter_module
+from isrc_manager.conversion.adapters.csv import (
+    CsvSourceAdapter,
+    CsvTemplateAdapter,
+    _first_non_empty_row,
+    _load_rows_from_bytes,
+    _rows_from_text,
+)
 from isrc_manager.conversion.adapters.xlsx import XlsxSourceAdapter, XlsxTemplateAdapter
+from isrc_manager.conversion.adapters.xml import (
+    XmlSourceAdapter,
+    XmlTemplateAdapter,
+    _local_name,
+    _lookup_by_path,
+    _row_from_node,
+)
 from isrc_manager.conversion.models import (
     MAPPING_KIND_CONSTANT,
     MAPPING_KIND_SKIP,
@@ -120,6 +135,123 @@ class ConversionServiceTests(unittest.TestCase):
         self.assertIn("CAT-001;Orbit;2025", exported_text)
         self.assertIn("CAT-002;Signal;2024", exported_text)
         self.assertTrue(exported_text.rstrip().endswith("Footer;Keep;Tail"))
+
+    def test_csv_adapter_helpers_cover_delimiters_bytes_and_empty_header_errors(self):
+        rows, dialect = _rows_from_text("Catalog;Title\nCAT-1;Orbit\n", preferred_delimiter=";")
+        self.assertEqual(rows, [["Catalog", "Title"], ["CAT-1", "Orbit"]])
+        self.assertEqual(getattr(dialect, "delimiter", ""), ";")
+
+        decoded_rows, decoded_dialect = _load_rows_from_bytes(
+            b"\xef\xbb\xbfCatalog,Title\nCAT-2,Signal\n",
+        )
+        self.assertEqual(decoded_rows[0], ["Catalog", "Title"])
+        self.assertEqual(getattr(decoded_dialect, "delimiter", ","), ",")
+
+        with mock.patch.object(
+            csv_adapter_module.csv.Sniffer,
+            "sniff",
+            side_effect=csv_adapter_module.csv.Error("ambiguous"),
+        ):
+            _rows, fallback_dialect = _rows_from_text("No obvious delimiter")
+        self.assertIs(fallback_dialect, csv_adapter_module.csv.excel)
+
+        with self.assertRaisesRegex(ValueError, "non-empty header"):
+            _first_non_empty_row([[""], ["  "]])
+
+    def test_csv_template_adapter_handles_empty_headers_no_samples_and_select_scope(self):
+        template_path = self._write_csv("header-only.csv", "\nCatalog*, ,Title\n")
+        adapter = CsvTemplateAdapter()
+
+        profile = adapter.inspect_template(template_path)
+
+        self.assertEqual(profile.chosen_scope, "csv")
+        self.assertEqual(profile.adapter_state["sample_start"], 2)
+        self.assertEqual(profile.adapter_state["sample_end"], 1)
+        self.assertEqual(
+            [(field.field_key, field.location) for field in profile.target_fields],
+            [("catalog", "CSV!A2"), ("title", "CSV!C2")],
+        )
+        self.assertIs(adapter.select_scope(profile, "ignored"), profile)
+
+    def test_csv_source_adapter_skips_blank_rows_and_select_scope(self):
+        source_path = self._write_csv(
+            "source.csv",
+            "Catalog,Title\n\nCAT-1,Orbit\n,\nCAT-2,Signal\n",
+        )
+        adapter = CsvSourceAdapter()
+
+        profile = adapter.inspect_source(source_path, preferred_csv_delimiter=",")
+
+        self.assertEqual(profile.headers, ("Catalog", "Title"))
+        self.assertEqual(
+            profile.rows,
+            (
+                {"Catalog": "CAT-1", "Title": "Orbit"},
+                {"Catalog": "CAT-2", "Title": "Signal"},
+            ),
+        )
+        self.assertEqual(profile.resolved_delimiter, ",")
+        self.assertIs(adapter.select_scope(profile, "anything"), profile)
+
+    def test_csv_export_preview_uses_stored_bytes_expands_rows_and_reports_progress(self):
+        template_profile = ConversionTemplateProfile(
+            template_path=self.root / "stored.csv",
+            format_name="csv",
+            output_suffix=".csv",
+            structure_label="Stored CSV",
+            target_fields=(
+                ConversionTargetField(
+                    field_key="catalog_number",
+                    display_name="Catalog Number",
+                    location="CSV!D1",
+                    required_status=REQUIRED_STATUS_REQUIRED,
+                    metadata={"column_index": 3},
+                ),
+            ),
+            template_signature="csv|stored|catalog_number",
+            template_bytes=b"Catalog Number\nTEMPLATE\nFooter\n",
+            adapter_state={
+                "header_row_index": 0,
+                "sample_start": 1,
+                "sample_end": 1,
+                "header_row": ["Catalog Number"],
+            },
+        )
+        preview = ConversionPreview(
+            template_profile=template_profile,
+            source_profile=ConversionSourceProfile(
+                source_mode=SOURCE_MODE_FILE,
+                format_name="csv",
+                source_label="memory",
+                headers=("catalog_number",),
+                rows=(),
+                preview_rows=(),
+            ),
+            mapping_entries=(),
+            included_row_indices=(0,),
+            rendered_rows=(("CAT-9", "unused", "overflow"),),
+        )
+        progress: list[tuple[int, int, str]] = []
+
+        result = CsvTemplateAdapter().export_preview(
+            preview,
+            self.root / "stored-output.csv",
+            progress_callback=lambda value, maximum, message: progress.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported_row_count, 1)
+        self.assertEqual(
+            progress,
+            [
+                (20, 100, "Preparing CSV conversion export..."),
+                (90, 100, "CSV conversion export written."),
+            ],
+        )
+        exported = (self.root / "stored-output.csv").read_text(encoding="utf-8")
+        self.assertIn(",,,CAT-9", exported)
+        self.assertTrue(exported.rstrip().endswith("Footer"))
 
     def test_xlsx_template_export_clones_sample_row_style_for_appended_rows(self):
         template_path = self.root / "template.xlsx"
@@ -599,6 +731,231 @@ class ConversionServiceTests(unittest.TestCase):
         self.assertEqual(records[1].attrib["code"], "CAT-2")
         self.assertEqual(records[1].findtext("Artist"), "Two")
 
+    def test_xml_template_adapter_handles_scopes_bytes_progress_and_defensive_paths(self):
+        template_path = self.root / "multi-template.xml"
+        template_path.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<Envelope>
+  <Records>
+    <Record code="TEMPLATE">
+      <Title lang="en">Sample</Title>
+      <Aliases>
+        <Alias>Nested</Alias>
+      </Aliases>
+      <Tag>First</Tag>
+      <Tag>Second</Tag>
+    </Record>
+    <Record code="OLD">
+      <Title>Old</Title>
+      <Tag>Old</Tag>
+    </Record>
+  </Records>
+  <Artists>
+    <Artist id="A"><Name>Ada</Name></Artist>
+    <Artist id="B"><Name>Ben</Name></Artist>
+  </Artists>
+</Envelope>
+""",
+            encoding="utf-8",
+        )
+        adapter = XmlTemplateAdapter()
+
+        profile = adapter.inspect_template(template_path)
+
+        self.assertEqual(_local_name("{urn:test}Record"), "Record")
+        self.assertTrue(profile.warnings)
+        self.assertIs(adapter.select_scope(profile, "missing"), profile)
+        tag_scope = next(
+            scope for scope, _label in profile.available_scopes if scope.endswith("Tag[1]")
+        )
+        self.assertEqual(adapter.select_scope(profile, tag_scope).chosen_scope, tag_scope)
+        self.assertEqual(
+            [field.display_name for field in profile.target_fields],
+            ["@code", "Title", "Title/@lang", "Aliases/Alias", "Tag"],
+        )
+
+        root = ET.fromstring(template_path.read_text(encoding="utf-8"))
+        self.assertIs(_lookup_by_path(root, ""), root)
+        self.assertIsNone(_lookup_by_path(root, "/Other/Records"))
+        self.assertIs(_lookup_by_path(root, "/Envelope/Records/Record[x]"), root[0][0])
+        self.assertIsNone(_lookup_by_path(root, "/Envelope/Records/Record[0]"))
+        self.assertIsNone(_lookup_by_path(root, "/Envelope/Records/Record[99]"))
+
+        missing_field = ConversionTargetField(
+            field_key="missing",
+            display_name="Missing",
+            location="/Envelope/Records/Record/Missing",
+            required_status=REQUIRED_STATUS_OPTIONAL,
+            metadata={"path": "Missing"},
+        )
+        bytes_profile = replace(
+            profile,
+            template_bytes=template_path.read_bytes(),
+            target_fields=profile.target_fields + (missing_field,),
+        )
+        headers, rows, xml_text, warnings, state = adapter.build_preview(
+            bytes_profile,
+            [
+                {
+                    "code": "CAT-9",
+                    "title": "Orbit",
+                    "title_lang": "nl",
+                    "tag": "Focus",
+                    "aliases_alias": "Alias One",
+                    "missing": "ignored",
+                }
+            ],
+        )
+
+        self.assertEqual(headers[-1], "Missing")
+        self.assertEqual(rows[0][headers.index("Title")], "Orbit")
+        self.assertEqual(warnings, ())
+        self.assertEqual(state, {})
+        self.assertTrue(xml_text.lstrip().startswith("<?xml"))
+        rendered_root = ET.fromstring(xml_text)
+        rendered_records = rendered_root.findall("./Records/Record")
+        self.assertEqual(len(rendered_records), 1)
+        self.assertEqual(rendered_records[0].attrib["code"], "CAT-9")
+        self.assertEqual(rendered_records[0].findtext("Title"), "Orbit")
+        self.assertEqual(rendered_records[0].find("Title").attrib["lang"], "nl")
+        self.assertEqual(rendered_records[0].findtext("./Aliases/Alias"), "Alias One")
+        self.assertIsNone(rendered_records[0].find("Missing"))
+
+        preview = ConversionPreview(
+            template_profile=bytes_profile,
+            source_profile=ConversionSourceProfile(
+                source_mode=SOURCE_MODE_FILE,
+                format_name="xml",
+                source_label="memory",
+                headers=(),
+                rows=(),
+                preview_rows=(),
+            ),
+            mapping_entries=(),
+            included_row_indices=(0,),
+            rendered_field_rows=({"title": "Orbit"},),
+            rendered_xml_text=xml_text,
+        )
+        progress: list[tuple[int, int, str]] = []
+        result = adapter.export_preview(
+            preview,
+            self.root / "rendered.xml",
+            progress_callback=lambda value, maximum, message: progress.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported_row_count, 1)
+        self.assertEqual(
+            progress,
+            [
+                (20, 100, "Preparing XML conversion export..."),
+                (90, 100, "XML conversion export written."),
+            ],
+        )
+        self.assertEqual((self.root / "rendered.xml").read_text(encoding="utf-8"), xml_text)
+
+        bad_profile = replace(profile, chosen_scope="/Envelope/Records/Missing")
+        with self.assertRaisesRegex(ValueError, "repeat-node path"):
+            adapter._render_xml_text(bad_profile, [])
+
+        empty_template = self.root / "empty-template.xml"
+        empty_template.write_text("<Envelope />", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "repeat-node candidate"):
+            adapter.inspect_template(empty_template)
+
+    def test_xml_template_adapter_uses_single_nested_node_when_no_repeats_exist(self):
+        template_path = self.root / "single-template.xml"
+        template_path.write_text(
+            '<Envelope><Record code="ONE"><Title>Single</Title></Record></Envelope>',
+            encoding="utf-8",
+        )
+
+        profile = XmlTemplateAdapter().inspect_template(template_path)
+
+        self.assertEqual(profile.chosen_scope, "/Envelope/Record")
+        self.assertEqual(profile.warnings, ())
+        self.assertEqual(
+            [field.display_name for field in profile.target_fields], ["@code", "Title"]
+        )
+
+    def test_xml_source_adapter_rows_scopes_and_defensive_paths(self):
+        source_path = self.root / "source-adapter.xml"
+        source_path.write_text(
+            """<Envelope>
+  <Records>
+    <Record code="CAT-1"><Title lang="en">Orbit</Title></Record>
+    <Record code="CAT-2"><Title>Signal</Title></Record>
+  </Records>
+  <Artists>
+    <Artist id="A"><Name>Ada</Name></Artist>
+    <Artist id="B"><Name>Ben</Name></Artist>
+  </Artists>
+</Envelope>
+""",
+            encoding="utf-8",
+        )
+        adapter = XmlSourceAdapter()
+
+        profile = adapter.inspect_source(source_path, preferred_csv_delimiter=";")
+
+        self.assertTrue(profile.warnings)
+        self.assertEqual(profile.headers, ("@code", "Title", "Title/@lang"))
+        self.assertEqual(
+            profile.rows,
+            (
+                {"@code": "CAT-1", "Title": "Orbit", "Title/@lang": "en"},
+                {"@code": "CAT-2", "Title": "Signal", "Title/@lang": ""},
+            ),
+        )
+        self.assertIs(adapter.select_scope(profile, "missing"), profile)
+
+        artist_scope = next(
+            scope for scope, _label in profile.available_scopes if scope.endswith("Artist[1]")
+        )
+        artist_profile = adapter.select_scope(profile, artist_scope)
+        self.assertEqual(artist_profile.headers, ("@id", "Name"))
+        self.assertEqual(
+            artist_profile.rows,
+            ({"@id": "A", "Name": "Ada"}, {"@id": "B", "Name": "Ben"}),
+        )
+
+        broken_profile = replace(
+            profile,
+            adapter_state={
+                "candidates": {
+                    "broken": {
+                        "sample_path": "/Envelope/Records/Missing",
+                        "parent_path": "/Envelope/Records",
+                        "sample_fields": profile.adapter_state["candidates"][profile.chosen_scope][
+                            "sample_fields"
+                        ],
+                    }
+                }
+            },
+        )
+        self.assertIs(adapter.select_scope(broken_profile, "broken"), broken_profile)
+
+        root = ET.fromstring(source_path.read_text(encoding="utf-8"))
+        missing_value = _row_from_node(
+            root.find("./Records/Record"),
+            (
+                ConversionTargetField(
+                    field_key="missing",
+                    display_name="Missing",
+                    location="/Envelope/Records/Record/Missing",
+                    required_status=REQUIRED_STATUS_OPTIONAL,
+                    metadata={"path": "Missing"},
+                ),
+            ),
+        )
+        self.assertEqual(missing_value, {"Missing": ""})
+
+        empty_source = self.root / "empty-source.xml"
+        empty_source.write_text("<Envelope />", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "repeat-node candidate"):
+            adapter.inspect_source(empty_source)
+
     def test_database_source_uses_exchange_export_rows(self):
         exchange_service = _FakeExchangeService()
         settings_read_service = _FakeSettingsReadService(
@@ -664,6 +1021,33 @@ class ConversionServiceTests(unittest.TestCase):
         self.assertEqual(profile.rows[0]["owner_company_name"], "Cosmowyn Records")
         self.assertEqual(profile.rows[0]["owner_email"], "hello@cosmowyn.test")
         self.assertTrue(any("release-aware" in warning.lower() for warning in profile.warnings))
+
+    def test_json_source_wrapper_variants_and_invalid_payloads(self):
+        service = ConversionService()
+        rows_path = self.root / "rows.json"
+        rows_path.write_text(json.dumps({"rows": [{"catalog": "CAT-1"}]}), encoding="utf-8")
+        items_path = self.root / "items.json"
+        items_path.write_text(json.dumps({"items": [{"title": "Orbit"}]}), encoding="utf-8")
+        nested_path = self.root / "nested.json"
+        nested_path.write_text(json.dumps({"payload": [{"artist": "Nova"}]}), encoding="utf-8")
+        single_path = self.root / "single.json"
+        single_path.write_text(
+            json.dumps({"catalog": "CAT-2", "title": "Signal"}),
+            encoding="utf-8",
+        )
+        invalid_path = self.root / "invalid.json"
+        invalid_path.write_text(json.dumps("bad payload"), encoding="utf-8")
+
+        self.assertEqual(service.inspect_source_file(rows_path).headers, ("catalog",))
+        self.assertEqual(service.inspect_source_file(items_path).headers, ("title",))
+        self.assertEqual(service.inspect_source_file(nested_path).headers, ("artist",))
+        single_profile = service.inspect_source_file(single_path)
+        self.assertEqual(single_profile.rows, ({"catalog": "CAT-2", "title": "Signal"},))
+
+        with self.assertRaisesRegex(ValueError, "JSON source"):
+            service.inspect_source_file(invalid_path)
+        with self.assertRaisesRegex(ValueError, "Unsupported source file format"):
+            service.inspect_source_file(self.root / "source.txt")
 
     def test_preview_blocks_unmapped_required_targets_and_supports_constants(self):
         service = ConversionService()
@@ -805,6 +1189,129 @@ class ConversionServiceTests(unittest.TestCase):
 
         self.assertIn("Required target 'Catalog Number*' is skipped.", preview.blocking_issues)
 
+    def test_conversion_service_guardrails_for_scopes_preview_export_and_mapping_payloads(self):
+        service = ConversionService()
+        required_field = ConversionTargetField(
+            field_key="catalog_number",
+            display_name="Catalog Number*",
+            location="CSV!A1",
+            required_status=REQUIRED_STATUS_REQUIRED,
+        )
+        optional_field = ConversionTargetField(
+            field_key="title",
+            display_name="Title",
+            location="CSV!B1",
+            required_status=REQUIRED_STATUS_OPTIONAL,
+        )
+        template_profile = ConversionTemplateProfile(
+            template_path=Path("template.csv"),
+            format_name="csv",
+            output_suffix=".csv",
+            structure_label="CSV",
+            target_fields=(required_field, optional_field),
+            template_signature="csv|test",
+        )
+        unsupported_profile = replace(template_profile, format_name="unknown")
+        source_profile = ConversionSourceProfile(
+            source_mode=SOURCE_MODE_FILE,
+            format_name="unknown",
+            source_label="memory",
+            headers=("catalog", "title"),
+            rows=({"catalog": "", "title": ""},),
+            preview_rows=({"catalog": "", "title": ""},),
+        )
+
+        self.assertIs(
+            service.select_template_scope(unsupported_profile, "anything"),
+            unsupported_profile,
+        )
+        self.assertIs(service.select_source_scope(source_profile, "anything"), source_profile)
+
+        empty_session = service.build_session(template_profile, source_profile)
+        empty_session.included_row_indices = ()
+        empty_session.mapping_entries = (
+            ConversionMappingEntry(
+                target_field_key="catalog_number",
+                target_display_name="Catalog Number*",
+                mapping_kind=MAPPING_KIND_SOURCE,
+                source_field="catalog",
+            ),
+            ConversionMappingEntry(
+                target_field_key="title",
+                target_display_name="Title",
+                mapping_kind=MAPPING_KIND_SOURCE,
+                source_field="title",
+            ),
+        )
+        empty_preview = service.build_preview(empty_session)
+        self.assertIn("Select at least one source row to convert.", empty_preview.blocking_issues)
+
+        session = service.build_session(template_profile, source_profile)
+        session.mapping_entries = empty_session.mapping_entries
+        preview = service.build_preview(session)
+        self.assertIn(
+            "Required target 'Catalog Number*' resolves empty in one or more rendered rows.",
+            preview.blocking_issues,
+        )
+        self.assertIn(
+            "Target 'Title' resolves empty in one or more rendered rows.",
+            preview.warnings,
+        )
+
+        unsupported_session = service.build_session(unsupported_profile, source_profile)
+        with self.assertRaisesRegex(ValueError, "Unsupported template format"):
+            service.build_preview(unsupported_session)
+        with self.assertRaisesRegex(ValueError, "Unsupported template format"):
+            service.export_preview(
+                ConversionPreview(
+                    template_profile=unsupported_profile,
+                    source_profile=source_profile,
+                    mapping_entries=(),
+                    included_row_indices=(),
+                ),
+                self.root / "output.dat",
+            )
+
+        self.assertEqual(service.deserialize_mapping_entries("{not json", template_profile), ())
+        restored_entries = service.deserialize_mapping_entries(
+            json.dumps(
+                [
+                    {"target_field_key": "missing", "mapping_kind": MAPPING_KIND_SOURCE},
+                    {
+                        "target_field_key": "title",
+                        "mapping_kind": MAPPING_KIND_SOURCE,
+                        "source_field": "title",
+                    },
+                ]
+            ),
+            template_profile,
+        )
+        self.assertEqual(len(restored_entries), 1)
+        self.assertEqual(restored_entries[0].target_field_key, "title")
+
+        with self.assertRaisesRegex(ValueError, "Unsupported template format"):
+            service.inspect_template(self.root / "template.txt")
+
+    def test_inspect_template_bytes_ignores_temporary_cleanup_failures(self):
+        service = ConversionService()
+        template_bytes = b"Catalog Number*,Title\nTEMPLATE,Sample\n"
+
+        with mock.patch(
+            "isrc_manager.conversion.service.Path.unlink",
+            side_effect=RuntimeError("temp file locked"),
+        ):
+            profile = service.inspect_template_bytes(
+                "saved-template.csv",
+                template_bytes,
+                source_label="Saved Template",
+                source_path="/original/template.csv",
+            )
+
+        self.assertEqual(profile.template_path, Path("saved-template.csv"))
+        self.assertEqual(profile.template_bytes, template_bytes)
+        self.assertEqual(profile.adapter_state["source_label"], "Saved Template")
+        self.assertEqual(profile.adapter_state["source_path"], "/original/template.csv")
+
     def test_saved_template_store_round_trips_template_bytes_and_mapping(self):
         conn = sqlite3.connect(":memory:")
         try:
@@ -869,6 +1376,118 @@ class ConversionServiceTests(unittest.TestCase):
             self.assertEqual(loaded_profile.template_bytes, loaded.template_bytes)
         finally:
             conn.close()
+
+    def test_saved_template_store_validation_memory_templates_and_update_paths(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            store = ConversionTemplateStoreService(conn)
+            memory_profile = ConversionTemplateProfile(
+                template_path=Path(""),
+                format_name="",
+                output_suffix=".csv",
+                structure_label="Memory template",
+                target_fields=(),
+                template_signature="memory",
+                template_bytes=b"catalog,title\nCAT-1,Orbit\n",
+                chosen_scope="tracks",
+                adapter_state={"source_path": " /imports/source.csv "},
+            )
+
+            with self.assertRaisesRegex(ValueError, "profile template name"):
+                store.save_template(name="  ", template_profile=memory_profile)
+            with self.assertRaisesRegex(ValueError, "no longer exists"):
+                store.load_saved_template(999)
+
+            stored = store.save_template(
+                name="Memory Template",
+                template_profile=memory_profile,
+                mapping_payload='{"field": "catalog"}',
+                source_mode=" file ",
+            )
+
+            self.assertEqual(stored.filename, "conversion-template")
+            self.assertEqual(stored.format_name, "unknown")
+            self.assertEqual(stored.source_path, "/imports/source.csv")
+            self.assertEqual(stored.chosen_scope, "tracks")
+            self.assertEqual(stored.source_mode, "file")
+            self.assertEqual(stored.size_bytes, len(memory_profile.template_bytes or b""))
+
+            updated_profile = replace(
+                memory_profile,
+                template_path=Path("updated-template.csv"),
+                template_bytes=b"updated\n",
+                adapter_state={},
+            )
+            updated = store.save_template(
+                name="memory template",
+                template_profile=updated_profile,
+            )
+
+            self.assertEqual(updated.id, stored.id)
+            self.assertEqual(updated.filename, "updated-template.csv")
+            self.assertEqual(updated.source_path, "")
+            loaded = store.load_saved_template(updated.id)
+            self.assertEqual(loaded.template_bytes, b"updated\n")
+        finally:
+            conn.close()
+
+    def test_saved_template_store_reads_file_templates_and_reports_missing_files(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            store = ConversionTemplateStoreService(conn)
+            template_path = self._write_csv("disk-template.csv", "catalog,title\nCAT-1,Orbit\n")
+            disk_profile = ConversionTemplateProfile(
+                template_path=template_path,
+                format_name="csv",
+                output_suffix=".csv",
+                structure_label="CSV template",
+                target_fields=(),
+                template_signature="disk",
+            )
+
+            stored = store.save_template(name="Disk Template", template_profile=disk_profile)
+            self.assertEqual(stored.source_path, str(template_path))
+            self.assertEqual(stored.size_bytes, template_path.stat().st_size)
+
+            missing_profile = replace(disk_profile, template_path=self.root / "missing.csv")
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                store.save_template(name="Missing Template", template_profile=missing_profile)
+        finally:
+            conn.close()
+
+    def test_saved_template_store_reports_failed_reload_after_insert(self):
+        class _Cursor:
+            def __init__(self, row=None):
+                self._row = row
+
+            def fetchone(self):
+                return self._row
+
+        class _FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, sql, _params=()):
+                if "WHERE name = ?" in sql:
+                    return _Cursor(row=None)
+                return _Cursor()
+
+        store = ConversionTemplateStoreService(_FakeConnection())
+        profile = ConversionTemplateProfile(
+            template_path=Path("template.csv"),
+            format_name="csv",
+            output_suffix=".csv",
+            structure_label="CSV template",
+            target_fields=(),
+            template_signature="memory",
+            template_bytes=b"catalog,title\n",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Failed to store"):
+            store.save_template(name="Defensive Reload", template_profile=profile)
 
 
 if __name__ == "__main__":

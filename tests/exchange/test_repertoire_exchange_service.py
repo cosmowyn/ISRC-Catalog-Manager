@@ -1,9 +1,12 @@
 import json
 from zipfile import ZipFile
 
+from openpyxl import Workbook
+
 from isrc_manager.exchange.repertoire_service import (
     REPERTOIRE_JSON_SCHEMA_VERSION,
     RepertoireImportOptions,
+    _stage_progress,
 )
 from tests.exchange._repertoire_exchange_support import SearchAndRepertoireExchangeTestCase
 
@@ -41,12 +44,45 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
         ids = self._seed_repertoire()
         service = self.exchange_service
 
+        self.assertEqual(_stage_progress(20, 40, 0, 0), 40)
         self.assertEqual(service._decode_value('{"nested": [1]}'), {"nested": [1]})
         self.assertEqual(service._decode_value("[1, 2]"), [1, 2])
         self.assertEqual(service._decode_value("{not-json"), "{not-json")
+        self.assertEqual(service._decode_value("   "), "")
         self.assertEqual(
             service._normalize_source_id_map({"1": "2", "bad": "3", "4": "0"}),
             {1: 2},
+        )
+        self.assertEqual(service._normalized_id_map({"9": "10", "bad": "11"}), {9: 10})
+        self.assertIsNone(
+            service._resolve_mapped_entity_id(
+                "not-int",
+                mapped_ids={},
+                table_name="Tracks",
+            )
+        )
+        self.assertEqual(
+            service._resolve_mapped_entity_id(
+                "55",
+                mapped_ids={55: ids["track_id"]},
+                table_name="Tracks",
+            ),
+            ids["track_id"],
+        )
+        self.assertEqual(
+            service._resolve_mapped_entity_id(
+                ids["track_id"],
+                mapped_ids={},
+                table_name="Tracks",
+            ),
+            ids["track_id"],
+        )
+        self.assertIsNone(
+            service._resolve_mapped_entity_id(
+                "999999",
+                mapped_ids={},
+                table_name="Tracks",
+            )
         )
         self.assertEqual(
             service._resolve_seeded_entity_id(
@@ -83,6 +119,15 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
                 mapping={},
                 table_name="Tracks",
                 strict=False,
+                entity_label="track",
+            )
+        )
+        self.assertIsNone(
+            service._resolve_seeded_entity_id(
+                "-1",
+                mapping={},
+                table_name="Tracks",
+                strict=True,
                 entity_label="track",
             )
         )
@@ -188,6 +233,137 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
                 {"schema_version": REPERTOIRE_JSON_SCHEMA_VERSION},
                 options=RepertoireImportOptions(phase="bad"),
             )
+        with self.assertRaisesRegex(ValueError, "Unsupported repertoire schema version"):
+            self.exchange_service._import_payload({"schema_version": 0})
+
+    def test_repertoire_public_ingress_paths_report_cancel_and_package_mappings(self):
+        json_path = self.data_root / "empty-repertoire.json"
+        json_path.write_text(
+            json.dumps({"schema_version": REPERTOIRE_JSON_SCHEMA_VERSION}),
+            encoding="utf-8",
+        )
+        workbook_path = self.data_root / "empty-sheets.xlsx"
+        workbook = Workbook()
+        workbook.active.title = "Works"
+        workbook.save(workbook_path)
+        csv_dir = self.data_root / "csv-empty"
+        csv_dir.mkdir()
+
+        cancel_calls: list[str] = []
+        progress_events: list[tuple[int, str]] = []
+
+        def cancel() -> None:
+            cancel_calls.append("checked")
+
+        def progress(value: int, _maximum: int, message: str) -> None:
+            progress_events.append((value, message))
+
+        workbook_rows = self.exchange_service._rows_from_workbook(workbook_path)
+        self.assertEqual(workbook_rows["works"], [])
+
+        self.exchange_service.inspect_json(
+            json_path,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        self.exchange_service.inspect_xlsx(
+            workbook_path,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        self.exchange_service.inspect_csv_bundle(
+            csv_dir,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        self.exchange_service.import_json(
+            json_path,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        self.exchange_service.import_xlsx(
+            workbook_path,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        self.exchange_service.import_csv_bundle(
+            csv_dir,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+
+        package_path = self.data_root / "mapped-package.repertoire.zip"
+        with ZipFile(package_path, "w") as archive:
+            archive.writestr("files/contracts/doc.txt", "contract doc")
+            archive.writestr("files/assets/audio.wav", b"RIFFaudio")
+            archive.writestr(
+                "manifest.json",
+                json.dumps(
+                    {
+                        "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                        "parties": [],
+                        "works": [],
+                        "contracts": [
+                            {
+                                "id": 1,
+                                "title": "Mapped Contract",
+                                "documents": [
+                                    {
+                                        "id": 9,
+                                        "title": "Mapped Doc",
+                                        "file_path": "stored/doc.txt",
+                                        "filename": "doc.txt",
+                                    },
+                                    {
+                                        "id": 10,
+                                        "title": "External Doc",
+                                        "file_path": "not-packaged/doc.txt",
+                                    },
+                                ],
+                            }
+                        ],
+                        "rights": [],
+                        "assets": [
+                            {
+                                "id": 3,
+                                "filename": "audio.wav",
+                                "stored_path": "stored/audio.wav",
+                            },
+                            {
+                                "id": 4,
+                                "filename": "outside.wav",
+                                "stored_path": "not-packaged/audio.wav",
+                            },
+                        ],
+                        "packaged_files": {
+                            "stored/doc.txt": "files/contracts/doc.txt",
+                            "stored/audio.wav": "files/assets/audio.wav",
+                        },
+                    }
+                ),
+            )
+
+        inspection = self.exchange_service.inspect_package(
+            package_path,
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+        result = self.exchange_service.import_package(
+            package_path,
+            options=RepertoireImportOptions(phase="parties_only"),
+            progress_callback=progress,
+            cancel_callback=cancel,
+        )
+
+        self.assertEqual(inspection.entity_counts["contracts"], 1)
+        self.assertEqual(result.phase, "parties_only")
+        self.assertGreaterEqual(len(cancel_calls), 9)
+        self.assertTrue(
+            any(
+                "Parsing repertoire package manifest" in message
+                for _value, message in progress_events
+            )
+        )
 
     def test_repertoire_package_export_omits_unreadable_documents_assets_and_lineage(self):
         package_path = self.data_root / "omissions.repertoire.zip"
@@ -294,6 +470,200 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
         inspection = self.exchange_service.inspect_package(inspect_path)
         self.assertTrue(any("contract document" in warning for warning in inspection.warnings))
         self.assertTrue(any("asset file" in warning for warning in inspection.warnings))
+
+    def test_repertoire_remaining_import_reuses_seeded_links_and_warns_for_optional_refs(self):
+        ids = self._seed_repertoire()
+        payload = {
+            "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+            "parties": [],
+            "works": [
+                {
+                    "id": 101,
+                    "title": "Midnight Circuit",
+                    "iswc": "T-222.333.444-5",
+                    "registration_number": "REG-NEW",
+                    "track_ids": [901, 902],
+                    "contributors": [
+                        {
+                            "role": "songwriter",
+                            "display_name": "Unknown Writer",
+                            "party_id": ids["label_party_id"],
+                        }
+                    ],
+                }
+            ],
+            "contracts": [
+                {
+                    "id": 201,
+                    "title": "Unmapped Links",
+                    "contract_type": "license",
+                    "parties": [
+                        {"party_id": ids["label_party_id"], "role_label": "label"},
+                    ],
+                    "track_ids": [902],
+                    "release_ids": [903],
+                }
+            ],
+            "rights": [
+                {
+                    "id": 301,
+                    "title": "Optional Right",
+                    "right_type": "master",
+                    "track_id": 901,
+                    "release_id": 903,
+                }
+            ],
+            "assets": [
+                {
+                    "id": 401,
+                    "filename": "optional.wav",
+                    "asset_type": "main_master",
+                    "track_id": 901,
+                    "release_id": 903,
+                }
+            ],
+        }
+
+        result = self.exchange_service._import_payload(
+            payload,
+            options=RepertoireImportOptions(
+                phase="remaining",
+                source_party_id_map={},
+                source_track_id_map={901: ids["track_id"], "bad": ids["track_id"]},
+                source_release_id_map={},
+            ),
+        )
+
+        self.assertEqual(result.imported_works, 1)
+        self.assertEqual(result.source_work_id_map["101"], ids["work_id"])
+        self.assertEqual(result.imported_contracts, 1)
+        self.assertEqual(result.imported_rights, 1)
+        self.assertEqual(result.imported_assets, 1)
+        self.assertTrue(any("track reference 902" in warning for warning in result.warnings))
+        self.assertTrue(any("release reference 903" in warning for warning in result.warnings))
+
+    def test_repertoire_import_fails_loudly_for_required_unresolved_references(self):
+        ids = self._seed_repertoire()
+        cases = [
+            (
+                "contract work",
+                {
+                    "contracts": [
+                        {
+                            "id": 1,
+                            "title": "Broken Work Link",
+                            "work_ids": [404],
+                        }
+                    ]
+                },
+                "Work reference 404",
+            ),
+            (
+                "contract supersedes",
+                {
+                    "contracts": [
+                        {
+                            "id": 1,
+                            "title": "Broken Contract Link",
+                            "supersedes_contract_id": 404,
+                        }
+                    ]
+                },
+                "Contract supersession reference 404",
+            ),
+            (
+                "contract superseded by",
+                {
+                    "contracts": [
+                        {
+                            "id": 1,
+                            "title": "Broken Reverse Contract Link",
+                            "superseded_by_contract_id": 405,
+                        }
+                    ]
+                },
+                "Contract supersession reference 405",
+            ),
+            (
+                "right contract",
+                {
+                    "rights": [
+                        {
+                            "id": 1,
+                            "title": "Broken Right Contract",
+                            "source_contract_id": 406,
+                        }
+                    ]
+                },
+                "Contract reference 406",
+            ),
+            (
+                "right work",
+                {
+                    "rights": [
+                        {
+                            "id": 1,
+                            "title": "Broken Right Work",
+                            "work_id": 407,
+                        }
+                    ]
+                },
+                "Work reference 407",
+            ),
+            (
+                "asset derivation",
+                {
+                    "assets": [
+                        {
+                            "id": 1,
+                            "filename": "derived.wav",
+                            "track_id": ids["track_id"],
+                            "derived_from_asset_id": 408,
+                        }
+                    ]
+                },
+                "Asset derivation reference 408",
+            ),
+        ]
+
+        for label, fragment, message in cases:
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, message):
+                payload = {
+                    "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                    "parties": [],
+                    "works": [],
+                    "contracts": [],
+                    "rights": [],
+                    "assets": [],
+                }
+                payload.update(fragment)
+                self.exchange_service._import_payload(
+                    payload,
+                    options=RepertoireImportOptions(phase="remaining"),
+                )
+
+        with self.assertRaisesRegex(ValueError, "Invalid source track id"):
+            self.exchange_service._import_payload(
+                {
+                    "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                    "works": [{"id": 1, "title": "Bad Track", "track_ids": ["bad"]}],
+                },
+                options=RepertoireImportOptions(phase="remaining"),
+            )
+
+        result = self.exchange_service._import_payload(
+            {
+                "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                "contracts": [
+                    {
+                        "id": 2,
+                        "title": "Missing Optional Party",
+                        "parties": [{"party_id": 999, "role_label": "missing"}],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(result.imported_contracts, 1)
 
 
 del SearchAndRepertoireExchangeTestCase

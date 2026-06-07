@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 try:
     from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QTabWidget
@@ -91,6 +92,111 @@ class ExchangeImportDialogTests(unittest.TestCase):
         finally:
             dlg.close()
 
+    def test_invalid_saved_preferences_and_non_csv_helpers_are_safe(self):
+        settings = _FakeSettings()
+        settings._values["exchange/import_preferences/json"] = "not json"
+        dlg = ExchangeImportDialog(
+            inspection=ExchangeInspection(
+                file_path="/tmp/catalog.json",
+                format_name="json",
+                headers=["track_title"],
+                preview_rows=[{"track_title": None}],
+                suggested_mapping={"track_title": "not_supported"},
+            ),
+            supported_headers=["track_title"],
+            settings=settings,
+            initial_mode="not-a-mode",
+        )
+        try:
+            self.assertEqual(dlg.mode_combo.currentData(), "dry_run")
+            self.assertEqual(dlg.preview_table.item(0, 0).text(), "")
+            self.assertEqual(dlg.resolved_csv_delimiter(), None)
+            self.assertEqual(dlg._validate_custom_delimiter(), (None, None))
+            self.assertEqual(dlg._requested_csv_delimiter(), (None, None))
+            dlg._update_csv_delimiter_widgets()
+            dlg._set_csv_delimiter_error("ignored for non-csv")
+            self.assertTrue(dlg.import_button.isEnabled())
+            self.assertNotIn("csv_delimiter_mode", dlg._current_import_preference_payload())
+        finally:
+            dlg.close()
+
+        settings._values["exchange/import_preferences/json"] = (
+            '{"mode": "not-a-mode", "match_by_internal_id": false, '
+            '"match_by_isrc": false, "match_by_upc_title": false, '
+            '"heuristic_match": true, "create_missing_custom_fields": false}'
+        )
+        remembered = ExchangeImportDialog(
+            inspection=ExchangeInspection(
+                file_path="/tmp/catalog.json",
+                format_name="json",
+                headers=["track_title"],
+                preview_rows=[{"track_title": "Orbit"}],
+                suggested_mapping={"track_title": "track_title"},
+            ),
+            supported_headers=["track_title"],
+            settings=settings,
+            initial_mode="create",
+        )
+        try:
+            self.assertEqual(remembered.mode_combo.currentData(), "create")
+            self.assertFalse(remembered.match_internal_checkbox.isChecked())
+            self.assertFalse(remembered.match_isrc_checkbox.isChecked())
+            self.assertFalse(remembered.match_upc_title_checkbox.isChecked())
+            self.assertTrue(remembered.heuristic_checkbox.isChecked())
+            self.assertFalse(remembered.create_custom_checkbox.isChecked())
+        finally:
+            remembered.close()
+
+    def test_mapping_presets_warn_save_reload_and_ignore_invalid_entries(self):
+        settings = _FakeSettings()
+        settings._values["exchange/mapping_presets/csv"] = "not json"
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["Source Title", "Source Artist"],
+            preview_rows=[{"Source Title": "Orbit", "Source Artist": "Moonwake"}],
+            suggested_mapping={"Source Title": "track_title", "Source Artist": "artist_name"},
+            resolved_delimiter=",",
+        )
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title", "artist_name"],
+            settings=settings,
+            csv_reinspect_callback=lambda delimiter: inspection,
+        )
+        try:
+            self.assertEqual(dlg.preset_combo.count(), 1)
+            with mock.patch("isrc_manager.exchange.dialogs.QMessageBox.warning") as warning:
+                dlg._save_preset()
+            warning.assert_called_once()
+
+            title_combo = dlg.mapping_table.cellWidget(0, 1)
+            artist_combo = dlg.mapping_table.cellWidget(1, 1)
+            title_combo.setCurrentIndex(title_combo.findData("artist_name"))
+            artist_combo.setCurrentIndex(artist_combo.findData("track_title"))
+            dlg.preset_name_edit.setText("Swapped")
+            dlg._save_preset()
+            self.assertIn('"Swapped"', settings.value("exchange/mapping_presets/csv"))
+
+            title_combo.setCurrentIndex(title_combo.findData("track_title"))
+            artist_combo.setCurrentIndex(artist_combo.findData("artist_name"))
+            dlg.preset_combo.setCurrentIndex(dlg.preset_combo.findText("Swapped"))
+            dlg._load_preset()
+            self.assertEqual(dlg.mapping()["Source Title"], "artist_name")
+            self.assertEqual(dlg.mapping()["Source Artist"], "track_title")
+
+            settings._values["exchange/mapping_presets/csv"] = '{"Broken": ["not", "a", "dict"]}'
+            dlg._reload_presets()
+            dlg.preset_combo.setCurrentIndex(dlg.preset_combo.findText("Broken"))
+            dlg._load_preset()
+            self.assertEqual(dlg.mapping()["Source Title"], "artist_name")
+
+            dlg.preset_combo.setCurrentIndex(0)
+            dlg._load_preset()
+            self.assertEqual(dlg.mapping()["Source Title"], "artist_name")
+        finally:
+            dlg.close()
+
     def test_csv_dialog_refreshes_preview_and_preserves_mapping(self):
         refresh_calls = []
         initial_inspection = ExchangeInspection(
@@ -141,6 +247,54 @@ class ExchangeImportDialogTests(unittest.TestCase):
             self.assertEqual(dlg.resolved_csv_delimiter(), ";")
         finally:
             dlg.close()
+
+    def test_csv_delimiter_paths_without_callback_and_with_callback_errors(self):
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["track_title"],
+            preview_rows=[{"track_title": "Orbit"}],
+            suggested_mapping={"track_title": "track_title"},
+            resolved_delimiter=",",
+        )
+
+        no_callback = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title"],
+            settings=_FakeSettings(),
+            csv_reinspect_callback=None,
+        )
+        try:
+            delimiter_combo = no_callback.findChild(QComboBox, "csvDelimiterCombo")
+            self.assertEqual(no_callback._requested_csv_delimiter(), (None, None))
+            self.assertEqual(no_callback._validate_custom_delimiter(), (None, None))
+            self.assertEqual(no_callback.resolved_csv_delimiter(), ",")
+            delimiter_combo.setCurrentIndex(delimiter_combo.findData("|"))
+            self.app.processEvents()
+            self.assertTrue(no_callback.import_button.isEnabled())
+            self.assertEqual(no_callback.resolved_csv_delimiter(), "|")
+            no_callback._set_csv_delimiter_error("  ")
+            self.assertTrue(no_callback.import_button.isEnabled())
+        finally:
+            no_callback.close()
+
+        failing = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title"],
+            settings=_FakeSettings(),
+            csv_reinspect_callback=lambda _delimiter: (_ for _ in ()).throw(
+                ValueError("delimiter cannot be parsed")
+            ),
+        )
+        try:
+            delimiter_combo = failing.findChild(QComboBox, "csvDelimiterCombo")
+            error_label = failing.findChild(QLabel, "csvDelimiterErrorLabel")
+            delimiter_combo.setCurrentIndex(delimiter_combo.findData(";"))
+            self.app.processEvents()
+            self.assertFalse(failing.import_button.isEnabled())
+            self.assertIn("delimiter cannot be parsed", error_label.text())
+        finally:
+            failing.close()
 
     def test_csv_dialog_invalid_custom_delimiter_disables_import(self):
         inspection = ExchangeInspection(
@@ -272,6 +426,38 @@ class ExchangeImportDialogTests(unittest.TestCase):
             self.assertEqual(remembered.resolved_csv_delimiter(), ";")
         finally:
             remembered.close()
+
+    def test_table_guard_paths_skip_missing_items_and_empty_identifier_values(self):
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["Contract Source", "Ignored Source"],
+            preview_rows=[{"Contract Source": "", "Ignored Source": "metadata"}],
+            suggested_mapping={
+                "Contract Source": "contract_number",
+                "Ignored Source": "custom::Ignored",
+            },
+            resolved_delimiter=",",
+        )
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["contract_number", "custom::Ignored"],
+            settings=_FakeSettings(),
+            csv_reinspect_callback=lambda delimiter: inspection,
+        )
+        try:
+            self.assertEqual(dlg._identifier_review_rows(), [])
+
+            dlg.mapping_table.takeItem(0, 0)
+            self.assertNotIn("Contract Source", dlg.mapping())
+            self.assertNotIn("Contract Source", dlg.skipped_source_headers())
+
+            assert dlg.identifier_review_table is not None
+            dlg.identifier_review_table.setRowCount(1)
+            dlg.identifier_review_table.setItem(0, 0, None)
+            self.assertEqual(dlg._identifier_overrides(), {})
+        finally:
+            dlg.close()
 
     def test_xml_dialog_uses_generic_missing_custom_field_label(self):
         dlg = ExchangeImportDialog(

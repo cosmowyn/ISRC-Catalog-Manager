@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import unittest
+from pathlib import Path
 
 from isrc_manager import external_launch
 
@@ -17,8 +19,96 @@ def test_looks_like_test_process_respects_env_and_argv(monkeypatch):
     assert external_launch._looks_like_test_process(["app.py"]) is False
     assert external_launch._looks_like_test_process(["tests/test_something.py"]) is True
     assert external_launch._looks_like_test_process(["python", "-m", "pytest"]) is True
+    assert external_launch._looks_like_test_process(["runner", "feature_test.py"]) is True
     monkeypatch.setenv(external_launch.TEST_BLOCK_ENV_VAR, "1")
     assert external_launch._looks_like_test_process(["app.py"]) is True
+
+
+def test_desktop_safety_helpers_cover_qt_windows_and_unittest_hook(monkeypatch):
+    class _FakeQCoreApplication:
+        instance_value = None
+        set_attribute_calls = []
+        raise_on_set = False
+
+        @classmethod
+        def instance(cls):
+            return cls.instance_value
+
+        @classmethod
+        def setAttribute(cls, attribute, enabled):
+            if cls.raise_on_set:
+                raise RuntimeError("qt unavailable")
+            cls.set_attribute_calls.append((attribute, enabled))
+
+    class _FakeQt:
+        AA_DontUseNativeDialogs = "native-dialogs-off"
+
+    monkeypatch.setattr(external_launch, "QCoreApplication", None)
+    external_launch._enable_qt_test_gui_safety()
+
+    monkeypatch.setattr(external_launch, "QCoreApplication", _FakeQCoreApplication)
+    monkeypatch.setattr(external_launch, "Qt", _FakeQt)
+    _FakeQCoreApplication.instance_value = object()
+    external_launch._enable_qt_test_gui_safety()
+    assert _FakeQCoreApplication.set_attribute_calls == []
+
+    _FakeQCoreApplication.instance_value = None
+    external_launch._enable_qt_test_gui_safety()
+    assert _FakeQCoreApplication.set_attribute_calls == [("native-dialogs-off", True)]
+
+    _FakeQCoreApplication.raise_on_set = True
+    external_launch._enable_qt_test_gui_safety()
+
+    monkeypatch.setattr(external_launch.os, "name", "nt", raising=False)
+    original_import = __import__
+    with monkeypatch.context() as import_patch:
+        import_patch.setattr(
+            "builtins.__import__",
+            lambda name, *args, **kwargs: (
+                (_ for _ in ()).throw(RuntimeError("missing"))
+                if name == "asyncio.windows_utils"
+                else original_import(name, *args, **kwargs)
+            ),
+        )
+        external_launch._prime_windows_asyncio_subprocess_classes()
+
+    install_calls = []
+
+    def _discover(self, *args, **kwargs):
+        return ("discover", args, kwargs)
+
+    def _load_from_name(self, name, module=None):
+        return ("name", name, module)
+
+    def _load_from_names(self, names, module=None):
+        return ("names", tuple(names), module)
+
+    monkeypatch.setattr(unittest.TestLoader, "discover", _discover)
+    monkeypatch.setattr(unittest.TestLoader, "loadTestsFromName", _load_from_name)
+    monkeypatch.setattr(unittest.TestLoader, "loadTestsFromNames", _load_from_names)
+    monkeypatch.setattr(
+        external_launch,
+        "install_test_process_desktop_safety",
+        lambda blocked_return_value=True: install_calls.append(blocked_return_value),
+    )
+
+    external_launch.install_unittest_test_process_desktop_safety_hook()
+    loader = unittest.TestLoader()
+    assert loader.discover("suite") == ("discover", ("suite",), {})
+    assert loader.loadTestsFromName("tests.test_external_launch") == (
+        "name",
+        "tests.test_external_launch",
+        None,
+    )
+    assert loader.loadTestsFromNames(["app.module", "pkg/tests/test_case.py"]) == (
+        "names",
+        ("app.module", "pkg/tests/test_case.py"),
+        None,
+    )
+    assert install_calls == [True, True, True]
+
+    external_launch.install_unittest_test_process_desktop_safety_hook()
+    assert install_calls == [True, True, True]
 
 
 def test_command_token_launch_target_and_external_command_detection():
@@ -34,6 +124,8 @@ def test_command_token_launch_target_and_external_command_detection():
         external_launch._launch_target_from_command(["xdg-open", "/tmp/file"], shell=False)
         == "/tmp/file"
     )
+    assert external_launch._command_tokens(object(), shell=False)
+    assert external_launch._launch_target_from_command(["open"], shell=False) == "open"
 
     assert (
         external_launch._looks_like_external_launch_command(
@@ -57,6 +149,8 @@ def test_command_token_launch_target_and_external_command_detection():
         )
         is True
     )
+    assert external_launch._looks_like_external_launch_command(["osascript"], shell=False) is False
+    assert external_launch._looks_like_external_launch_command([], shell=False) is False
     assert (
         external_launch._looks_like_external_launch_command(["python", "-V"], shell=False) is False
     )
@@ -128,6 +222,25 @@ def test_file_dialog_metadata_and_patched_dialogs_record_blocked_desktop_dialogs
         "selected_filter": "selected",
         "options": "DontUseNativeDialog",
     }
+    kw_details = external_launch._file_dialog_kwargs(
+        (),
+        {
+            "caption": "Caption",
+            "dir": "/kw-dir",
+            "filter": "*.csv",
+            "selectedFilter": "CSV",
+            "options": "Options",
+        },
+    )
+    assert kw_details == {
+        "caption": "Caption",
+        "directory": "/kw-dir",
+        "filter": "*.csv",
+        "selected_filter": "CSV",
+        "options": "Options",
+    }
+    directory_details = external_launch._file_dialog_kwargs((), {"directory": "/directory"})
+    assert directory_details == {"directory": "/directory"}
 
     assert external_launch._patched_qfiledialog_get_open_file_name(
         "parent",
@@ -192,6 +305,10 @@ def test_patched_webbrowser_open_variants_record_and_respect_blocking(monkeypatc
     external_launch.set_external_launch_blocking(False)
     monkeypatch.setattr(external_launch, "_ORIGINAL_WEBBROWSER_OPEN", lambda *args, **kwargs: True)
     assert external_launch._patched_webbrowser_open("https://example.test") is True
+    monkeypatch.setattr(external_launch, "_ORIGINAL_WEBBROWSER_OPEN_NEW", lambda *args: True)
+    monkeypatch.setattr(external_launch, "_ORIGINAL_WEBBROWSER_OPEN_NEW_TAB", lambda *args: True)
+    assert external_launch._patched_webbrowser_open_new("https://example.test/new") is True
+    assert external_launch._patched_webbrowser_open_new_tab("https://example.test/tab") is True
 
 
 def test_external_launch_fallbacks_and_url_dialog_shims(monkeypatch, tmp_path):
@@ -212,6 +329,14 @@ def test_external_launch_fallbacks_and_url_dialog_shims(monkeypatch, tmp_path):
             ["osascript"],
             shell=False,
             input_payload=b'display dialog "Choose wisely"',
+        )
+        is True
+    )
+    assert (
+        external_launch._looks_like_external_launch_command(
+            ["osascript"],
+            shell=False,
+            input_payload='tell application "Safari" to activate',
         )
         is True
     )
@@ -241,6 +366,12 @@ def test_external_launch_fallbacks_and_url_dialog_shims(monkeypatch, tmp_path):
     with external_launch.temporary_external_launch_blocking(False):
         monkeypatch.setattr(external_launch, "_ORIGINAL_QDESKTOPSERVICES_OPENURL", None)
         assert external_launch.open_external_url("https://example.test/fallback") is False
+        monkeypatch.setattr(
+            external_launch,
+            "_ORIGINAL_QDESKTOPSERVICES_OPENURL",
+            lambda _url: (_ for _ in ()).throw(RuntimeError("desktop failed")),
+        )
+        assert external_launch.open_external_url("https://example.test/error") is False
 
         called = []
         monkeypatch.setattr(
@@ -259,3 +390,80 @@ def test_external_launch_fallbacks_and_url_dialog_shims(monkeypatch, tmp_path):
         assert called
 
     assert external_launch.external_launch_history()[-1].source == "unblocked-test"
+
+
+def test_external_launch_nonblocked_wrappers_forward_to_originals(monkeypatch):
+    external_launch.set_external_launch_blocking(False)
+    calls = []
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_SUBPROCESS_RUN",
+        lambda *args, **kwargs: calls.append(("run", args, kwargs))
+        or subprocess.CompletedProcess(args[0], 3),
+    )
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_SUBPROCESS_CALL",
+        lambda *args, **kwargs: calls.append(("call", args, kwargs)) or 4,
+    )
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_SUBPROCESS_CHECK_CALL",
+        lambda *args, **kwargs: calls.append(("check_call", args, kwargs)) or 5,
+    )
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_SUBPROCESS_CHECK_OUTPUT",
+        lambda *args, **kwargs: calls.append(("check_output", args, kwargs)) or b"ok",
+    )
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_SUBPROCESS_POPEN",
+        lambda *args, **kwargs: calls.append(("popen", args, kwargs)) or "popen-result",
+    )
+    monkeypatch.setattr(
+        external_launch,
+        "_ORIGINAL_OS_SYSTEM",
+        lambda command: calls.append(("system", command, {})) or 6,
+    )
+
+    assert external_launch._patched_subprocess_run(["open", "/tmp/file"]).returncode == 3
+    assert external_launch._patched_subprocess_call(["open", "/tmp/file"]) == 4
+    assert external_launch._patched_subprocess_check_call(["open", "/tmp/file"]) == 5
+    assert external_launch._patched_subprocess_check_output(["open", "/tmp/file"]) == b"ok"
+    assert external_launch._patched_subprocess_popen(["open", "/tmp/file"]) == "popen-result"
+    assert external_launch._patched_os_system("open /tmp/file") == 6
+    assert [call[0] for call in calls] == [
+        "run",
+        "call",
+        "check_call",
+        "check_output",
+        "popen",
+        "system",
+    ]
+
+
+def test_external_launch_qurl_none_fallbacks(monkeypatch):
+    monkeypatch.setattr(external_launch, "QUrl", None)
+    assert external_launch._normalize_qurl(Path("/tmp/file")) == "/tmp/file"
+    assert external_launch._url_text("/tmp/file") == "/tmp/file"
+    assert external_launch._as_text("plain") == "plain"
+    assert external_launch._patched_qfiledialog_get_existing_directory_url("parent", "Folder") == ""
+    assert external_launch._patched_qfiledialog_get_open_file_url("parent", "Open") == ("", "")
+    assert external_launch._patched_qfiledialog_get_save_file_url("parent", "Save") == ("", "")
+
+    launches = external_launch.external_launch_history()
+    assert [launch.via for launch in launches[-3:]] == [
+        "QFileDialog.getExistingDirectoryUrl",
+        "QFileDialog.getOpenFileUrl",
+        "QFileDialog.getSaveFileUrl",
+    ]
+
+
+def test_external_launch_qurl_local_file_and_as_text_branches():
+    if external_launch.QUrl is None:
+        return
+    local = external_launch._normalize_qurl("relative/path.txt")
+    assert local.isLocalFile()
+    assert external_launch._url_text(local).startswith("file:")
+    assert external_launch._as_text(local).startswith("file:")

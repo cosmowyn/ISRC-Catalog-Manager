@@ -8,19 +8,25 @@ from unittest import mock
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtGui import QPalette
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QImage, QPainter, QPalette
     from PySide6.QtWidgets import (
+        QComboBox,
         QGridLayout,
         QLabel,
+        QMenu,
         QMenuBar,
         QMessageBox,
+        QPushButton,
         QSlider,
         QStyle,
         QStyleFactory,
+        QStyleOption,
         QWidget,
     )
 
     from isrc_manager import main_window as app_module
+    from isrc_manager import theme_builder
     from isrc_manager.parties import PartyRecord
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
     from isrc_manager.storage_admin import StorageAdminAudit, StorageAdminSummary
@@ -84,7 +90,22 @@ class _ThemeApplyHost(QWidget):
     _effective_theme_settings = app_module.App._effective_theme_settings
     _build_theme_stylesheet = app_module.App._build_theme_stylesheet
     _apply_theme = app_module.App._apply_theme
+    _theme_setting_defaults = staticmethod(app_module.App._theme_setting_defaults)
+    _theme_setting_keys = staticmethod(app_module.App._theme_setting_keys)
     _format_theme_qss_issues = staticmethod(app_module.App._format_theme_qss_issues)
+    _normalize_theme_string = staticmethod(app_module.App._normalize_theme_string)
+    _normalize_theme_color = staticmethod(app_module.App._normalize_theme_color)
+    _normalize_theme_font_family = staticmethod(app_module.App._normalize_theme_font_family)
+    _load_theme_settings = app_module.App._load_theme_settings
+    _stored_theme_payload = app_module.App._stored_theme_payload
+    _sanitize_theme_library = app_module.App._sanitize_theme_library
+    _load_theme_library = app_module.App._load_theme_library
+    _save_theme_library = app_module.App._save_theme_library
+    _save_theme_settings = app_module.App._save_theme_settings
+    _blob_icon_setting_defaults = staticmethod(app_module.App._blob_icon_setting_defaults)
+    _load_blob_icon_settings = app_module.App._load_blob_icon_settings
+    _save_blob_icon_settings = app_module.App._save_blob_icon_settings
+    _active_custom_qss = app_module.App._active_custom_qss
     _prepare_theme_application_payload = app_module.App._prepare_theme_application_payload
     _apply_prepared_theme_payload = app_module.App._apply_prepared_theme_payload
     _apply_theme_with_loading = app_module.App._apply_theme_with_loading
@@ -103,6 +124,9 @@ class _ThemeApplyHost(QWidget):
         self.menu_bar.setNativeMenuBar(False)
         self.file_menu = self.menu_bar.addMenu("File")
         self.background_tasks = self
+        self.blob_icon_settings = {}
+        self.blob_icon_settings_service = None
+        self.logger = mock.Mock()
 
     def _queue_top_chrome_boundary_refresh(self):
         self.boundary_refresh_count += 1
@@ -131,6 +155,31 @@ class _ThemeApplyHost(QWidget):
         if on_success is not None:
             on_success(payload)
         return "task-1"
+
+
+class _ThemeSettings:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+        self.synced = False
+
+    def contains(self, key):
+        return key in self.values
+
+    def value(self, key, default=None, _type=None):
+        value = self.values.get(key, default)
+        if _type is bool:
+            return bool(value)
+        if _type is int:
+            return int(value)
+        if _type is str:
+            return str(value)
+        return value
+
+    def setValue(self, key, value):
+        self.values[key] = value
+
+    def sync(self):
+        self.synced = True
 
 
 class ThemeBuilderTests(unittest.TestCase):
@@ -345,6 +394,102 @@ class ThemeBuilderTests(unittest.TestCase):
     def test_build_theme_style_returns_arrow_proxy(self):
         style = build_theme_style({"window_bg": "#1F2937", "window_fg": "#F9FAFB"})
         self.assertEqual(style.objectName(), "themeArrowProxyStyle")
+
+    def test_theme_arrow_proxy_draws_or_ignores_supported_arrow_shapes(self):
+        style = theme_builder.ThemeArrowProxyStyle("fusion")
+        image = QImage(32, 32, QImage.Format_ARGB32)
+        painter = QPainter(image)
+        option = QStyleOption()
+        option.palette = self.app.palette()
+        option.state = QStyle.State_Enabled
+        option.rect = QRect(0, 0, 24, 24)
+        try:
+            for primitive in (
+                QStyle.PE_IndicatorArrowDown,
+                QStyle.PE_IndicatorArrowUp,
+                QStyle.PE_IndicatorArrowLeft,
+                QStyle.PE_IndicatorArrowRight,
+            ):
+                style._draw_themed_arrow(primitive, option, painter, QWidget())
+
+            option.rect = QRect()
+            style._draw_themed_arrow(QStyle.PE_IndicatorArrowDown, option, painter, QWidget())
+        finally:
+            painter.end()
+
+    def test_theme_arrow_proxy_chooses_palette_roles_by_widget_type(self):
+        style = theme_builder.ThemeArrowProxyStyle("fusion")
+        option = QStyleOption()
+        option.palette = self.app.palette()
+        option.state = QStyle.State_Enabled | QStyle.State_Selected
+        menu = QMenu()
+        combo = QComboBox()
+        button = QPushButton("Apply")
+        try:
+            self.assertEqual(
+                style._arrow_color(option, menu),
+                self.app.palette().color(QPalette.Active, QPalette.HighlightedText),
+            )
+            option.state = QStyle.State_Enabled
+            self.assertEqual(
+                style._arrow_color(option, combo),
+                self.app.palette().color(QPalette.Active, QPalette.Text),
+            )
+            self.assertEqual(
+                style._arrow_color(option, button),
+                self.app.palette().color(QPalette.Active, QPalette.ButtonText),
+            )
+            option.state = QStyle.State_None
+            self.assertEqual(
+                style._arrow_color(option, QWidget()),
+                self.app.palette().color(QPalette.Disabled, QPalette.WindowText),
+            )
+        finally:
+            menu.close()
+            combo.close()
+            button.close()
+
+    def test_theme_normalization_handles_invalid_colors_fonts_and_metrics(self):
+        defaults = theme_setting_defaults()
+
+        normalized = theme_builder.normalize_theme_settings(
+            {
+                "font_family": "system-ui",
+                "font_size": "not-a-number",
+                "window_bg": "not-a-color",
+                "custom_qss": None,
+                "selected_name": "  Saved Theme  ",
+                "auto_contrast_enabled": "",
+            }
+        )
+
+        self.assertEqual(
+            theme_builder.normalize_theme_font_family("-apple-system", "Fallback"),
+            "Fallback",
+        )
+        self.assertEqual(theme_builder.normalize_theme_color("bad-color"), "")
+        self.assertEqual(theme_builder.shift_color("bad-color", 120), "bad-color")
+        self.assertEqual(theme_builder.color_relative_luminance("bad-color"), 0.0)
+        self.assertEqual(normalized["font_family"], defaults["font_family"])
+        self.assertEqual(
+            normalized["font_size"],
+            theme_builder.THEME_METRIC_SPECS_BY_KEY["font_size"].default,
+        )
+        self.assertEqual(normalized["window_bg"], "")
+        self.assertEqual(normalized["custom_qss"], "")
+        self.assertEqual(normalized["selected_name"], "Saved Theme")
+        self.assertFalse(normalized["auto_contrast_enabled"])
+
+    def test_effective_theme_settings_can_auto_contrast_group_title_text(self):
+        effective = effective_theme_settings(
+            {
+                "panel_bg": "#FFFFFF",
+                "group_title_fg": "#FFFFFF",
+                "auto_contrast_enabled": True,
+            }
+        )
+
+        self.assertEqual(effective["group_title_fg"], "#111827")
 
     def test_application_settings_dialog_exposes_theme_builder_tabs_and_payload(self):
         host = _ThemePreviewHost()
@@ -1208,6 +1353,174 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("#101820", str(payload["stylesheet"]).upper())
         finally:
             host.close()
+
+    def test_theme_settings_and_library_wrappers_persist_sanitized_payloads(self):
+        host = _ThemeApplyHost()
+        bundled_name = starter_theme_names()[0]
+        host.settings = _ThemeSettings(
+            {
+                "theme/font_size": 15,
+                "theme/auto_contrast_enabled": False,
+                "theme/custom_qss": "QLabel { color: #123456; }",
+                "theme/library_json": json.dumps(
+                    {
+                        "": {"window_bg": "#000000"},
+                        bundled_name: {"window_bg": "#111111"},
+                        " Custom ": {"window_bg": "#123456", "selected_name": "Ignored"},
+                    }
+                ),
+            }
+        )
+        try:
+            loaded = host._load_theme_settings()
+            self.assertEqual(loaded["font_size"], 15)
+            self.assertFalse(loaded["auto_contrast_enabled"])
+            self.assertEqual(loaded["custom_qss"], "QLabel { color: #123456; }")
+
+            sanitized = host._sanitize_theme_library(
+                {"": {"window_bg": "#000000"}, " Custom ": {"window_bg": "#123456"}}
+            )
+            self.assertEqual(list(sanitized), ["Custom"])
+            self.assertEqual(sanitized["Custom"]["window_bg"], "#123456")
+            self.assertEqual(sanitized["Custom"]["selected_name"], "")
+
+            loaded_library = host._load_theme_library()
+            self.assertIn(bundled_name, loaded_library)
+            self.assertEqual(loaded_library["Custom"]["window_bg"], "#123456")
+            self.assertNotEqual(loaded_library[bundled_name]["window_bg"], "#111111")
+
+            saved = host._save_theme_library({bundled_name: {}, "Custom": {"accent": "#654321"}})
+            stored_library = json.loads(host.settings.values["theme/library_json"])
+            self.assertIn("Custom", saved)
+            self.assertEqual(list(stored_library), ["Custom"])
+            self.assertTrue(host.settings.synced)
+
+            normalized = host._save_theme_settings({"window_bg": "#334455"})
+            self.assertEqual(host.theme_settings, normalized)
+            self.assertEqual(host.settings.values["theme/window_bg"], "#334455")
+        finally:
+            host.close()
+
+    def test_theme_library_loader_recovers_from_invalid_json_and_non_object_payloads(self):
+        host = _ThemeApplyHost()
+        try:
+            host.settings = _ThemeSettings({"theme/library_json": "{"})
+            self.assertEqual(host._load_theme_library(), starter_theme_library())
+
+            host.settings = _ThemeSettings({"theme/library_json": json.dumps(["not", "a", "dict"])})
+            self.assertEqual(host._load_theme_library(), starter_theme_library())
+        finally:
+            host.close()
+
+    def test_blob_icon_wrappers_load_save_reset_and_report_active_qss(self):
+        host = _ThemeApplyHost()
+        try:
+            defaults = host._load_blob_icon_settings()
+            self.assertIn("audio_managed", defaults)
+
+            host.blob_icon_settings_service = mock.Mock(
+                load_settings=mock.Mock(
+                    return_value={"audio_managed": {"mode": "emoji", "emoji": "A"}}
+                ),
+                save_settings=mock.Mock(
+                    return_value={"audio_managed": {"mode": "emoji", "emoji": "B"}}
+                ),
+            )
+            loaded = host._load_blob_icon_settings()
+            self.assertEqual(loaded["audio_managed"]["emoji"], "A")
+            saved = host._save_blob_icon_settings(
+                {"audio_managed": {"mode": "emoji", "emoji": "C"}}
+            )
+            self.assertEqual(saved["audio_managed"]["emoji"], "B")
+            self.assertEqual(host.blob_badge_reset_count, 1)
+
+            theme_builder._reset_blob_badge_render_cache(host)
+            self.assertEqual(host._blob_badge_icon_cache, {})
+            host.theme_settings = {"custom_qss": "QWidget { color: #ABCDEF; }"}
+            self.assertEqual(host._active_custom_qss(), "QWidget { color: #ABCDEF; }")
+            self.assertTrue(host._build_theme_stylesheet({"window_bg": "#101820"}))
+        finally:
+            host.close()
+
+    def test_apply_theme_invalid_custom_qss_logs_and_applies_safe_stylesheet(self):
+        host = _ThemeApplyHost()
+        previous_font = self.app.font()
+        previous_palette = self.app.palette()
+        previous_stylesheet = self.app.styleSheet()
+        previous_style = self.app.style()
+        previous_style_key = str(
+            getattr(
+                getattr(previous_style, "baseStyle", lambda: None)(), "objectName", lambda: ""
+            )()
+            or getattr(previous_style, "objectName", lambda: "")()
+            or "fusion"
+        )
+        try:
+            host._apply_theme(
+                {
+                    "window_bg": "#101820",
+                    "window_fg": "#F8FAFC",
+                    "accent": "#F97316",
+                    "custom_qss": "QPushButton",
+                }
+            )
+
+            host.logger.warning.assert_called_once()
+            self.assertTrue(host.applied_stylesheets[-1])
+            self.assertNotIn("QPushButton\n", host.applied_stylesheets[-1])
+        finally:
+            self.app.setFont(previous_font)
+            self.app.setPalette(previous_palette)
+            if self.app.styleSheet() != previous_stylesheet:
+                self.app.setStyleSheet(previous_stylesheet)
+            restored_style = QStyleFactory.create(previous_style_key)
+            if restored_style is not None:
+                self.app.setStyle(restored_style)
+            host.close()
+
+    def test_theme_application_helpers_return_without_qapplication(self):
+        host = _ThemeApplyHost()
+        try:
+            with mock.patch.object(theme_builder.QApplication, "instance", return_value=None):
+                theme_builder._apply_theme(host, {})
+                theme_builder._apply_prepared_theme_payload(host, {})
+                theme_builder._refresh_menu_theme_state(host)
+        finally:
+            host.close()
+
+    def test_apply_theme_with_loading_reports_start_failure_error_and_cancel(self):
+        class StartFailureHost(_ThemeApplyHost):
+            def _submit_background_task(self, **kwargs):
+                self.submissions.append(dict(kwargs))
+                return None
+
+        class ErrorHost(_ThemeApplyHost):
+            def _submit_background_task(self, **kwargs):
+                self.submissions.append(dict(kwargs))
+                kwargs["on_error"](mock.Mock(message="theme failed"))
+                return "task-error"
+
+        class CancelHost(_ThemeApplyHost):
+            def _submit_background_task(self, **kwargs):
+                self.submissions.append(dict(kwargs))
+                kwargs["on_cancelled"]()
+                return "task-cancel"
+
+        start_failure_host = StartFailureHost()
+        error_host = ErrorHost()
+        cancel_host = CancelHost()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Task could not start"):
+                start_failure_host._apply_theme_with_loading({})
+            with self.assertRaisesRegex(RuntimeError, "theme failed"):
+                error_host._apply_theme_with_loading({})
+
+            cancel_host._apply_theme_with_loading({})
+            self.assertEqual(cancel_host.applied_stylesheets, [])
+        finally:
+            start_failure_host.close()
+            error_host.close()
+            cancel_host.close()
 
     def test_theme_dialog_reports_invalid_advanced_qss_and_keeps_last_valid_preview(self):
         host = _ThemePreviewHost()

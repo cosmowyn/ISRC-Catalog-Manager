@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QMessageBox
 
 from isrc_manager import application_settings_gs1 as gs1_module
 from isrc_manager.application_settings_gs1 import ApplicationSettingsGs1Mixin
@@ -94,6 +94,52 @@ def _combo_texts(combo: QComboBox) -> list[str]:
     return [combo.itemText(index) for index in range(combo.count())]
 
 
+def test_create_gs1_combos_tolerate_missing_line_edit(monkeypatch):
+    class _NoLineEditCombo:
+        def __init__(self, parent):
+            self.parent = parent
+            self.current_text = ""
+            self.editable = False
+            self.insert_policy = None
+            self.minimum_width = 0
+            self.maximum_width = 0
+
+        def setEditable(self, editable):
+            self.editable = bool(editable)
+
+        def setInsertPolicy(self, policy):
+            self.insert_policy = policy
+
+        def setMinimumWidth(self, width):
+            self.minimum_width = width
+
+        def setMaximumWidth(self, width):
+            self.maximum_width = width
+
+        def setCurrentText(self, text):
+            self.current_text = str(text)
+
+        def lineEdit(self):
+            return None
+
+    monkeypatch.setattr(gs1_module, "FocusWheelComboBox", _NoLineEditCombo)
+    harness = _Gs1Harness()
+
+    default_combo = harness._create_gs1_default_combo(
+        initial_text="  Existing Market  ",
+        placeholder="Target market",
+    )
+    contract_combo = harness._create_gs1_contract_combo(initial_text="  1002  ")
+
+    assert default_combo.parent is harness
+    assert default_combo.editable is True
+    assert default_combo.insert_policy == QComboBox.NoInsert
+    assert default_combo.minimum_width == 320
+    assert default_combo.maximum_width == 520
+    assert default_combo.current_text == "Existing Market"
+    assert contract_combo.current_text == "1002"
+
+
 def test_set_combo_items_deduplicates_values_and_preserves_custom_text():
     require_qapplication()
     combo = _editable_combo("Custom Brand")
@@ -106,6 +152,32 @@ def test_set_combo_items_deduplicates_values_and_preserves_custom_text():
     assert _combo_texts(combo) == ["", "Alpha", "Beta", "Custom Brand"]
     assert combo.currentText() == "Custom Brand"
     assert combo.completer().caseSensitivity() == Qt.CaseInsensitive
+
+
+def test_contract_combo_preserves_custom_text_and_summarizes_sparse_overflow_entries():
+    harness = _make_harness()
+    harness.gs1_active_contract_edit.setCurrentText("manual-contract")
+    harness._gs1_contract_entries = (
+        GS1ContractEntry(contract_number="1000"),
+        GS1ContractEntry(contract_number="1001", product="Starter Pack"),
+        GS1ContractEntry(contract_number="1002", status="Active"),
+        GS1ContractEntry(contract_number="1003", product="Archive", status="Inactive"),
+        GS1ContractEntry(contract_number="1004"),
+        GS1ContractEntry(contract_number="1005"),
+        GS1ContractEntry(contract_number="1006"),
+    )
+
+    harness._configure_gs1_contract_combo()
+
+    assert "manual-contract" in _combo_texts(harness.gs1_active_contract_edit)
+    assert harness.gs1_active_contract_edit.currentText() == "manual-contract"
+    status = harness.gs1_contracts_status_label.text()
+    assert "Loaded 7 GTIN contract(s)" in status
+    assert "(path not saved)" in status
+    assert "1000" in status
+    assert "1001 - Starter Pack" in status
+    assert "1002 - Active" in status
+    assert "and 1 more" in status
 
 
 def test_template_status_covers_pending_empty_and_stored_asset():
@@ -161,6 +233,32 @@ def test_template_status_covers_pending_empty_and_stored_asset():
     assert "Verified workbook sheet: Metadata" in status
 
 
+def test_template_status_reports_database_asset_without_optional_metadata():
+    harness = _make_harness()
+    harness._gs1_template_profile = SimpleNamespace(
+        available_sheet_names=(),
+        sheet_name="",
+        header_row=1,
+    )
+    harness._gs1_template_asset = GS1TemplateAsset(
+        storage_mode=STORAGE_MODE_DATABASE,
+        stored_in_database=True,
+    )
+
+    assert harness._gs1_template_profile_summary() == ""
+
+    harness._refresh_gs1_template_status()
+
+    status = harness.gs1_template_status_label.text()
+    assert harness.gs1_template_path_edit.text() == "Official GS1 workbook"
+    assert harness.gs1_template_export_btn.isEnabled() is True
+    assert "inside the current profile database" in status
+    assert "Filename:" not in status
+    assert "Size:" not in status
+    assert "Updated:" not in status
+    assert "Verified workbook" not in status
+
+
 def test_refresh_template_options_merges_service_and_builtin_values(monkeypatch):
     harness = _make_harness()
     profile = SimpleNamespace(
@@ -200,6 +298,82 @@ def test_refresh_template_options_merges_service_and_builtin_values(monkeypatch)
 
     assert warnings
     assert "bad workbook" in str(warnings[0])
+
+
+def test_refresh_template_options_loads_stored_asset_and_keeps_builtins_after_template_options():
+    harness = _make_harness()
+    profile = SimpleNamespace(
+        available_sheet_names=["Metadata"],
+        sheet_name="Metadata",
+        header_row=4,
+        field_options={
+            "target_market": ("Worldwide", "Mars"),
+            "language": ("Klingon", "English"),
+            "brand": ("Existing Brand", "Lunar Works"),
+            "packaging_type": ("Download", "Cassette"),
+            "product_classification": ("Music", "Archive"),
+        },
+    )
+    service = SimpleNamespace(load_template_profile=mock.Mock(return_value=profile))
+    harness.gs1_integration_service = service
+    harness._gs1_template_asset = GS1TemplateAsset(filename="stored-template.xlsx")
+
+    harness._refresh_gs1_template_options(show_errors=False)
+
+    service.load_template_profile.assert_called_once_with()
+    assert harness._gs1_template_profile is profile
+    target_values = _combo_texts(harness.gs1_target_market_edit)
+    assert target_values.index("Worldwide") < target_values.index("Mars")
+    language_values = _combo_texts(harness.gs1_language_edit)
+    assert language_values.index("Klingon") < language_values.index("Dutch")
+    assert "Lunar Works" in _combo_texts(harness.gs1_brand_edit)
+    assert "Cassette" in _combo_texts(harness.gs1_packaging_type_edit)
+    assert "Archive" in _combo_texts(harness.gs1_product_classification_edit)
+
+
+def test_browse_gs1_template_handles_cancel_validation_failure_and_pending_selection(
+    monkeypatch, tmp_path
+):
+    harness = _make_harness()
+    refresh = mock.Mock()
+    harness._refresh_gs1_template_options = refresh
+    warnings = []
+    monkeypatch.setattr(
+        gs1_module.QMessageBox,
+        "warning",
+        lambda *args: warnings.append(args),
+    )
+
+    selections = iter(
+        [
+            ("", ""),
+            (str(tmp_path / "bad-template.xlsx"), ""),
+            (str(tmp_path / "accepted-template.xlsx"), ""),
+        ]
+    )
+    monkeypatch.setattr(
+        gs1_module.QFileDialog,
+        "getOpenFileName",
+        lambda *args: next(selections),
+    )
+    harness.gs1_integration_service = SimpleNamespace(
+        load_template_profile=mock.Mock(side_effect=RuntimeError("not a GS1 workbook"))
+    )
+
+    harness._browse_gs1_template()
+    assert refresh.call_count == 0
+    assert harness._pending_gs1_template_path == ""
+
+    harness._browse_gs1_template()
+    assert warnings
+    assert "not a GS1 workbook" in str(warnings[0])
+    assert refresh.call_count == 0
+    assert harness._pending_gs1_template_path == ""
+
+    harness.gs1_integration_service = None
+    harness._browse_gs1_template()
+    assert harness._pending_gs1_template_path == str(tmp_path / "accepted-template.xlsx")
+    refresh.assert_called_once_with(show_errors=False)
 
 
 def test_import_gs1_contracts_csv_loads_entries_and_clear_resets_state(tmp_path):
@@ -262,6 +436,107 @@ def test_import_gs1_contracts_csv_handles_missing_service_and_import_errors(monk
     assert warnings
     assert "no header" in str(warnings[0])
 
+    warnings.clear()
+    assert harness._import_gs1_contracts_csv("/bad.csv", show_errors=False) is False
+    assert warnings == []
+
+
+def test_import_gs1_contracts_csv_handles_unreadable_source_and_autoselect_edges():
+    harness = _make_harness()
+    entries = (GS1ContractEntry(contract_number="1001", status="Inactive"),)
+    contract_service = SimpleNamespace(load_contracts=mock.Mock(return_value=entries))
+    harness.gs1_integration_service = SimpleNamespace(contract_import_service=contract_service)
+    harness.gs1_active_contract_edit.setCurrentText("manual-contract")
+
+    assert harness._import_gs1_contracts_csv("/missing/contracts.csv", show_errors=True) is True
+
+    assert harness._pending_gs1_contracts_csv_bytes is None
+    assert harness._pending_gs1_contracts_csv_filename == "contracts.csv"
+    assert harness.gs1_active_contract_edit.currentText() == "manual-contract"
+
+    harness.gs1_active_contract_edit.setCurrentText("")
+    contract_service.load_contracts.return_value = entries
+
+    assert harness._import_gs1_contracts_csv("/missing/other.csv", show_errors=True) is True
+    assert harness.gs1_active_contract_edit.currentText() == ""
+
+
+def test_browse_reload_and_export_gs1_contracts_csv_guardrails(monkeypatch, tmp_path):
+    harness = _make_harness()
+    information_messages = []
+    warnings = []
+    imports = []
+    monkeypatch.setattr(
+        gs1_module.QMessageBox,
+        "information",
+        lambda *args: information_messages.append(args),
+    )
+    monkeypatch.setattr(
+        gs1_module.QMessageBox,
+        "warning",
+        lambda *args: warnings.append(args),
+    )
+
+    browse_paths = iter([("", ""), (str(tmp_path / "contracts.csv"), "")])
+    monkeypatch.setattr(
+        gs1_module.QFileDialog,
+        "getOpenFileName",
+        lambda *args: next(browse_paths),
+    )
+    harness._import_gs1_contracts_csv = lambda path, *, show_errors: imports.append(
+        (path, show_errors)
+    )
+
+    harness._browse_gs1_contracts_csv()
+    assert imports == []
+
+    harness._browse_gs1_contracts_csv()
+    assert imports == [(str(tmp_path / "contracts.csv"), True)]
+
+    harness.gs1_contracts_csv_edit.setText("")
+    harness._reload_gs1_contracts_csv()
+    assert "Choose a GS1 contracts CSV first." in str(information_messages[-1])
+
+    harness.gs1_contracts_csv_edit.setText(str(tmp_path / "contracts.csv"))
+    harness._reload_gs1_contracts_csv()
+    assert imports[-1] == (str(tmp_path / "contracts.csv"), True)
+
+    harness.gs1_integration_service = None
+    harness._export_gs1_contracts_csv()
+
+    existing = tmp_path / "existing.csv"
+    existing.write_text("contract_number\n1001\n", encoding="utf-8")
+    export_target = tmp_path / "export.csv"
+    service = mock.Mock()
+    service.settings_service.load_stored_contracts_filename.return_value = "stored.csv"
+    service.export_contracts_csv.side_effect = RuntimeError("cannot write contracts")
+    harness.gs1_integration_service = service
+    harness.gs1_contracts_csv_edit.setText("")
+    save_paths = iter([("", ""), (str(existing), ""), (str(export_target), "")])
+    monkeypatch.setattr(
+        gs1_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args: next(save_paths),
+    )
+    monkeypatch.setattr(gs1_module.QMessageBox, "question", lambda *args: QMessageBox.No)
+
+    harness._export_gs1_contracts_csv()
+    service.settings_service.load_stored_contracts_filename.assert_called_once_with()
+    service.export_contracts_csv.assert_not_called()
+
+    harness._export_gs1_contracts_csv()
+    service.export_contracts_csv.assert_not_called()
+
+    harness._export_gs1_contracts_csv()
+    service.export_contracts_csv.assert_called_once_with(
+        export_target,
+        contracts=(),
+        source_path="",
+        source_bytes=None,
+    )
+    assert warnings
+    assert "cannot write contracts" in str(warnings[-1])
+
 
 def test_export_template_and_contract_csv_apply_suffixes_and_report_success(monkeypatch, tmp_path):
     harness = _make_harness()
@@ -309,3 +584,51 @@ def test_export_template_and_contract_csv_apply_suffixes_and_report_success(monk
         source_bytes=b"contract_number\n1002\n",
     )
     assert len(information_messages) == 2
+
+
+def test_export_gs1_template_guardrails(monkeypatch, tmp_path):
+    harness = _make_harness()
+    information_messages = []
+    warnings = []
+    monkeypatch.setattr(
+        gs1_module.QMessageBox,
+        "information",
+        lambda *args: information_messages.append(args),
+    )
+    monkeypatch.setattr(
+        gs1_module.QMessageBox,
+        "warning",
+        lambda *args: warnings.append(args),
+    )
+
+    harness._export_gs1_template()
+
+    service = mock.Mock()
+    harness.gs1_integration_service = service
+    harness._export_gs1_template()
+    assert "No GS1 workbook is stored" in str(information_messages[-1])
+    service.export_template_workbook.assert_not_called()
+
+    harness._gs1_template_asset = GS1TemplateAsset(filename="template.xlsx")
+    existing = tmp_path / "existing.xlsx"
+    existing.write_text("old workbook", encoding="utf-8")
+    failed_export = tmp_path / "failed.xlsx"
+    save_paths = iter([("", ""), (str(existing), ""), (str(failed_export), "")])
+    monkeypatch.setattr(
+        gs1_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args: next(save_paths),
+    )
+    monkeypatch.setattr(gs1_module.QMessageBox, "question", lambda *args: QMessageBox.No)
+    service.export_template_workbook.side_effect = RuntimeError("cannot write workbook")
+
+    harness._export_gs1_template()
+    service.export_template_workbook.assert_not_called()
+
+    harness._export_gs1_template()
+    service.export_template_workbook.assert_not_called()
+
+    harness._export_gs1_template()
+    service.export_template_workbook.assert_called_once_with(failed_export)
+    assert warnings
+    assert "cannot write workbook" in str(warnings[-1])

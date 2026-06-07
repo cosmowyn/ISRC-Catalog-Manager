@@ -96,6 +96,66 @@ def test_refresh_audio_conversion_action_states_sets_tooltips_and_foreground_ser
     assert unavailable.inspect_forensic_watermark_action.enabled is False
 
 
+def test_refresh_audio_conversion_action_states_covers_lossy_and_no_target_messages(monkeypatch):
+    monkeypatch.setattr(conversion, "configure_foreground_exchange_services", lambda shell: None)
+
+    lossy_only = SimpleNamespace(
+        audio_conversion_service=SimpleNamespace(
+            is_available=mock.Mock(return_value=True),
+            capabilities=mock.Mock(
+                return_value=SimpleNamespace(
+                    managed_targets=(),
+                    managed_lossy_targets=(_profile("mp3", "MP3"),),
+                    managed_forensic_targets=(),
+                    external_targets=(),
+                )
+            ),
+        ),
+        track_service=object(),
+        audio_authenticity_service=None,
+        forensic_export_service=None,
+        convert_selected_audio_action=_Action(),
+        convert_external_audio_files_action=_Action(),
+        export_forensic_watermarked_audio_action=_Action(),
+        soundcloud_forensic_export_action=_Action(),
+        inspect_forensic_watermark_action=_Action(),
+    )
+
+    conversion._refresh_audio_conversion_action_states(lossy_only)
+
+    assert lossy_only.convert_selected_audio_action.enabled is True
+    assert "managed lossy derivatives" in lossy_only.convert_selected_audio_action.status_tip
+
+    no_targets = SimpleNamespace(
+        audio_conversion_service=SimpleNamespace(
+            is_available=mock.Mock(return_value=True),
+            capabilities=mock.Mock(
+                return_value=SimpleNamespace(
+                    managed_targets=(),
+                    managed_lossy_targets=(),
+                    managed_forensic_targets=(),
+                    external_targets=(),
+                )
+            ),
+        ),
+        track_service=object(),
+        audio_authenticity_service=None,
+        forensic_export_service=None,
+        convert_selected_audio_action=_Action(),
+        convert_external_audio_files_action=_Action(),
+        export_forensic_watermarked_audio_action=_Action(),
+        soundcloud_forensic_export_action=_Action(),
+        inspect_forensic_watermark_action=_Action(),
+    )
+
+    conversion._refresh_audio_conversion_action_states(no_targets)
+
+    assert no_targets.convert_selected_audio_action.enabled is False
+    assert "No supported managed derivative targets" in (
+        no_targets.convert_selected_audio_action.status_tip
+    )
+
+
 def test_audio_source_label_suffix_and_unavailable_message_helpers():
     app = SimpleNamespace(
         audio_conversion_service=None,
@@ -179,6 +239,69 @@ def test_prompt_audio_conversion_format_merges_managed_targets_without_duplicate
         )
         is None
     )
+
+
+def test_prompt_audio_conversion_format_groups_and_selected_track_guardrails(monkeypatch):
+    choices = []
+    capabilities = SimpleNamespace(
+        managed_targets=(_profile("flac", "FLAC"),),
+        managed_lossy_targets=(_profile("mp3", "MP3"),),
+        managed_forensic_targets=(_profile("wav-forensic", "WAV Forensic"),),
+        external_targets=(_profile("aac", "AAC"),),
+    )
+    app = SimpleNamespace(
+        audio_conversion_service=SimpleNamespace(capabilities=mock.Mock(return_value=capabilities))
+    )
+
+    def fake_choice_dialog(*args, **kwargs):
+        choices.append(tuple(kwargs["choices"]))
+        return kwargs["choices"][0][0]
+
+    monkeypatch.setattr(conversion, "_compact_choice_dialog", fake_choice_dialog)
+
+    assert (
+        conversion._prompt_audio_conversion_format(
+            app,
+            title="Authentic",
+            prompt="Choose",
+            capability_group="managed_authenticity",
+        )
+        == "flac"
+    )
+    assert (
+        conversion._prompt_audio_conversion_format(
+            app,
+            title="Forensic",
+            prompt="Choose",
+            capability_group="managed_forensic",
+        )
+        == "wav-forensic"
+    )
+    assert (
+        conversion._prompt_audio_conversion_format(
+            app,
+            title="Lossy",
+            prompt="Choose",
+            capability_group="managed_lossy",
+        )
+        == "mp3"
+    )
+    assert (
+        conversion._prompt_audio_conversion_format(
+            SimpleNamespace(audio_conversion_service=None),
+            title="None",
+            prompt="Choose",
+            capability_group="external",
+        )
+        is None
+    )
+    assert choices == [
+        (("flac", "FLAC"),),
+        (("wav-forensic", "WAV Forensic"),),
+        (("mp3", "MP3"),),
+    ]
+
+    assert conversion._selected_track_ids_with_audio(SimpleNamespace(track_service=None)) == []
 
 
 def test_start_conversion_export_uses_direct_worker_and_reports_success(monkeypatch, tmp_path):
@@ -275,6 +398,120 @@ def test_start_conversion_export_rejects_source_template_overwrite(monkeypatch, 
     conversion._start_conversion_export(app, preview, template_path)
 
     assert "never overwrites the source template" in messages[0][2]
+
+
+def test_root_wrappers_ledger_guard_and_conversion_export_error_paths(monkeypatch, tmp_path):
+    warnings = []
+
+    class FakeMessageBox:
+        @classmethod
+        def warning(cls, *args):
+            warnings.append(args)
+
+    class FakeFileDialog:
+        pass
+
+    def fake_history_action(*args, **kwargs):
+        return ("history", args, kwargs)
+
+    monkeypatch.setitem(
+        conversion.sys.modules,
+        "isrc_manager.main_window",
+        SimpleNamespace(
+            QMessageBox=FakeMessageBox,
+            QFileDialog=FakeFileDialog,
+            run_file_history_action=fake_history_action,
+        ),
+    )
+
+    assert conversion._message_box() is FakeMessageBox
+    assert conversion._file_dialog() is FakeFileDialog
+    assert conversion._run_file_history_action("arg", key="value")[0] == "history"
+
+    conversion.open_derivative_ledger(SimpleNamespace(asset_service=None), batch_id="batch")
+    assert warnings[-1][1] == "Derivative Ledger"
+
+    preview = SimpleNamespace(
+        template_profile=SimpleNamespace(
+            format_name="csv",
+            output_suffix=".csv",
+            template_bytes=b"template",
+            template_path=tmp_path / "template.csv",
+        ),
+        source_profile=SimpleNamespace(source_mode="catalog"),
+    )
+    app = SimpleNamespace(
+        _resolve_file_export_target=mock.Mock(side_effect=ValueError("bad target")),
+    )
+    conversion._start_conversion_export(app, preview, tmp_path / "out.csv")
+    assert warnings[-1][1] == "Template Conversion"
+    assert "bad target" in warnings[-1][2]
+
+
+def test_start_conversion_export_uses_history_bundle_worker_and_refreshes_history(
+    monkeypatch, tmp_path
+):
+    submitted = {}
+    history_calls = []
+    messages = []
+    template_path = tmp_path / "template.csv"
+    preview = SimpleNamespace(
+        template_profile=SimpleNamespace(
+            format_name="csv",
+            output_suffix=".csv",
+            template_bytes=b"template",
+            template_path=template_path,
+        ),
+        source_profile=SimpleNamespace(source_mode="database_tracks"),
+    )
+    result = SimpleNamespace(target_format="csv", exported_row_count=1, summary_lines=())
+    conversion_service = mock.Mock()
+    conversion_service.export_preview.return_value = result
+
+    def fake_history_action(**kwargs):
+        history_calls.append(kwargs)
+        return kwargs["mutation"]()
+
+    class FakeMessageBox:
+        @classmethod
+        def information(cls, *args):
+            messages.append(args)
+
+        @classmethod
+        def warning(cls, *args):
+            messages.append(args)
+
+    app = SimpleNamespace(
+        history_manager=object(),
+        current_db_path="/profiles/current.sqlite",
+        background_service_factory=object(),
+        conversion_service=conversion_service,
+        conn=None,
+        logger=mock.Mock(),
+        _resolve_file_export_target=lambda path, **kwargs: Path(path),
+        _scaled_progress_callback=lambda callback, **kwargs: "history-progress",
+        _submit_background_bundle_task=lambda **kwargs: submitted.update(kwargs),
+        _show_background_task_error=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        _log_event=mock.Mock(),
+    )
+    monkeypatch.setattr(conversion, "_run_file_history_action", fake_history_action)
+    monkeypatch.setattr(conversion, "_message_box", lambda: FakeMessageBox)
+
+    conversion._start_conversion_export(app, preview, tmp_path / "output")
+
+    bundle = SimpleNamespace(
+        conversion_service=conversion_service,
+        history_manager=app.history_manager,
+    )
+    ctx = SimpleNamespace(report_progress=mock.Mock())
+    assert submitted["task_fn"](bundle, ctx) is result
+    assert history_calls[0]["action_type"] == "file.conversion_export"
+
+    submitted["on_success_after_cleanup"](result)
+    app._refresh_history_actions.assert_called_once()
+    app._log_event.assert_called_once()
+    assert "Rows written: 1" in messages[-1][2]
 
 
 def test_convert_external_audio_files_deduplicates_inputs_and_runs_worker(monkeypatch, tmp_path):
@@ -482,3 +719,70 @@ def test_convert_selected_audio_reports_early_blockers(monkeypatch):
     app.audio_authenticity_service = None
     conversion.convert_selected_audio(app)
     assert "Lossless managed exports require" in messages[-1][1][2]
+
+
+def test_convert_selected_and_external_audio_cancel_paths(monkeypatch, tmp_path):
+    messages = []
+
+    class FakeMessageBox:
+        @classmethod
+        def warning(cls, *args):
+            messages.append(("warning", args))
+
+        @classmethod
+        def information(cls, *args):
+            messages.append(("information", args))
+
+    class EmptyInputFileDialog:
+        @classmethod
+        def getOpenFileNames(cls, *args):
+            return ([], "")
+
+        @classmethod
+        def getExistingDirectory(cls, *args):
+            return ""
+
+    monkeypatch.setattr(conversion, "_message_box", lambda: FakeMessageBox)
+    monkeypatch.setattr(conversion, "_file_dialog", lambda: EmptyInputFileDialog)
+
+    selected_app = SimpleNamespace(
+        track_service=object(),
+        audio_conversion_service=SimpleNamespace(is_supported_target=mock.Mock(return_value=False)),
+        audio_authenticity_service=None,
+        exports_dir=tmp_path,
+        _audio_conversion_unavailable_message=mock.Mock(return_value=""),
+        _selected_track_ids_with_audio=mock.Mock(return_value=[1]),
+        _prompt_audio_conversion_format=mock.Mock(return_value=None),
+    )
+    conversion.convert_selected_audio(selected_app)
+
+    selected_app._prompt_audio_conversion_format.return_value = "mp3"
+    conversion.convert_selected_audio(selected_app)
+
+    unavailable_external = SimpleNamespace(
+        audio_conversion_service=SimpleNamespace(is_available=mock.Mock(return_value=False)),
+    )
+    conversion.convert_external_audio_files(unavailable_external)
+    assert "External audio conversion requires ffmpeg" in messages[-1][1][2]
+
+    external_app = SimpleNamespace(
+        audio_conversion_service=SimpleNamespace(is_available=mock.Mock(return_value=True)),
+        exports_dir=tmp_path,
+        _prompt_audio_conversion_format=mock.Mock(return_value="mp3"),
+    )
+    conversion.convert_external_audio_files(external_app)
+
+    class InputButNoOutputDialog:
+        @classmethod
+        def getOpenFileNames(cls, *args):
+            return ([str(tmp_path / "one.wav")], "")
+
+        @classmethod
+        def getExistingDirectory(cls, *args):
+            return ""
+
+    monkeypatch.setattr(conversion, "_file_dialog", lambda: InputButNoOutputDialog)
+    external_app._prompt_audio_conversion_format.return_value = None
+    conversion.convert_external_audio_files(external_app)
+    external_app._prompt_audio_conversion_format.return_value = "mp3"
+    conversion.convert_external_audio_files(external_app)

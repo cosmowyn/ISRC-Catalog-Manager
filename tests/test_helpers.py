@@ -42,6 +42,17 @@ class TimecodeTests(unittest.TestCase):
         self.assertEqual(hms_to_seconds(1, 1, 1), 3661)
         self.assertEqual(parse_hms_text("01:01:01"), 3661)
 
+    def test_timecode_helpers_sanitize_invalid_and_out_of_range_values(self):
+        self.assertEqual(seconds_to_hms("not-a-number"), "00:00:00")
+        self.assertEqual(seconds_to_hms(-10), "00:00:00")
+        self.assertEqual(hms_to_seconds("bad", 20, 30), 0)
+        self.assertEqual(hms_to_seconds(1, 90, 90), 7199)
+
+    def test_parse_hms_text_rejects_malformed_or_incomplete_values(self):
+        self.assertEqual(parse_hms_text("01:02"), 0)
+        self.assertEqual(parse_hms_text("01:bad:03"), 0)
+        self.assertEqual(parse_hms_text(""), 0)
+
 
 class PathHelperTests(unittest.TestCase):
     def test_data_dir_uses_requested_app_name(self):

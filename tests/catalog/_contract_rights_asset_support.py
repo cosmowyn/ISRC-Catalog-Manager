@@ -1467,6 +1467,161 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         self.assertEqual(summary.master_control, ["Master Label"])
         self.assertEqual(summary.publishing_control, ["Writer Control"])
 
+    def case_rights_validation_normalization_and_conflict_skip_branches(self):
+        granted_to = self.party_service.create_party(PartyPayload(legal_name="Control Label"))
+        retained = self.party_service.create_party(PartyPayload(legal_name="Retained Writer"))
+        track_id, release_id = self._create_track_and_release()
+
+        validation_errors = self.rights_service.validate_right(
+            RightPayload(
+                title="Invalid right",
+                start_date="2026-12-31",
+                end_date="2026-01-01",
+            )
+        )
+        self.assertIn("work, track, or release", validation_errors[0])
+        self.assertIn("end date", validation_errors[1])
+        with self.assertRaisesRegex(ValueError, "work, track, or release"):
+            self.rights_service.create_right(RightPayload(title="Invalid right"))
+        with self.assertRaisesRegex(ValueError, "end date"):
+            self.rights_service.update_right(
+                999,
+                RightPayload(
+                    title="Invalid dates",
+                    start_date="2026-12-31",
+                    end_date="2026-01-01",
+                    track_id=track_id,
+                ),
+            )
+
+        normalized_id = self.rights_service.create_right(
+            RightPayload(
+                title="Unknown type",
+                right_type="Neighbouring Rights",
+                track_id=track_id,
+                granted_to_party_id=granted_to,
+            )
+        )
+        normalized = self.rights_service.fetch_right(normalized_id)
+        self.assertIsNotNone(normalized)
+        assert normalized is not None
+        self.assertEqual(normalized.right_type, "other")
+
+        base_id = self.rights_service.create_right(
+            RightPayload(
+                title="EU Master A",
+                right_type="master",
+                exclusive_flag=True,
+                territory="EU",
+                start_date="2026-01-01",
+                end_date="2026-12-31",
+                granted_to_party_id=granted_to,
+                retained_by_party_id=retained,
+                track_id=track_id,
+            )
+        )
+        territory_skip_id = self.rights_service.create_right(
+            RightPayload(
+                title="US Master",
+                right_type="master",
+                exclusive_flag=True,
+                territory="US",
+                start_date="2026-03-01",
+                end_date="2026-05-01",
+                granted_to_party_id=granted_to,
+                track_id=track_id,
+            )
+        )
+        type_skip_id = self.rights_service.create_right(
+            RightPayload(
+                title="EU Publishing",
+                right_type="composition_publishing",
+                exclusive_flag=True,
+                territory="EU",
+                start_date="2026-03-01",
+                end_date="2026-05-01",
+                granted_to_party_id=granted_to,
+                track_id=track_id,
+            )
+        )
+        range_skip_id = self.rights_service.create_right(
+            RightPayload(
+                title="EU Master Later",
+                right_type="master",
+                exclusive_flag=True,
+                territory="EU",
+                start_date="2027-01-01",
+                end_date="2027-12-31",
+                granted_to_party_id=granted_to,
+                track_id=track_id,
+            )
+        )
+        entity_skip_id = self.rights_service.create_right(
+            RightPayload(
+                title="EU Release Master",
+                right_type="master",
+                exclusive_flag=True,
+                territory="EU",
+                start_date="2026-03-01",
+                end_date="2026-05-01",
+                granted_to_party_id=granted_to,
+                release_id=release_id,
+            )
+        )
+        conflict_id = self.rights_service.create_right(
+            RightPayload(
+                title="EU Master B",
+                right_type="master",
+                exclusive_flag=True,
+                territory="EU",
+                start_date="2026-06-01",
+                end_date="2026-12-31",
+                granted_to_party_id=granted_to,
+                track_id=track_id,
+            )
+        )
+
+        conflict_pairs = {
+            frozenset((conflict.left_right_id, conflict.right_right_id))
+            for conflict in self.rights_service.detect_conflicts()
+        }
+        self.assertIn(frozenset((base_id, conflict_id)), conflict_pairs)
+        self.assertNotIn(frozenset((base_id, territory_skip_id)), conflict_pairs)
+        self.assertNotIn(frozenset((base_id, type_skip_id)), conflict_pairs)
+        self.assertNotIn(frozenset((base_id, range_skip_id)), conflict_pairs)
+        self.assertNotIn(frozenset((base_id, entity_skip_id)), conflict_pairs)
+
+        self.assertEqual(
+            self.rights_service.list_rights(entity_type="unsupported", entity_id=track_id),
+            self.rights_service.list_rights(),
+        )
+        with self.assertRaisesRegex(ValueError, "work or track"):
+            self.rights_service.list_ownership_interests(
+                entity_type="release", entity_id=release_id
+            )
+
+        self.rights_service.replace_recording_ownership_interests(
+            track_id,
+            [
+                OwnershipInterestPayload(name="  ", role="", share_percent="bad"),
+                OwnershipInterestPayload(
+                    name="Unregistered Label",
+                    role="unexpected role",
+                    share_percent="bad",
+                    territory=" Worldwide ",
+                ),
+            ],
+        )
+        recording_rows = self.rights_service.list_recording_ownership_interests(track_id)
+        self.assertEqual(len(recording_rows), 1)
+        self.assertEqual(recording_rows[0].ownership_role, "master_owner")
+        self.assertIsNone(recording_rows[0].share_percent)
+        self.assertEqual(recording_rows[0].territory, "Worldwide")
+
+        summary = self.rights_service.ownership_summary(entity_type="track", entity_id=track_id)
+        self.assertEqual(summary.master_control[0], "Unregistered Label")
+        self.assertEqual(summary.exclusive_territories.count("EU: Control Label"), 1)
+
     def case_asset_validation_catches_missing_approved_master(self):
         track_id, _release_id = self._create_track_and_release()
         master_path = self.data_root / "master.wav"

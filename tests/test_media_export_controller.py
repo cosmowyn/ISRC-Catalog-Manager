@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,7 +8,11 @@ import pytest
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE
 from isrc_manager.media import export_controller
-from isrc_manager.tags.models import AudioTagData, TaggedAudioExportPlanItem
+from isrc_manager.tags.models import (
+    AudioTagData,
+    TaggedAudioExportPlanItem,
+    TaggedAudioExportResult,
+)
 
 
 class _TrackService:
@@ -144,7 +149,7 @@ def _install_export_dialog_fakes(
             self.save_calls.append((title, default))
             return self.save_path, ""
 
-        def getExistingDirectory(self, _parent, title: str):
+        def getExistingDirectory(self, _parent, title: str, *_args):
             self.directory_calls.append(title)
             return self.directory
 
@@ -268,6 +273,50 @@ def test_tagged_audio_export_name_uses_safe_track_stems(
     expected: str,
 ) -> None:
     assert export_controller._tagged_audio_export_name(track_id, title) == expected
+
+
+def test_root_hooks_and_export_filename_destination_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root_history_calls = []
+    root_module = SimpleNamespace(
+        QMessageBox="root-message-box",
+        QFileDialog="root-file-dialog",
+        run_file_history_action=lambda *args, **kwargs: root_history_calls.append((args, kwargs))
+        or "history-result",
+    )
+    monkeypatch.setitem(sys.modules, "isrc_manager.main_window", root_module)
+
+    assert export_controller._message_box() == "root-message-box"
+    assert export_controller._file_dialog() == "root-file-dialog"
+    assert export_controller._run_file_history_action("arg", key="value") == "history-result"
+    assert root_history_calls == [(("arg",), {"key": "value"})]
+
+    monkeypatch.setattr(export_controller.mimetypes, "guess_extension", lambda _mime: ".jpe")
+    assert export_controller._export_extension_for_mime("image/jpeg") == ".jpg"
+    monkeypatch.setattr(export_controller.mimetypes, "guess_extension", lambda _mime: None)
+    assert export_controller._export_extension_for_mime("image/custom") == ".png"
+    assert export_controller._export_extension_for_mime("audio/custom") == ".wav"
+    assert export_controller._export_extension_for_mime("application/custom") == ".bin"
+
+    app = SimpleNamespace(_export_extension_for_mime=export_controller._export_extension_for_mime)
+    assert export_controller._default_export_filename(app, "bad/name", "audio/custom") == (
+        "bad_name.wav"
+    )
+    assert (
+        export_controller._resolve_directory_export_target(
+            tmp_path / "folder",
+            default_name="fallback",
+        )
+        == tmp_path / "folder"
+    )
+
+    (tmp_path / "song.wav").write_bytes(b"one")
+    (tmp_path / "song (2).wav").write_bytes(b"two")
+    assert export_controller._deduplicate_export_destination(tmp_path, "song.wav") == (
+        tmp_path / "song (3).wav"
+    )
 
 
 def test_prepare_tagged_audio_export_preview_collects_rows_and_warnings(tmp_path: Path) -> None:
@@ -510,6 +559,154 @@ def test_background_audio_file_export_writes_bytes_and_reports_metadata(
     assert app.status_messages[-1] == ("Export cancelled.", 5000)
     task["on_error"](RuntimeError("boom"))
     assert app.errors[-1][0] == "Export"
+
+
+def test_export_catalog_audio_copies_guardrails_and_callback_flow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    messages, file_dialog = _install_export_dialog_fakes(monkeypatch)
+    app = _export_app()
+    app.track_service = object()
+    app.tagged_audio_export_service = None
+    app._normalize_track_ids = lambda ids: list(ids or [])
+    app._catalog_table_controller = lambda: SimpleNamespace(
+        selected_or_visible_track_ids=lambda: []
+    )
+
+    export_controller.export_catalog_audio_copies(app, [1])
+    assert messages.warning_calls[-1] == ("Export Catalog Audio Copies", "Open a profile first.")
+
+    app.tagged_audio_export_service = object()
+    app.track_service = object()
+    export_controller.export_catalog_audio_copies(app)
+    assert messages.information_calls[-1][1].startswith("Select one or more tracks")
+
+    class FakeTagPreviewDialog:
+        next_result = export_controller.QDialog.Accepted
+        instances: list["FakeTagPreviewDialog"] = []
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            type(self).instances.append(self)
+
+        def exec(self):
+            return type(self).next_result
+
+    monkeypatch.setitem(
+        sys.modules,
+        "isrc_manager.main_window",
+        SimpleNamespace(TagPreviewDialog=FakeTagPreviewDialog),
+    )
+
+    app.exports_dir = tmp_path
+    app.release_service = object()
+    app._normalize_track_ids = lambda ids: [int(track_id) for track_id in ids]
+    prepared = [TaggedAudioExportPlanItem(1, "Song", "song", ".wav", "database", None)]
+
+    def prepare_preview(selected_ids, *, track_service, release_service, progress_callback):
+        assert selected_ids == [1]
+        assert track_service == "bundle-track-service"
+        assert release_service == "bundle-release-service"
+        progress_callback(0, 1, "preparing")
+        return {
+            "prepared": prepared,
+            "rows": [{"track": "Song", "field": "Title"}],
+            "warnings": ["preview warning"],
+        }
+
+    app._prepare_tagged_audio_export_preview = prepare_preview
+
+    export_controller.export_catalog_audio_copies(app, [1])
+    preview_task = app.submitted_tasks[-1]
+    ctx = _ExportContext()
+    result = preview_task["task_fn"](
+        SimpleNamespace(
+            track_service="bundle-track-service",
+            release_service="bundle-release-service",
+        ),
+        ctx,
+    )
+    assert result["prepared"] == prepared
+    assert ctx.progress == [(0, 1, "preparing")]
+
+    preview_task["on_success_after_cleanup"](
+        {"prepared": [], "rows": [], "warnings": ["nothing attached"]}
+    )
+    assert "No exportable audio files" in messages.information_calls[-1][1]
+
+    FakeTagPreviewDialog.next_result = export_controller.QDialog.Rejected
+    submitted_before = len(app.submitted_tasks)
+    preview_task["on_success_after_cleanup"](result)
+    assert len(app.submitted_tasks) == submitted_before
+
+    FakeTagPreviewDialog.next_result = export_controller.QDialog.Accepted
+    file_dialog.directory = ""
+    preview_task["on_success_after_cleanup"](result)
+    assert len(app.submitted_tasks) == submitted_before
+
+    file_dialog.directory = str(tmp_path / "copies")
+    app.progress_events = []
+    app.events = []
+    app.audits = []
+    app.audit_commits = 0
+    app._scaled_progress_callback = lambda callback, **_kwargs: (
+        lambda *, value, maximum, message: callback(
+            value=value,
+            maximum=maximum,
+            message=message,
+        )
+    )
+    app._build_tagged_audio_export_items = lambda plan_items, **_kwargs: (
+        ["export-item"],
+        ["build warning"],
+    )
+    app._advance_task_ui_progress = lambda _ui_progress, **kwargs: app.progress_events.append(
+        kwargs
+    )
+    app._log_event = lambda *args, **kwargs: app.events.append((args, kwargs))
+    app._audit = lambda *args, **kwargs: app.audits.append((args, kwargs))
+    app._audit_commit = lambda: setattr(app, "audit_commits", app.audit_commits + 1)
+    export_result = TaggedAudioExportResult(
+        requested=1,
+        exported=1,
+        skipped=1,
+        warnings=["export warning"],
+        written_paths=[str(tmp_path / "copies" / "song.wav")],
+    )
+    export_service = SimpleNamespace(
+        export_copies=lambda **kwargs: export_result,
+    )
+    preview_task["on_success_after_cleanup"](result)
+    export_task = app.submitted_tasks[-1]
+    export_payload = export_task["task_fn"](
+        SimpleNamespace(
+            track_service=object(),
+            release_service=object(),
+            tagged_audio_export_service=export_service,
+        ),
+        _ExportContext(),
+    )
+    assert export_payload == {"result": export_result, "warnings": ["build warning"]}
+
+    with pytest.raises(ValueError, match="did not return"):
+        export_task["on_success_before_cleanup"]({}, None)
+    export_task["on_success_before_cleanup"](export_payload, None)
+    assert app.events[-1][0][0] == "audio.export_catalog_copies"
+    assert app.audits[-1][0][:2] == ("EXPORT", "CatalogAudioCopy")
+    assert app.audit_commits == 1
+
+    with pytest.raises(ValueError, match="did not return"):
+        export_task["on_success_after_cleanup"]({})
+    export_task["on_success_after_cleanup"](export_payload)
+    assert "Exported 1 catalog audio copy" in messages.information_calls[-1][1]
+    assert "build warning" in messages.information_calls[-1][1]
+    assert "export warning" in messages.information_calls[-1][1]
+
+    export_task["on_cancelled"]()
+    assert app.status_messages[-1] == ("Catalog audio copy export cancelled.", 5000)
+    export_task["on_error"](RuntimeError("copy failed"))
+    assert app.errors[-1][0] == "Export Catalog Audio Copies"
 
 
 def test_background_audio_column_export_covers_standard_custom_skip_and_cancel_paths(
@@ -759,3 +956,131 @@ def test_focused_media_export_helpers_and_bulk_image_paths(
     )
     export_controller._export_focused_media_column(app, 3, track_ids=[4])
     assert (tmp_path / "custom" / "Track 4 Field 7.png").read_bytes() == b"custom-png"
+
+
+def test_media_export_basename_focus_and_proxy_ordering_edges(tmp_path: Path) -> None:
+    snapshot_service = SimpleNamespace(
+        fetch_track_snapshot=lambda track_id, cursor=None: {
+            1: SimpleNamespace(track_title="Song Title", album_title="Album Title"),
+            2: SimpleNamespace(track_title="", album_title="Single"),
+            3: None,
+        }[track_id]
+    )
+    app = SimpleNamespace(
+        cursor=object(),
+        track_service=snapshot_service,
+        _get_track_title=lambda track_id: "Fallback Title" if track_id == 2 else "",
+        custom_field_definitions=SimpleNamespace(get_field_name=lambda field_id: "Stem"),
+        _media_export_basename_for_track=lambda track_id, media_key: export_controller._media_export_basename_for_track(
+            app,
+            track_id,
+            media_key,
+        ),
+    )
+
+    assert export_controller._media_export_basename_for_track(app, 1, "album_art") == "Album Title"
+    assert export_controller._media_export_basename_for_track(app, 1, "audio_file") == "Song Title"
+    assert export_controller._media_export_basename_for_track(app, 2, "album_art") == (
+        "Fallback Title"
+    )
+    assert export_controller._media_export_basename_for_track(app, 3, "audio_file") == "track_3"
+    assert export_controller._custom_blob_export_basename(app, 1, 8) == "Song Title - Stem"
+
+    app.custom_field_definitions = SimpleNamespace(get_field_name=lambda _field_id: "")
+    assert export_controller._custom_blob_export_basename(app, 1, 8) == "Song Title"
+
+    model = SimpleNamespace(
+        columnCount=lambda: 2,
+        headerData=lambda *_args: "",
+    )
+    focus_app = SimpleNamespace(
+        table=SimpleNamespace(model=lambda: model),
+        BASE_HEADERS=["Title", "Artist"],
+        active_custom_fields=[],
+        _standard_media_key_for_column_key=lambda _key: None,
+        _standard_media_key_for_header=lambda _header: None,
+        _standard_media_column_key=lambda media_key: f"media:{media_key}",
+        _custom_field_for_column_key=lambda _key: None,
+        _custom_field_column_key=lambda field_id: f"custom:{field_id}",
+    )
+    assert export_controller._focused_media_export_spec(focus_app, 1) is None
+    assert export_controller._focused_media_export_spec(focus_app, 4) is None
+
+    focus_app.active_custom_fields = [{"id": 9, "name": "Text Field", "field_type": "text"}]
+    assert export_controller._focused_media_export_spec(focus_app, 2) is None
+
+    payload_calls = []
+    payload_app = SimpleNamespace(
+        _media_cell_has_payload=lambda *args, **kwargs: payload_calls.append((args, kwargs)) or True
+    )
+    assert export_controller._media_cell_has_payload_for_export_spec(
+        payload_app,
+        "index",
+        {"kind": "standard", "media_key": "album_art"},
+    )
+    assert payload_calls[-1] == (("index",), {"media_key": "album_art"})
+    assert not export_controller._media_cell_has_payload_for_export_spec(
+        payload_app,
+        "index",
+        {"kind": "custom_blob", "field_id": "bad"},
+    )
+
+    controller = SimpleNamespace(
+        column_for_key=lambda key: 2 if key == "media:audio" else None,
+        visible_indexes=lambda column: ["row-1", "row-2", "row-3", "row-4"],
+        track_id_for_index=lambda index: {
+            "row-1": 10,
+            "row-2": None,
+            "row-3": 11,
+            "row-4": 12,
+        }[index],
+    )
+    ordered_app = SimpleNamespace(
+        _normalize_track_ids=lambda values: list(dict.fromkeys(int(value) for value in values)),
+        _catalog_table_controller=lambda: controller,
+        _catalog_proxy_model=lambda: object(),
+        _media_cell_has_payload_for_export_spec=lambda index, spec: index != "row-1",
+    )
+    assert export_controller._proxy_ordered_track_ids(
+        ordered_app,
+        [10, 11, 12],
+        media_spec={"column": "bad", "column_key": "media:audio"},
+        require_media_payload=True,
+    ) == [11, 12]
+
+    ordered_app._catalog_proxy_model = lambda: None
+    ordered_app._media_cell_has_payload_for_export_spec = lambda _index, _spec: False
+    assert export_controller._proxy_ordered_track_ids(
+        ordered_app,
+        [12, 10],
+        media_spec={"column": 2},
+        require_media_payload=True,
+    ) == [12, 10]
+
+
+def test_export_focused_media_column_cancel_and_no_export_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    messages, file_dialog = _install_export_dialog_fakes(monkeypatch, directory="")
+    app = _export_app()
+    image_spec = {
+        "kind": "standard",
+        "column": 1,
+        "column_label": "Album Art",
+        "media_key": "album_art",
+    }
+    app._focused_media_export_spec = lambda _column: image_spec
+    app._catalog_table_controller = lambda: SimpleNamespace(selected_track_ids=lambda: [6])
+    app._proxy_ordered_track_ids = lambda ids, **_kwargs: list(ids)
+
+    export_controller._export_focused_media_column(app, 1, track_ids=[6])
+    assert messages.warning_calls == []
+    assert messages.information_calls == []
+
+    file_dialog.directory = str(tmp_path)
+    app.track_has_media = lambda _track_id, _media_key: False
+    app._get_track_title = lambda _track_id: (_ for _ in ()).throw(RuntimeError("title down"))
+    export_controller._export_focused_media_column(app, 1, track_ids=[6])
+    assert "No files were exported." in messages.warning_calls[-1][1]
+    assert "track_6: No stored album art is available." in messages.warning_calls[-1][1]

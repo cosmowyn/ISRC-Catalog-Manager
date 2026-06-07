@@ -1,3 +1,4 @@
+import json
 import shutil
 import sqlite3
 import tempfile
@@ -11,7 +12,7 @@ from isrc_manager.constants import APP_NAME
 from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.paths import AppStorageLayout
 from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService
-from isrc_manager.storage_migration import StorageMigrationService
+from isrc_manager.storage_migration import StorageLayoutInspection, StorageMigrationService
 
 
 class StorageMigrationServiceTests(unittest.TestCase):
@@ -64,6 +65,25 @@ class StorageMigrationServiceTests(unittest.TestCase):
             history_dir=self.source_root / "history",
             help_dir=self.source_root / "help",
         )
+
+    def _build_inspection(self, **overrides) -> StorageLayoutInspection:
+        values = {
+            "layout": self._build_layout(),
+            "legacy_root": None,
+            "legacy_items": (),
+            "preferred_items": (),
+            "preferred_state": "empty",
+            "migration_needed": False,
+            "deferred": False,
+            "journal_status": "",
+            "journal_path": None,
+            "journal": {},
+            "journal_source_root": None,
+            "stage_root": None,
+            "conflict_items": (),
+        }
+        values.update(overrides)
+        return StorageLayoutInspection(**values)
 
     def _build_legacy_storage(self) -> None:
         self.track_media_root.mkdir(parents=True, exist_ok=True)
@@ -652,6 +672,431 @@ class StorageMigrationServiceTests(unittest.TestCase):
             ),
             10,
         )
+
+    def test_defer_and_migration_entry_guardrails_cover_missing_sources(self):
+        service = self._build_service()
+        self.settings.setValue(
+            "db/last_path",
+            str((self.target_root / "Database" / "library.db").resolve()),
+        )
+        self.settings.setValue(
+            "paths/database_dir",
+            str((self.target_root / "Database").resolve()),
+        )
+
+        service.defer(self.source_root)
+
+        self.assertEqual(
+            self.settings.value("db/last_path", "", str),
+            str((self.source_root / "Database" / "library.db").resolve()),
+        )
+        self.assertEqual(
+            self.settings.value("paths/database_dir", "", str),
+            str((self.source_root / "Database").resolve()),
+        )
+        self.assertEqual(self.settings.value("storage/migration_state", "", str), "deferred")
+
+        no_legacy_layout = AppStorageLayout(
+            app_name=APP_NAME,
+            portable=False,
+            settings_root=self.settings_root,
+            settings_path=self.settings_path,
+            lock_path=self.settings_root / f"{APP_NAME}.lock",
+            preferred_data_root=self.target_root,
+            active_data_root=self.target_root,
+            legacy_data_roots=(),
+            database_dir=self.target_root / "Database",
+            exports_dir=self.target_root / "exports",
+            logs_dir=self.target_root / "logs",
+            backups_dir=self.target_root / "backups",
+            history_dir=self.target_root / "history",
+            help_dir=self.target_root / "help",
+        )
+        no_legacy_service = StorageMigrationService(no_legacy_layout, settings=self.settings)
+        self.settings.setValue("storage/migration_state", "")
+        self.settings.setValue("storage/legacy_data_root", "")
+        no_legacy_service.defer()
+        self.assertEqual(self.settings.value("storage/migration_state", "", str), "")
+
+        with mock.patch.object(
+            service,
+            "inspect",
+            return_value=self._build_inspection(
+                preferred_state="resumable_stage",
+                stage_root=self.root / "missing-stage",
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "staged migration folder is missing"):
+                service.migrate()
+
+        with mock.patch.object(
+            service,
+            "inspect",
+            return_value=self._build_inspection(legacy_root=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No legacy app-data root"):
+                service.migrate()
+
+        empty_legacy_root = self.root / "empty-legacy"
+        empty_legacy_root.mkdir()
+        with mock.patch.object(
+            service,
+            "inspect",
+            return_value=self._build_inspection(
+                legacy_root=empty_legacy_root,
+                legacy_items=(),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No app-owned legacy storage"):
+                service.migrate()
+
+    def test_journal_loading_and_preferred_validation_failure_branches(self):
+        service = self._build_service()
+        self.target_root.mkdir(parents=True)
+        target_journal = self.target_root / "storage_migration.json"
+        target_journal.write_text("{", encoding="utf-8")
+        fallback_journal = self.target_root.parent / ".preferred-data_storage_migration.json"
+        fallback_journal.write_text('{"status": "complete"}', encoding="utf-8")
+
+        journal, journal_path = service._load_journal_details()
+
+        self.assertEqual(journal, {"status": "complete"})
+        self.assertEqual(journal_path, fallback_journal)
+        target_journal.write_text("[]", encoding="utf-8")
+        fallback_journal.unlink()
+        self.assertEqual(service._load_journal_details(), ({}, None))
+
+        preferred_db = self.target_root / "Database" / "library.db"
+        preferred_db.parent.mkdir()
+        sqlite3.connect(str(preferred_db)).close()
+
+        self.assertFalse(
+            service._preferred_root_valid(
+                self.target_root,
+                self.source_root,
+                ("Database",),
+                {"status": "complete", "target_root": str(self.root / "other-target")},
+                ("Database",),
+            )
+        )
+        with mock.patch.object(
+            service,
+            "_verify_target_databases",
+            side_effect=RuntimeError("metadata unavailable"),
+        ):
+            self.assertFalse(
+                service._preferred_root_valid(
+                    self.target_root,
+                    self.source_root,
+                    ("Database",),
+                    {},
+                    ("Database",),
+                )
+            )
+        with mock.patch.object(
+            service,
+            "_find_legacy_references",
+            return_value=(str(preferred_db),),
+        ):
+            self.assertFalse(
+                service._preferred_root_valid(
+                    self.target_root,
+                    self.source_root,
+                    ("Database",),
+                    {},
+                    ("Database",),
+                )
+            )
+        with mock.patch.object(
+            service,
+            "_find_legacy_references",
+            side_effect=RuntimeError("scan failed"),
+        ):
+            self.assertFalse(
+                service._preferred_root_valid(
+                    self.target_root,
+                    self.source_root,
+                    ("Database",),
+                    {},
+                    ("Database",),
+                )
+            )
+
+        self.assertEqual(
+            StorageMigrationService._required_source_backed_items(
+                legacy_items=("Database", "Database", "logs"),
+                journal={},
+                preferred_items=(),
+            ),
+            ("Database",),
+        )
+        self.assertEqual(
+            StorageMigrationService._required_source_backed_items(
+                legacy_items=(),
+                journal={"copied_items": ["Database", 3, "logs", "Database"]},
+                preferred_items=(),
+            ),
+            ("Database",),
+        )
+        self.assertEqual(
+            StorageMigrationService._required_source_backed_items(
+                legacy_items=(),
+                journal={},
+                preferred_items=("exports", "exports", "logs"),
+            ),
+            ("exports",),
+        )
+        self.assertEqual(
+            service._preferred_root_conflicts(
+                self.root / "missing-target",
+                progress_value=1,
+            ),
+            (),
+        )
+
+    def test_resume_stage_branches_cover_inventory_mismatch_conflict_and_no_source_activation(
+        self,
+    ):
+        service = self._build_service()
+
+        mismatch_stage = self.root / "mismatch-stage"
+        mismatch_stage.mkdir()
+        (mismatch_stage / "only-file.txt").write_text("stage", encoding="utf-8")
+        mismatch_inspection = self._build_inspection(
+            preferred_state="resumable_stage",
+            stage_root=mismatch_stage,
+            journal={"source_inventory_count": 2},
+        )
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            service._resume_migration_stage(mismatch_inspection, None, self.target_root)
+
+        conflict_target = self.root / "conflict-resume-target"
+        conflict_target.mkdir()
+        (conflict_target / "foreign.txt").write_text("conflict", encoding="utf-8")
+        conflict_stage = self.root / "conflict-stage"
+        conflict_db = conflict_stage / "Database" / "library.db"
+        conflict_db.parent.mkdir(parents=True)
+        sqlite3.connect(str(conflict_db)).close()
+        conflict_inspection = self._build_inspection(
+            preferred_state="resumable_stage",
+            stage_root=conflict_stage,
+            journal={"source_inventory_count": 1, "copied_items": ["Database"]},
+        )
+        with self.assertRaisesRegex(RuntimeError, "foreign.txt"):
+            service._resume_migration_stage(conflict_inspection, None, conflict_target)
+
+        success_container = self.root / "resume-container"
+        success_stage = success_container / self.target_root.name
+        success_db = success_stage / "Database" / "library.db"
+        success_db.parent.mkdir(parents=True)
+        sqlite3.connect(str(success_db)).close()
+        success_inspection = self._build_inspection(
+            preferred_state="resumable_stage",
+            stage_root=success_stage,
+            journal={"source_inventory_count": 1, "copied_items": ["Database"]},
+        )
+
+        result = service._resume_migration_stage(success_inspection, None, self.target_root)
+
+        self.assertEqual(result.action, "resumed")
+        self.assertEqual(result.source_root, self.target_root.resolve())
+        self.assertTrue((self.target_root / "Database" / "library.db").exists())
+        self.assertFalse(success_container.exists())
+        self.assertEqual(
+            self.settings.value("storage/active_data_root", "", str),
+            str(self.target_root.resolve()),
+        )
+
+    def test_storage_reference_sqlite_and_progress_edge_helpers(self):
+        progress_messages: list[str] = []
+        service = StorageMigrationService(
+            self._build_layout(),
+            settings=None,
+            progress_reporter=lambda _value, _maximum, message: progress_messages.append(message),
+        )
+        reported_events: list[tuple[tuple, dict]] = []
+        reporting_service = StorageMigrationService(
+            self._build_layout(),
+            reporter=lambda *args, **kwargs: reported_events.append((args, kwargs)),
+        )
+        reporting_service._report("storage.test", "message", level="unknown", path=self.db_path)
+        self.assertEqual(reported_events[0][0], ("storage.test", "message"))
+        self.assertEqual(reported_events[0][1]["level"], 20)
+
+        def raising_progress(_value, _maximum, _message):
+            raise RuntimeError("progress sink failed")
+
+        StorageMigrationService(
+            self._build_layout(),
+            progress_reporter=raising_progress,
+        )._progress(1, 2, "ignored")
+
+        self.assertEqual(
+            service._find_legacy_references(
+                None,
+                self.target_root,
+                progress_value=1,
+                label="target",
+            ),
+            (),
+        )
+        reference_root = self.root / "reference-target"
+        (reference_root / "history").mkdir(parents=True)
+        (reference_root / "backups").mkdir()
+        (reference_root / "history" / "session_history.json").write_text(
+            json.dumps({"path": str(self.source_root / "Database" / "library.db")}),
+            encoding="utf-8",
+        )
+        (reference_root / "history" / "manual.snapshot.json").write_text(
+            json.dumps({"path": str(self.source_root / "history" / "snap.db")}),
+            encoding="utf-8",
+        )
+        (reference_root / "backups" / "manual.backup.json").write_text(
+            json.dumps({"path": str(self.source_root / "backups" / "backup.db")}),
+            encoding="utf-8",
+        )
+        references = service._find_legacy_references(
+            self.source_root,
+            reference_root,
+            progress_value=1,
+            label="target",
+        )
+        self.assertEqual(len(references), 3)
+        self.assertEqual(
+            service._verify_target_databases(
+                self.root / "no-databases",
+                progress_value=3,
+            ),
+            (),
+        )
+        self.assertTrue(
+            any(message.startswith("No storage databases found") for message in progress_messages)
+        )
+        service._activate_target_root(self.target_root)
+
+        plain_db = self.root / "plain.db"
+        sqlite3.connect(str(plain_db)).close()
+        self.assertFalse(service._database_contains_legacy_reference(plain_db, self.source_root))
+        self.assertTrue(service._database_contains_legacy_reference(self.db_path, self.source_root))
+
+        target_db = self.root / "target-existing.db"
+        sqlite3.connect(str(target_db)).close()
+        source_db = self.root / "source-copy.db"
+        source_conn = sqlite3.connect(str(source_db))
+        try:
+            source_conn.execute("CREATE TABLE CopyProof(value TEXT)")
+            source_conn.execute("INSERT INTO CopyProof(value) VALUES ('fresh')")
+            source_conn.commit()
+        finally:
+            source_conn.close()
+
+        StorageMigrationService._copy_sqlite_database(source_db, target_db)
+        copied_conn = sqlite3.connect(str(target_db))
+        try:
+            self.assertEqual(
+                copied_conn.execute("SELECT value FROM CopyProof").fetchone()[0], "fresh"
+            )
+        finally:
+            copied_conn.close()
+
+        integrity_db = self.root / "integrity.db"
+        sqlite3.connect(str(integrity_db)).close()
+        with mock.patch.object(
+            service,
+            "_run_integrity_check_with_progress",
+            return_value=("not ok",),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Integrity check failed"):
+                service._verify_target_databases(
+                    integrity_db.parent,
+                    progress_value=10,
+                    progress_end=12,
+                )
+
+        self.assertEqual(
+            service._adoption_inventory_count(
+                None,
+                [],
+                {"source_inventory_count": "not-an-int"},
+                progress_value=1,
+            ),
+            0,
+        )
+        self.assertGreater(
+            service._adoption_inventory_count(
+                self.source_root,
+                ["Database"],
+                {},
+                progress_value=1,
+            ),
+            0,
+        )
+        self.assertEqual(
+            service._resolve_source_root(
+                self._build_inspection(journal_source_root=self.source_root)
+            ),
+            self.source_root.resolve(),
+        )
+        self.assertEqual(service._present_items(None), ())
+        self.assertEqual(
+            service._source_inventory(
+                self.source_root,
+                ["catalog-path.txt"],
+                progress_value=1,
+                label="legacy",
+            ),
+            (),
+        )
+        single_file = self.source_root / "catalog-path.txt"
+        single_file.write_text("file", encoding="utf-8")
+        self.assertEqual(
+            service._source_inventory(
+                self.source_root,
+                ["catalog-path.txt"],
+                progress_value=1,
+                label="legacy",
+            ),
+            ("catalog-path.txt",),
+        )
+        service._clear_safe_target_noise(self.root / "missing-safe-root")
+        settings_service = self._build_service()
+        settings_service.mark_complete()
+        self.assertEqual(
+            self.settings.value("storage/legacy_data_root", "", str),
+            str(self.source_root.resolve()),
+        )
+        settings_service.mark_failed(self.source_root)
+        self.assertEqual(self.settings.value("storage/migration_state", "", str), "failed")
+        settings_service._rewrite_settings_paths(None, self.target_root)
+        self.assertEqual(
+            self.settings.value("storage/active_data_root", "", str),
+            str(self.target_root.resolve()),
+        )
+        service._rewrite_settings_paths(self.source_root, self.target_root)
+
+        stage_root = self.root / "promote-stage"
+        target_root = self.root / "empty-promote-target"
+        stage_root.mkdir()
+        target_root.mkdir()
+        (stage_root / "file.txt").write_text("promoted", encoding="utf-8")
+        StorageMigrationService._promote_stage_root(stage_root, target_root)
+        self.assertEqual((target_root / "file.txt").read_text(encoding="utf-8"), "promoted")
+
+        with mock.patch.object(Path, "rmdir", side_effect=OSError):
+            StorageMigrationService._remove_empty_stage_container(self.root / "non-removable")
+
+        with mock.patch.object(Path, "resolve", side_effect=RuntimeError("bad path")):
+            self.assertEqual(StorageMigrationService._display_path(Path("broken")), "broken")
+            self.assertIsNone(StorageMigrationService._journal_path_value("broken"))
+            self.assertFalse(
+                StorageMigrationService._string_points_into_root(
+                    str(self.source_root / "Database"),
+                    self.source_root,
+                )
+            )
+        self.assertTrue(StorageMigrationService._is_safe_noise_path(Path()))
+        self.assertFalse(StorageMigrationService._string_points_into_root("", self.source_root))
+        self.assertEqual(StorageMigrationService._loads(None), {})
 
 
 if __name__ == "__main__":

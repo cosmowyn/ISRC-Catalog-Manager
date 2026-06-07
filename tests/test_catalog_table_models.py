@@ -3,8 +3,11 @@ import unittest
 from tests.qt_test_helpers import pump_events, require_qapplication
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QModelIndex, Qt
+    from PySide6.QtGui import QStandardItemModel
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    QModelIndex = None
+    QStandardItemModel = None
     Qt = None
     QT_IMPORT_ERROR = exc
 else:
@@ -21,6 +24,8 @@ from isrc_manager.catalog_table.models import (
     SearchTextRole,
     SortRole,
     TrackIdRole,
+    comparison_sort_key,
+    natural_sort_key,
 )
 from isrc_manager.catalog_table.table_model import CatalogTableModel
 
@@ -107,6 +112,61 @@ class CatalogTableModelTests(unittest.TestCase):
         if Qt is None:
             raise unittest.SkipTest(f"PySide6 Qt unavailable: {QT_IMPORT_ERROR}")
         self.model = CatalogTableModel(snapshot=_build_snapshot())
+
+    def test_sort_key_and_snapshot_value_objects_cover_validation_edges(self):
+        class NamedObject:
+            def __str__(self):
+                return "Object 12"
+
+        self.assertEqual(comparison_sort_key(None), (4, ()))
+        self.assertEqual(comparison_sort_key(True), (0, 1))
+        self.assertEqual(comparison_sort_key(12.5), (0, 12.5))
+        self.assertEqual(comparison_sort_key("Track 10"), (1, natural_sort_key("Track 10")))
+        self.assertEqual(
+            comparison_sort_key(("A2", None)),
+            (2, (comparison_sort_key("A2"), comparison_sort_key(None))),
+        )
+        self.assertEqual(
+            comparison_sort_key(["B1", False]),
+            (2, (comparison_sort_key("B1"), comparison_sort_key(False))),
+        )
+        self.assertEqual(comparison_sort_key(NamedObject()), (3, natural_sort_key("Object 12")))
+
+        with self.assertRaisesRegex(ValueError, "column keys"):
+            CatalogColumnSpec(key="  ", header_text="Title")
+        with self.assertRaisesRegex(ValueError, "column headers"):
+            CatalogColumnSpec(key="title", header_text="")
+
+        spec = CatalogColumnSpec(
+            key=" title ",
+            header_text=" Title ",
+            legacy_header_labels=(" Old Title ", "", "Alt"),
+            notes=" Primary title ",
+        )
+        self.assertEqual(spec.key, "title")
+        self.assertEqual(spec.header_text, "Title")
+        self.assertEqual(spec.all_header_labels, ("Title", "Old Title", "Alt"))
+        self.assertEqual(spec.notes, "Primary title")
+
+        with self.assertRaisesRegex(ValueError, "row cells"):
+            CatalogRowSnapshot(track_id="5", cells_by_key={" ": "bad"})
+
+        row = CatalogRowSnapshot(track_id="5", cells_by_key={" title ": "Orbit"})
+        self.assertEqual(row.track_id, 5)
+        self.assertEqual(row.cell("title").display_text, "Orbit")
+
+        snapshot = CatalogSnapshot(
+            column_specs=(spec,),
+            rows=(row,),
+            metadata={"source": "unit-test"},
+        )
+        self.assertEqual(CatalogSnapshot.empty().column_keys, ())
+        self.assertEqual(snapshot.column_keys, ("title",))
+        self.assertEqual(snapshot.column_index("title"), 0)
+        self.assertIsNone(snapshot.column_index("missing"))
+        self.assertIs(snapshot.column_spec("title"), spec)
+        self.assertIsNone(snapshot.column_spec("missing"))
+        self.assertEqual(snapshot.metadata, {"source": "unit-test"})
 
     def test_snapshot_rejects_duplicate_column_keys_and_track_ids(self):
         with self.assertRaises(ValueError):
@@ -196,6 +256,35 @@ class CatalogTableModelTests(unittest.TestCase):
         self.assertEqual(self.model.track_id_for_source_row(0), 999)
         self.assertEqual(self.model.source_row_for_track_id(999), 0)
 
+    def test_model_guard_paths_for_invalid_indexes_headers_and_empty_snapshots(self):
+        parent_index = self.model.index(0, 0)
+        self.assertEqual(self.model.rowCount(parent_index), 0)
+        self.assertEqual(self.model.columnCount(parent_index), 0)
+        self.assertIsNone(self.model.data(QModelIndex()))
+        self.assertIsNone(self.model.data(self.model.createIndex(99, 0)))
+        self.assertIsNone(self.model.data(self.model.createIndex(0, 99)))
+
+        self.assertIsNone(self.model.headerData(0, Qt.Orientation.Vertical))
+        self.assertIsNone(self.model.headerData(99, Qt.Orientation.Horizontal))
+        self.assertIsNone(
+            self.model.headerData(
+                0,
+                Qt.Orientation.Horizontal,
+                int(Qt.ItemDataRole.DecorationRole),
+            )
+        )
+        self.assertIsNone(self.model.column_spec(-1))
+        self.assertIsNone(self.model.track_id_for_source_row(-1))
+        self.assertIsNone(self.model.track_id_for_source_row(99))
+        self.assertIn(SortRole, self.model.roleNames())
+        self.assertEqual(self.model.roleNames()[RawValueRole], b"rawValue")
+
+        self.model.set_snapshot(None)
+
+        self.assertEqual(self.model.rowCount(), 0)
+        self.assertEqual(self.model.columnCount(), 0)
+        self.assertIsNone(self.model.source_row_for_track_id(101))
+
 
 class CatalogFilterProxyModelTests(unittest.TestCase):
     @classmethod
@@ -252,6 +341,120 @@ class CatalogFilterProxyModelTests(unittest.TestCase):
         self.proxy.set_explicit_track_ids(None)
         pump_events(app=self.app)
         self.assertEqual(self._proxy_track_ids(), [101, 102, 103])
+
+    def test_proxy_edge_guards_legacy_invalidation_and_source_model_absence(self):
+        if QModelIndex is None or QStandardItemModel is None:
+            raise unittest.SkipTest(f"PySide6 Qt unavailable: {QT_IMPORT_ERROR}")
+
+        class LegacyInvalidationProxy(CatalogFilterProxyModel):
+            beginFilterChange = None
+            endFilterChange = None
+
+            def __init__(self):
+                super().__init__()
+                self.invalidated = 0
+
+            def invalidateFilter(self):
+                self.invalidated += 1
+                super().invalidateFilter()
+
+        legacy_proxy = LegacyInvalidationProxy()
+        legacy_proxy.set_search_text(" legacy ")
+        self.assertEqual(legacy_proxy.search_text(), "legacy")
+        self.assertEqual(legacy_proxy.invalidated, 1)
+        legacy_proxy.set_search_text("legacy")
+        self.assertEqual(legacy_proxy.invalidated, 1)
+        legacy_proxy.set_search_column_key("title")
+        self.assertEqual(legacy_proxy.search_column_key(), "title")
+        legacy_proxy.set_search_column_key(" title ")
+        self.assertEqual(legacy_proxy.invalidated, 2)
+
+        self.proxy.set_explicit_track_ids(["bad", object(), -1, 101])
+        self.assertEqual(self.proxy.explicit_track_ids(), frozenset({101}))
+        self.proxy.set_explicit_track_ids([101])
+
+        no_source_proxy = CatalogFilterProxyModel()
+        self.assertFalse(no_source_proxy.filterAcceptsRow(0, QModelIndex()))
+        self.assertFalse(no_source_proxy.lessThan(QModelIndex(), QModelIndex()))
+        self.assertIsNone(no_source_proxy._track_id_for_source_row(0, source_parent=QModelIndex()))
+        self.assertEqual(no_source_proxy._searchable_source_columns(), ())
+        self.assertIsNone(no_source_proxy._source_column_for_key("title"))
+
+        standard_model = QStandardItemModel(1, 2)
+        no_spec_proxy = CatalogFilterProxyModel()
+        no_spec_proxy.setSourceModel(standard_model)
+        self.assertEqual(no_spec_proxy._searchable_source_columns(), (0, 1))
+        self.assertIsNone(no_spec_proxy._source_column_for_key(""))
+        self.assertIsNone(no_spec_proxy._source_column_for_key("missing"))
+
+    def test_proxy_less_than_uses_track_id_and_row_tie_breakers(self):
+        equal_display_snapshot = CatalogSnapshot(
+            column_specs=(CatalogColumnSpec(key="title", header_text="Title"),),
+            rows=(
+                CatalogRowSnapshot(
+                    track_id=20,
+                    cells_by_key={
+                        "title": CatalogCellValue(
+                            display_text="Same",
+                            search_text="Same",
+                            sort_value="Same",
+                        )
+                    },
+                ),
+                CatalogRowSnapshot(
+                    track_id=10,
+                    cells_by_key={
+                        "title": CatalogCellValue(
+                            display_text="Same",
+                            search_text="Same",
+                            sort_value="Same",
+                        )
+                    },
+                ),
+            ),
+        )
+        model = CatalogTableModel(snapshot=equal_display_snapshot)
+        proxy = CatalogFilterProxyModel()
+        proxy.setSourceModel(model)
+
+        self.assertFalse(proxy.lessThan(model.index(0, 0), model.index(1, 0)))
+        self.assertTrue(proxy.lessThan(model.index(1, 0), model.index(0, 0)))
+
+        class EqualTrackIdModel(CatalogTableModel):
+            def data(self, index, role=int(Qt.ItemDataRole.DisplayRole)):
+                if role == TrackIdRole:
+                    return 5
+                return super().data(index, role)
+
+        equal_track_snapshot = CatalogSnapshot(
+            column_specs=(CatalogColumnSpec(key="title", header_text="Title"),),
+            rows=(
+                CatalogRowSnapshot(
+                    track_id=5,
+                    cells_by_key={"title": CatalogCellValue(display_text="Same")},
+                ),
+                CatalogRowSnapshot(
+                    track_id=6,
+                    cells_by_key={"title": CatalogCellValue(display_text="Same")},
+                ),
+            ),
+        )
+        equal_track_model = EqualTrackIdModel(snapshot=equal_track_snapshot)
+        equal_track_proxy = CatalogFilterProxyModel()
+        equal_track_proxy.setSourceModel(equal_track_model)
+
+        self.assertTrue(
+            equal_track_proxy.lessThan(
+                equal_track_model.index(0, 0),
+                equal_track_model.index(1, 0),
+            )
+        )
+        self.assertFalse(
+            equal_track_proxy.lessThan(
+                equal_track_model.index(1, 0),
+                equal_track_model.index(0, 0),
+            )
+        )
 
 
 if __name__ == "__main__":

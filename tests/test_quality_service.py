@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
 from isrc_manager.contracts import ContractPayload, ContractService
@@ -129,6 +130,155 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.assertIn("broken_media_reference", issue_types)
         self.assertIn("broken_release_artwork_reference", issue_types)
         self.assertIn("missing_required_custom_field", issue_types)
+
+    def test_scan_reports_metadata_ordering_and_custom_field_edge_issues(self):
+        first_track_id = self._create_track(isrc="NL-ABC-26-00401", title="First Edge")
+        second_track_id = self._create_track(isrc="NL-ABC-26-00402", title="Second Edge")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_upd")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_releases_reldate_check_ins")
+        self.conn.execute("DROP TRIGGER IF EXISTS trg_releases_reldate_check_upd")
+        self.conn.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
+        self.conn.execute("DROP INDEX IF EXISTS idx_tracks_isrc_compact_unique")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET track_title='',
+                main_artist_party_id=0,
+                isrc='NL-ABC-26-00499',
+                isrc_compact='STALE',
+                release_date='31/31/2026',
+                audio_file_path='database/audio.wav',
+                audio_file_storage_mode='database'
+            WHERE id=?
+            """,
+            (first_track_id,),
+        )
+        self.conn.execute(
+            "UPDATE Tracks SET isrc='NL-ABC-26-00499' WHERE id=?",
+            (second_track_id,),
+        )
+
+        duplicate_order_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Ordering Edge",
+                primary_artist="Moonwake",
+                release_type="album",
+                release_date="2026-03-15",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=first_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.conn.execute("DROP INDEX IF EXISTS idx_release_tracks_order_unique")
+        self.conn.execute(
+            """
+            INSERT INTO ReleaseTracks(release_id, track_id, disc_number, track_number, sequence_number)
+            VALUES (?, ?, 1, 1, 2)
+            """,
+            (duplicate_order_release_id, second_track_id),
+        )
+
+        first_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Edge A",
+                primary_artist="Moonwake",
+                release_type="album",
+                release_date="2026-03-15",
+                catalog_number="EDGE-CAT",
+            )
+        )
+        second_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Edge B",
+                primary_artist="Moonwake",
+                release_type="album",
+                release_date="2026-03-15",
+                catalog_number="EDGE-CAT",
+            )
+        )
+        checksum_release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Edge Checksum",
+                primary_artist="Moonwake",
+                release_type="single",
+                release_date="2026-03-15",
+            )
+        )
+        self.conn.execute(
+            """
+            UPDATE Releases
+            SET title='',
+                primary_artist='',
+                release_date='not-a-date',
+                upc='12345',
+                barcode_validation_status='stale',
+                artwork_path=''
+            WHERE id=?
+            """,
+            (first_release_id,),
+        )
+        self.conn.execute(
+            "UPDATE Releases SET upc='036000291453', barcode_validation_status='stale' WHERE id=?",
+            (checksum_release_id,),
+        )
+        self.conn.execute(
+            "UPDATE Releases SET artwork_path='database/cover.jpg', artwork_storage_mode='database' WHERE id=?",
+            (second_release_id,),
+        )
+
+        self.conn.execute("""
+            INSERT INTO CustomFieldDefs(name, field_type, options, active)
+            VALUES ('Malformed Options', 'text', '{', 1)
+            """)
+        blob_field = self.custom_defs.ensure_fields(
+            [
+                {
+                    "name": "Required Image",
+                    "field_type": "blob_image",
+                    "options": json.dumps({"required": True}),
+                }
+            ]
+        )[0]
+        self.assertEqual(blob_field["field_type"], "blob_image")
+
+        result = self.service.scan()
+        issue_types = {issue.issue_type for issue in result.issues}
+
+        self.assertIn("missing_track_title", issue_types)
+        self.assertIn("missing_primary_artist", issue_types)
+        self.assertIn("invalid_track_release_date", issue_types)
+        self.assertIn("derived_isrc_compact_out_of_sync", issue_types)
+        self.assertIn("duplicate_isrc", issue_types)
+        self.assertIn("missing_release_title", issue_types)
+        self.assertIn("missing_release_primary_artist", issue_types)
+        self.assertIn("invalid_release_date", issue_types)
+        self.assertIn("invalid_release_upc_format", issue_types)
+        self.assertIn("invalid_release_upc_checksum", issue_types)
+        self.assertIn("release_barcode_status_out_of_sync", issue_types)
+        self.assertIn("duplicate_release_catalog_number", issue_types)
+        self.assertIn("disc_track_conflict", issue_types)
+        self.assertIn("missing_required_custom_field", issue_types)
+        self.assertFalse(
+            any(
+                issue.issue_type == "broken_media_reference" and issue.track_id == first_track_id
+                for issue in result.issues
+            )
+        )
+        self.assertFalse(
+            any(
+                issue.issue_type == "broken_release_artwork_reference"
+                and issue.release_id == second_release_id
+                for issue in result.issues
+            )
+        )
 
     def test_normalize_dates_fix_updates_invalid_values(self):
         track_id = self._create_track(isrc="NL-ABC-26-00001")
@@ -478,6 +628,69 @@ class QualityDashboardServiceTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(message, "Relinked 0 media reference(s).")
         self.assertEqual(row, ("media/existing.wav", "missing/no-match.jpg"))
+
+    def test_quality_helper_edges_and_generic_relink_scope(self):
+        self.assertFalse(self.service._releases_share_linked_album([999]))
+        no_root_service = QualityDashboardService(
+            self.conn,
+            track_service=self.track_service,
+            release_service=self.release_service,
+            data_root=None,
+        )
+        self.assertIsNone(no_root_service._find_media_by_name("audio.wav"))
+
+        track_id = self._create_track(isrc="NL-ABC-26-00308", title="Generic Relink")
+        recovered = self.data_root / "generic-recovered"
+        recovered.mkdir()
+        (recovered / "audio.wav").write_bytes(b"audio")
+        (recovered / "cover.jpg").write_bytes(b"cover")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET audio_file_path='missing/audio.wav', album_art_path='missing/cover.jpg'
+            WHERE id=?
+            """,
+            (track_id,),
+        )
+
+        message = self.service.apply_fix(
+            "relink_media",
+            issue=QualityIssue(
+                "broken_media_reference",
+                "error",
+                "Broken Track Media Reference",
+                "Both track media fields should be considered.",
+                "track",
+                track_id,
+                track_id=track_id,
+                fix_key="relink_media",
+            ),
+        )
+
+        row = self.conn.execute(
+            "SELECT audio_file_path, album_art_path FROM Tracks WHERE id=?",
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(message, "Relinked 2 media reference(s).")
+        self.assertEqual(row, ("generic-recovered/audio.wav", "generic-recovered/cover.jpg"))
+
+        work_id = self.work_service.create_work(WorkPayload(title="Missing Detail Work"))
+        with mock.patch.object(self.service.work_service, "fetch_work_detail", return_value=None):
+            self.assertFalse(
+                any(issue.entity_id == work_id for issue in self.service._work_issues())
+            )
+
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(title="Missing Detail Contract", status="draft")
+        )
+        with mock.patch.object(
+            self.service.contract_service,
+            "fetch_contract_detail",
+            return_value=None,
+        ):
+            self.assertFalse(
+                any(issue.entity_id == contract_id for issue in self.service._contract_issues())
+            )
 
     def test_fill_from_release_populates_blank_track_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00002")

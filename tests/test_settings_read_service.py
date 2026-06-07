@@ -217,6 +217,101 @@ class SettingsReadServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.load_owner_party_settings(), OwnerPartySettings())
 
+    def test_owner_profile_payload_and_invalid_profile_int_fallbacks(self):
+        self.assertEqual(
+            OwnerPartySettings(
+                party_id=42,
+                legal_name=" Moonwake Records ",
+                email=" hello@moonwake.test ",
+            ).to_profile_payload()["party_id"],
+            "42",
+        )
+        payload = OwnerPartySettings(legal_name=" Moonwake Records ").to_profile_payload()
+        self.assertEqual(payload["party_id"], "")
+        self.assertEqual(payload["legal_name"], "Moonwake Records")
+
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                ("owner_party_id", "not-an-int"),
+            )
+        self.assertIsNone(self.service.load_owner_party_id())
+
+        with self.conn:
+            self.conn.execute(
+                "UPDATE app_kv SET value=? WHERE key=?",
+                ("0", "owner_party_id"),
+            )
+        self.assertIsNone(self.service.load_owner_party_id())
+
+    def test_owner_party_binding_falls_back_for_malformed_rows_and_missing_party(self):
+        with self.conn:
+            self.conn.execute("DROP TABLE IF EXISTS ApplicationOwnerBinding")
+            self.conn.execute(
+                "CREATE TABLE ApplicationOwnerBinding(id INTEGER PRIMARY KEY, bad INTEGER)"
+            )
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                ("owner_party_id", "77"),
+            )
+
+        self.assertEqual(self.service.load_owner_party_id(), 77)
+        self.assertEqual(self.service.load_owner_party_settings(), OwnerPartySettings())
+
+        with self.conn:
+            self.conn.execute("DROP TABLE ApplicationOwnerBinding")
+            self.conn.execute(
+                "CREATE TABLE ApplicationOwnerBinding(id INTEGER PRIMARY KEY, party_id TEXT)"
+            )
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES(1, ?)",
+                ("not-an-int",),
+            )
+            self.conn.execute(
+                "UPDATE app_kv SET value=? WHERE key=?",
+                ("78", "owner_party_id"),
+            )
+
+        self.assertEqual(self.service.load_owner_party_id(), 78)
+
+    def test_party_backed_registration_numbers_override_legacy_singletons(self):
+        with self.conn:
+            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", (" LEGACY-BTW ",))
+            self.conn.execute(
+                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
+                (" LEGACY-PRO ", " LEGACY-IPI "),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO Parties(id, legal_name, vat_number, pro_number, ipi_cae)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (11, "Moonwake Records", " PARTY-VAT ", " PARTY-PRO ", " PARTY-IPI "),
+            )
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    party_id INTEGER NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+                )
+                """)
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES (1, ?)",
+                (11,),
+            )
+
+        self.assertEqual(self.service.load_btw_number(), "PARTY-VAT")
+        self.assertEqual(self.service.load_buma_relatie_nummer(), "PARTY-PRO")
+        self.assertEqual(self.service.load_buma_ipi(), "PARTY-IPI")
+
+        broken_conn = sqlite3.connect(":memory:")
+        try:
+            self.assertIsNone(SettingsReadService(broken_conn)._load_owner_party_from_record(1))
+        finally:
+            broken_conn.close()
+
     def test_load_owner_party_settings_prefers_linked_party_when_owner_party_binding_exists(self):
         with self.conn:
             self.conn.execute(

@@ -11,6 +11,9 @@ class RightsServiceTests(ContractRightsAssetServiceTestCase):
     test_explicit_ownership_ledgers_override_inferred_control = (
         ContractRightsAssetServiceTestCase.case_explicit_ownership_ledgers_override_inferred_control
     )
+    test_rights_validation_normalization_and_conflict_skip_branches = (
+        ContractRightsAssetServiceTestCase.case_rights_validation_normalization_and_conflict_skip_branches
+    )
 
 
 del ContractRightsAssetServiceTestCase

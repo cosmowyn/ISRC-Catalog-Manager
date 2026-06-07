@@ -5729,3 +5729,1461 @@ Results:
 
 ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
 coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.54 - Media, Mapping, Header, and Blob Icon Branch Coverage
+
+Timestamp: `2026-06-07`
+
+This continuation resumed from the lowest modules in the authoritative `coverage.json` report and
+focused on compact, behaviour-heavy branch gaps. The batch expanded meaningful tests for media
+player preview fallbacks, catalog audio export workflows, conversion mapping semantics, party
+authority notifications, catalog header-state compatibility, application sound normalization, and
+blob icon serialization/editor state.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `92.85322108345534%`.
+- Statement coverage: `94.98294485503126%`.
+- Branch coverage: `85.61654861558274%`.
+- Combined covered points: `101470 / 109280`.
+- Full pytest result: `2997 passed`, `23 skipped`, `834 warnings`, `126 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/media/player_controller.py`: `97.17171717171718%`.
+- `isrc_manager/media/export_controller.py`: `95.44764795144158%`.
+- `isrc_manager/conversion/mapping.py`: `96.53465346534654%`.
+- `isrc_manager/parties/authority.py`: `100.0%`.
+- `isrc_manager/catalog_table/header_state.py`: `99.33333333333333%`.
+- `isrc_manager/blob_icons.py`: `95.69313593539704%`.
+- `isrc_manager/app_sounds.py`: `100.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/contracts/service.py`: `84.41%`.
+- `isrc_manager/media/audio_visualization.py`: `85.30%`.
+- `isrc_manager/exchange/dialogs.py`: `85.60%`.
+- `isrc_manager/history/session_manager.py`: `85.64%`.
+- `isrc_manager/services/license_migration.py`: `85.71%`.
+- `isrc_manager/exchange/controller.py`: `85.75%`.
+- `isrc_manager/catalog_table/table_model.py`: `85.95%`.
+- `isrc_manager/media/waveform.py`: `86.03%`.
+
+### Tests added or expanded
+
+- `tests/test_media_player_controller.py`: root helper lookup/configuration, preview blob error
+  fallbacks, no-service audio-preview state, reused image/audio dialogs, album query fallback and
+  DB-error paths, standard/custom payload checks, default-track fallback exhaustion, and window
+  activation exception handling.
+- `tests/test_media_export_controller.py`: root export hooks, MIME extension fallbacks,
+  deduplicated destinations, catalog audio copy preview/export callback flow, worker payload
+  validation, audit/log success path, focused media export cancellation/no-export paths, proxy
+  ordering, focused column discovery, and basename/custom-field naming fallbacks.
+- `tests/test_conversion_mapping_sounds_authority.py`: conversion field normalization,
+  transform listing, mapping resolution for constant/skip/unmapped kinds, non-empty and late
+  non-empty samples, exact/alias/date suggestions, app sound alias/default normalization, and
+  party authority singleton signal emission.
+- `tests/test_catalog_table_header_zoom.py`: no-settings default-hidden fallback, prefix
+  normalization, JSON/list/dict/invalid payload loading, native-state restoration from legacy
+  labels, and key/legacy hidden-column visibility restore.
+- `tests/test_blob_icons.py`: invalid JSON/image normalization, empty-image inheritance,
+  image payload dimension coercion failures, decode-by-path and non-image decode behavior, PNG
+  encode error handling, signal wrapper retention, system-icon no-style fallback, image icon
+  scaling, and image editor current-spec/choose/clear state transitions.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_player_controller.py tests/test_conversion_mapping_sounds_authority.py tests/test_catalog_table_header_zoom.py tests/test_media_export_controller.py tests/test_blob_icons.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_media_player_controller.py tests/test_conversion_mapping_sounds_authority.py tests/test_catalog_table_header_zoom.py tests/test_media_export_controller.py tests/test_blob_icons.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/player_controller.py,isrc_manager/conversion/mapping.py,isrc_manager/parties/authority.py,isrc_manager/app_sounds.py,isrc_manager/catalog_table/header_state.py,isrc_manager/media/export_controller.py,isrc_manager/blob_icons.py' -m --fail-under=90
+python3 -m black tests/test_conversion_mapping_sounds_authority.py tests/test_media_player_controller.py tests/test_catalog_table_header_zoom.py tests/test_media_export_controller.py tests/test_blob_icons.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check --fix tests/test_conversion_mapping_sounds_authority.py tests/test_media_export_controller.py
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`64 passed`).
+- Focused target-module coverage: passed (`93%` combined across the seven targeted modules).
+- Compileall: passed.
+- Ruff: passed after Ruff fixed one import-order issue in
+  `tests/test_conversion_mapping_sounds_authority.py`.
+- Black check: passed after formatting the touched tests.
+- Full production-scope pytest/coverage: passed (`2997 passed`, `23 skipped`, `834 warnings`,
+  `126 subtests passed in 723.91s`; required coverage of `90%` reached at `92.85%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.55 - Contract, Audio Visualization, and License Migration Branch Coverage
+
+This continuation kept following the branch-aware low-module queue after Checkpoint 4.54. The
+batch targeted production modules that were still below 90% in the authoritative report and added
+behavioural tests for registry/document edge cases, live audio visualization state machines and
+decoder fallback paths, and legacy license migration safety rails.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.0517935578331%`.
+- Statement coverage: `95.12862421830586%`.
+- Branch coverage: `85.99484867997424%`.
+- Combined covered points: `101687 / 109280`.
+- Full pytest result: `3007 passed`, `23 skipped`, `746 warnings`, `131 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/contracts/service.py`: `93.64896073903002%`.
+- `isrc_manager/media/audio_visualization.py`: `93.83445945945945%`.
+- `isrc_manager/services/license_migration.py`: `96.04863221884499%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/exchange/dialogs.py`: `85.60%`.
+- `isrc_manager/history/session_manager.py`: `85.64%`.
+- `isrc_manager/exchange/controller.py`: `85.75%`.
+- `isrc_manager/catalog_table/table_model.py`: `85.95%`.
+- `isrc_manager/media/waveform.py`: `86.03%`.
+- `isrc_manager/update_handoff.py`: `86.10%`.
+- `isrc_manager/update_installer.py`: `86.10%`.
+- `isrc_manager/rights/service.py`: `86.15%`.
+
+### Tests added or expanded
+
+- `tests/catalog/test_contract_service.py`: registry-unavailable schema and assignment branches,
+  registry generation/capture validation paths, external/manual identifier resolution, SHA key
+  registry generation, explicit-cursor creation, document storage payloads, managed/database
+  conversion verification failures, and idempotent cleanup branches.
+- `tests/test_media_waveform_clusters.py`: peak meter floor/release/formatting boundaries,
+  spectrum graph context-menu/frequency/fade/rendering boundaries, empty/unsupported/silent WAV
+  decoder cases, soundfile fallback decoding, missing numpy handling, and platform-specific ffmpeg
+  discovery fallback paths.
+- `tests/test_legacy_license_migration_service.py`: existing-party reuse with migration progress
+  callbacks, unused-licensee cleanup when no legacy license rows remain, truncated blocked-migration
+  issue reporting, and post-create contract integrity failures for missing detail, missing document,
+  checksum mismatch, and content mismatch.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/catalog/test_contract_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_waveform_clusters.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_legacy_license_migration_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/catalog/test_contract_service.py tests/test_media_waveform_clusters.py tests/test_legacy_license_migration_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/contracts/service.py,isrc_manager/media/audio_visualization.py,isrc_manager/services/license_migration.py' -m --fail-under=90
+python3 -m black tests/catalog/test_contract_service.py tests/test_media_waveform_clusters.py tests/test_legacy_license_migration_service.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`54 passed`).
+- Focused target-module coverage: passed (`93%` combined across the three targeted modules).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed after formatting the three touched test files.
+- Full production-scope pytest/coverage: passed (`3007 passed`, `23 skipped`, `746 warnings`,
+  `131 subtests passed in 711.66s`; required coverage of `90%` reached at `93.05%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.56 - Exchange, Session History, and Catalog Table Branch Coverage
+
+This continuation kept following the authoritative low-module queue after Checkpoint 4.55. The
+batch focused on meaningful branch coverage for exchange import dialogs, app-level session history
+state recovery, exchange import/export controller preflight flows, and the pure catalog table
+model guard paths.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.21284773060029%`.
+- Statement coverage: `95.2541690354368%`.
+- Branch coverage: `86.27656149388281%`.
+- Combined covered points: `101863 / 109280`.
+- Full pytest result: `3020 passed`, `23 skipped`, `782 warnings`, `131 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/exchange/dialogs.py`: `98.2200647249191%`.
+- `isrc_manager/history/session_manager.py`: `95.85635359116022%`.
+- `isrc_manager/exchange/controller.py`: `96.6321243523316%`.
+- `isrc_manager/catalog_table/table_model.py`: `100.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/media/waveform.py`: `86.03%`.
+- `isrc_manager/update_handoff.py`: `86.10%`.
+- `isrc_manager/update_installer.py`: `86.10%`.
+- `isrc_manager/rights/service.py`: `86.15%`.
+- `isrc_manager/services/gs1_excel.py`: `86.29%`.
+- `isrc_manager/catalog_table/workflow.py`: `86.48%`.
+- `isrc_manager/contract_templates/form_service.py`: `86.56%`.
+- `isrc_manager/contract_templates/parser.py`: `86.67%`.
+
+### Tests added or expanded
+
+- `tests/test_exchange_dialogs.py`: malformed saved preferences, non-CSV helper guard paths,
+  mapping preset warning/save/reload behavior, invalid preset entry no-ops, CSV delimiter handling
+  without a reinspect callback, CSV reinspect failures, missing table item guards, and empty
+  identifier review value handling.
+- `tests/test_session_history_manager.py`: empty/no-op undo/redo behavior, same-profile switch
+  no-op, missing snapshot capture failures, nonreversible redo candidate skipping, wrong-parent
+  redo rejection, remove-profile reload variants, unknown session action errors, stale current-entry
+  invariant repair, snapshot reference fallback paths, and profile bundle companion restore.
+- `tests/test_exchange_controller.py`: XML exchange inspection missing-preview failure, rejected
+  import dialog no-op, CSV reinspect callback wiring, XML apply after accepted preflight review,
+  nonfatal commit failure during applied import cleanup, no-created/updated focus fallback, XLSX and
+  ZIP package preflight workers, and expanded import report detail text.
+- `tests/test_catalog_table_models.py`: parent-index row/column guards, invalid and forced
+  out-of-range indexes, vertical/unsupported header roles, invalid column/source row lookups,
+  role-name exposure, and resetting the model to an empty snapshot.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_exchange_dialogs.py tests/test_session_history_manager.py tests/test_exchange_controller.py tests/test_catalog_table_models.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_exchange_dialogs.py tests/test_session_history_manager.py tests/test_exchange_controller.py tests/test_catalog_table_models.py --no-cov
+python3 -m coverage report --include='isrc_manager/exchange/dialogs.py,isrc_manager/history/session_manager.py,isrc_manager/exchange/controller.py,isrc_manager/catalog_table/table_model.py' -m --fail-under=90
+python3 -m black tests/test_exchange_dialogs.py tests/test_session_history_manager.py tests/test_exchange_controller.py tests/test_catalog_table_models.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`53 passed`, with the expected Qt deprecation warnings from the
+  existing `QSortFilterProxyModel.invalidateFilter()` fallback coverage).
+- Focused target-module coverage: passed (`97%` combined across the four targeted modules).
+- Compileall: passed.
+- Ruff: passed after fixing import order in `tests/test_session_history_manager.py`.
+- Black check: passed after formatting `tests/test_session_history_manager.py`.
+- Full production-scope pytest/coverage: passed (`3020 passed`, `23 skipped`, `782 warnings`,
+  `131 subtests passed in 714.74s`; required coverage of `90%` reached at `93.21%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.57 - Waveform, Update, Rights, and GS1 Excel Branch Coverage
+
+This continuation kept following the authoritative low-module queue after Checkpoint 4.56. The
+batch focused on meaningful branch coverage for waveform rendering and decoder fallbacks, update
+backup handoff cleanup, packaged update installer safety checks, rights-service validation and
+conflict filtering, and GS1 Excel export edge cases.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.4068448023426%`.
+- Statement coverage: `95.39629524350957%`.
+- Branch coverage: `86.64681262073407%`.
+- Combined covered points: `102075 / 109280`.
+- Full pytest result: `3035 passed`, `23 skipped`, `825 warnings`, `131 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/media/waveform.py`: `94.12955465587045%`.
+- `isrc_manager/update_handoff.py`: `96.79144385026738%`.
+- `isrc_manager/update_installer.py`: `95.18716577540107%`.
+- `isrc_manager/rights/service.py`: `98.26839826839827%`.
+- `isrc_manager/services/gs1_excel.py`: `96.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/catalog_table/workflow.py`: `86.48%`.
+- `isrc_manager/contract_templates/form_service.py`: `86.56%`.
+- `isrc_manager/contract_templates/parser.py`: `86.67%`.
+- `isrc_manager/search/dialogs.py`: `86.69%`.
+- `isrc_manager/quality/dialogs.py`: `86.69%`.
+- `isrc_manager/media/derivatives.py`: `86.69%`.
+- `isrc_manager/assets/service.py`: `86.72%`.
+- `isrc_manager/exchange/repertoire_service.py`: `86.77%`.
+
+### Tests added or expanded
+
+- `tests/test_media_waveform_clusters.py`: widget guard paths, null cached-pixmap fallbacks, real
+  non-left mouse events, vertical wheel scrubbing, static waveform cache edge rendering, harmonic
+  trace guard behavior, Qt decoder sample-format branches, invalid decoder buffers, decoder error
+  fallbacks, and Windows ffmpeg binary discovery.
+- `tests/test_update_handoff.py`: malformed/non-dict state reads, missing-state no-ops, empty
+  backup-path destruction, legacy cleanup empty-version/missing-parent/self-candidate behavior,
+  cache-root missing no-op, and sibling cleanup retry behavior when a candidate cannot resolve.
+- `tests/test_update_installer.py`: oversized and failed streaming downloads, missing extraction
+  roots, installed-target fallback paths, prepared restart directory command resolution, macOS
+  helper-copy success and broken bundle failures, duplicate/special/invalid-link archive rejection,
+  archive destination conflicts, unreadable tar file entries, update cache roots, Windows detached
+  launch flags, and executable-name helper suffixes.
+- `tests/catalog/_contract_rights_asset_support.py` and `tests/catalog/test_rights_service.py`:
+  rights payload validation failures, right-type normalization, exclusive-conflict skip reasons
+  for entity/type/territory/date ranges, unsupported entity filters, invalid ownership table
+  requests, blank ownership payload skips, invalid ownership role defaults, invalid share coercion,
+  and duplicate exclusive-territory summary suppression.
+- `tests/test_gs1_excel_export_service.py`: empty export rejection, embedded-template cleanup
+  failure tolerance, append-row discovery after occupied rows, row-style cloning, row-dimension
+  cloning, invalid clone-row guards, and unknown mapped-field skips.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_waveform_clusters.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_media_waveform_clusters.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/waveform.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_update_handoff.py tests/test_update_installer.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_media_waveform_clusters.py tests/test_update_handoff.py tests/test_update_installer.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/waveform.py,isrc_manager/update_handoff.py,isrc_manager/update_installer.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/catalog/test_rights_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/catalog/test_rights_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/rights/service.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_gs1_excel_export_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_gs1_excel_export_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/gs1_excel.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_waveform_clusters.py tests/test_update_handoff.py tests/test_update_installer.py tests/catalog/test_rights_service.py tests/test_gs1_excel_export_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_media_waveform_clusters.py tests/test_update_handoff.py tests/test_update_installer.py tests/catalog/test_rights_service.py tests/test_gs1_excel_export_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/waveform.py,isrc_manager/update_handoff.py,isrc_manager/update_installer.py,isrc_manager/rights/service.py,isrc_manager/services/gs1_excel.py' -m --fail-under=90
+python3 -m black tests/test_media_waveform_clusters.py tests/test_update_handoff.py tests/test_update_installer.py tests/catalog/_contract_rights_asset_support.py tests/catalog/test_rights_service.py tests/test_gs1_excel_export_service.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`82 passed`).
+- Focused target-module coverage: passed (`94%` combined across the five targeted modules).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed after formatting four touched test files.
+- Full production-scope pytest/coverage: passed (`3035 passed`, `23 skipped`, `825 warnings`,
+  `131 subtests passed in 727.01s`; required coverage of `90%` reached at `93.41%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.58 - Catalog Workflow, Contract Templates, and Assets Branch Coverage
+
+This continuation kept following the authoritative low-module queue after Checkpoint 4.57. The
+batch focused on meaningful branch coverage for catalog-table workflow state restoration and
+refresh helpers, contract-template placeholder grammar and fill-form synthesis, and managed asset
+storage/validation edge cases.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.60816251830161%`.
+- Statement coverage: `95.55144968732235%`.
+- Branch coverage: `87.00499034127496%`.
+- Combined covered points: `102295 / 109280`.
+- Full pytest result: `3048 passed`, `23 skipped`, `832 warnings`, `150 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/catalog_table/workflow.py`: `98.63523573200993%`.
+- `isrc_manager/contract_templates/form_service.py`: `96.23655913978494%`.
+- `isrc_manager/contract_templates/parser.py`: `95.55555555555556%`.
+- `isrc_manager/assets/service.py`: `95.15260323159785%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/search/dialogs.py`: `86.69%`.
+- `isrc_manager/quality/dialogs.py`: `86.69%`.
+- `isrc_manager/media/derivatives.py`: `86.69%`.
+- `isrc_manager/exchange/repertoire_service.py`: `86.77%`.
+- `isrc_manager/authenticity/watermark.py`: `86.81%`.
+- `isrc_manager/profile_session.py`: `87.16%`.
+- `isrc_manager/storage_migration.py`: `87.30%`.
+- `isrc_manager/paths.py`: `87.39%`.
+
+### Tests added or expanded
+
+- `tests/test_catalog_table_workflow.py`: catalog model/view initialization, combo refresh
+  branches, dataset reset and missing-service fallback paths, refresh request state restoration,
+  sort-enabled and sort-disabled flows, duration/count label guards, repaint target deduplication,
+  update suspension exception tolerance, bundle dataset loading, and background refresh progress,
+  finish, and error routing.
+- `tests/test_contract_template_parser.py`: runtime/control placeholders, typed manual list
+  options, invalid indexed suffix/count validation, manual option bracket failures, and base-symbol
+  derivation for indexed database, manual, current, page, custom, and duplicate placeholders.
+- `tests/contract_templates/test_form_generation.py`: unresolved selector warnings, empty
+  release/asset selector choice warnings, editable payload format cleanup, existing binding merge
+  preservation, missing-catalog fallback metadata, owner auto-field label overrides, manual binding
+  validation/widget overrides, and choice/label variants for release, work, right, and asset
+  records.
+- `tests/test_assets_service.py`: Mutagen unavailable/success metadata extraction, direct asset file
+  staging and managed-byte reads, fetch/build validation errors, cursor-backed create/update
+  branches, release/search filtering, database-backed delete and validation paths, export rows, and
+  track audio attachment sync for same-checksum updates versus new-source versioning.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_catalog_table_workflow.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_catalog_table_workflow.py --no-cov
+python3 -m coverage report --include='isrc_manager/catalog_table/workflow.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_contract_template_parser.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_contract_template_parser.py --no-cov
+python3 -m coverage report --include='isrc_manager/contract_templates/parser.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/contract_templates/test_form_generation.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/contract_templates/test_form_generation.py --no-cov
+python3 -m coverage report --include='isrc_manager/contract_templates/form_service.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_assets_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_assets_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/assets/service.py' -m --fail-under=90
+python3 -m black tests/test_catalog_table_workflow.py tests/test_contract_template_parser.py tests/contract_templates/test_form_generation.py tests/test_assets_service.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_catalog_table_workflow.py tests/test_contract_template_parser.py tests/contract_templates/test_form_generation.py tests/test_assets_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_catalog_table_workflow.py tests/test_contract_template_parser.py tests/contract_templates/test_form_generation.py tests/test_assets_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/catalog_table/workflow.py,isrc_manager/contract_templates/parser.py,isrc_manager/contract_templates/form_service.py,isrc_manager/assets/service.py' -m --fail-under=90
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`50 passed`).
+- Focused target-module coverage: passed (`94%` combined across the four targeted modules).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed after formatting `tests/test_catalog_table_workflow.py` and
+  `tests/contract_templates/test_form_generation.py`.
+- Full production-scope pytest/coverage: passed (`3048 passed`, `23 skipped`, `832 warnings`,
+  `150 subtests passed in 715.89s`; required coverage of `90%` reached at `93.61%`).
+
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.59 - Search, Quality Dashboard, Derivatives, and Repertoire Exchange Branch Coverage
+
+This continuation followed the low-module queue from Checkpoint 4.58 and lifted four compact
+production modules with behavioral branch tests. The batch focused on search dialog guard paths and
+saved-search workflows, quality dashboard task/filter/export behavior, derivative ledger and managed
+export validation paths, and repertoire exchange package/import reference handling.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.80215959004393%`.
+- Statement coverage: `95.7113416714042%`.
+- Branch coverage: `87.31487443657437%`.
+- Combined covered points: `102507 / 109280`.
+- Full pytest result: `3060 passed`, `23 skipped`, `789 warnings`, `156 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/search/dialogs.py`: `99.71671388101983%`.
+- `isrc_manager/quality/dialogs.py`: `99.65870307167235%`.
+- `isrc_manager/media/derivatives.py`: `95.69471624266144%`.
+- `isrc_manager/exchange/repertoire_service.py`: `94.97435897435898%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/profile_session.py`: `87.16%`.
+- `isrc_manager/authenticity/watermark.py`: `87.29%`.
+- `isrc_manager/storage_migration.py`: `87.30%`.
+- `isrc_manager/paths.py`: `87.39%`.
+- `isrc_manager/tasks/manager.py`: `87.44%`.
+- `isrc_manager/quality/service.py`: `87.52%`.
+- `isrc_manager/services/settings_reads.py`: `87.56%`.
+- `isrc_manager/services/imports.py`: `87.60%`.
+
+### Tests added or expanded
+
+- `tests/test_dialog_controller_behaviors.py`: global search panel no-profile states, result
+  selection guards, empty relationship sections, overview filtering, saved-search application and
+  deletion guards, and failing selection-model handling.
+- `tests/test_quality_dialogs.py`: dashboard active-scan/task-manager failure paths, severity/type
+  and release filtering, missing selected issue guards, fix callback errors, and CSV/JSON export
+  cancellation plus filtered payload assertions.
+- `tests/test_audio_conversion_pipeline.py`: derivative ledger filter/update/delete behavior,
+  workflow kind validation, managed export validation and cleanup paths, unsupported/cancelled
+  conversion flows, missing source handling, and no-exportable-derivative progress reporting.
+- `tests/exchange/test_repertoire_exchange_service.py`: repertoire payload helper resolution,
+  empty workbook/missing CSV ingestion, public inspect/import cancel callbacks, package file mapping
+  and warning paths, remaining-phase seeded-link reuse, optional reference warnings, and required
+  unresolved reference failures.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_dialog_controller_behaviors.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_dialog_controller_behaviors.py --no-cov
+python3 -m coverage report --include='isrc_manager/search/dialogs.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_quality_dialogs.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_quality_dialogs.py --no-cov
+python3 -m coverage report --include='isrc_manager/quality/dialogs.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_audio_conversion_pipeline.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_audio_conversion_pipeline.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/derivatives.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/exchange/test_repertoire_exchange_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/exchange/test_repertoire_exchange_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/exchange/repertoire_service.py' -m --fail-under=90
+python3 -m black tests/test_dialog_controller_behaviors.py tests/test_quality_dialogs.py tests/test_audio_conversion_pipeline.py tests/exchange/test_repertoire_exchange_service.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_dialog_controller_behaviors.py tests/test_quality_dialogs.py tests/test_audio_conversion_pipeline.py tests/exchange/test_repertoire_exchange_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_dialog_controller_behaviors.py tests/test_quality_dialogs.py tests/test_audio_conversion_pipeline.py tests/exchange/test_repertoire_exchange_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/search/dialogs.py,isrc_manager/quality/dialogs.py,isrc_manager/media/derivatives.py,isrc_manager/exchange/repertoire_service.py' -m --fail-under=90
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`58 passed`).
+- Focused target-module coverage: passed (`96%` combined across the four targeted modules).
+- Compileall: passed.
+- Ruff: passed after replacing assigned lambdas in
+  `tests/exchange/test_repertoire_exchange_service.py` and sorting imports in
+  `tests/test_audio_conversion_pipeline.py`.
+- Black check: passed after formatting `tests/test_quality_dialogs.py`,
+  `tests/test_audio_conversion_pipeline.py`, and
+  `tests/exchange/test_repertoire_exchange_service.py`.
+- Full production-scope pytest/coverage: passed (`3060 passed`, `23 skipped`, `789 warnings`,
+  `156 subtests passed in 716.05s`; required coverage of `90%` reached at `93.80%`).
+
+The full coverage run regenerated tracked UI PQ and Help screenshot artifacts. Those generated
+files were restored because this checkpoint did not change UI or Help behavior. ResourceWarning
+noise for unrelated app-shell SQLite fixtures remains visible during the full coverage run and did
+not fail the checkpoint.
+
+## Checkpoint 4.60 - Profile Session, Audio Watermark, and Paths Branch Coverage
+
+This continuation followed the low-module queue from Checkpoint 4.59 and focused on compact
+behavioral branches in profile/session startup reconciliation, audio watermark token and reference
+verification paths, and runtime path/layout fallback handling. The batch intentionally left
+`storage_migration.py` itself for the next pass because the profile-session coverage covered caller
+workflow branches without changing the migration service's own branch profile.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `93.88634699853587%`.
+- Statement coverage: `95.78122039037332%`.
+- Branch coverage: `87.4476819059884%`.
+- Combined covered points: `102599 / 109280`.
+- Full pytest result: `3071 passed`, `23 skipped`, `748 warnings`, `156 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/profile_session.py`: `90.25500910746813%`.
+- `isrc_manager/authenticity/watermark.py`: `96.1630695443645%`.
+- `isrc_manager/paths.py`: `95.94594594594595%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/storage_migration.py`: `87.30%`.
+- `isrc_manager/tasks/manager.py`: `87.44%`.
+- `isrc_manager/quality/service.py`: `87.52%`.
+- `isrc_manager/services/settings_reads.py`: `87.56%`.
+- `isrc_manager/services/imports.py`: `87.60%`.
+- `isrc_manager/reporting/collectors.py`: `87.62%`.
+- `isrc_manager/main_window_layout.py`: `87.70%`.
+- `isrc_manager/releases/service.py`: `87.75%`.
+
+### Tests added or expanded
+
+- `tests/test_audio_watermark_service.py`: token packing/unpacking validation, settings payload
+  encoding, one-source audio IO fallbacks, ISTFT padding, empty-channel embed guards, no-key
+  extract/verify results, mocked direct detection, reference sample-rate mismatch, short reference
+  frame handling, and insufficient reference-score behavior.
+- `tests/test_paths.py`: migration-journal and lock-path properties, deferred legacy root
+  detection, duplicate legacy-root pruning, portable legacy roots, Qt application identity setter
+  fallbacks, QStandardPaths exception fallbacks, and repo/test/demo runtime path classification.
+- `tests/test_profile_session_controller.py`: startup storage-root resumable conflicts, preferred
+  and legacy fallback selection, migration failure warnings, background-task guards, previous-DB
+  reopen failures, no-profile background runtime paths, profile-switch cancellation, security
+  preparation failures, and app-level storage migration reconciliation delegation.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_audio_watermark_service.py tests/test_paths.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_audio_watermark_service.py tests/test_authenticity_verification_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/authenticity/watermark.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_profile_session_controller.py tests/test_audio_watermark_service.py tests/test_paths.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_profile_session_controller.py --no-cov
+python3 -m black tests/test_audio_watermark_service.py tests/test_paths.py tests/test_profile_session_controller.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check --select I001 --fix tests/test_audio_watermark_service.py
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`57 passed` across
+  `tests/test_audio_watermark_service.py`, `tests/test_paths.py`, and
+  `tests/test_profile_session_controller.py`; profile-session focused rerun passed `39 passed`).
+- Focused authenticity watermark module coverage: passed at `96%` for
+  `isrc_manager/authenticity/watermark.py`.
+- Compileall: passed.
+- Ruff: passed after import sorting in `tests/test_audio_watermark_service.py`.
+- Black check: passed after formatting `tests/test_audio_watermark_service.py` and
+  `tests/test_paths.py`.
+- Full production-scope pytest/coverage: passed (`3071 passed`, `23 skipped`, `748 warnings`,
+  `156 subtests passed in 721.32s`; required coverage of `90%` reached at `93.89%`).
+
+The full coverage run regenerated tracked UI PQ and Help screenshot artifacts. Those generated
+files were restored because this checkpoint did not change UI or Help behavior. ResourceWarning
+noise for unrelated app-shell SQLite fixtures remains visible during the full coverage run and did
+not fail the checkpoint.
+
+## Checkpoint 4.61 - Storage Migration, Task Manager, Quality Service, and Settings Reads Branch Coverage
+
+This continuation followed the low-module queue from Checkpoint 4.60 and lifted the next four
+production modules above the branch-aware 90% target. The batch focused on storage migration
+recovery and helper guardrails, deterministic background-task helper and relay branches, quality
+dashboard scan/fix edge cases, and profile settings read fallbacks.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `94.08857979502196%`.
+- Statement coverage: `95.93874360432065%`.
+- Branch coverage: `87.80183515775917%`.
+- Combined covered points: `102820 / 109280`.
+- Full pytest result: `3083 passed`, `23 skipped`, `832 warnings`, `156 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/storage_migration.py`: `95.85585585585585%`.
+- `isrc_manager/tasks/manager.py`: `95.26916802610114%`.
+- `isrc_manager/quality/service.py`: `95.0354609929078%`.
+- `isrc_manager/services/settings_reads.py`: `100.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/services/imports.py`: `87.60%`.
+- `isrc_manager/reporting/collectors.py`: `87.62%`.
+- `isrc_manager/main_window_layout.py`: `87.70%`.
+- `isrc_manager/releases/service.py`: `87.75%`.
+- `isrc_manager/catalog_workspace.py`: `87.83%`.
+- `isrc_manager/domain/repertoire.py`: `87.93%`.
+- `isrc_manager/services/import_governance.py`: `88.21%`.
+- `isrc_manager/services/gs1_mapping.py`: `88.57%`.
+
+### Tests added or expanded
+
+- `tests/test_storage_migration_service.py`: migration inspection helpers, defer path rewrites,
+  missing-source guardrails, invalid/fallback journal handling, preferred-root validation failures,
+  resumable-stage mismatch/conflict/no-source activation, legacy-reference scanning, SQLite copy
+  replacement, adoption inventory fallbacks, settings activation paths, and safe stage promotion.
+- `tests/test_task_manager.py`: progress-dialog theme fallbacks, deterministic layout helper
+  branches, worker cancellation/interruption paths, relay progress/status/error/success cleanup
+  routing, success-before-cleanup failure handling, no-error relay handling, active task state
+  queries, unique-key/exclusive/write/read guardrails, and invalid dialog refresh skips.
+- `tests/test_quality_service.py`: persisted scan edge states for missing/invalid track and
+  release metadata, duplicate ISRCs, invalid UPC format/checksum, stale barcode status, duplicate
+  release catalog numbers, duplicate disc/track ordering, malformed custom-field options,
+  required blob fields, database-mode media references that must not be reported as broken,
+  generic track-media relinking, no-root media search, and missing work/contract detail fallbacks.
+- `tests/test_settings_read_service.py`: owner profile payload trimming, invalid and non-positive
+  profile owner IDs, malformed owner-binding fallback paths, missing linked owner-party records,
+  party-backed VAT/PRO/IPI registration overrides, and missing Parties-table owner lookup
+  fallback.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_storage_migration_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_storage_migration_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/storage_migration.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_task_manager.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_task_manager.py --no-cov
+python3 -m coverage report --include='isrc_manager/tasks/manager.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_quality_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_quality_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/quality/service.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_settings_read_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_settings_read_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/settings_reads.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_storage_migration_service.py tests/test_task_manager.py tests/test_quality_service.py tests/test_settings_read_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_storage_migration_service.py tests/test_task_manager.py tests/test_quality_service.py tests/test_settings_read_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/storage_migration.py,isrc_manager/tasks/manager.py,isrc_manager/quality/service.py,isrc_manager/services/settings_reads.py' -m --fail-under=90
+python3 -m black tests/test_storage_migration_service.py tests/test_task_manager.py tests/test_quality_service.py tests/test_settings_read_service.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check --select I001 --fix tests/test_task_manager.py
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`71 passed` across the four touched test files).
+- Focused target-module coverage: passed (`95%` combined across the four targeted modules).
+- Individual focused module coverage reached `94.59%` for `storage_migration.py`, `94.78%` for
+  `tasks/manager.py`, `94.47%` for `quality/service.py`, and `99.08%` for
+  `services/settings_reads.py`.
+- Compileall: passed.
+- Ruff: passed after import sorting in `tests/test_task_manager.py`.
+- Black check: passed after formatting `tests/test_storage_migration_service.py`,
+  `tests/test_quality_service.py`, and `tests/test_settings_read_service.py`.
+- Full production-scope pytest/coverage: passed (`3083 passed`, `23 skipped`, `832 warnings`,
+  `156 subtests passed in 721.21s`; required coverage of `90%` reached at `94.09%`).
+
+The full coverage run regenerated tracked UI PQ and Help screenshot artifacts. Those generated
+files were restored because this checkpoint did not change UI or Help behavior. ResourceWarning
+noise for unrelated app-shell SQLite fixtures remains visible during the full coverage run and did
+not fail the checkpoint.
+
+## Checkpoint 4.48 - Follow-Up Low-Module Coverage Continuation
+
+Timestamp: `2026-06-07`
+
+This continuation resumed the follow-up list from the lowest remaining production-scope modules in
+`coverage.json`. The batch focused on meaningful module and branch coverage for audio equalizer
+playback guardrails, authenticity workflow routing, GS1 settings import/export decisions, history
+retention budget orchestration, code-registry-backed identifier widgets, and persistent audio
+bookmark storage.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `91.54282576866764%`.
+- Statement coverage: `93.92055144968732%`.
+- Branch coverage: `83.46345782356728%`.
+- Combined covered points: `100038 / 109280`.
+- Full pytest result: `2850 passed`, `23 skipped`, `807 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted follow-up module coverage after the full-suite run:
+
+- `isrc_manager/media/equalizer_player.py`: `94.82993197278911%`.
+- `isrc_manager/authenticity/controller.py`: `97.57785467128028%`.
+- `isrc_manager/application_settings_gs1.py`: `99.20424403183024%`.
+- `isrc_manager/history_retention_controller.py`: `97.11815561959654%`.
+- `isrc_manager/code_registry/widgets.py`: `96.97885196374622%`.
+- `isrc_manager/media/bookmarks.py`: `99.0%`.
+
+### Tests added or expanded
+
+- `tests/test_media_equalizer_player.py`: live biquad processing, decoded-source reset,
+  platform ffmpeg discovery, decode fallbacks, sink start/stop/write failures, EOF replay, pause
+  state transitions, volume/mute clamping, audio-output signal wiring, spectrum guardrails, and
+  disabled/zero-gain equalizer response branches.
+- `tests/test_authenticity_controller.py`: watermarked export task submission and audit logging,
+  preview cancellation paths, provenance export service guardrails, selected-track verification
+  guardrails, candidate resolution failures, and external-file verification fallback branches.
+- `tests/test_application_settings_gs1.py`: combo construction fallbacks, contract summary overflow,
+  database-stored workbook status, template option merging, browse/import/export cancellation,
+  overwrite refusal, service failure, unreadable CSV source handling, and active-contract
+  auto-selection edges.
+- `tests/test_history_retention_controller_clusters.py`: snapshot retention guardrails, recursive
+  path-size failure handling, projected-growth under-budget paths, cleanup blocked/generic failure
+  handling, interactive budget prompts, duplicate warning suppression, disabled timer states,
+  skipped/failed automatic snapshots, and deferred budget enforcement scheduling.
+- `tests/test_code_registry_widgets.py`: internal/external identifier modes, status
+  classifications, generated value routing, SHA-256 generation, service failure fallbacks,
+  invalid mode coercion, assignment aliases, and retained/cleared external identifier IDs.
+- `tests/test_media_bookmarks.py`: bookmark schema creation, row conversion, position/duration
+  coercion, upsert behavior, scoped deletion, track-delete cascade cleanup, invalid IDs, bulk
+  deletion, and failed insert reload detection.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_equalizer_player.py tests/test_authenticity_controller.py tests/test_application_settings_gs1.py tests/test_history_retention_controller_clusters.py tests/test_code_registry_widgets.py tests/test_media_bookmarks.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_media_equalizer_player.py tests/test_authenticity_controller.py tests/test_application_settings_gs1.py tests/test_history_retention_controller_clusters.py tests/test_code_registry_widgets.py tests/test_media_bookmarks.py --no-cov
+python3 -m coverage report --include='isrc_manager/media/equalizer_player.py,isrc_manager/authenticity/controller.py,isrc_manager/application_settings_gs1.py,isrc_manager/history_retention_controller.py,isrc_manager/code_registry/widgets.py,isrc_manager/media/bookmarks.py' -m --fail-under=90
+python3 -m black --check build.py isrc_manager scripts tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m compileall ISRC_manager.py isrc_manager tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`115 passed`).
+- Focused target-module coverage: passed (`95%` combined across the six targeted modules).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed.
+- Full production-scope pytest/coverage: passed (`2850 passed`, `23 skipped`, `807 warnings`,
+  `119 subtests passed in 673.63s`; required coverage of `90%` reached at `91.54%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this batch did not change UI behaviour or Help content.
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.49 - Branch-Aware Low-Module Follow-Up
+
+Timestamp: `2026-06-07`
+
+This continuation picked up the remaining follow-up list from the production-scope
+`coverage.json` report and continued upward from the lowest compact modules. The work focused on
+behavioural tests for table zoom state, conversion template/source adapters, external-launch
+safety wrappers, and catalog-table value models.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `91.82375549048317%`.
+- Statement coverage: `94.13966268713284%`.
+- Branch coverage: `83.95444301352221%`.
+- Combined covered points: `100345 / 109280`.
+- Full pytest result: `2870 passed`, `23 skipped`, `724 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/catalog_table/zoom.py`: `96.99248120300751%`.
+- `isrc_manager/conversion/service.py`: `98.31223628691983%`.
+- `isrc_manager/conversion/store.py`: `100%`.
+- `isrc_manager/external_launch.py`: `96.36048526863085%`.
+- `isrc_manager/catalog_table/models.py`: `100%`.
+- `isrc_manager/conversion/adapters/csv.py`: `99.43820224719101%`.
+- `isrc_manager/conversion/adapters/xml.py`: `99.05660377358491%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/tracks/album_entry_dialog.py`: `80.32%`.
+- `isrc_manager/isrc_registry_controller.py`: `80.85%`.
+- `isrc_manager/catalog_table/filter_proxy.py`: `81.46%`.
+- `isrc_manager/media/conversion_controller.py`: `81.59%`.
+- `isrc_manager/services/gs1_contracts.py`: `81.61%`.
+- `isrc_manager/update_checker.py`: `81.90%`.
+
+### Tests added or expanded
+
+- `tests/test_catalog_table_header_zoom.py`: zoom throttling, pending flush/reschedule behaviour,
+  invalid pinch/clamp inputs, layout restore edge cases, and view-binding callback routing.
+- `tests/test_conversion_service.py`: conversion-store validation/update/reload paths, JSON source
+  wrappers, conversion service guardrails, CSV preferred delimiter and byte-backed export paths,
+  CSV blank-row/source-scope handling, XML repeated and single-node scope handling, XML byte-backed
+  rendering, progress callbacks, and defensive bad-path source/template branches.
+- `tests/test_external_launch_clusters.py`: desktop safety hook installation, non-blocked wrapper
+  forwarding, command token handling, QFileDialog/QDesktopServices fallback branches, and QUrl
+  local-file/text conversion paths.
+- `tests/test_catalog_table_models.py`: natural/comparison sort-key edges, value-object validation,
+  catalog snapshot lookup/copy helpers, and invalid row/column construction paths.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_conversion_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_catalog_table_header_zoom.py tests/test_conversion_service.py tests/test_external_launch.py tests/test_external_launch_clusters.py tests/test_catalog_table_models.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_catalog_table_header_zoom.py tests/test_conversion_service.py tests/test_external_launch.py tests/test_external_launch_clusters.py tests/test_catalog_table_models.py --no-cov
+python3 -m coverage report --include='isrc_manager/catalog_table/zoom.py,isrc_manager/catalog_table/models.py,isrc_manager/conversion/service.py,isrc_manager/conversion/store.py,isrc_manager/conversion/adapters/csv.py,isrc_manager/conversion/adapters/xml.py,isrc_manager/external_launch.py' -m --fail-under=90
+python3 -m black tests/test_conversion_service.py tests/test_catalog_table_header_zoom.py tests/test_external_launch_clusters.py tests/test_catalog_table_models.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+python3 -m ruff check tests/test_conversion_service.py --fix
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused conversion tests: passed (`27 passed`).
+- Focused affected tests: passed (`72 passed`).
+- Focused target-module coverage: passed (`98%` combined across the targeted modules, with
+  `catalog_table/models.py` and `conversion/store.py` skipped in that report because they were
+  fully covered).
+- Compileall: passed.
+- Ruff: passed after Ruff fixed one import-order issue in `tests/test_conversion_service.py`.
+- Black check: passed after formatting `tests/test_conversion_service.py` and
+  `tests/test_external_launch_clusters.py`.
+- Full production-scope pytest/coverage: passed (`2870 passed`, `23 skipped`, `724 warnings`,
+  `119 subtests passed in 673.91s`; required coverage of `90%` reached at `91.82%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.52 - Follow-Up Low-Module Coverage Continuation
+
+Timestamp: `2026-06-07`
+
+This continuation resumed from the lowest production modules left after checkpoint 4.51. The batch
+focused on startup splash thread/bridge guardrails, database exchange adapter profile and settings
+branches, GS1 integration defaults/error paths, and update-controller wrapper, prompt, release-note,
+and install-task branches.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `92.41032210834554%`.
+- Statement coverage: `94.62407617964753%`.
+- Branch coverage: `84.8881197681906%`.
+- Combined covered points: `100986 / 109280`.
+- Full pytest result: `2956 passed`, `23 skipped`, `790 warnings`, `126 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/startup_splash.py`: `97.85932721712538%`.
+- `isrc_manager/conversion/adapters/database.py`: `100.0%`.
+- `isrc_manager/services/gs1_integration.py`: `97.53086419753086%`.
+- `isrc_manager/update_controller.py`: `98.50299401197604%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/invoicing/royalty_import.py`: `83.37%`.
+- `isrc_manager/parties/service.py`: `83.45%`.
+- `isrc_manager/isrc_registry.py`: `83.82%`.
+- `isrc_manager/media/player_controller.py`: `83.84%`.
+- `isrc_manager/assets/controller.py`: `84.00%`.
+- `isrc_manager/contract_templates/controller.py`: `84.00%`.
+- `isrc_manager/rights/controller.py`: `84.00%`.
+- `isrc_manager/media/export_controller.py`: `84.07%`.
+
+### Tests added or expanded
+
+- `tests/test_startup_splash.py`: bridge handler dispatch, thread-routed public emissions,
+  finished/suspended immediate-method guardrails, phase-label progress fallback, finish cleanup
+  when the splash raises, and render/process-event no-op edges.
+- `tests/test_conversion_adapters_database.py`: open-profile guardrails, missing settings and
+  no-row exports, scoped track selection, settings read failures, owner-setting enrichment,
+  duplicate-header prevention, and invalid owner-party ID normalization.
+- `tests/test_gs1_integration_service.py`: missing-track rejection, metadata fallback defaults,
+  contract/template wrappers, legacy-default repair branches, validation and save errors, missing
+  stored template bytes, export-group validation, export-plan delegation, static summary/mode
+  helpers, invalid export IDs, and stored-template cleanup failure handling.
+- `tests/test_update_controller_clusters.py`: root wrappers and update scheduling, update-available
+  message button paths, packaged-state and user-prompt install confirmation, preflight and busy
+  update-install task callbacks, helper launch failure reporting, and release-note empty URL,
+  task-error, busy, dialog-install paths.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_startup_splash.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_startup_splash.py --no-cov
+python3 -m coverage report --include='isrc_manager/startup_splash.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_conversion_adapters_database.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_conversion_adapters_database.py --no-cov
+python3 -m coverage report --include='isrc_manager/conversion/adapters/database.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_gs1_integration_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_gs1_integration_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/gs1_integration.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_update_controller_clusters.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_update_controller_clusters.py tests/test_update_ui_integration.py --no-cov
+python3 -m coverage report --include='isrc_manager/update_controller.py' -m --fail-under=90
+python3 -m black tests/test_startup_splash.py tests/test_conversion_adapters_database.py tests/test_gs1_integration_service.py tests/test_update_controller_clusters.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_startup_splash.py tests/test_conversion_adapters_database.py tests/test_gs1_integration_service.py tests/test_update_controller_clusters.py tests/test_update_ui_integration.py --no-cov
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`79 passed`).
+- Focused target-module coverage gates: passed for each target module after its relevant affected
+  tests, with `database.py` reaching `100%`.
+- Compileall: passed.
+- Ruff: passed after removing unused GS1 model imports introduced during the test expansion.
+- Black check: passed after formatting the touched tests.
+- Full production-scope pytest/coverage: passed (`2956 passed`, `23 skipped`, `790 warnings`,
+  `126 subtests passed in 711.91s`; required coverage of `90%` reached at `92.41%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.53 - Royalty, Registry, Party, and Workspace Controller Coverage
+
+Timestamp: `2026-06-07`
+
+This continuation resumed from the next low-module queue after checkpoint 4.52. The batch focused
+on royalty source import parsing and preview/apply decisions, application ISRC registry reuse and
+profile-sync guardrails, party validation/merge/delete edge cases, and compact workspace controller
+wrappers for assets, contract templates, and rights.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `92.57686676427525%`.
+- Statement coverage: `94.75554292211484%`.
+- Branch coverage: `85.17385705086929%`.
+- Combined covered points: `101168 / 109280`.
+- Full pytest result: `2977 passed`, `23 skipped`, `833 warnings`, `126 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/invoicing/royalty_import.py`: `97.38717339667458%`.
+- `isrc_manager/parties/service.py`: `94.25675675675676%`.
+- `isrc_manager/isrc_registry.py`: `99.02912621359224%`.
+- `isrc_manager/assets/controller.py`: `100.0%`.
+- `isrc_manager/contract_templates/controller.py`: `100.0%`.
+- `isrc_manager/rights/controller.py`: `100.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/media/player_controller.py`: `83.84%`.
+- `isrc_manager/media/export_controller.py`: `84.07%`.
+- `isrc_manager/conversion/mapping.py`: `84.16%`.
+- `isrc_manager/parties/authority.py`: `84.21%`.
+- `isrc_manager/catalog_table/header_state.py`: `84.33%`.
+- `isrc_manager/contracts/service.py`: `84.41%`.
+- `isrc_manager/blob_icons.py`: `84.93%`.
+- `isrc_manager/app_sounds.py`: `85.11%`.
+
+### Tests added or expanded
+
+- `tests/invoicing/test_royalty_import.py`: CSV mapping validation, invalid currency and amount
+  issues, minor-unit rounding skips, generated description precedence, ID match failures, apply
+  mode metadata, empty CSV and unsupported suffix guardrails, XLSX blank-row/header handling, XML
+  flattening and empty-root warnings, and missing lookup-table handling.
+- `tests/test_workspace_controller_wrappers.py`: asset registry, contract template workspace, and
+  rights matrix provider wiring, catalog workspace dock registration, focus callbacks, and
+  no-profile warning branches.
+- `tests/test_isrc_registry.py`: invalid-code no-ops, empty sync cleanup, duplicate path filtering,
+  reusable pending reservations, reserved-claim release, direct activation conflicts, abandoned
+  claim reuse, unreadable/minimal/invalid profile sync tolerance, invalid budget settings, and path
+  normalization/fingerprint fallbacks.
+- `tests/test_work_and_party_services.py`: party validation conflicts across primary/alternative
+  email, IPI/CAE, Chamber of Commerce, PRO number, canonical artist name, alias-as-artist,
+  duplicate alias, blank-name validation, create/update rejection paths, table-shape fallbacks,
+  blank ensure/find guardrails, non-owner delete integrity re-raise, missing primary merge errors,
+  missing duplicate skip, and different-artist-name merge aliasing.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/invoicing/test_royalty_import.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_workspace_controller_wrappers.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/invoicing/test_royalty_import.py tests/test_workspace_controller_wrappers.py --no-cov
+python3 -m coverage report --include='isrc_manager/invoicing/royalty_import.py,isrc_manager/assets/controller.py,isrc_manager/contract_templates/controller.py,isrc_manager/rights/controller.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_isrc_registry.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/invoicing/test_royalty_import.py tests/test_workspace_controller_wrappers.py tests/test_isrc_registry.py --no-cov
+python3 -m coverage report --include='isrc_manager/invoicing/royalty_import.py,isrc_manager/assets/controller.py,isrc_manager/contract_templates/controller.py,isrc_manager/rights/controller.py,isrc_manager/isrc_registry.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_work_and_party_services.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_work_and_party_services.py --no-cov
+python3 -m coverage report --include='isrc_manager/parties/service.py' -m --fail-under=90
+python3 -m black tests/invoicing/test_royalty_import.py tests/test_workspace_controller_wrappers.py tests/test_isrc_registry.py tests/test_work_and_party_services.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/invoicing/test_royalty_import.py tests/test_workspace_controller_wrappers.py tests/test_isrc_registry.py tests/test_work_and_party_services.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/invoicing/test_royalty_import.py tests/test_workspace_controller_wrappers.py tests/test_isrc_registry.py tests/test_work_and_party_services.py --no-cov
+python3 -m coverage report --include='isrc_manager/invoicing/royalty_import.py,isrc_manager/assets/controller.py,isrc_manager/contract_templates/controller.py,isrc_manager/rights/controller.py,isrc_manager/isrc_registry.py,isrc_manager/parties/service.py' -m --fail-under=90
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`44 passed`).
+- Focused target-module coverage: passed (`94%` combined across the six targeted modules, with
+  the compact workspace controller modules fully covered).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed after formatting the touched tests.
+- Full production-scope pytest/coverage: passed (`2977 passed`, `23 skipped`, `833 warnings`,
+  `126 subtests passed in 711.96s`; required coverage of `90%` reached at `92.58%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## 4.51 Coverage continuation - GS1/update/authenticity/import-review sweep
+
+Follow-up action from checkpoint 4.50: continue upward from the next lowest production modules in
+the authoritative branch-aware coverage report.
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `92.22913616398243%`.
+- Statement coverage: `94.4712905059693%`.
+- Branch coverage: `84.61043142305216%`.
+- Combined covered points: `100788 / 109280`.
+- Full pytest result: `2925 passed`, `23 skipped`, `805 warnings`, `126 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/services/gs1_contracts.py`: `100.0%`.
+- `isrc_manager/update_checker.py`: `99.56896551724138%`.
+- `isrc_manager/authenticity/manifest.py`: `100.0%`.
+- `isrc_manager/import_review_dialog.py`: `100.0%`.
+- `isrc_manager/services/gs1_template.py`: `98.85321100917432%`.
+- `isrc_manager/authenticity/availability.py`: `100.0%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/startup_splash.py`: `82.87%`.
+- `isrc_manager/conversion/adapters/database.py`: `82.89%`.
+- `isrc_manager/services/gs1_integration.py`: `82.92%`.
+- `isrc_manager/update_controller.py`: `83.23%`.
+- `isrc_manager/invoicing/royalty_import.py`: `83.37%`.
+- `isrc_manager/parties/service.py`: `83.45%`.
+
+### Tests added or expanded
+
+- `tests/test_gs1_contract_import_service.py`: missing/wrong file guardrails, empty/missing-header
+  CSV rejection, blank-contract/malformed-range filtering, decode/read error wrapping, and active
+  numeric/text contract sorting.
+- `tests/test_update_checker.py`: manifest minimum-supported parsing, invalid manifest and asset
+  payloads, unsupported/missing/mismatched platform assets, invalid current/ignored versions,
+  release-note size/decode failures, default HTTPS fetch boundaries, and manifest fetch
+  network/size failures.
+- `tests/test_authenticity_manifest.py`: canonical manifest text, empty/short/stereo/resampled
+  fingerprint inputs, defensive empty frequency-band and zero-histogram paths, empty/zero-vector
+  similarity, matching-audio similarity, and sidecar document builder normalization.
+- `tests/test_import_review_dialog.py`: warning-table rendering, preview-header inference, empty
+  preview cell display, review-only dialog state, and confirm/cancel button routing.
+- `tests/test_gs1_template_service.py`: workbook open guardrails, no-candidate and missing-core
+  verification failures, option-extraction failure fallback, merged field option de-duplication,
+  candidate skip/bonus branches, sheet-name priority edges, workbook marker scanning, validation
+  XML path and entry parsing, validation formula resolution, cell-range failures, and sqref field
+  resolution.
+- `tests/test_authenticity_availability.py`: missing optional dependency status and unavailable
+  message formatting.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_gs1_contract_import_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_gs1_contract_import_service.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/gs1_contracts.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_update_checker.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_update_checker.py --no-cov
+python3 -m coverage report --include='isrc_manager/update_checker.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_authenticity_manifest.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_authenticity_manifest.py --no-cov
+python3 -m coverage report --include='isrc_manager/authenticity/manifest.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_import_review_dialog.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_import_review_dialog.py --no-cov
+python3 -m coverage report --include='isrc_manager/import_review_dialog.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_gs1_template_service.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_gs1_template_service.py tests/test_gs1_excel_export_service.py tests/test_application_settings_gs1.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/gs1_template.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_authenticity_availability.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_authenticity_availability.py --no-cov
+python3 -m coverage report --include='isrc_manager/authenticity/availability.py' -m --fail-under=90
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_gs1_contract_import_service.py tests/test_update_checker.py tests/test_authenticity_manifest.py tests/test_import_review_dialog.py tests/test_gs1_template_service.py tests/test_gs1_excel_export_service.py tests/test_application_settings_gs1.py tests/test_authenticity_availability.py --no-cov
+python3 -m black tests/test_gs1_contract_import_service.py tests/test_update_checker.py tests/test_authenticity_manifest.py tests/test_import_review_dialog.py tests/test_gs1_template_service.py tests/test_authenticity_availability.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`80 passed`).
+- Focused target-module coverage gates: passed for each target after the relevant affected tests.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed after formatting the touched tests.
+- Full production-scope pytest/coverage: passed (`2925 passed`, `23 skipped`, `805 warnings`,
+  `126 subtests passed in 711.35s`; required coverage of `90%` reached at `92.23%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.47 - Follow-Up Low-Module Coverage
+
+Timestamp: `2026-06-07`
+
+This follow-up continued the low-module coverage campaign after Checkpoint 4.46, focusing on
+compact behavioural branches in the next documented follow-up targets. The work emphasized
+database/profile safety, Qt helper edge cases, theme application behaviour, and startup/profile
+recovery branches rather than superficial import coverage.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `91.17221815519765%`.
+- Statement coverage: `93.6137957172636%`.
+- Branch coverage: `82.87588538312943%`.
+- Combined covered points: `99633 / 109280`.
+- Full pytest result: `2802 passed`, `23 skipped`, `799 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted follow-up module coverage after the full-suite run:
+
+- `isrc_manager/services/database_security.py`: `94.5945945945946%`.
+- `isrc_manager/ui_common.py`: `98.14502529510962%`.
+- `isrc_manager/profile_session.py`: `87.1584699453552%`.
+- `isrc_manager/theme_builder.py`: `94.18282548476455%`.
+
+### Tests added or expanded
+
+- `tests/test_database_security.py`: SQLCipher/keyring detection failures, database profile ID
+  normalization, session password clearing, change-password rollback, plaintext encryption
+  guardrails, migration verification failures, keyring timestamp parsing, missing credential
+  values, and keyring IO error reporting.
+- `tests/test_ui_common.py`: owner-only custom QSS composition, orphan help button no-op behaviour,
+  compact choice dialog accept/reject/empty choices, spinbox reset events, focus-wheel mixin
+  routing, calendar wheel forwarding edge cases, date picker defaults, and scrollable page layout
+  reuse.
+- `tests/test_profile_session_controller.py`: remembered database-password settings and keyring
+  errors, encrypted-profile prompt retries/cancellation, profile migration cancellation and
+  failure guardrails, password-change guardrails, profile-removal rollback, database preparation
+  cleanup, startup recovery candidate selection, schema-prepared profile open wiring, and profile
+  activation refresh behaviour.
+- `tests/test_theme_builder.py`: arrow proxy drawing and palette-role selection, invalid theme
+  color/font/metric normalization, automatic contrast for group titles, theme settings/library
+  persistence wrappers, blob icon settings wrappers, invalid advanced-QSS safe application, no
+  QApplication exits, and theme-loading failure/cancel branches.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_database_security.py tests/test_ui_common.py tests/test_profile_session_controller.py tests/test_theme_builder.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_database_security.py tests/test_ui_common.py tests/test_profile_session_controller.py tests/test_theme_builder.py --no-cov
+python3 -m coverage report --include='isrc_manager/services/database_security.py,isrc_manager/ui_common.py,isrc_manager/profile_session.py,isrc_manager/theme_builder.py' -m --fail-under=0
+python3 -m black --check build.py isrc_manager scripts tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m compileall ISRC_manager.py isrc_manager tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`183 passed`, with two Qt deprecation warnings from
+  `QMouseEvent` constructor use in `tests/test_ui_common.py`).
+- Focused target-module coverage: passed with `84%` combined across the four targeted modules;
+  individual focused coverage reached `95%` for `database_security.py`, `97%` for `ui_common.py`,
+  `68%` for `profile_session.py`, and `94%` for `theme_builder.py`.
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed.
+- Full production-scope pytest/coverage: passed (`2802 passed`, `23 skipped`, `799 warnings`,
+  `119 subtests passed in 689.46s`; required coverage of `90%` reached at `91.17%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this batch did not change UI behaviour or Help content.
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.46 - Low-Module Coverage Continuation
+
+Timestamp: `2026-06-07`
+
+This continuation inspected the current PQ/coverage artifacts, then continued from the lowest
+production-scope modules in `coverage.json`. The dashboard/PQ snapshot still included broader
+UI-PQ-style coverage figures, while the authoritative production-scope package report was the
+local `coverage.json` baseline at `90.5307467057101%`.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `90.82814787701318%`.
+- Statement coverage: `93.29874928936896%`.
+- Branch coverage: `82.43319381841597%`.
+- Combined covered points: `99257 / 109280`.
+- Full pytest result: `2757 passed`, `23 skipped`, `814 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/custom_fields/__init__.py`: `99.29078014184397%`.
+- `isrc_manager/domain/timecode.py`: `100%`.
+- `isrc_manager/media/waveform_cache_worker.py`: `99.63636363636364%`.
+- `isrc_manager/startup_progress.py`: `98.38709677419355%`.
+- `isrc_manager/media/conversion.py`: `99.02597402597402%`.
+- `isrc_manager/conversion/adapters/base.py`: `100%`.
+- `isrc_manager/invoicing/travel_distance.py`: `100%`.
+- `isrc_manager/catalog_table/media_routing.py`: `96.67590027700831%`.
+
+### Tests added or expanded
+
+- `tests/test_custom_fields_controller.py`: custom field configuration history/fallbacks, prompt
+  cancellations, managed dialog guardrails, catalog refresh failure logging, double-click custom
+  field routing, blob attach cancellation/error paths, dropdown/checkbox/date/text value updates,
+  and rollback reporting.
+- `tests/test_helpers.py`: timecode invalid input, clamping, and malformed parse handling.
+- `tests/test_media_waveform_cache_worker.py`: worker queue deduplication, service opening,
+  synchronous job processing, startup queue helpers, host worker lifecycle, and cache lookup
+  failure/miss branches.
+- `tests/test_startup_progress.py`: startup tracker progress mapping, invalid ratios,
+  no-feedback mode, and report/set-phase/set-status fallback behaviour.
+- `tests/test_audio_conversion_service_unit.py`: ffmpeg discovery candidates, encoder cache/failure
+  handling, capability group routing, managed target probes, and transcode validation paths.
+- `tests/test_conversion_adapters_base.py`: abstract adapter contract guardrails.
+- `tests/invoicing/test_travel_distance.py`: malformed geocode/route payloads and request header
+  JSON decoding.
+- `tests/test_catalog_table_media_routing.py`: standard/custom media column fallback logic,
+  malformed raw payloads, source-spec branches, dropped-file edge cases, storage prompt
+  cancellation, attach/delete rollback paths, and preview error handling.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_custom_fields_controller.py tests/test_helpers.py tests/test_media_waveform_cache_worker.py tests/test_startup_progress.py tests/test_audio_conversion_service_unit.py tests/test_conversion_adapters_base.py tests/invoicing/test_travel_distance.py tests/test_catalog_table_media_routing.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_custom_fields_controller.py tests/test_helpers.py tests/test_media_waveform_cache_worker.py tests/test_startup_progress.py tests/test_audio_conversion_service_unit.py tests/test_conversion_adapters_base.py tests/invoicing/test_travel_distance.py tests/test_catalog_table_media_routing.py --no-cov
+python3 -m coverage report --include='isrc_manager/custom_fields/__init__.py,isrc_manager/domain/timecode.py,isrc_manager/media/waveform_cache_worker.py,isrc_manager/startup_progress.py,isrc_manager/media/conversion.py,isrc_manager/conversion/adapters/base.py,isrc_manager/invoicing/travel_distance.py,isrc_manager/catalog_table/media_routing.py' -m --fail-under=90
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`68 passed`).
+- Focused target-module coverage: passed (`95%` combined across the eight targeted modules).
+- Compileall: passed.
+- Ruff: passed.
+- Black check: passed.
+- Full production-scope pytest/coverage: passed (`2757 passed`, `23 skipped`, `814 warnings`,
+  `119 subtests passed in 637.48s`; required coverage of `90%` reached at `90.83%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this batch did not change UI behaviour or Help content.
+ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the full
+coverage run. It did not fail this checkpoint and was not hidden.
+
+## Checkpoint 4.50 - Follow-Up Low-Module Branch Coverage
+
+Timestamp: `2026-06-07`
+
+This continuation resumed the follow-up campaign from the next lowest production modules in
+`coverage.json`. The batch focused on album-entry dialog state and validation behaviour,
+application ISRC registry guardrails, catalog-table proxy filtering/sorting edges, and media
+conversion controller cancellation/availability branches.
+
+### Coverage delta
+
+Authoritative result from the full branch-aware production coverage run:
+
+- Full branch-aware production coverage: `92.07631771595901%`.
+- Statement coverage: `94.35403638430927%`.
+- Branch coverage: `84.33676754668383%`.
+- Combined covered points: `100621 / 109280`.
+- Full pytest result: `2886 passed`, `23 skipped`, `729 warnings`, `119 subtests passed`.
+- The configured `--cov-fail-under=90` gate passed.
+
+Targeted low-module coverage after the full-suite run:
+
+- `isrc_manager/tracks/album_entry_dialog.py`: `97.81357882623705%`.
+- `isrc_manager/isrc_registry_controller.py`: `97.87234042553192%`.
+- `isrc_manager/catalog_table/filter_proxy.py`: `98.87640449438203%`.
+- `isrc_manager/media/conversion_controller.py`: `98.55595667870035%`.
+
+The next lowest production modules in the authoritative report are now:
+
+- `isrc_manager/services/gs1_contracts.py`: `81.61%`.
+- `isrc_manager/update_checker.py`: `81.90%`.
+- `isrc_manager/authenticity/manifest.py`: `82.29%`.
+- `isrc_manager/import_review_dialog.py`: `82.47%`.
+- `isrc_manager/services/gs1_template.py`: `82.57%`.
+- `isrc_manager/authenticity/availability.py`: `82.76%`.
+
+### Tests added or expanded
+
+- `tests/test_album_entry_dialog.py`: lightweight QWidget host coverage for Add Album governance
+  seeding, missing/invalid work IDs, date picker acceptance, track-number dirty state, track-tab
+  add/remove/focus paths, album/UPC/no-track/track-data validation, lossy-media confirmation,
+  storage-mode cancellation, ISRC/ISWC duplicate/exhaustion branches, successful payload assembly,
+  and reservation rollback on a later ISRC claim failure.
+- `tests/test_isrc_registry_controller.py`: root-attribute lookup, profile path fallback handling,
+  registry sync no-op paths, registry reservation/activation/release exception fallback behaviour,
+  exhausted generated-ISRC claims, not-ready/exhausted next-ISRC generation, preview date-picker
+  failures, ready-but-empty generated-field state, and no-track-service duplicate checks.
+- `tests/test_catalog_table_models.py`: filter-proxy invalid explicit track IDs, legacy
+  `invalidateFilter` fallback routing, no-source-model guards, QStandardItemModel searchable-column
+  fallback, missing column-key lookup, and sort tie-breaks by track ID and row number.
+- `tests/test_media_conversion_controller.py`: lossy-only/no-target action state messaging,
+  conversion format prompt groups, selected-track guardrails, root wrapper hooks, derivative ledger
+  no-profile guard, conversion export target errors, history-backed conversion export worker path,
+  selected-audio cancel paths, and external conversion unavailable/input/format/output cancellation.
+
+### Validation
+
+Commands run:
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_album_entry_dialog.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_isrc_registry_controller.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_catalog_table_models.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_media_conversion_controller.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q tests/test_album_entry_dialog.py tests/test_isrc_registry_controller.py tests/test_catalog_table_models.py tests/test_media_conversion_controller.py --no-cov
+QT_QPA_PLATFORM=offscreen python3 -m coverage run --branch -m pytest -q tests/test_album_entry_dialog.py tests/test_isrc_registry_controller.py tests/test_catalog_table_models.py tests/test_media_conversion_controller.py --no-cov
+python3 -m coverage report --include='isrc_manager/tracks/album_entry_dialog.py,isrc_manager/isrc_registry_controller.py,isrc_manager/catalog_table/filter_proxy.py,isrc_manager/media/conversion_controller.py' -m --fail-under=90
+python3 -m black tests/test_album_entry_dialog.py tests/test_isrc_registry_controller.py tests/test_catalog_table_models.py tests/test_media_conversion_controller.py
+python3 -m compileall ISRC_manager.py isrc_manager tests
+python3 -m ruff check tests/test_album_entry_dialog.py --fix
+python3 -m ruff check build.py isrc_manager scripts tests
+python3 -m black --check build.py isrc_manager scripts tests
+QT_QPA_PLATFORM=offscreen python3 -m pytest --cov=isrc_manager --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json --cov-fail-under=90
+```
+
+Results:
+
+- Focused affected tests: passed (`40 passed`, with two expected Qt deprecation warnings from
+  deliberate coverage of the `QSortFilterProxyModel.invalidateFilter()` fallback path).
+- Focused target-module coverage: passed (`94%` combined across the four targeted modules).
+- Compileall: passed.
+- Ruff: passed after Ruff fixed one import-order issue in `tests/test_album_entry_dialog.py`.
+- Black check: passed after formatting `tests/test_album_entry_dialog.py` and
+  `tests/test_media_conversion_controller.py`.
+- Full production-scope pytest/coverage: passed (`2886 passed`, `23 skipped`, `729 warnings`,
+  `119 subtests passed in 710.85s`; required coverage of `90%` reached at `92.08%`).
+
+The full validation run refreshed tracked UI-PQ and Help screenshot artifacts as a side effect.
+Those generated files were restored because this continuation did not change UI behaviour or Help
+content. ResourceWarning noise for unrelated app-shell SQLite fixtures remains visible during the
+full coverage run. It did not fail this checkpoint and was not hidden.

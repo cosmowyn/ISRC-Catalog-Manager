@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from isrc_manager.contracts import ContractPartyPayload, ContractPayload, ContractService
 from isrc_manager.parties import PartyPayload, PartyService
@@ -900,6 +901,170 @@ class WorkAndPartyServiceTests(unittest.TestCase):
             (primary_id,),
         )
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 1)
+
+    def test_party_validation_reports_identifier_and_artist_alias_conflicts(self):
+        existing_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Taken Artist Legal",
+                artist_name="Taken Artist",
+                email="taken@example.test",
+                alternative_email="alt@example.test",
+                ipi_cae="IPI-123",
+                chamber_of_commerce_number="KVK-123",
+                pro_number="PRO-123",
+                party_type="artist",
+            )
+        )
+        self.party_service.create_party(
+            PartyPayload(
+                legal_name="Existing Artist Legal",
+                artist_name="Existing Artist",
+                party_type="artist",
+            )
+        )
+        alias_holder_id = self.party_service.create_party(PartyPayload(legal_name="Alias Holder"))
+        shared_alias_holder_id = self.party_service.create_party(
+            PartyPayload(legal_name="Shared Alias Holder")
+        )
+        self.conn.execute(
+            """
+            INSERT INTO PartyArtistAliases(party_id, alias_name, normalized_alias, sort_order)
+            VALUES (?, 'Taken Artist', 'taken artist', 1)
+            """,
+            (int(alias_holder_id),),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO PartyArtistAliases(party_id, alias_name, normalized_alias, sort_order)
+            VALUES (?, 'Shared Alias', 'shared alias', 1)
+            """,
+            (int(shared_alias_holder_id),),
+        )
+
+        invalid_payload = PartyPayload(
+            legal_name="",
+            artist_name="Taken Artist",
+            email="taken@example.test",
+            alternative_email="alt@example.test",
+            ipi_cae="IPI-123",
+            chamber_of_commerce_number="KVK-123",
+            pro_number="PRO-123",
+            artist_aliases=["Taken Artist", "Existing Artist", "Shared Alias"],
+        )
+        errors = self.party_service.validate_party(invalid_payload)
+
+        self.assertIn("Legal name is required.", errors)
+        self.assertIn("Provide either a legal name or a structured person name.", errors)
+        self.assertIn("Another party already uses this email address.", errors)
+        self.assertIn("Another party already uses this alternative email address.", errors)
+        self.assertIn("Another party already uses this IPI/CAE.", errors)
+        self.assertIn("Another party already uses this Chamber of Commerce Number.", errors)
+        self.assertIn("Another party already uses this PRO Number.", errors)
+        self.assertIn("Another party already uses this artist name.", errors)
+        self.assertIn(
+            "This artist name is already stored as an alias on another party.",
+            errors,
+        )
+        self.assertIn("Artist aliases must not repeat the canonical artist name.", errors)
+        self.assertIn(
+            "Artist alias 'Existing Artist' is already the artist name of another party.",
+            errors,
+        )
+        self.assertIn("Artist alias 'Shared Alias' is already linked to another party.", errors)
+        with self.assertRaises(ValueError):
+            self.party_service.create_party(invalid_payload)
+        with self.assertRaises(ValueError):
+            self.party_service.update_party(int(existing_id), invalid_payload)
+
+    def test_party_service_low_level_fallbacks_and_empty_inputs(self):
+        self.assertEqual(self.party_service._clean_party_type("not a supported type"), "other")
+        self.assertIsNone(self.party_service.find_party_id_by_name("   "))
+        self.assertIsNone(self.party_service.find_artist_party_id_by_name(""))
+        with (
+            mock.patch.object(self.party_service, "find_party_id_by_name", return_value=123),
+            mock.patch.object(self.party_service, "fetch_party", return_value=None),
+        ):
+            self.assertIsNone(self.party_service.find_artist_party_id_by_name("Ghost Artist"))
+        with self.assertRaisesRegex(ValueError, "Party name is required."):
+            self.party_service.ensure_party_by_name(" ")
+        with self.assertRaisesRegex(ValueError, "Artist name is required."):
+            self.party_service.ensure_artist_party_by_name("")
+        self.assertEqual(self.party_service.export_rows([]), [])
+
+        missing_artists_conn = sqlite3.connect(":memory:")
+        try:
+            missing_artists_conn.execute("CREATE TABLE Tracks(id INTEGER PRIMARY KEY)")
+            missing_service = PartyService(missing_artists_conn)
+            self.assertIsNone(missing_service._track_artist_columns())
+        finally:
+            missing_artists_conn.close()
+
+        legacy_conn = sqlite3.connect(":memory:")
+        try:
+            legacy_conn.executescript("""
+                CREATE TABLE Tracks(id INTEGER PRIMARY KEY, main_artist_id INTEGER);
+                CREATE TABLE TrackArtists(track_id INTEGER, artist_id INTEGER);
+                """)
+            legacy_service = PartyService(legacy_conn)
+            self.assertEqual(
+                legacy_service._track_artist_columns(),
+                ("main_artist_id", "artist_id"),
+            )
+        finally:
+            legacy_conn.close()
+
+        unsupported_columns_conn = sqlite3.connect(":memory:")
+        try:
+            unsupported_columns_conn.executescript("""
+                CREATE TABLE Tracks(id INTEGER PRIMARY KEY);
+                CREATE TABLE TrackArtists(track_id INTEGER);
+                """)
+            unsupported_service = PartyService(unsupported_columns_conn)
+            self.assertIsNone(unsupported_service._track_artist_columns())
+        finally:
+            unsupported_columns_conn.close()
+
+    def test_delete_party_reraises_non_owner_integrity_failures(self):
+        blocked_id = self.party_service.create_party(PartyPayload(legal_name="Blocked Delete"))
+        self.conn.execute("""
+            CREATE TRIGGER block_party_delete
+            BEFORE DELETE ON Parties
+            BEGIN
+                SELECT RAISE(ABORT, 'blocked party delete');
+            END
+            """)
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.party_service.delete_party(int(blocked_id))
+
+        self.conn.execute("DROP TRIGGER block_party_delete")
+
+    def test_merge_missing_and_different_artist_name_paths(self):
+        with self.assertRaisesRegex(ValueError, "Primary party not found."):
+            self.party_service.merge_parties(999_001, [])
+        with self.assertRaisesRegex(ValueError, "Primary party not found."):
+            self.party_service.merge_parties(999_001, [999_002])
+
+        primary_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Merge Primary",
+                artist_name="Primary Artist",
+                party_type="artist",
+            )
+        )
+        duplicate_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Merge Duplicate",
+                artist_name="Different Artist",
+                party_type="artist",
+            )
+        )
+
+        merged = self.party_service.merge_parties(int(primary_id), [999_003, int(duplicate_id)])
+
+        self.assertEqual(merged.id, int(primary_id))
+        self.assertEqual(merged.artist_name, "Primary Artist")
+        self.assertIn("Different Artist", merged.artist_aliases)
 
 
 if __name__ == "__main__":

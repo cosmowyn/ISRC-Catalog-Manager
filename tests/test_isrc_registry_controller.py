@@ -96,6 +96,31 @@ def test_profile_paths_are_deduplicated_and_registry_sync_logs_conflicts(tmp_pat
     app.logger.warning.assert_called()
 
 
+def test_root_attr_prefix_paths_and_sync_noop_fallbacks(monkeypatch, tmp_path):
+    override = object()
+    monkeypatch.setitem(
+        registry_controller.sys.modules,
+        "isrc_manager.main_window",
+        SimpleNamespace(QMessageBox=override),
+    )
+    assert registry_controller._root_attr("QMessageBox", None) is override
+
+    assert registry_controller.load_isrc_prefix(SimpleNamespace(settings_reads=None)) == ""
+
+    current_path = tmp_path / "current.sqlite"
+    app = SimpleNamespace(
+        profile_store=SimpleNamespace(list_profiles=mock.Mock(side_effect=RuntimeError("boom"))),
+        current_db_path=str(current_path),
+    )
+    assert registry_controller._profile_paths_for_isrc_registry(app) == [
+        Path(str(current_path.expanduser().resolve(strict=False)))
+    ]
+
+    registry_controller._sync_application_isrc_registry(
+        SimpleNamespace(application_isrc_registry=None)
+    )
+
+
 def test_conflict_format_lookup_reserve_activate_and_release(monkeypatch):
     messages = []
 
@@ -161,6 +186,74 @@ def test_conflict_format_lookup_reserve_activate_and_release(monkeypatch):
     app.logger.warning.assert_called()
 
 
+def test_registry_claim_guardrails_and_exception_fallbacks(monkeypatch):
+    messages = []
+
+    class FakeMessageBox:
+        @classmethod
+        def warning(cls, *args):
+            messages.append(args)
+
+    monkeypatch.setattr(
+        registry_controller,
+        "_root_attr",
+        lambda name, fallback: FakeMessageBox if name == "QMessageBox" else fallback,
+    )
+
+    bare_app = SimpleNamespace(
+        application_isrc_registry=None,
+        current_db_path="/profiles/current.sqlite",
+        logger=mock.Mock(),
+    )
+    assert registry_controller._isrc_registry_conflict(bare_app, "NL-ABC-26-01001") is None
+    assert registry_controller._reserve_isrc_claim_for_profile(bare_app, "not-an-isrc") is True
+    registry_controller._activate_isrc_claim_for_track(
+        bare_app,
+        "NL-ABC-26-01001",
+        track_id=1,
+        track_title="No Registry",
+    )
+    registry_controller._release_reserved_isrc_claim(bare_app, "NL-ABC-26-01001")
+
+    registry = SimpleNamespace(
+        reserve_isrc=mock.Mock(side_effect=RuntimeError("reserve failed")),
+        activate_isrc=mock.Mock(side_effect=RuntimeError("activate failed")),
+        release_reserved_isrc=mock.Mock(side_effect=RuntimeError("release failed")),
+    )
+    app = SimpleNamespace(
+        application_isrc_registry=registry,
+        current_db_path="/profiles/current.sqlite",
+        _current_profile_name=mock.Mock(return_value="Current"),
+        logger=mock.Mock(),
+        _log_event=mock.Mock(),
+        _format_isrc_registry_conflict=lambda item: registry_controller._format_isrc_registry_conflict(
+            item
+        ),
+    )
+
+    assert registry_controller._reserve_isrc_claim_for_profile(app, "NL-ABC-26-01001") is True
+    registry_controller._activate_isrc_claim_for_track(
+        app,
+        "NL-ABC-26-01001",
+        track_id=7,
+        track_title="Activation Failure",
+    )
+    registry_controller._release_reserved_isrc_claim(app, "NL-ABC-26-01001")
+    assert app.logger.warning.call_count == 3
+
+    registry.reserve_isrc = mock.Mock(return_value=None)
+    assert registry_controller._reserve_isrc_claim_for_profile(app, "NL-ABC-26-01002") is True
+    registry.activate_isrc = mock.Mock(return_value=None)
+    registry_controller._activate_isrc_claim_for_track(
+        app,
+        "NL-ABC-26-01002",
+        track_id=8,
+        track_title="No Conflict",
+    )
+    app._log_event.assert_not_called()
+    assert not messages
+
+
 def test_claim_next_generated_isrc_skips_reserved_conflict_then_returns_success():
     generated = iter(["NL-ABC-26-01001", "NL-ABC-26-01002"])
     reserve_results = [False, True]
@@ -184,6 +277,16 @@ def test_claim_next_generated_isrc_skips_reserved_conflict_then_returns_success(
     assert app._next_generated_isrc.call_count == 2
     blocked = app._next_generated_isrc.call_args_list[1].kwargs["reserved_compacts"]
     assert "NLABC2601001" in blocked
+
+
+def test_claim_next_generated_isrc_stops_when_generator_exhausts():
+    app = SimpleNamespace(
+        _next_generated_isrc=mock.Mock(return_value=""),
+        _reserve_isrc_claim_for_profile=mock.Mock(),
+    )
+
+    assert registry_controller._claim_next_generated_isrc(app) == ""
+    app._reserve_isrc_claim_for_profile.assert_not_called()
 
 
 def test_isrc_generation_state_and_next_generated_isrc_cover_invalid_and_ready_paths():
@@ -216,6 +319,29 @@ def test_isrc_generation_state_and_next_generated_isrc_cover_invalid_and_ready_p
     )
 
     app.conn = None
+    assert registry_controller._next_generated_isrc(app) == ""
+
+
+def test_next_generated_isrc_handles_not_ready_exceptions_and_exhaustion():
+    app = SimpleNamespace(
+        conn=object(),
+        cursor=object(),
+        load_isrc_prefix=mock.Mock(return_value="NLABC"),
+        load_artist_code=mock.Mock(return_value="01"),
+        _isrc_generation_state=mock.Mock(return_value=("disabled", "not ready")),
+        is_isrc_taken_normalized=mock.Mock(),
+    )
+
+    assert registry_controller._next_generated_isrc(app) == ""
+
+    app._isrc_generation_state.return_value = ("ready", "")
+    app.is_isrc_taken_normalized.side_effect = RuntimeError("lookup offline")
+    assert registry_controller._next_generated_isrc(app, release_date=object()) == (
+        f"NL-ABC-{registry_controller.datetime.now().year % 100:02d}-01001"
+    )
+
+    app.is_isrc_taken_normalized.side_effect = None
+    app.is_isrc_taken_normalized.return_value = True
     assert registry_controller._next_generated_isrc(app) == ""
 
 
@@ -259,6 +385,36 @@ def test_preview_and_update_generated_fields_set_placeholders_and_toggle_state()
     registry_controller._update_add_data_generated_fields(app)
     assert "Fix ISRC settings" in generated.placeholder
     assert generated.tooltip == "error message"
+
+
+def test_preview_and_update_generated_fields_cover_missing_and_empty_ready_states():
+    generated = _Field()
+    release_date_field = SimpleNamespace(selectedDate=mock.Mock(side_effect=RuntimeError("closed")))
+    app = SimpleNamespace(
+        release_date_field=release_date_field,
+        prev_release_toggle=_Toggle(False),
+        _next_generated_isrc=mock.Mock(return_value="NL-ABC-26-01001"),
+    )
+
+    assert registry_controller._preview_generated_isrc(app) == "NL-ABC-26-01001"
+    app._next_generated_isrc.assert_called_once_with(release_date=None, use_release_year=False)
+
+    no_generated_field_app = SimpleNamespace(
+        record_id_field=_Field(),
+        entry_date_preview_field=_Field(),
+    )
+    registry_controller._update_add_data_generated_fields(no_generated_field_app)
+    assert no_generated_field_app.record_id_field.cleared == 1
+    assert no_generated_field_app.entry_date_preview_field.cleared == 1
+
+    ready_empty_app = SimpleNamespace(
+        generated_isrc_field=generated,
+        _isrc_generation_state=mock.Mock(return_value=("ready", "")),
+        _preview_generated_isrc=mock.Mock(return_value=""),
+    )
+    registry_controller._update_add_data_generated_fields(ready_empty_app)
+    assert "No free ISRC sequence" in generated.placeholder
+    assert "no free sequence" in generated.tooltip
 
 
 def test_update_generated_fields_skips_preview_when_generation_is_not_ready():
@@ -336,3 +492,10 @@ def test_generate_set_prefix_and_taken_checks(monkeypatch):
     assert registry_controller.is_isrc_taken_normalized(app, "NL-ABC-26-01001") is True
     app._isrc_registry_conflict.return_value = None
     assert registry_controller.is_isrc_taken_normalized(app, "NL-ABC-26-01001") is False
+
+    no_track_service_app = SimpleNamespace(
+        track_service=None,
+        cursor=object(),
+        _isrc_registry_conflict=mock.Mock(return_value=_conflict(track_id=None, track_title="")),
+    )
+    assert registry_controller.is_isrc_taken_normalized(no_track_service_app, "NLABC2601001")

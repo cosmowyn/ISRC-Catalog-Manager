@@ -1,4 +1,5 @@
 import hashlib
+import io
 import os
 import stat
 import tarfile
@@ -246,6 +247,75 @@ class UpdateInstallerTests(unittest.TestCase):
             self.assertFalse((Path(tmp) / asset.name).exists())
             self.assertEqual(urlopen.call_args.kwargs["timeout"], 5.0)
 
+    def test_streaming_update_download_rejects_oversize_and_url_errors(self):
+        class _FakeResponse:
+            def __init__(self, chunks, *, headers=None):
+                self._chunks = list(chunks)
+                self.headers = headers or {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                if self._chunks:
+                    return self._chunks.pop(0)
+                return b""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "pkg.zip"
+            with mock.patch.object(update_installer, "MAX_UPDATE_PACKAGE_BYTES", 3):
+                with mock.patch(
+                    "isrc_manager.update_installer.urllib.request.urlopen",
+                    return_value=_FakeResponse(
+                        [],
+                        headers={"Content-Length": "4"},
+                    ),
+                ):
+                    with self.assertRaisesRegex(UpdateInstallerError, "unexpectedly large"):
+                        update_installer._stream_download(
+                            "https://example.test/pkg.zip",
+                            package,
+                            timeout_seconds=45.0,
+                            read_timeout_seconds=5.0,
+                            progress_callback=None,
+                            is_cancelled=None,
+                        )
+                self.assertFalse(package.exists())
+
+                with mock.patch(
+                    "isrc_manager.update_installer.urllib.request.urlopen",
+                    return_value=_FakeResponse([b"ab", b"cd"]),
+                ):
+                    with self.assertRaisesRegex(UpdateInstallerError, "unexpectedly large"):
+                        update_installer._stream_download(
+                            "https://example.test/pkg.zip",
+                            package,
+                            timeout_seconds=45.0,
+                            read_timeout_seconds=5.0,
+                            progress_callback=None,
+                            is_cancelled=None,
+                        )
+                self.assertFalse(package.exists())
+
+            with mock.patch(
+                "isrc_manager.update_installer.urllib.request.urlopen",
+                side_effect=OSError("network down"),
+            ):
+                with self.assertRaisesRegex(UpdateInstallerError, "could not be downloaded"):
+                    update_installer._stream_download(
+                        "https://example.test/pkg.zip",
+                        package,
+                        timeout_seconds=45.0,
+                        read_timeout_seconds=5.0,
+                        progress_callback=None,
+                        is_cancelled=None,
+                    )
+            self.assertFalse(package.exists())
+
     def test_extract_update_package_can_cancel_and_removes_partial_stage(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -383,6 +453,41 @@ class UpdateInstallerTests(unittest.TestCase):
             executable.chmod(0o755)
 
             self.assertEqual(locate_replacement_candidate(Path(tmp), "macos"), app)
+
+    def test_path_resolution_and_restart_helpers_cover_platform_fallbacks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(UpdateInstallerError, "did not extract correctly"):
+                locate_replacement_candidate(root / "missing", "linux")
+
+            mac_exe = root / "python"
+            mac_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertEqual(
+                resolve_installed_target_path(executable=mac_exe, platform_key="macos"),
+                mac_exe.resolve(),
+            )
+
+            linux_exe = root / PACKAGED_APP_NAME
+            linux_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertEqual(
+                resolve_installed_target_path(executable=linux_exe, platform_key="linux"),
+                linux_exe.resolve(),
+            )
+
+            target_dir = root / "replacement"
+            replacement_dir = root / "stage" / "replacement"
+            replacement_bin = replacement_dir / PACKAGED_APP_NAME
+            replacement_bin.parent.mkdir(parents=True)
+            replacement_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+            replacement_bin.chmod(0o755)
+            self.assertEqual(
+                restart_command_for_prepared_install(
+                    target_dir,
+                    replacement_dir,
+                    platform_key="linux",
+                ),
+                (str((target_dir / PACKAGED_APP_NAME).resolve()),),
+            )
 
     def test_installed_target_detection_handles_platform_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -668,6 +773,42 @@ class UpdateInstallerTests(unittest.TestCase):
                     executable=root / "missing-python",
                 )
 
+    def test_create_helper_runtime_copy_macos_bundle_and_existing_run_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = root / f"{PACKAGED_APP_NAME}.app"
+            executable = app / "Contents" / "MacOS" / PACKAGED_APP_NAME
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+            helper_root = root / "helper"
+            stale_run = helper_root / "run-321-654"
+            stale_run.mkdir(parents=True)
+            (stale_run / "stale").write_text("old", encoding="utf-8")
+
+            with (
+                mock.patch("isrc_manager.update_installer.os.getpid", return_value=321),
+                mock.patch("isrc_manager.update_installer.time.time", return_value=654.9),
+            ):
+                helper_executable = create_helper_runtime_copy(
+                    app,
+                    helper_root,
+                    platform_key="macos",
+                )
+
+            self.assertTrue(helper_executable.is_file())
+            self.assertIn(f"{PACKAGED_APP_NAME}-updater.app", str(helper_executable))
+            self.assertFalse((stale_run / "stale").exists())
+
+            broken_app = root / "Broken.app"
+            broken_app.mkdir()
+            with self.assertRaisesRegex(UpdateInstallerError, "app bundle is not runnable"):
+                create_helper_runtime_copy(
+                    broken_app,
+                    root / "helper-broken",
+                    platform_key="macos",
+                )
+
     def test_archive_private_validation_helpers_cover_unsafe_paths(self):
         with self.assertRaisesRegex(UpdateInstallerError, "absolute path"):
             update_installer._validate_archive_member("/absolute")
@@ -681,6 +822,161 @@ class UpdateInstallerTests(unittest.TestCase):
             update_installer._reject_entries_below_symlinks(
                 {update_installer.PurePosixPath("app/link/file")},
                 {update_installer.PurePosixPath("app/link")},
+            )
+        with self.assertRaisesRegex(UpdateInstallerError, "invalid target"):
+            update_installer._validate_archive_link_target(
+                update_installer.PurePosixPath("app/link"),
+                "bad\x00target",
+            )
+        with self.assertRaisesRegex(UpdateInstallerError, "unsafe symbolic link"):
+            update_installer._validate_archive_link_target(
+                update_installer.PurePosixPath("app/link"),
+                "/absolute",
+            )
+        with self.assertRaisesRegex(UpdateInstallerError, "unsafe symbolic link"):
+            update_installer._validate_archive_link_target(
+                update_installer.PurePosixPath("app/link"),
+                "C:/absolute",
+            )
+        with self.assertRaisesRegex(UpdateInstallerError, "unsafe symbolic link"):
+            update_installer._collapse_archive_path(("app", ".."))
+
+    def test_archive_extract_rejects_duplicate_special_and_invalid_link_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            duplicate_zip = root / "duplicate.zip"
+            with zipfile.ZipFile(duplicate_zip, "w") as archive:
+                _write_zip_file(archive, f"{PACKAGED_APP_NAME}.exe", b"one")
+                with self.assertWarns(UserWarning):
+                    _write_zip_file(archive, f"{PACKAGED_APP_NAME}.exe", b"two")
+            with self.assertRaisesRegex(UpdateInstallerError, "duplicate archive paths"):
+                extract_update_package(
+                    duplicate_zip, root / "stage-duplicate", platform_key="windows"
+                )
+
+            invalid_link_zip = root / "invalid-link.zip"
+            with zipfile.ZipFile(invalid_link_zip, "w") as archive:
+                info = zipfile.ZipInfo("app/link")
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                archive.writestr(info, b"\xff")
+            with self.assertRaisesRegex(UpdateInstallerError, "invalid target"):
+                extract_update_package(
+                    invalid_link_zip, root / "stage-invalid-link", platform_key="linux"
+                )
+
+            special_zip = root / "special.zip"
+            with zipfile.ZipFile(special_zip, "w") as archive:
+                info = zipfile.ZipInfo("app/fifo")
+                info.create_system = 3
+                info.external_attr = (stat.S_IFIFO | 0o644) << 16
+                archive.writestr(info, b"")
+            with self.assertRaisesRegex(UpdateInstallerError, "safe symbolic links"):
+                extract_update_package(special_zip, root / "stage-special", platform_key="linux")
+
+            duplicate_tar = root / "duplicate.tar.gz"
+            payload = b"data"
+            with tarfile.open(duplicate_tar, "w:gz") as archive:
+                for _index in range(2):
+                    info = tarfile.TarInfo("app/file")
+                    info.size = len(payload)
+                    archive.addfile(info, io.BytesIO(payload))
+            with self.assertRaisesRegex(UpdateInstallerError, "duplicate archive paths"):
+                extract_update_package(
+                    duplicate_tar, root / "stage-duplicate-tar", platform_key="linux"
+                )
+
+            hardlink_tar = root / "hardlink.tar.gz"
+            with tarfile.open(hardlink_tar, "w:gz") as archive:
+                info = tarfile.TarInfo("app/hardlink")
+                info.type = tarfile.LNKTYPE
+                info.linkname = "app/file"
+                archive.addfile(info)
+            with self.assertRaisesRegex(UpdateInstallerError, "unsafe tar entries"):
+                extract_update_package(hardlink_tar, root / "stage-hardlink", platform_key="linux")
+
+    def test_archive_destination_and_write_conflicts_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extract_dir = root / "extract"
+            extract_dir.mkdir()
+            (extract_dir / "app-link").symlink_to("app")
+            with self.assertRaisesRegex(UpdateInstallerError, "entries below a symbolic link"):
+                update_installer._prepare_archive_destination(
+                    extract_dir,
+                    update_installer.PurePosixPath("app-link/file"),
+                )
+
+            (extract_dir / "conflict").write_text("file", encoding="utf-8")
+            with self.assertRaisesRegex(UpdateInstallerError, "conflicting archive paths"):
+                update_installer._prepare_archive_destination(
+                    extract_dir,
+                    update_installer.PurePosixPath("conflict/file"),
+                )
+
+            directory_conflict = extract_dir / "directory-conflict"
+            directory_conflict.write_text("file", encoding="utf-8")
+            with self.assertRaisesRegex(UpdateInstallerError, "conflicting archive paths"):
+                update_installer._create_archive_directory(directory_conflict, 0o755)
+
+            symlink_conflict = extract_dir / "symlink-conflict"
+            symlink_conflict.write_text("existing", encoding="utf-8")
+            with self.assertRaisesRegex(UpdateInstallerError, "conflicting archive paths"):
+                update_installer._create_archive_symlink(symlink_conflict, "target")
+
+            zip_destination = extract_dir / "zip-destination"
+            zip_destination.mkdir()
+            with zipfile.ZipFile(root / "one.zip", "w") as archive:
+                _write_zip_file(archive, "file", b"content")
+                info = archive.infolist()[0]
+                with self.assertRaisesRegex(UpdateInstallerError, "conflicting archive paths"):
+                    update_installer._write_zip_file(archive, info, zip_destination, 0o644)
+
+            unreadable_archive = mock.Mock()
+            unreadable_archive.extractfile.return_value = None
+            with self.assertRaisesRegex(UpdateInstallerError, "unreadable file entry"):
+                update_installer._write_tar_file(
+                    unreadable_archive,
+                    tarfile.TarInfo("file"),
+                    extract_dir / "tar-file",
+                )
+
+    def test_cache_roots_launch_flags_and_private_name_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch(
+                "isrc_manager.update_installer.preferred_data_root",
+                return_value=root,
+            ):
+                cache_root = update_installer.update_cache_root()
+                self.assertEqual(cache_root, root / "updates")
+                self.assertTrue(cache_root.is_dir())
+                workspace = update_installer.update_workspace_root(
+                    "3.5.4",
+                    platform_key="linux",
+                    cache_root=cache_root,
+                )
+                self.assertEqual(workspace, cache_root / "v3.5.4-linux")
+
+            calls = []
+
+            def _popen(command, **kwargs):
+                calls.append((command, kwargs))
+                return mock.Mock()
+
+            with (
+                mock.patch.object(update_installer.os, "name", "nt"),
+                mock.patch.object(
+                    update_installer.subprocess, "CREATE_NEW_PROCESS_GROUP", 1, create=True
+                ),
+                mock.patch.object(update_installer.subprocess, "DETACHED_PROCESS", 2, create=True),
+            ):
+                launch_update_helper(["helper", HELPER_MODE_ARGUMENT], popen_factory=_popen)
+
+            self.assertEqual(calls[0][1]["creationflags"], 3)
+            self.assertIn(
+                f"{PACKAGED_APP_NAME}.exe",
+                update_installer._preferred_executable_names(include_windows_suffix=True),
             )
 
     def test_launch_update_helper_detaches_process(self):

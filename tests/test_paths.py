@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from PySide6.QtCore import QSettings
@@ -88,6 +89,56 @@ class PathLayoutTests(unittest.TestCase):
         self.assertEqual(layout.backups_dir, preferred_override.resolve() / "backups")
         self.assertEqual(layout.legacy_data_roots, (legacy_root.resolve(),))
 
+    def test_layout_deferred_legacy_root_properties_and_duplicate_pruning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bin_root = root / "bin"
+            settings_root = root / "settings" / APP_NAME
+            preferred_root = root / "preferred" / APP_NAME
+            deferred_root = root / "deferred"
+            settings = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+            settings.setFallbacksEnabled(False)
+            settings.setValue(
+                path_helpers.STORAGE_MIGRATION_STATE_KEY,
+                path_helpers.STORAGE_STATE_DEFERRED,
+            )
+            settings.setValue(path_helpers.STORAGE_LEGACY_DATA_ROOT_KEY, str(deferred_root))
+            settings.sync()
+
+            def _fake_writable_location(location):
+                location_name = getattr(location, "name", str(location))
+                if location_name.endswith("AppDataLocation"):
+                    return str(settings_root)
+                if location_name.endswith("AppLocalDataLocation"):
+                    return str(preferred_root)
+                return ""
+
+            with (
+                mock.patch.object(path_helpers, "BIN_DIR", return_value=bin_root),
+                mock.patch.object(
+                    path_helpers.QStandardPaths,
+                    "writableLocation",
+                    side_effect=_fake_writable_location,
+                ),
+                mock.patch.object(
+                    path_helpers,
+                    "legacy_data_root",
+                    return_value=preferred_root,
+                ),
+            ):
+                layout = path_helpers.resolve_app_storage_layout(settings=settings)
+            with mock.patch.object(path_helpers, "BIN_DIR", return_value=bin_root):
+                portable_legacy = path_helpers.legacy_data_root(portable=True)
+
+        self.assertEqual(layout.active_data_root, deferred_root.resolve())
+        self.assertEqual(layout.lock_path, settings_root.resolve() / f"{APP_NAME}.lock")
+        self.assertEqual(
+            layout.migration_journal_path,
+            deferred_root.resolve() / path_helpers.STORAGE_MIGRATION_JOURNAL_BASENAME,
+        )
+        self.assertEqual(layout.legacy_data_roots, ())
+        self.assertEqual(portable_legacy, bin_root)
+
     def test_platform_fallback_roots_use_app_named_directories(self):
         cases = (
             (
@@ -141,6 +192,52 @@ class PathLayoutTests(unittest.TestCase):
                     (Path(env_patch["LOCALAPPDATA"]) / APP_ORG / APP_NAME).resolve(),
                 )
 
+    def test_qt_path_and_application_identity_error_fallbacks(self):
+        app = SimpleNamespace(
+            organization_names=[],
+            application_names=[],
+            setOrganizationName=lambda value: app.organization_names.append(value),
+            setApplicationName=lambda value: app.application_names.append(value),
+        )
+
+        path_helpers.configure_qt_application_identity(app)
+        self.assertEqual(app.organization_names, [APP_ORG])
+        self.assertEqual(app.application_names, [APP_NAME])
+
+        raising_app = SimpleNamespace(
+            setOrganizationName=mock.Mock(side_effect=RuntimeError("org")),
+            setApplicationName=mock.Mock(),
+        )
+        qcore = SimpleNamespace(
+            setOrganizationName=mock.Mock(side_effect=RuntimeError("qcore org")),
+            setApplicationName=mock.Mock(),
+        )
+        with mock.patch.object(path_helpers, "QCoreApplication", qcore):
+            path_helpers.configure_qt_application_identity(raising_app)
+
+        qcore.setOrganizationName.assert_called_once_with(APP_ORG)
+        qcore.setApplicationName.assert_not_called()
+
+        class BrokenStandardPaths:
+            AppDataLocation = object()
+
+            @staticmethod
+            def writableLocation(_location):
+                raise RuntimeError("qt unavailable")
+
+        with (
+            mock.patch.object(path_helpers, "QStandardPaths", BrokenStandardPaths),
+            mock.patch.object(path_helpers.sys, "platform", "linux"),
+        ):
+            self.assertEqual(
+                path_helpers.settings_root(app_name="BrokenQtApp"),
+                (Path.home() / ".config" / APP_ORG / "BrokenQtApp").resolve(),
+            )
+            self.assertEqual(
+                path_helpers.lock_path(app_name="BrokenQtApp"),
+                (Path.home() / ".config" / APP_ORG / "BrokenQtApp" / "BrokenQtApp.lock").resolve(),
+            )
+
     def test_repo_demo_runtime_database_paths_are_ignored_for_normal_settings(self):
         repo_demo_db = (
             path_helpers.BIN_DIR()
@@ -174,6 +271,38 @@ class PathLayoutTests(unittest.TestCase):
             path_helpers.should_ignore_persisted_last_db_path(
                 repo_demo_db,
                 settings_path=demo_settings,
+            )
+        )
+
+    def test_repo_nonproduction_path_edges_and_normal_paths(self):
+        repo_root = path_helpers.BIN_DIR()
+        self.assertFalse(path_helpers.is_repo_nonproduction_runtime_path(None, repo_root=repo_root))
+        self.assertFalse(
+            path_helpers.is_repo_nonproduction_runtime_path("   ", repo_root=repo_root)
+        )
+        self.assertFalse(
+            path_helpers.is_repo_nonproduction_runtime_path(
+                Path.home() / "Documents" / "library.db",
+                repo_root=repo_root,
+            )
+        )
+        self.assertTrue(
+            path_helpers.is_repo_nonproduction_runtime_path(
+                repo_root / "tests" / "fixtures" / "profile.db",
+                repo_root=repo_root,
+            )
+        )
+        self.assertTrue(
+            path_helpers.is_repo_nonproduction_runtime_path(
+                repo_root / "demo" / ".runtime-test" / APP_NAME / "Database" / "library.db",
+                repo_root=repo_root,
+            )
+        )
+        self.assertTrue(
+            path_helpers.should_ignore_persisted_last_db_path(
+                repo_root / "tests" / "fixtures" / "profile.db",
+                settings_path=None,
+                repo_root=repo_root,
             )
         )
 

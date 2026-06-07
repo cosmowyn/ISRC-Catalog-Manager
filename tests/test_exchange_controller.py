@@ -287,12 +287,29 @@ def test_show_exchange_import_report_opens_first_repair_queue_entry(monkeypatch,
     exchange_controller._show_exchange_import_report(
         app,
         tmp_path / "tracks.csv",
-        _report(repair_queue_entry_ids=[42, 43], warnings=["warning one", "warning two"]),
+        _report(
+            repair_queue_entry_ids=[42, 43],
+            warnings=["warning one", "warning two"],
+            would_create_tracks=3,
+            would_update_tracks=4,
+            identifier_totals={
+                "catalog_number": {"internal": 1, "external": 2},
+                "contract_number": {"mismatch": 3, "merged": 4},
+                "license_number": {"skipped": 5},
+                "registry_sha256_key": {"conflicted": 6},
+            },
+        ),
     )
 
     assert opened == [{"focus_entry_id": 42}]
     assert instances[0].title == "Import CSV"
     assert "Warnings:" in instances[0].text
+    assert "Would create tracks: 3" in instances[0].text
+    assert "Would update tracks: 4" in instances[0].text
+    assert "Catalog Number: internal 1, external 2" in instances[0].text
+    assert "Contract Number: mismatch 3, merged/skipped 4" in instances[0].text
+    assert "License Number: skipped 5" in instances[0].text
+    assert "Registry SHA-256 Key: conflicted 6" in instances[0].text
     assert "- warning one" in instances[0].text
 
 
@@ -483,6 +500,64 @@ def test_import_exchange_file_handles_missing_service_cancel_unsupported_and_xml
 
     with pytest.raises(ValueError, match="XML inspection"):
         xml_task["on_success_after_cleanup"]({})
+    with pytest.raises(ValueError, match="XML exchange inspection"):
+        xml_task["on_success_after_cleanup"](
+            {
+                "xml_inspection": SimpleNamespace(
+                    conflicting_custom_fields=[],
+                    missing_custom_fields=[],
+                )
+            }
+        )
+
+
+def test_import_exchange_file_rejected_dialog_and_csv_reinspect_callback(monkeypatch, tmp_path):
+    source = tmp_path / "tracks.csv"
+    source.write_text("ISRC,Title\nAA6Q72000001,Song\n", encoding="utf-8")
+    inspection = ExchangeInspection(
+        file_path=str(source),
+        format_name="csv",
+        headers=["ISRC"],
+        preview_rows=[{"ISRC": "AA6Q72000001"}],
+        suggested_mapping={"ISRC": "isrc"},
+        resolved_delimiter=",",
+    )
+    submitted = []
+    captured_dialogs = []
+
+    class RejectingDialog:
+        def __init__(self, **kwargs):
+            captured_dialogs.append(kwargs)
+
+        def exec(self):
+            return QDialog.Rejected
+
+    service = mock.Mock()
+    service.supported_import_targets.return_value = ["isrc"]
+    service.inspect_csv.return_value = inspection
+    app = SimpleNamespace(
+        exchange_service=service,
+        settings=mock.Mock(),
+        _scaled_progress_callback=lambda callback, **_kwargs: callback,
+        _submit_background_bundle_task=lambda **kwargs: submitted.append(kwargs),
+        _show_background_task_error=mock.Mock(),
+    )
+    file_dialog = mock.Mock()
+    file_dialog.getOpenFileName.return_value = (str(source), "")
+    monkeypatch.setattr(exchange_controller, "_file_dialog", lambda: file_dialog)
+    monkeypatch.setattr(
+        exchange_controller,
+        "_root_attr",
+        lambda name, fallback: RejectingDialog if name == "ExchangeImportDialog" else fallback,
+    )
+
+    exchange_controller.import_exchange_file(app, "csv")
+    inspect_task = submitted[-1]
+    inspect_task["on_success_after_cleanup"](inspection)
+
+    assert len(submitted) == 1
+    assert captured_dialogs[-1]["csv_reinspect_callback"]("|") is inspection
+    service.inspect_csv.assert_called_with(str(source), delimiter="|")
 
 
 def test_xml_import_adds_missing_custom_fields_and_honors_review_rejection(
@@ -584,6 +659,175 @@ def test_xml_import_adds_missing_custom_fields_and_honors_review_rejection(
 
     assert app._open_import_review_dialog.called
     assert submitted[-1] is review_task
+
+
+def test_xml_import_apply_uses_snapshot_history_and_commit_failure_is_nonfatal(
+    monkeypatch,
+    tmp_path,
+):
+    source = tmp_path / "catalog.xml"
+    source.write_text("<catalog />", encoding="utf-8")
+    submitted = []
+
+    class FakeDialog:
+        def __init__(self, **_kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def mapping(self):
+            return {"ISRC": "isrc"}
+
+        def import_options(self):
+            return ExchangeImportOptions(mode="update")
+
+        def resolved_csv_delimiter(self):
+            return None
+
+    def fake_root_attr(name, fallback):
+        if name == "ExchangeImportDialog":
+            return FakeDialog
+        if name == "run_snapshot_history_action":
+            return lambda **kwargs: kwargs["mutation"]()
+        return fallback
+
+    dry_report = _report(format_name="xml", mode="dry_run", passed=1, failed=0, skipped=0)
+    apply_report = _report(format_name="xml", mode="update", passed=1, failed=0, skipped=0)
+    service = mock.Mock()
+    service.supported_import_targets.return_value = ["isrc"]
+    service.import_xml.side_effect = [dry_report, apply_report]
+    app = SimpleNamespace(
+        exchange_service=service,
+        settings=mock.Mock(),
+        logger=mock.Mock(),
+        conn=SimpleNamespace(commit=mock.Mock(side_effect=RuntimeError("already closed"))),
+        _scaled_progress_callback=lambda callback, **_kwargs: callback,
+        _submit_background_bundle_task=lambda **kwargs: submitted.append(kwargs),
+        _advance_task_ui_progress=mock.Mock(),
+        _refresh_history_actions=mock.Mock(),
+        refresh_table_preserve_view=mock.Mock(),
+        populate_all_comboboxes=mock.Mock(),
+        _log_event=mock.Mock(),
+        _audit=mock.Mock(),
+        _audit_commit=mock.Mock(),
+        _show_exchange_import_report=mock.Mock(),
+        _show_background_task_error=mock.Mock(),
+        _open_import_review_dialog=mock.Mock(return_value=True),
+        _exchange_import_review_summary=exchange_controller._exchange_import_review_summary,
+    )
+    file_dialog = mock.Mock()
+    file_dialog.getOpenFileName.return_value = (str(source), "")
+    monkeypatch.setattr(exchange_controller, "_file_dialog", lambda: file_dialog)
+    monkeypatch.setattr(exchange_controller, "_root_attr", fake_root_attr)
+
+    exchange_controller.import_exchange_file(app, "xml")
+    inspect_task = submitted[-1]
+    xml_inspection = SimpleNamespace(conflicting_custom_fields=[], missing_custom_fields=[])
+    exchange_inspection = ExchangeInspection(
+        file_path=str(source),
+        format_name="xml",
+        headers=["ISRC"],
+        preview_rows=[{"ISRC": "AA6Q72000001"}],
+        suggested_mapping={"ISRC": "isrc"},
+    )
+    inspect_task["on_success_after_cleanup"](
+        {"xml_inspection": xml_inspection, "exchange_inspection": exchange_inspection}
+    )
+
+    review_task = submitted[-1]
+    ctx = SimpleNamespace(report_progress=mock.Mock(), raise_if_cancelled=mock.Mock())
+    bundle = SimpleNamespace(exchange_service=service, history_manager=object())
+    assert review_task["task_fn"](bundle, ctx) is dry_report
+    review_task["on_success_after_cleanup"](dry_report)
+
+    apply_task = submitted[-1]
+    assert apply_task["task_fn"](bundle, ctx) is apply_report
+    apply_task["on_success_before_cleanup"](apply_report, object())
+    apply_task["on_success_after_cleanup"](apply_report)
+
+    app.conn.commit.assert_called_once()
+    app.refresh_table_preserve_view.assert_called_once_with(focus_id=None)
+    assert service.import_xml.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("format_name", "inspect_method", "import_method"),
+    [
+        ("xlsx", "inspect_xlsx", "import_xlsx"),
+        ("package", "inspect_package", "import_package"),
+    ],
+)
+def test_import_exchange_file_preflight_review_dispatches_non_csv_formats(
+    monkeypatch,
+    tmp_path,
+    format_name,
+    inspect_method,
+    import_method,
+):
+    source = tmp_path / f"catalog.{format_name}"
+    source.write_text("payload", encoding="utf-8")
+    inspection = ExchangeInspection(
+        file_path=str(source),
+        format_name=format_name,
+        headers=["ISRC"],
+        preview_rows=[{"ISRC": "AA6Q72000001"}],
+        suggested_mapping={"ISRC": "isrc"},
+    )
+    report = _report(format_name=format_name, mode="dry_run", passed=1, failed=0, skipped=0)
+    submitted = []
+
+    class FakeDialog:
+        def __init__(self, **_kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def mapping(self):
+            return {"ISRC": "isrc"}
+
+        def import_options(self):
+            return ExchangeImportOptions(mode="update")
+
+        def resolved_csv_delimiter(self):
+            return None
+
+    service = mock.Mock()
+    service.supported_import_targets.return_value = ["isrc"]
+    getattr(service, inspect_method).return_value = inspection
+    getattr(service, import_method).return_value = report
+    app = SimpleNamespace(
+        exchange_service=service,
+        settings=mock.Mock(),
+        logger=mock.Mock(),
+        _scaled_progress_callback=lambda callback, **_kwargs: callback,
+        _submit_background_bundle_task=lambda **kwargs: submitted.append(kwargs),
+        _show_background_task_error=mock.Mock(),
+        _open_import_review_dialog=mock.Mock(return_value=False),
+        _exchange_import_review_summary=exchange_controller._exchange_import_review_summary,
+    )
+    file_dialog = mock.Mock()
+    file_dialog.getOpenFileName.return_value = (str(source), "")
+    monkeypatch.setattr(exchange_controller, "_file_dialog", lambda: file_dialog)
+    monkeypatch.setattr(
+        exchange_controller,
+        "_root_attr",
+        lambda name, fallback: FakeDialog if name == "ExchangeImportDialog" else fallback,
+    )
+
+    exchange_controller.import_exchange_file(app, format_name)
+    inspect_task = submitted[-1]
+    bundle = SimpleNamespace(exchange_service=service, history_manager=object())
+    ctx = SimpleNamespace(report_progress=mock.Mock(), raise_if_cancelled=mock.Mock())
+    assert inspect_task["task_fn"](bundle, ctx) is inspection
+    inspect_task["on_success_after_cleanup"](inspection)
+
+    review_task = submitted[-1]
+    assert review_task["title"] == f"Review {format_name.upper()}"
+    assert review_task["task_fn"](bundle, ctx) is report
+    review_task["on_success_after_cleanup"](report)
+    app._open_import_review_dialog.assert_called_once()
 
 
 @pytest.mark.parametrize(

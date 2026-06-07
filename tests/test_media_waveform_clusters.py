@@ -11,8 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPixmap, QPointingDevice
 
 from isrc_manager.media import waveform as waveform_module
 from isrc_manager.media import waveform_cache
@@ -243,6 +243,56 @@ class _FakeAudioBuffer:
         return self._payload
 
 
+class _ConfigurableAudioFormat:
+    def __init__(
+        self,
+        sample_format,
+        *,
+        frame_bytes: int = 4,
+        bytes_per_sample: int = 2,
+        channels: int = 2,
+        sample_rate: int = 8000,
+    ) -> None:
+        self._sample_format = sample_format
+        self._frame_bytes = frame_bytes
+        self._bytes_per_sample = bytes_per_sample
+        self._channels = channels
+        self._sample_rate = sample_rate
+
+    def bytesPerFrame(self) -> int:
+        return self._frame_bytes
+
+    def bytesPerSample(self) -> int:
+        return self._bytes_per_sample
+
+    def channelCount(self) -> int:
+        return self._channels
+
+    def sampleFormat(self):
+        return self._sample_format
+
+    def sampleRate(self) -> int:
+        return self._sample_rate
+
+
+class _ConfigurableAudioBuffer:
+    def __init__(
+        self, payload: bytes, fmt: _ConfigurableAudioFormat, *, valid: bool = True
+    ) -> None:
+        self._payload = payload
+        self._format = fmt
+        self._valid = valid
+
+    def isValid(self) -> bool:
+        return self._valid
+
+    def format(self):
+        return self._format
+
+    def data(self) -> bytes:
+        return self._payload
+
+
 def _fake_decoder_class(sample_format, payload: bytes):
     class _FakeDecoder:
         def __init__(self) -> None:
@@ -273,6 +323,48 @@ def _fake_decoder_class(sample_format, payload: bytes):
 
         def errorString(self) -> str:
             return ""
+
+    return _FakeDecoder
+
+
+def _configurable_decoder_class(
+    buffer: _ConfigurableAudioBuffer | None,
+    *,
+    supported: bool = True,
+    emit_error: bool = False,
+):
+    class _FakeDecoder:
+        def __init__(self) -> None:
+            self.bufferReady = _FakeSignal()
+            self.finished = _FakeSignal()
+            self.error = _FakeSignal()
+            self.stopped = False
+
+        def isSupported(self) -> bool:
+            return supported
+
+        def setSource(self, _source) -> None:
+            return None
+
+        def start(self) -> None:
+            if buffer is not None:
+                self.bufferReady.emit()
+            if emit_error:
+                self.error.emit()
+            else:
+                self.finished.emit()
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def read(self):
+            return buffer
+
+        def duration(self) -> int:
+            return 1
+
+        def errorString(self) -> str:
+            return "decoder failed" if emit_error else ""
 
     return _FakeDecoder
 
@@ -461,6 +553,100 @@ def test_waveform_widget_color_and_trace_helpers_cover_edge_branches() -> None:
         painter.end()
 
 
+def test_waveform_widget_guard_paths_cached_fallbacks_and_real_non_left_events(monkeypatch) -> None:
+    require_qapplication()
+    widget = WaveformWidget()
+    widget.resize(72, 36)
+    widget.set_duration_ms(1000)
+    widget.set_peaks([(-0.4, 0.0), (0.0, 0.35), (0.0, 0.0)])
+
+    monkeypatch.setattr(widget, "rect", lambda: QRect())
+    widget._update_playhead_regions(100, 200)
+
+    monkeypatch.setattr(widget, "window", lambda: None)
+    assert widget._window_background_color() == widget.palette().window().color()
+    assert widget._waveform_cache_key_for(QRectF(0.0, 0.0, 10.0, 10.0))[-1].startswith("#")
+
+    monkeypatch.setattr(widget, "size", lambda: QSize())
+    assert widget._empty_waveform_pixmap().isNull()
+    monkeypatch.undo()
+
+    assert widget._fallback_waveform_rgb_for_peak(0.3) != widget._fallback_waveform_rgb_for_peak(
+        0.1
+    )
+    assert widget._render_static_waveform_cache(QRectF(200.0, 0.0, 8.0, 12.0)).isNull() is False
+
+    empty = WaveformWidget()
+    empty.resize(20, 20)
+    assert empty._render_static_waveform_cache(empty._waveform_rect(empty.rect())).isNull()
+    empty_image = QImage(20, 20, QImage.Format.Format_ARGB32)
+    empty_image.fill(Qt.GlobalColor.transparent)
+    empty.render(empty_image)
+
+    null_pixmap = QPixmap()
+    widget._stored_waveform_pixmaps = {"light": null_pixmap, "dark": null_pixmap}
+    assert widget._stored_waveform_pixmap() is None
+
+    widget.set_harmonic_frames([[0.0, 1.0]])
+    points, intensities = widget._harmonic_trace_points(
+        [0.0, 1.0],
+        QRectF(0.0, 0.0, 12.0, 10.0),
+    )
+    assert len(points) == 12
+    assert any(value > 0.0 for value in intensities)
+    assert widget._harmonic_trace_points(None, QRectF(0.0, 0.0, 12.0, 10.0)) == ([], [])
+
+    class _TruthyEmptySequence:
+        def __bool__(self) -> bool:
+            return True
+
+        def __getitem__(self, item):
+            if isinstance(item, slice):
+                return []
+            raise IndexError(item)
+
+    assert widget._harmonic_frame_energy(_TruthyEmptySequence()) == 0.0
+
+    image = QImage(24, 24, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    try:
+        WaveformWidget()._draw_live_harmonics(painter, QRect(0, 0, 24, 24), light_mode=True)
+    finally:
+        painter.end()
+
+    device = QPointingDevice.primaryPointingDevice()
+    right_press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(4.0, 2.0),
+        QPointF(4.0, 2.0),
+        Qt.MouseButton.RightButton,
+        Qt.MouseButton.RightButton,
+        Qt.KeyboardModifier.NoModifier,
+        device,
+    )
+    widget.mousePressEvent(right_press)
+    assert right_press.isAccepted() is False
+
+    passive_move = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(5.0, 2.0),
+        QPointF(5.0, 2.0),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        device,
+    )
+    widget.mouseMoveEvent(passive_move)
+    assert passive_move.isAccepted() is False
+
+    scrub_values = _connect_int_signal(widget.scrubRequested)
+    angle_y = _WheelLikeEvent(angle_delta=120)
+    widget.wheelEvent(angle_y)
+    assert angle_y.accepted is True
+    assert scrub_values[-1] == -1000
+
+
 def test_load_wav_peaks_handles_pcm_widths_and_invalid_files(tmp_path: Path) -> None:
     wav_path = tmp_path / "tone.wav"
     _write_stereo_wav(
@@ -626,6 +812,134 @@ def test_qt_decoder_waveform_fallbacks_are_deterministic(
     assert cache_peaks[0][1] > 0.0
 
 
+def test_load_wav_peaks_qt_decoder_edge_formats_and_binary_search(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    require_qapplication()
+    raw_path = tmp_path / "decoder-source.bin"
+    raw_path.write_bytes(b"not-riff")
+
+    import os
+    import platform
+    import shutil
+    import subprocess
+
+    monkeypatch.setattr(waveform_module, "QEventLoop", _FakeEventLoop)
+    monkeypatch.setattr(waveform_module, "QTimer", _FakeTimer)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(platform, "system", lambda: "plan9")
+    monkeypatch.setattr(os.path, "exists", lambda _path: False)
+    monkeypatch.setitem(
+        sys.modules,
+        "audioread",
+        types.SimpleNamespace(audio_open=lambda _path: (_ for _ in ()).throw(RuntimeError())),
+    )
+
+    uint8_format = _ConfigurableAudioFormat(
+        waveform_module.QAudioFormat.SampleFormat.UInt8,
+        frame_bytes=2,
+        bytes_per_sample=1,
+        channels=2,
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(_ConfigurableAudioBuffer(bytes([255, 0]), uint8_format)),
+    )
+    uint8_peaks = load_wav_peaks(str(raw_path), 1)
+    assert uint8_peaks == pytest.approx([(-1.0, 0.9921875)])
+
+    int32_format = _ConfigurableAudioFormat(
+        waveform_module.QAudioFormat.SampleFormat.Int32,
+        frame_bytes=8,
+        bytes_per_sample=4,
+        channels=2,
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(
+            _ConfigurableAudioBuffer(
+                struct.pack("<ii", 2_147_483_647, -2_147_483_648), int32_format
+            )
+        ),
+    )
+    int32_peaks = load_wav_peaks(str(raw_path), 1)
+    assert int32_peaks[0][0] == pytest.approx(-1.0)
+    assert int32_peaks[0][1] > 0.99
+
+    float_format = _ConfigurableAudioFormat(
+        waveform_module.QAudioFormat.SampleFormat.Float,
+        frame_bytes=8,
+        bytes_per_sample=4,
+        channels=2,
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(
+            _ConfigurableAudioBuffer(struct.pack("<ff", 1.5, -2.0), float_format)
+        ),
+    )
+    assert load_wav_peaks(str(raw_path), 1) == pytest.approx([(-1.0, 1.0)])
+
+    frame_bytes_fallback_format = _ConfigurableAudioFormat(
+        waveform_module.QAudioFormat.SampleFormat.Int16,
+        frame_bytes=0,
+        bytes_per_sample=2,
+        channels=2,
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(
+            _ConfigurableAudioBuffer(struct.pack("<hh", 12000, -6000), frame_bytes_fallback_format)
+        ),
+    )
+    assert load_wav_peaks(str(raw_path), 1)[0][1] > 0.0
+
+    invalid_format = _ConfigurableAudioFormat(
+        waveform_module.QAudioFormat.SampleFormat.Int16,
+        frame_bytes=0,
+        bytes_per_sample=0,
+        channels=0,
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(_ConfigurableAudioBuffer(b"ignored", invalid_format)),
+    )
+    assert load_wav_peaks(str(raw_path), 1) == []
+
+    unsupported_format = _ConfigurableAudioFormat(object(), frame_bytes=2, bytes_per_sample=1)
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(_ConfigurableAudioBuffer(b"ignored", unsupported_format)),
+    )
+    assert load_wav_peaks(str(raw_path), 1) == []
+
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(None, emit_error=True),
+    )
+    assert load_wav_peaks(str(raw_path), 1) == []
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(os.path, "exists", lambda path: str(path).lower().endswith("ffmpeg.exe"))
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError())
+    )
+    monkeypatch.setattr(
+        waveform_module,
+        "QAudioDecoder",
+        _configurable_decoder_class(None, supported=False),
+    )
+    assert load_wav_peaks(str(raw_path), 1) == []
+
+
 def test_stereo_peak_meter_state_machine_and_formatting() -> None:
     require_qapplication()
     meter = StereoPeakMeterWidget()
@@ -777,6 +1091,78 @@ def test_spectrum_graph_frequency_scale_fade_release_and_segments() -> None:
     assert ignored.ignored is True
 
 
+def test_audio_visualization_widget_boundary_branches(monkeypatch) -> None:
+    require_qapplication()
+    meter = StereoPeakMeterWidget()
+    meter.resize(58, 32)
+
+    assert meter.advance_release(1) is False
+    meter.begin_release()
+    assert meter.is_releasing() is False
+    assert meter._frame_at_playhead() == (
+        StereoPeakMeterWidget.DB_FLOOR,
+        StereoPeakMeterWidget.DB_FLOOR,
+    )
+    assert meter._gain_db() == 0.0
+
+    meter.set_peak_frames([(-12.0, -9.0)])
+    meter.set_gain(0.0)
+    assert meter._gain_db() == StereoPeakMeterWidget.DB_FLOOR
+    assert meter._frame_position() == 0.0
+    assert meter._format_compact_db(StereoPeakMeterWidget.DB_FLOOR) == "-inf"
+
+    floor_image = QImage(58, 32, QImage.Format.Format_ARGB32)
+    floor_image.fill(Qt.GlobalColor.transparent)
+    meter.render(floor_image)
+
+    graph = SpectrumGraphWidget()
+    graph.resize(90, 32)
+    graph.set_frequency_scale("linear")
+    assert graph.frequency_scale() == SpectrumGraphWidget.SPECTRUM_SCALE_LINEAR
+    harmonic_rect = graph._harmonic_rect(QRectF(1.0, 2.0, 3.0, -4.0))
+    assert harmonic_rect.height() == 1.0
+    assert graph._visual_color_for_intensity(0.5, light_mode=False).isValid()
+
+    class _ContextMenuEvent:
+        def __init__(self) -> None:
+            self.accepted = False
+
+        def globalPos(self):
+            return None
+
+        def accept(self) -> None:
+            self.accepted = True
+
+    class _FakeMenu:
+        def __init__(self) -> None:
+            self.executed_with = object()
+
+        def exec(self, pos) -> None:
+            self.executed_with = pos
+
+    fake_menu = _FakeMenu()
+    monkeypatch.setattr(graph, "_create_frequency_scale_context_menu", lambda: fake_menu)
+    event = _ContextMenuEvent()
+    graph.contextMenuEvent(event)
+    assert event.accepted is True
+    assert fake_menu.executed_with is None
+
+    monkeypatch.setattr(graph, "_spectrum_display_values", lambda _frame: [])
+    assert graph._spectrum_line_segments([0.5], QRectF(0, 0, 10, 10)) == []
+
+    image = QImage(90, 32, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    try:
+        graph._draw_spectrum_graph(painter, graph.rect(), light_mode=False)
+        graph._fade_opacity = 1.0
+        graph.set_spectrum_frames([[0.25, 0.75]])
+        graph.set_gain(0.0)
+        graph._draw_spectrum_graph(painter, graph.rect(), light_mode=False)
+    finally:
+        painter.end()
+
+
 def test_audio_visualization_loaders_extract_frames_from_wav(tmp_path: Path) -> None:
     wav_path = tmp_path / "tone.wav"
     _write_stereo_wav(wav_path, _tone_frames(), sample_rate=22050)
@@ -855,6 +1241,44 @@ def test_audio_visualization_loaders_cover_pcm_width_and_channel_variants(
     assert all(len(frame) == 14 for frame in harmonic_frames)
 
 
+def test_audio_visualization_loaders_handle_wav_boundaries(tmp_path: Path) -> None:
+    empty_wav = tmp_path / "empty.wav"
+    with wave.open(str(empty_wav), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(8000)
+    assert load_audio_peak_meter_frames(str(empty_wav), target_sr=8000) == []
+    assert load_audio_harmonic_frames(str(empty_wav), target_sr=8000) == []
+    assert load_audio_spectrum_frames(str(empty_wav), target_sr=8000) == []
+
+    unsupported_width = tmp_path / "wide.wav"
+    wide_payload = b"\x00" * 20
+    unsupported_width.write_bytes(
+        b"RIFF"
+        + struct.pack("<I", 36 + len(wide_payload))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 8000 * 5, 5, 40)
+        + b"data"
+        + struct.pack("<I", len(wide_payload))
+        + wide_payload
+    )
+    assert load_audio_peak_meter_frames(str(unsupported_width), target_sr=8000) == []
+    assert load_audio_harmonic_frames(str(unsupported_width), target_sr=8000) == []
+    assert load_audio_spectrum_frames(str(unsupported_width), target_sr=8000) == []
+
+    silent_wav = tmp_path / "silent.wav"
+    _write_stereo_wav(silent_wav, [(0, 0)] * 4096, sample_rate=8000)
+    silent_peaks = load_audio_peak_meter_frames(str(silent_wav), target_sr=8000)
+    assert silent_peaks
+    assert set(silent_peaks) == {(StereoPeakMeterWidget.DB_FLOOR, StereoPeakMeterWidget.DB_FLOOR)}
+    harmonic_frames = load_audio_harmonic_frames(str(silent_wav), target_sr=8000)
+    assert harmonic_frames
+    assert all(value == 0.0 for frame in harmonic_frames for value in frame)
+    spectrum_frames = load_audio_spectrum_frames(str(silent_wav), target_sr=8000, bin_count=48)
+    assert spectrum_frames
+    assert all(value == 0.0 for frame in spectrum_frames for value in frame)
+
+
 def test_audio_visualization_loaders_decode_ffmpeg_fallbacks(
     monkeypatch,
     tmp_path: Path,
@@ -897,6 +1321,90 @@ def test_audio_visualization_loaders_decode_ffmpeg_fallbacks(
     spectrum_frames = load_audio_spectrum_frames(str(source), target_sr=8000, bin_count=4)
     assert spectrum_frames
     assert len(spectrum_frames[0]) == 48
+
+
+def test_audio_visualization_loaders_decode_soundfile_and_unavailable_dependencies(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "compressed-source.flac"
+    source.write_bytes(b"not-riff")
+
+    import builtins
+    import os
+    import platform
+    import shutil
+
+    import numpy as np
+
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(platform, "system", lambda: "plan9")
+
+    sample_rate = 8000
+    mono_samples = np.asarray(
+        [[math.sin((2.0 * math.pi * 440.0 * index) / sample_rate)] for index in range(4096)],
+        dtype=np.float32,
+    )
+    stereo_samples = np.column_stack((mono_samples[:, 0], -mono_samples[:, 0] / 2.0)).astype(
+        np.float32
+    )
+
+    def fake_read(path, **_kwargs):
+        if str(path).endswith("empty.flac"):
+            return np.empty((0, 1), dtype=np.float32), sample_rate
+        if str(path).endswith("stereo.flac"):
+            return stereo_samples, sample_rate
+        return mono_samples, sample_rate
+
+    monkeypatch.setitem(sys.modules, "soundfile", types.SimpleNamespace(read=fake_read))
+
+    harmonic_frames = load_audio_harmonic_frames(str(source), target_sr=sample_rate)
+    assert harmonic_frames
+    spectrum_frames = load_audio_spectrum_frames(str(source), target_sr=sample_rate, bin_count=4)
+    assert spectrum_frames
+    mono_peak_frames = load_audio_peak_meter_frames(str(source), target_sr=sample_rate)
+    assert mono_peak_frames
+    assert all(left == right for left, right in mono_peak_frames)
+    stereo_peak_frames = load_audio_peak_meter_frames(
+        str(tmp_path / "stereo.flac"),
+        target_sr=sample_rate,
+    )
+    assert stereo_peak_frames
+    assert any(left != right for left, right in stereo_peak_frames)
+
+    empty_source = tmp_path / "empty.flac"
+    empty_source.write_bytes(b"not-riff")
+    assert load_audio_harmonic_frames(str(empty_source), target_sr=sample_rate) == []
+    assert load_audio_peak_meter_frames(str(empty_source), target_sr=sample_rate) == []
+    assert load_audio_spectrum_frames(str(empty_source), target_sr=sample_rate) == []
+
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "numpy":
+            raise ImportError("numpy intentionally unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert load_audio_harmonic_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_peak_meter_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_spectrum_frames(str(source), target_sr=sample_rate) == []
+
+    monkeypatch.setattr(builtins, "__import__", original_import)
+    monkeypatch.setitem(
+        sys.modules,
+        "soundfile",
+        types.SimpleNamespace(read=lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError)),
+    )
+    monkeypatch.setattr(platform, "system", lambda: "darwin")
+    monkeypatch.setattr(os.path, "exists", lambda _path: False)
+    assert load_audio_harmonic_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_peak_meter_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_spectrum_frames(str(source), target_sr=sample_rate) == []
+    monkeypatch.setattr(platform, "system", lambda: "linux")
+    assert load_audio_harmonic_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_peak_meter_frames(str(source), target_sr=sample_rate) == []
+    assert load_audio_spectrum_frames(str(source), target_sr=sample_rate) == []
 
 
 def _new_cache_connection() -> sqlite3.Connection:

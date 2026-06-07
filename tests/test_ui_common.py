@@ -2,8 +2,8 @@ import unittest
 from unittest import mock
 
 try:
-    from PySide6.QtCore import QEvent, Qt
-    from PySide6.QtGui import QKeyEvent, QValidator
+    from PySide6.QtCore import QDate, QEvent, QPointF, Qt
+    from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent, QShowEvent, QValidator
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,
@@ -12,12 +12,18 @@ try:
         QLineEdit,
         QPushButton,
         QScrollArea,
+        QVBoxLayout,
         QWidget,
     )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QDate = None
     QEvent = None
+    QFocusEvent = None
     QKeyEvent = None
+    QMouseEvent = None
+    QPointF = None
+    QShowEvent = None
     Qt = None
     QDialog = None
     QFormLayout = None
@@ -25,6 +31,7 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QLineEdit = None
     QPushButton = None
     QScrollArea = None
+    QVBoxLayout = None
     QValidator = None
     QWidget = None
     QT_IMPORT_ERROR = exc
@@ -34,6 +41,7 @@ else:
 from isrc_manager.ui_common import (
     DatePickerDialog,
     FocusWheelCalendarWidget,
+    FocusWheelComboBox,
     FocusWheelSlider,
     StorageBudgetSpinBox,
     TwoDigitSpinBox,
@@ -50,7 +58,9 @@ from isrc_manager.ui_common import (
     _create_round_help_button,
     _create_scrollable_dialog_content,
     _create_standard_section,
+    _prompt_compact_choice_dialog,
     _standard_dialog_stylesheet,
+    _WheelIntentMixin,
 )
 
 
@@ -99,6 +109,16 @@ class UICommonTests(unittest.TestCase):
         finally:
             owner.close()
 
+    def test_compose_widget_stylesheet_can_return_owner_qss_without_base(self):
+        owner = _ThemeOwner()
+        try:
+            self.assertEqual(
+                _compose_widget_stylesheet(owner.child, "   "),
+                "QWidget { color: red; }",
+            )
+        finally:
+            owner.close()
+
     def test_compose_widget_stylesheet_ignores_broken_owner_qss(self):
         owner = _BrokenThemeOwner()
         try:
@@ -120,6 +140,15 @@ class UICommonTests(unittest.TestCase):
             self.assertIs(host.calls[0][1], host.child)
         finally:
             host.close()
+
+    def test_help_button_without_host_is_a_safe_noop(self):
+        owner = QWidget()
+        try:
+            button = _create_round_help_button(owner, "overview")
+            button.click()
+            self.assertEqual(button.objectName(), "overviewHelpButton")
+        finally:
+            owner.close()
 
     def test_help_button_routes_to_app_help_host(self):
         owner = QWidget()
@@ -185,6 +214,19 @@ class UICommonTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_date_picker_defaults_invalid_or_missing_dates_to_today(self):
+        today = QDate.currentDate().toString("yyyy-MM-dd")
+        missing = DatePickerDialog()
+        invalid = DatePickerDialog(initial_iso_date="not-a-date")
+        try:
+            self.assertEqual(missing.selected_iso(), today)
+            self.assertEqual(invalid.selected_iso(), today)
+            self.assertIsNotNone(missing.btn_ok)
+            self.assertFalse(missing.btn_cancel.autoDefault())
+        finally:
+            missing.close()
+            invalid.close()
+
     def test_two_digit_spinbox_pads_values(self):
         spinbox = TwoDigitSpinBox()
         try:
@@ -245,6 +287,35 @@ class UICommonTests(unittest.TestCase):
         finally:
             spinbox.close()
 
+    def test_storage_budget_spinbox_focus_and_mouse_release_reset_repeat_state(self):
+        spinbox = StorageBudgetSpinBox()
+        try:
+            spinbox._repeat_direction = 1
+            spinbox._repeat_moved_mb = 20
+            spinbox._last_step_timestamp = 123.0
+            spinbox.focusOutEvent(QFocusEvent(QEvent.FocusOut))
+            self.assertEqual(spinbox._repeat_direction, 0)
+            self.assertEqual(spinbox._repeat_moved_mb, 0)
+            self.assertEqual(spinbox._last_step_timestamp, 0.0)
+
+            spinbox._repeat_direction = -1
+            spinbox._repeat_moved_mb = 40
+            spinbox._last_step_timestamp = 456.0
+            spinbox.mouseReleaseEvent(
+                QMouseEvent(
+                    QEvent.MouseButtonRelease,
+                    QPointF(1, 1),
+                    Qt.LeftButton,
+                    Qt.LeftButton,
+                    Qt.NoModifier,
+                )
+            )
+            self.assertEqual(spinbox._repeat_direction, 0)
+            self.assertEqual(spinbox._repeat_moved_mb, 0)
+            self.assertEqual(spinbox._last_step_timestamp, 0.0)
+        finally:
+            spinbox.close()
+
     def test_storage_budget_spinbox_validation_invalid_and_zero_step(self):
         spinbox = StorageBudgetSpinBox()
         spinbox.setRange(0, 1048576)
@@ -296,6 +367,22 @@ class UICommonTests(unittest.TestCase):
             self.assertEqual(scroll_area.viewport().property("role"), "workspaceCanvas")
             self.assertEqual(content.property("role"), "workspaceCanvas")
             self.assertEqual(layout.spacing(), 14)
+        finally:
+            owner.close()
+
+    def test_scrollable_dialog_content_reuses_existing_page_layout(self):
+        owner = QWidget()
+        page = QWidget(owner)
+        existing_layout = QVBoxLayout(page)
+        try:
+            scroll_area, _content, _layout = _create_scrollable_dialog_content(
+                owner,
+                page=page,
+                role="detailsPanel",
+            )
+            self.assertIs(page.layout(), existing_layout)
+            self.assertIs(page.layout().itemAt(0).widget(), scroll_area)
+            self.assertEqual(page.property("role"), "detailsPanel")
         finally:
             owner.close()
 
@@ -444,6 +531,10 @@ class UICommonTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_abbreviate_middle_text_returns_empty_for_falsey_value(self):
+        self.assertEqual(_abbreviate_middle_text(""), "")
+        self.assertEqual(_abbreviate_middle_text(None), "")
+
     def test_abbreviate_middle_text_preserves_short_values_and_compacts_long_values(self):
         short_value = "Short export title"
         long_value = (
@@ -455,6 +546,114 @@ class UICommonTests(unittest.TestCase):
             _abbreviate_middle_text(long_value),
             "This is a deliberate...eep the most useful edges",
         )
+
+    def test_prompt_compact_choice_dialog_handles_empty_rejected_and_accepted_choices(self):
+        self.assertIsNone(
+            _prompt_compact_choice_dialog(
+                None,
+                title="Choose",
+                prompt="Pick one",
+                choices=[],
+            )
+        )
+
+        with mock.patch("isrc_manager.ui_common.QDialog.exec", return_value=QDialog.Rejected):
+            self.assertIsNone(
+                _prompt_compact_choice_dialog(
+                    None,
+                    title="Choose",
+                    prompt="Pick one",
+                    choices=[("one", "One")],
+                )
+            )
+
+        with mock.patch("isrc_manager.ui_common.QDialog.exec", return_value=QDialog.Accepted):
+            self.assertEqual(
+                _prompt_compact_choice_dialog(
+                    None,
+                    title="Choose",
+                    prompt="Pick one",
+                    choices=[("one", "One"), ("two", "Two")],
+                    ok_text="Apply",
+                ),
+                "one",
+            )
+            self.assertIsNone(
+                _prompt_compact_choice_dialog(
+                    None,
+                    title="Choose",
+                    prompt="Pick one",
+                    choices=[("", "Empty")],
+                )
+            )
+
+    def test_wheel_intent_mixin_reports_focus_and_ignores_unfocused_wheel_events(self):
+        combo = FocusWheelComboBox()
+        child = QLineEdit(combo)
+
+        class _PopupCombo(FocusWheelComboBox):
+            def view(self):
+                return mock.Mock(isVisible=mock.Mock(return_value=True))
+
+        class _FailingPopupCombo(FocusWheelComboBox):
+            def view(self):
+                raise RuntimeError("popup unavailable")
+
+        class _WheelEvent:
+            ignored = False
+
+            def ignore(self):
+                self.ignored = True
+
+        try:
+            fake_app = mock.Mock()
+            with mock.patch("isrc_manager.ui_common.QApplication.instance", return_value=fake_app):
+                fake_app.focusWidget.return_value = None
+                self.assertFalse(combo._wheel_has_user_focus())
+
+                fake_app.focusWidget.return_value = combo
+                self.assertTrue(combo._wheel_has_user_focus())
+
+                fake_app.focusWidget.return_value = child
+                self.assertTrue(combo._wheel_has_user_focus())
+
+                popup_combo = _PopupCombo()
+                try:
+                    fake_app.focusWidget.return_value = QWidget()
+                    self.assertTrue(popup_combo._wheel_has_user_focus())
+                finally:
+                    popup_combo.close()
+
+                failing_popup_combo = _FailingPopupCombo()
+                try:
+                    fake_app.focusWidget.return_value = QWidget()
+                    self.assertFalse(failing_popup_combo._wheel_has_user_focus())
+                finally:
+                    failing_popup_combo.close()
+
+                fake_app.focusWidget.return_value = None
+                event = _WheelEvent()
+                combo.wheelEvent(event)
+                self.assertTrue(event.ignored)
+        finally:
+            combo.close()
+
+    def test_wheel_intent_mixin_forwards_focused_wheel_events_to_super(self):
+        class _BaseWheelHandler:
+            def __init__(self):
+                self.forwarded_event = None
+
+            def wheelEvent(self, event):
+                self.forwarded_event = event
+
+        class _Harness(_WheelIntentMixin, _BaseWheelHandler):
+            def _wheel_has_user_focus(self):
+                return True
+
+        event = object()
+        harness = _Harness()
+        harness.wheelEvent(event)
+        self.assertIs(harness.forwarded_event, event)
 
     def test_focus_wheel_slider_double_click_reset_clamps_value(self):
         slider = FocusWheelSlider(Qt.Horizontal)
@@ -479,6 +678,23 @@ class UICommonTests(unittest.TestCase):
         finally:
             slider.close()
 
+    def test_focus_wheel_slider_double_click_without_reset_uses_default_handler(self):
+        slider = FocusWheelSlider(Qt.Horizontal)
+        try:
+            slider.setValue(2)
+            slider.mouseDoubleClickEvent(
+                QMouseEvent(
+                    QEvent.MouseButtonDblClick,
+                    QPointF(1, 1),
+                    Qt.RightButton,
+                    Qt.RightButton,
+                    Qt.NoModifier,
+                )
+            )
+            self.assertEqual(slider.value(), 2)
+        finally:
+            slider.close()
+
     def test_two_digit_spinbox_falls_back_when_value_cannot_be_int(self):
         spinbox = TwoDigitSpinBox()
 
@@ -493,6 +709,118 @@ class UICommonTests(unittest.TestCase):
             self.assertEqual(spinbox.textFromValue(_BadInt()), "bad")
         finally:
             spinbox.close()
+
+    def test_calendar_wheel_filter_install_show_and_forwarding_edge_cases(self):
+        calendar = FocusWheelCalendarWidget()
+
+        class _Delta:
+            def __init__(self, value):
+                self._value = value
+
+            def y(self):
+                return self._value
+
+        class _WheelEvent:
+            def __init__(self, *, pixel=0, angle=0):
+                self.accepted = False
+                self.ignored = False
+                self._pixel = pixel
+                self._angle = angle
+
+            def type(self):
+                return QEvent.Wheel
+
+            def pixelDelta(self):
+                return _Delta(self._pixel)
+
+            def angleDelta(self):
+                return _Delta(self._angle)
+
+            def accept(self):
+                self.accepted = True
+
+            def ignore(self):
+                self.ignored = True
+
+        try:
+            calendar.showEvent(QShowEvent())
+            self.assertIsNone(FocusWheelCalendarWidget._find_scroll_area_parent(None))
+
+            no_parent_event = _WheelEvent(angle=120)
+            self.assertFalse(
+                calendar._forward_wheel_to_parent_scroll_area(calendar, no_parent_event)
+            )
+            self.assertTrue(calendar.eventFilter(calendar, no_parent_event))
+            self.assertTrue(no_parent_event.ignored)
+
+            zero_delta_event = _WheelEvent()
+            self.assertFalse(
+                calendar._forward_wheel_to_parent_scroll_area(calendar, zero_delta_event)
+            )
+
+            self.assertFalse(calendar.eventFilter(calendar, QEvent(QEvent.FocusIn)))
+        finally:
+            calendar.close()
+
+    def test_calendar_wheel_filter_scrolls_pixel_delta_and_wheel_event_paths(self):
+        scroll = QScrollArea()
+        content = QWidget()
+        scroll.setWidget(content)
+        calendar = FocusWheelCalendarWidget(content)
+        scrollbar = scroll.verticalScrollBar()
+        scrollbar.setRange(0, 500)
+        scrollbar.setValue(250)
+        scrollbar.setSingleStep(10)
+
+        class _Delta:
+            def __init__(self, value):
+                self._value = value
+
+            def y(self):
+                return self._value
+
+        class _WheelEvent:
+            def __init__(self, *, pixel=0, angle=0):
+                self.accepted = False
+                self.ignored = False
+                self._pixel = pixel
+                self._angle = angle
+
+            def type(self):
+                return QEvent.Wheel
+
+            def pixelDelta(self):
+                return _Delta(self._pixel)
+
+            def angleDelta(self):
+                return _Delta(self._angle)
+
+            def accept(self):
+                self.accepted = True
+
+            def ignore(self):
+                self.ignored = True
+
+        try:
+            pixel_event = _WheelEvent(pixel=15)
+            self.assertTrue(calendar.eventFilter(calendar, pixel_event))
+            self.assertTrue(pixel_event.accepted)
+            self.assertEqual(scrollbar.value(), 235)
+
+            wheel_event = _WheelEvent(angle=-120)
+            calendar.wheelEvent(wheel_event)
+            self.assertTrue(wheel_event.accepted)
+            self.assertEqual(scrollbar.value(), 307)
+
+            orphan = FocusWheelCalendarWidget()
+            try:
+                ignored_event = _WheelEvent(angle=120)
+                orphan.wheelEvent(ignored_event)
+                self.assertTrue(ignored_event.ignored)
+            finally:
+                orphan.close()
+        finally:
+            scroll.close()
 
     def test_calendar_wheel_forwarding_scrolls_parent_scroll_area(self):
         scroll = QScrollArea()

@@ -3,12 +3,15 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from tests.qt_test_helpers import require_qapplication
 
 try:
     from PySide6.QtGui import QImage
 
+    import isrc_manager.blob_icons as blob_icons
     from isrc_manager.blob_icons import (
         BlobIconEditorWidget,
         BlobIconSettingsService,
@@ -189,12 +192,17 @@ class BlobIconTests(unittest.TestCase):
 
     def test_blob_icon_serialization_descriptions_and_image_decoding_edges(self):
         self.assertEqual(default_system_icon_name("unknown-kind"), "SP_FileIcon")
+        self.assertEqual(normalize_blob_icon_spec("not json", kind="audio")["emoji"], "🎵")
         self.assertEqual(
             normalize_blob_icon_spec(
                 {"mode": "system", "system_name": "MissingIcon"},
                 kind="unknown-kind",
             ),
             {"mode": "system", "system_name": "SP_FileIcon"},
+        )
+        self.assertEqual(
+            normalize_blob_icon_spec({"mode": "image"}, kind="image", allow_inherit=True),
+            {"mode": "inherit"},
         )
         self.assertIsNone(
             blob_icon_spec_to_storage(
@@ -221,6 +229,16 @@ class BlobIconTests(unittest.TestCase):
             describe_blob_icon_spec(normalized_image, kind="image"),
             "Custom image · Cover",
         )
+        height_error_image = normalize_blob_icon_spec(
+            {
+                "mode": "image",
+                "image_path": "/tmp/cover.png",
+                "image_height": "tall",
+            },
+            kind="image",
+        )
+        self.assertNotIn("image_height", height_error_image)
+        self.assertTrue(decode_blob_icon_image({"mode": "emoji", "emoji": "🎵"}).isNull())
         self.assertTrue(decode_blob_icon_image(normalized_image).isNull())
 
         image = QImage(8, 6, QImage.Format_ARGB32)
@@ -234,6 +252,22 @@ class BlobIconTests(unittest.TestCase):
         )
         self.assertFalse(decoded.isNull())
         self.assertEqual((decoded.width(), decoded.height()), (8, 6))
+        scaled_icon = icon_from_blob_icon_spec(
+            {
+                "mode": "image",
+                "image_png_base64": base64.b64encode(encoded).decode("ascii"),
+            },
+            kind="image",
+            size=4,
+        )
+        self.assertFalse(scaled_icon.isNull())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path_image = Path(tmpdir) / "stored.png"
+            self.assertTrue(image.save(str(path_image), "PNG"))
+            self.assertFalse(
+                decode_blob_icon_image({"mode": "image", "image_path": str(path_image)}).isNull()
+            )
 
         inherit_description = describe_blob_icon_spec(
             {"mode": "inherit"},
@@ -241,6 +275,183 @@ class BlobIconTests(unittest.TestCase):
             allow_inherit=True,
         )
         self.assertEqual(inherit_description, "Uses global audio managed icon")
+
+    def test_blob_icon_signal_wrappers_and_encoding_error_edges(self):
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+        owner = SimpleNamespace()
+        calls = []
+        noarg_signal = FakeSignal()
+        args_signal = FakeSignal()
+
+        blob_icons._connect_noarg_signal(noarg_signal, owner, lambda: calls.append("noarg"))
+        blob_icons._connect_args_signal(
+            args_signal,
+            owner,
+            lambda *args: calls.append(("args", args)),
+        )
+        noarg_signal.callbacks[0](True)
+        args_signal.callbacks[0]("value", 3)
+
+        self.assertEqual(calls, ["noarg", ("args", ("value", 3))])
+        self.assertEqual(len(owner._isrc_signal_wrappers), 2)
+
+        with self.assertRaises(ValueError):
+            compress_blob_icon_image("")
+
+        class ClosedBuffer:
+            def __init__(self, _payload):
+                pass
+
+            def open(self, _mode):
+                return False
+
+        with mock.patch.object(blob_icons, "QBuffer", ClosedBuffer):
+            with self.assertRaisesRegex(ValueError, "prepare"):
+                encode_qimage_to_png_bytes(QImage(1, 1, QImage.Format_ARGB32))
+
+        class OpenBuffer:
+            def __init__(self, _payload):
+                self.closed = False
+
+            def open(self, _mode):
+                return True
+
+            def close(self):
+                self.closed = True
+
+        class UnsavableImage:
+            def save(self, _buffer, _format):
+                return False
+
+        with mock.patch.object(blob_icons, "QBuffer", OpenBuffer):
+            with self.assertRaisesRegex(ValueError, "encode"):
+                encode_qimage_to_png_bytes(UnsavableImage())
+
+        with mock.patch.object(blob_icons.QApplication, "instance", return_value=None):
+            self.assertTrue(
+                icon_from_blob_icon_spec(
+                    {"mode": "system", "system_name": "SP_FileIcon"},
+                    kind="image",
+                    style=None,
+                ).isNull()
+            )
+
+    def test_blob_icon_editor_image_current_spec_edges(self):
+        image = QImage(4, 4, QImage.Format_ARGB32)
+        image.fill(0xFF445566)
+        encoded = base64.b64encode(encode_qimage_to_png_bytes(image)).decode("ascii")
+
+        editor = BlobIconEditorWidget(kind="image_database", allow_inherit=True)
+        try:
+            editor.mode_combo.setCurrentIndex(editor.mode_combo.findData("inherit"))
+            self.assertEqual(editor.current_spec(), {"mode": "inherit"})
+
+            editor._setting_spec = True
+            editor._apply_selected_emoji_preset()
+            editor._setting_spec = False
+            editor.emoji_combo.setCurrentIndex(-1)
+            editor._apply_selected_emoji_preset()
+
+            editor.mode_combo.setCurrentIndex(editor.mode_combo.findData("image"))
+            editor.image_path_edit.setText("/tmp/custom-icon.png")
+            self.assertEqual(
+                editor.current_spec(),
+                {
+                    "mode": "image",
+                    "image_path": "/tmp/custom-icon.png",
+                    "image_label": "custom-icon.png",
+                },
+            )
+
+            editor.image_path_edit.clear()
+            editor.image_path_edit.setProperty("stored_png_base64", encoded)
+            editor.image_path_edit.setProperty("stored_image_label", "Stored Icon")
+            self.assertEqual(
+                editor.current_spec(),
+                {
+                    "mode": "image",
+                    "image_png_base64": encoded,
+                    "image_label": "Stored Icon",
+                },
+            )
+
+            editor.image_path_edit.setProperty("stored_image_label", "")
+            self.assertEqual(
+                editor.current_spec(),
+                {"mode": "image", "image_png_base64": encoded},
+            )
+
+            editor.image_path_edit.setProperty("stored_png_base64", "")
+            self.assertEqual(editor.current_spec(), {"mode": "inherit"})
+
+            editor.set_spec(
+                {
+                    "mode": "image",
+                    "image_png_base64": encoded,
+                    "image_label": "Stored Icon",
+                }
+            )
+            self.assertEqual(editor.image_path_edit.property("stored_png_base64"), encoded)
+            self.assertEqual(editor.image_path_edit.property("stored_image_label"), "Stored Icon")
+
+            editor._clear_image()
+            self.assertEqual(editor.image_path_edit.text(), "")
+            self.assertEqual(editor.image_path_edit.property("stored_png_base64"), "")
+
+            with mock.patch.object(
+                blob_icons.QFileDialog,
+                "getOpenFileName",
+                return_value=("", ""),
+            ):
+                editor._choose_image()
+
+            warnings = []
+            with (
+                mock.patch.object(
+                    blob_icons.QFileDialog,
+                    "getOpenFileName",
+                    return_value=("/does/not/exist.png", ""),
+                ),
+                mock.patch.object(
+                    blob_icons.QMessageBox,
+                    "warning",
+                    lambda *args: warnings.append(args),
+                ),
+            ):
+                editor._choose_image()
+            self.assertEqual(warnings[-1][1], "Custom Icon")
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                chosen_path = Path(tmpdir) / "chosen.png"
+                self.assertTrue(image.save(str(chosen_path), "PNG"))
+                with mock.patch.object(
+                    blob_icons.QFileDialog,
+                    "getOpenFileName",
+                    return_value=(str(chosen_path), ""),
+                ):
+                    editor._choose_image()
+                self.assertEqual(editor.image_path_edit.text(), str(chosen_path))
+                self.assertEqual(editor.image_path_edit.property("stored_png_base64"), "")
+        finally:
+            editor.close()
+
+        defaulting_editor = BlobIconEditorWidget(kind="image_database")
+        try:
+            defaulting_editor.mode_combo.setCurrentIndex(
+                defaulting_editor.mode_combo.findData("image")
+            )
+            self.assertEqual(
+                defaulting_editor.current_spec(),
+                {"mode": "emoji", "emoji": "🗃️"},
+            )
+        finally:
+            defaulting_editor.close()
 
 
 if __name__ == "__main__":
