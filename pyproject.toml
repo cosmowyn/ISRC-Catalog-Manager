@@ -22,7 +22,7 @@ dependencies = [
   "openpyxl==3.1.5",
   "mutagen==1.47.0",
   "numpy==2.4.6",
-  "soundfile==0.13.1",
+  "soundfile==0.14.0",
   "scipy==1.17.1",
   "cryptography==48.0.0",
   "keyring==25.7.0",
