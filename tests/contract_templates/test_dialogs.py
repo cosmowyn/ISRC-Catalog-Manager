@@ -1779,7 +1779,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         with mock.patch.object(
             self.panel,
             "_rebuild_selector_fields",
-            side_effect=lambda _definition, *, indexed_count, preserved_values=None: rebuild_calls.append(
+            side_effect=lambda _definition, *, indexed_count, preserved_values=None, preserved_line_inputs=None: rebuild_calls.append(
                 (indexed_count, dict(preserved_values or {}))
             ),
         ):
@@ -3068,6 +3068,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
                 "contractTemplateFillDraftWorkspaceDock",
                 "contractTemplateFillResolvedExportDock",
                 "contractTemplateFillDraftNotesDock",
+                "contractTemplateFillTravelHelperDock",
                 "contractTemplateFillAutomaticFieldsDock",
                 "contractTemplateFillDatabaseFieldsDock",
                 "contractTemplateFillManualFieldsDock",
@@ -3889,7 +3890,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             restored_host = restored_panel._tab_hosts["fill"]
             self.assertFalse(restored_dock._pending_panel_layout_state_dirty)
             self.assertTrue(restored_host.validate_layout_integrity_after_restore())
-            self.assertEqual(len([dock for dock in restored_host._docks if dock.isVisible()]), 8)
+            self.assertEqual(len([dock for dock in restored_host._docks if dock.isVisible()]), 9)
         finally:
             restored_dock.close()
             restored_dock.deleteLater()
