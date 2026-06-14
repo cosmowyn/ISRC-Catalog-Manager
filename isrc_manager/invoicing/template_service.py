@@ -7,6 +7,7 @@ import html
 import json
 import re
 import sqlite3
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,13 @@ from isrc_manager.contract_templates.parser import (
     InvalidPlaceholderError,
     base_symbol_for_indexed_placeholder,
     parse_placeholder,
+)
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
+    coalesce_filename,
+    normalize_storage_mode,
 )
 from isrc_manager.services.settings_reads import SettingsReadService
 
@@ -260,11 +268,26 @@ def _escape_text(value: object | None) -> str:
     return html.escape(str(value or ""), quote=True)
 
 
+def _format_vat_rate(rate_basis_points: object | None) -> str:
+    rate = int(rate_basis_points or 0)
+    whole, fraction = divmod(rate, 100)
+    if fraction:
+        return f"{whole}.{fraction:02d}%"
+    return f"{whole}%"
+
+
 class InvoiceTemplateService:
     """Renders invoice HTML through one strict path for preview and export."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    ARTIFACT_ROOT = "invoice_artifacts"
+
+    def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
         self.conn = conn
+        self.data_root = Path(data_root).resolve() if data_root is not None else None
+        self.artifact_store = ManagedFileStorage(
+            data_root=self.data_root,
+            relative_root=self.ARTIFACT_ROOT,
+        )
         self.invoice_service = InvoiceService(conn)
         self.reports = InvoiceAccountingReportService(conn)
 
@@ -474,12 +497,22 @@ class InvoiceTemplateService:
         snapshot_id: int,
         output_path: str | None = None,
         output_filename: str | None = None,
+        artifact_type: str = "html",
+        status: str = "generated",
+        storage_mode: str = STORAGE_MODE_DATABASE,
     ) -> InvoiceOutputArtifactRecord:
         row = self.conn.execute(
             """
-            SELECT invoice_id, rendered_html_content, rendered_checksum_sha256
-            FROM InvoiceTemplateResolvedSnapshots
-            WHERE id=?
+            SELECT
+                s.invoice_id,
+                s.rendered_html_content,
+                s.rendered_checksum_sha256,
+                i.issued_ledger_transaction_id,
+                i.invoice_number,
+                i.draft_display_id
+            FROM InvoiceTemplateResolvedSnapshots s
+            INNER JOIN Invoices i ON i.id=s.invoice_id
+            WHERE s.id=?
             """,
             (int(snapshot_id),),
         ).fetchone()
@@ -492,27 +525,210 @@ class InvoiceTemplateService:
             _clean_text(output_filename)
             or f"invoice-{int(row[0])}-snapshot-{int(snapshot_id)}.html"
         )
-        path = _clean_text(output_path) or f"invoice-artifacts/{filename}"
-        checksum = str(row[2] or "") or hashlib.sha256(rendered_html.encode("utf-8")).hexdigest()
+        artifact_bytes = rendered_html.encode("utf-8")
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode not in {STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE}:
+            raise ValueError(f"Unsupported invoice artifact storage mode: {storage_mode}")
+        if clean_mode == STORAGE_MODE_MANAGED_FILE:
+            managed_path = self.artifact_store.write_bytes(
+                artifact_bytes,
+                filename=filename,
+                subdir=str(row[4] or row[5] or int(row[0])),
+            )
+            path = managed_path
+            content_blob = None
+        else:
+            path = _clean_text(output_path) or f"{self.ARTIFACT_ROOT}/{filename}"
+            managed_path = None
+            content_blob = artifact_bytes
+        checksum = str(row[2] or "") or hashlib.sha256(artifact_bytes).hexdigest()
         with self.conn:
             cursor = self.conn.execute(
                 """
                 INSERT INTO InvoiceOutputArtifacts(
                     snapshot_id,
+                    invoice_id,
+                    ledger_transaction_id,
                     artifact_type,
+                    status,
                     output_path,
                     output_filename,
                     mime_type,
+                    storage_mode,
+                    managed_file_path,
+                    content_blob,
                     size_bytes,
                     checksum_sha256
                 )
-                VALUES (?, 'html', ?, ?, 'text/html; charset=utf-8', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'text/html; charset=utf-8', ?, ?, ?, ?, ?)
                 """,
                 (
                     int(snapshot_id),
+                    int(row[0]),
+                    int(row[3]) if row[3] is not None else None,
+                    _clean_text(artifact_type) or "html",
+                    _clean_text(status) or "generated",
                     path,
                     filename,
-                    len(rendered_html.encode("utf-8")),
+                    clean_mode,
+                    managed_path,
+                    content_blob,
+                    len(artifact_bytes),
+                    checksum,
+                ),
+            )
+            artifact_id = int(cursor.lastrowid)
+        artifact = self.fetch_output_artifact(artifact_id)
+        if artifact is None:
+            raise RuntimeError("Invoice output artifact could not be reloaded.")
+        return artifact
+
+    def create_external_snapshot(
+        self,
+        *,
+        invoice_id: int,
+        resolved_values: object | None = None,
+        resolution_warnings: object | None = None,
+        rendered_html_content: str | None = None,
+        rendered_checksum_sha256: str | None = None,
+    ) -> int:
+        invoice = self.invoice_service.fetch_invoice(int(invoice_id))
+        if invoice is None:
+            raise ValueError(f"Invoice {int(invoice_id)} was not found.")
+        resolved_json = json.dumps(resolved_values or {}, sort_keys=True)
+        warnings_json = (
+            json.dumps(resolution_warnings, sort_keys=True)
+            if resolution_warnings is not None
+            else None
+        )
+        rendered_html = str(rendered_html_content or "")
+        checksum = (
+            _clean_text(rendered_checksum_sha256)
+            or hashlib.sha256(rendered_html.encode("utf-8")).hexdigest()
+        )
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                INSERT INTO InvoiceTemplateResolvedSnapshots(
+                    invoice_id,
+                    template_revision_id,
+                    resolved_values_json,
+                    resolution_warnings_json,
+                    rendered_html_content,
+                    rendered_checksum_sha256
+                )
+                VALUES (?, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    int(invoice_id),
+                    resolved_json,
+                    warnings_json,
+                    rendered_html,
+                    checksum,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def create_output_artifact_from_bytes(
+        self,
+        *,
+        snapshot_id: int,
+        artifact_bytes: bytes,
+        output_filename: str,
+        mime_type: str,
+        artifact_type: str,
+        status: str = "generated",
+        storage_mode: str = STORAGE_MODE_DATABASE,
+        contract_template_draft_id: int | None = None,
+        contract_template_snapshot_id: int | None = None,
+        contract_template_artifact_id: int | None = None,
+    ) -> InvoiceOutputArtifactRecord:
+        row = self.conn.execute(
+            """
+            SELECT
+                s.invoice_id,
+                i.issued_ledger_transaction_id,
+                i.invoice_number,
+                i.draft_display_id
+            FROM InvoiceTemplateResolvedSnapshots s
+            INNER JOIN Invoices i ON i.id=s.invoice_id
+            WHERE s.id=?
+            """,
+            (int(snapshot_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Invoice resolved snapshot {int(snapshot_id)} was not found.")
+        filename = coalesce_filename(
+            output_filename,
+            default_stem=f"invoice-{int(row[0])}-artifact-{int(snapshot_id)}",
+        )
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode not in {STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE}:
+            raise ValueError(f"Unsupported invoice artifact storage mode: {storage_mode}")
+        if clean_mode == STORAGE_MODE_MANAGED_FILE:
+            managed_path = self.artifact_store.write_bytes(
+                bytes(artifact_bytes),
+                filename=filename,
+                subdir=str(row[2] or row[3] or int(row[0])),
+            )
+            path = managed_path
+            content_blob = None
+        else:
+            path = f"{self.ARTIFACT_ROOT}/{filename}"
+            managed_path = None
+            content_blob = bytes(artifact_bytes)
+        checksum = hashlib.sha256(bytes(artifact_bytes)).hexdigest()
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                INSERT INTO InvoiceOutputArtifacts(
+                    snapshot_id,
+                    invoice_id,
+                    ledger_transaction_id,
+                    contract_template_draft_id,
+                    contract_template_snapshot_id,
+                    contract_template_artifact_id,
+                    artifact_type,
+                    status,
+                    output_path,
+                    output_filename,
+                    mime_type,
+                    storage_mode,
+                    managed_file_path,
+                    content_blob,
+                    size_bytes,
+                    checksum_sha256
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(snapshot_id),
+                    int(row[0]),
+                    int(row[1]) if row[1] is not None else None,
+                    (
+                        int(contract_template_draft_id)
+                        if contract_template_draft_id is not None
+                        else None
+                    ),
+                    (
+                        int(contract_template_snapshot_id)
+                        if contract_template_snapshot_id is not None
+                        else None
+                    ),
+                    (
+                        int(contract_template_artifact_id)
+                        if contract_template_artifact_id is not None
+                        else None
+                    ),
+                    _clean_text(artifact_type) or "artifact",
+                    _clean_text(status) or "generated",
+                    path,
+                    filename,
+                    _clean_text(mime_type),
+                    clean_mode,
+                    managed_path,
+                    content_blob,
+                    len(artifact_bytes),
                     checksum,
                 ),
             )
@@ -528,10 +744,19 @@ class InvoiceTemplateService:
             SELECT
                 id,
                 snapshot_id,
+                invoice_id,
+                ledger_transaction_id,
+                contract_template_draft_id,
+                contract_template_snapshot_id,
+                contract_template_artifact_id,
                 artifact_type,
+                status,
                 output_path,
                 output_filename,
                 mime_type,
+                storage_mode,
+                managed_file_path,
+                content_blob,
                 size_bytes,
                 checksum_sha256,
                 created_at
@@ -545,14 +770,180 @@ class InvoiceTemplateService:
         return InvoiceOutputArtifactRecord(
             id=int(row[0]),
             snapshot_id=int(row[1]),
-            artifact_type=str(row[2] or ""),
-            output_path=str(row[3] or ""),
-            output_filename=str(row[4] or ""),
-            mime_type=_clean_text(row[5]),
-            size_bytes=int(row[6] or 0),
-            checksum_sha256=_clean_text(row[7]),
-            created_at=_clean_text(row[8]),
+            invoice_id=int(row[2]) if row[2] is not None else None,
+            ledger_transaction_id=int(row[3]) if row[3] is not None else None,
+            contract_template_draft_id=int(row[4]) if row[4] is not None else None,
+            contract_template_snapshot_id=int(row[5]) if row[5] is not None else None,
+            contract_template_artifact_id=int(row[6]) if row[6] is not None else None,
+            artifact_type=str(row[7] or ""),
+            status=str(row[8] or ""),
+            output_path=str(row[9] or ""),
+            output_filename=str(row[10] or ""),
+            mime_type=_clean_text(row[11]),
+            storage_mode=_clean_text(row[12]),
+            managed_file_path=_clean_text(row[13]),
+            content_blob=bytes(row[14]) if row[14] is not None else None,
+            size_bytes=int(row[15] or 0),
+            checksum_sha256=_clean_text(row[16]),
+            created_at=_clean_text(row[17]),
         )
+
+    def fetch_latest_invoice_output_artifact(
+        self,
+        invoice_id: int,
+        *,
+        artifact_type: str = "final_html",
+    ) -> InvoiceOutputArtifactRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT a.id
+            FROM InvoiceOutputArtifacts a
+            INNER JOIN InvoiceTemplateResolvedSnapshots s ON s.id=a.snapshot_id
+            WHERE COALESCE(a.invoice_id, s.invoice_id)=?
+              AND a.artifact_type=?
+            ORDER BY a.id DESC
+            LIMIT 1
+            """,
+            (int(invoice_id), _clean_text(artifact_type) or "final_html"),
+        ).fetchone()
+        if not row:
+            return None
+        return self.fetch_output_artifact(int(row[0]))
+
+    def fetch_latest_template_invoice_output_artifact(
+        self,
+        *,
+        contract_template_draft_id: int,
+        artifact_type: str = "final_pdf",
+    ) -> InvoiceOutputArtifactRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT id
+            FROM InvoiceOutputArtifacts
+            WHERE contract_template_draft_id=?
+              AND artifact_type=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(contract_template_draft_id), _clean_text(artifact_type) or "final_pdf"),
+        ).fetchone()
+        if not row:
+            return None
+        return self.fetch_output_artifact(int(row[0]))
+
+    def finalize_invoice(
+        self,
+        invoice_id: int,
+        *,
+        command_key: str,
+        storage_mode: str = STORAGE_MODE_DATABASE,
+        template_revision_id: int | None = None,
+        manual_symbols: dict[str, object] | None = None,
+        canonical_overrides: dict[str, object] | None = None,
+        created_by: str | None = None,
+    ) -> InvoiceOutputArtifactRecord:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode is None:
+            clean_mode = STORAGE_MODE_DATABASE
+        invoice = self.invoice_service.fetch_invoice(int(invoice_id))
+        if invoice is None:
+            raise ValueError(f"Invoice {int(invoice_id)} was not found.")
+        if invoice.document_status == "draft":
+            invoice = self.invoice_service.issue_invoice(
+                int(invoice_id),
+                command_key=command_key,
+                created_by=created_by,
+            )
+        elif invoice.document_status != "issued":
+            raise ValueError("Only draft or issued invoices can be finalized.")
+        existing = self.fetch_latest_invoice_output_artifact(
+            int(invoice.id),
+            artifact_type="final_html",
+        )
+        if (
+            existing is not None
+            and normalize_storage_mode(existing.storage_mode, default=STORAGE_MODE_DATABASE)
+            == clean_mode
+        ):
+            return existing
+        revision = (
+            self.fetch_revision(int(template_revision_id))
+            if template_revision_id is not None
+            else self.fetch_active_revision()
+        )
+        if revision is not None:
+            render_result = self.render_invoice(
+                int(invoice.id),
+                template_revision_id=int(revision.id),
+                manual_symbols=manual_symbols,
+                canonical_overrides=canonical_overrides,
+                strict=True,
+                create_snapshot=True,
+            )
+        else:
+            render_result = self._render_default_invoice(
+                int(invoice.id),
+                create_snapshot=True,
+            )
+        if render_result.snapshot_id is None:
+            raise RuntimeError("Final invoice snapshot was not created.")
+        filename = coalesce_filename(
+            f"{invoice.invoice_number or invoice.draft_display_id or f'invoice-{invoice.id}'}.html",
+            default_stem=f"invoice-{invoice.id}",
+            default_suffix=".html",
+        )
+        return self.create_html_output_artifact(
+            snapshot_id=int(render_result.snapshot_id),
+            output_filename=filename,
+            artifact_type="final_html",
+            status="final",
+            storage_mode=clean_mode,
+        )
+
+    def load_output_artifact_bytes(self, artifact_id: int) -> bytes:
+        row = self.conn.execute(
+            """
+            SELECT a.content_blob, s.rendered_html_content
+            FROM InvoiceOutputArtifacts a
+            INNER JOIN InvoiceTemplateResolvedSnapshots s ON s.id=a.snapshot_id
+            WHERE a.id=?
+            """,
+            (int(artifact_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Invoice output artifact {int(artifact_id)} was not found.")
+        if row[0] is not None:
+            return bytes(row[0])
+        rendered_html = str(row[1] or "")
+        if not rendered_html:
+            raise ValueError("Invoice output artifact has no stored HTML content.")
+        return rendered_html.encode("utf-8")
+
+    def materialize_output_artifact(self, artifact_id: int) -> Path:
+        artifact = self.fetch_output_artifact(int(artifact_id))
+        if artifact is None:
+            raise ValueError(f"Invoice output artifact {int(artifact_id)} was not found.")
+        clean_mode = normalize_storage_mode(artifact.storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode == STORAGE_MODE_MANAGED_FILE:
+            path = self.artifact_store.resolve(artifact.managed_file_path or artifact.output_path)
+            if path is None:
+                raise ValueError("Managed invoice artifact storage is not configured.")
+            if not path.exists() or not path.is_file():
+                raise FileNotFoundError(str(path))
+            return path
+        artifact_bytes = self.load_output_artifact_bytes(int(artifact.id))
+        digest = hashlib.sha256(artifact_bytes).hexdigest()[:12]
+        filename = coalesce_filename(
+            artifact.output_filename,
+            default_stem=f"invoice-artifact-{artifact.id}",
+            default_suffix=".html",
+        )
+        target_dir = Path(tempfile.gettempdir()) / "isrc_manager_invoice_artifacts"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{digest}_{filename}"
+        if not target.exists() or target.read_bytes() != artifact_bytes:
+            target.write_bytes(artifact_bytes)
+        return target
 
     def render_invoice(
         self,
@@ -1172,7 +1563,14 @@ class InvoiceTemplateService:
     def _render_lines_table(self, invoice_id: int, currency: str) -> str:
         rows = self.conn.execute(
             """
-            SELECT description, quantity_value, quantity_scale, unit_price_minor, vat_amount_minor, gross_amount_minor
+            SELECT
+                description,
+                quantity_value,
+                quantity_scale,
+                unit_price_minor,
+                vat_rate_basis_points,
+                vat_amount_minor,
+                gross_amount_minor
             FROM InvoiceLineItems
             WHERE invoice_id=?
             ORDER BY sort_order, id
@@ -1184,14 +1582,16 @@ class InvoiceTemplateService:
             f"<td>{_escape_text(row[0])}</td>"
             f"<td>{_escape_text(format_quantity(Quantity(int(row[1] or 0), int(row[2] or 0))))}</td>"
             f"<td>{_escape_text(format_money(int(row[3] or 0), currency=currency))}</td>"
-            f"<td>{_escape_text(format_money(int(row[4] or 0), currency=currency))}</td>"
+            f"<td>{_escape_text(_format_vat_rate(row[4]))}</td>"
             f"<td>{_escape_text(format_money(int(row[5] or 0), currency=currency))}</td>"
+            f"<td>{_escape_text(format_money(int(row[6] or 0), currency=currency))}</td>"
             "</tr>"
             for row in rows
         )
         return (
             '<table class="invoice-lines"><thead><tr>'
-            "<th>Description</th><th>Quantity</th><th>Unit price</th><th>VAT</th><th>Total</th>"
+            "<th>Description</th><th>Quantity</th><th>Unit price</th>"
+            "<th>VAT Rate</th><th>VAT</th><th>Total</th>"
             f"</tr></thead><tbody>{body}</tbody></table>"
         )
 
@@ -1221,11 +1621,98 @@ class InvoiceTemplateService:
             f"</tr></thead><tbody>{body}</tbody></table>"
         )
 
+    def _render_default_invoice(
+        self,
+        invoice_id: int,
+        *,
+        create_snapshot: bool,
+    ) -> InvoiceTemplateRenderResult:
+        values = self._canonical_values(int(invoice_id))
+        invoice = self.invoice_service.fetch_invoice(int(invoice_id))
+        if invoice is None:
+            raise ValueError(f"Invoice {int(invoice_id)} was not found.")
+        company_lines = "<br>".join(
+            _escape_text(part)
+            for part in (
+                values.get("company.name"),
+                values.get("company.address"),
+                values.get("company.email"),
+                values.get("company.phone"),
+                values.get("company.vat_number"),
+            )
+            if str(part or "").strip()
+        )
+        party_lines = "<br>".join(
+            _escape_text(part)
+            for part in (
+                values.get("invoice.party.name"),
+                values.get("invoice.party.address"),
+                values.get("invoice.party.email"),
+                values.get("invoice.party.vat_number"),
+            )
+            if str(part or "").strip()
+        )
+        rendered_html = f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoice {_escape_text(values.get("invoice.number"))}</title>
+<style>
+body {{ font-family: Arial, sans-serif; color: #111; margin: 40px; font-size: 12px; }}
+h1 {{ font-size: 22px; margin: 0 0 24px; }}
+.letterhead {{ display: flex; justify-content: space-between; gap: 40px; margin-bottom: 32px; }}
+.meta {{ margin-bottom: 28px; }}
+.meta div {{ margin-bottom: 6px; }}
+.invoice-lines, .invoice-vat-breakdown {{ border-collapse: collapse; width: 100%; margin: 18px 0; }}
+th, td {{ border-bottom: 1px solid #222; padding: 8px 6px; text-align: left; vertical-align: top; }}
+.totals {{ margin-left: auto; width: 280px; margin-top: 24px; }}
+.totals div {{ display: flex; justify-content: space-between; padding: 5px 0; }}
+.totals .total {{ border-top: 2px solid #111; font-weight: bold; padding-top: 10px; }}
+</style>
+</head>
+<body>
+<section class="letterhead">
+<div>{company_lines}</div>
+<div>{party_lines}</div>
+</section>
+<h1>Invoice</h1>
+<section class="meta">
+<div><strong>Invoice number:</strong> {_escape_text(values.get("invoice.number"))}</div>
+<div><strong>Issue date:</strong> {_escape_text(values.get("invoice.issue_date"))}</div>
+<div><strong>Due date:</strong> {_escape_text(values.get("invoice.due_date"))}</div>
+<div><strong>Status:</strong> {_escape_text(values.get("invoice.document_status"))}</div>
+</section>
+{values.get("invoice.lines") or ""}
+<section class="totals">
+<div><span>Subtotal</span><span>{_escape_text(values.get("invoice.subtotal"))}</span></div>
+<div><span>VAT</span><span>{_escape_text(values.get("invoice.vat_total"))}</span></div>
+<div class="total"><span>Total due</span><span>{_escape_text(values.get("invoice.total"))}</span></div>
+</section>
+{values.get("invoice.vat_breakdown") or ""}
+</body>
+</html>"""
+        snapshot_id = None
+        if create_snapshot:
+            snapshot_id = self._create_snapshot(
+                invoice_id=int(invoice.id),
+                template_revision_id=None,
+                rendered_html=rendered_html,
+                resolved_values=values,
+                warnings=("Rendered with the built-in invoice fallback template.",),
+            )
+        return InvoiceTemplateRenderResult(
+            template_revision_id=None,
+            rendered_html=rendered_html,
+            resolved_values=values,
+            warnings=("Rendered with the built-in invoice fallback template.",),
+            snapshot_id=snapshot_id,
+        )
+
     def _create_snapshot(
         self,
         *,
         invoice_id: int,
-        template_revision_id: int,
+        template_revision_id: int | None,
         rendered_html: str,
         resolved_values: dict[str, object],
         warnings: tuple[str, ...],
@@ -1246,7 +1733,7 @@ class InvoiceTemplateService:
                 """,
                 (
                     int(invoice_id),
-                    int(template_revision_id),
+                    int(template_revision_id) if template_revision_id is not None else None,
                     json.dumps(resolved_values, sort_keys=True),
                     json.dumps(list(warnings), sort_keys=True),
                     rendered_html,

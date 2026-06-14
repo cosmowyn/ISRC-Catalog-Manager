@@ -1,14 +1,14 @@
 {
   "document_type": "direct_watermark",
-  "key_id": "ed25519-d66705e209497588",
+  "key_id": "ed25519-38843533f2fb8c31",
   "payload": {
     "app_version": "5.1.0",
     "artist_ref": {
       "primary_artist_name": "UI PQ Artist"
     },
     "authenticity_version": 1,
-    "created_at_utc": "2026-06-04T17:26:36Z",
-    "manifest_id": "8de5b1f06928bb023342c9ecc7137c78",
+    "created_at_utc": "2026-06-14T20:55:23Z",
+    "manifest_id": "e210f78c8a4d61ce2d2af2fa219203ec",
     "reference_audio": {
       "bit_depth": 24,
       "filename": "ui-pq-authenticity-master.wav",
@@ -26,7 +26,7 @@
       {
         "catalog_number": null,
         "profile_name": "default.db",
-        "release_date": "2026-06-04",
+        "release_date": "2026-06-14",
         "release_id": 1,
         "title": "UI PQ Release",
         "upc": null
@@ -57,7 +57,7 @@
       ]
     },
     "signer": {
-      "key_id": "ed25519-d66705e209497588",
+      "key_id": "ed25519-38843533f2fb8c31",
       "signer_label": "UI PQ Authenticity Signer"
     },
     "track_ref": {
@@ -66,15 +66,15 @@
       "isrc": "",
       "iswc": null,
       "profile_name": "default.db",
-      "release_date": "2026-06-04",
+      "release_date": "2026-06-14",
       "track_id": 2,
       "track_title": "UI PQ Qualification Track Edited",
       "upc": null
     },
     "watermark_binding": {
-      "manifest_digest_prefix": "567379b7f8912bd7",
-      "watermark_id": 3310703598694242374,
-      "watermark_nonce": 1882377571,
+      "manifest_digest_prefix": "39828e78365ad9b9",
+      "watermark_id": 4939079508550394958,
+      "watermark_nonce": 605857361,
       "watermark_version": 1
     },
     "watermark_version": 1,
@@ -89,9 +89,9 @@
     ],
     "workflow_kind": "authenticity_master"
   },
-  "payload_sha256": "f705828e6791c485064c923197ee419d7a89efad2fbdbdcbf865ce0ee1a1c4c5",
-  "public_key_b64": "6gDp75vLbh1M8TePzKQesYYwbMNxOv0yMHqm2NLlT28=",
+  "payload_sha256": "5dae4411c222555c9494eb1d9e1081cbb79da56c9e71d0bcc37d2c56fcacc416",
+  "public_key_b64": "RopqvRiPWJts6bHaDt4eo+CHS6/wDBsX+QfbIncjAJI=",
   "schema_version": 1,
-  "signature_b64": "Kni9PcAOa0o9nZNZkkty1MKyfmw3MB6zofNMPIs5ooTQ6E+9cIx09BsDgQi7T7OGeUaWsX1CZOzkxXbng79UBw==",
+  "signature_b64": "Ce/oCyfh1oI/m3k+SDiUdu9wVAMf/3VSrJVEd5lHN/By0fXq87P66/zYyHVuVD5LLbedlBtAIDLKjbjnlyXTDg==",
   "workflow_kind": "authenticity_master"
 }

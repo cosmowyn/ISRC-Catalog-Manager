@@ -539,7 +539,7 @@ class SavedLayoutTransitionUpdateTests(unittest.TestCase):
 
         outer_dock = CatalogWorkspaceDock(
             host,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: outer_panel,
         )

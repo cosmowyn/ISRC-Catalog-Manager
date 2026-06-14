@@ -1157,7 +1157,7 @@ class AppShellTestCase(unittest.TestCase):
             "Release Browser…": self.window.release_browser_action,
             "Work Manager…": self.window.work_manager_action,
             "Contract Manager…": self.window.contract_manager_action,
-            "Contract Template Workspace…": self.window.contract_template_workspace_action,
+            "Template Workspace…": self.window.contract_template_workspace_action,
             "Derivative Ledger…": self.window.derivative_ledger_action,
             "Global Search and Relationships…": self.window.global_search_action,
             "Create Snapshot…": self.window.create_snapshot_action,
@@ -4718,7 +4718,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Party Manager…",
                 "Contract Manager…",
                 "Code Registry Workspace…",
-                "Contract Template Workspace…",
+                "Template Workspace…",
                 "Invoice Workspace…",
                 "Rights Matrix…",
             ],
@@ -6348,7 +6348,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(
             self.window.contract_template_workspace_action.text(),
-            "Contract Template Workspace…",
+            "Template Workspace…",
         )
         self.assertEqual(
             [panel.workspace_tabs.tabText(index) for index in range(panel.workspace_tabs.count())],

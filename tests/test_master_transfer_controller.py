@@ -129,7 +129,7 @@ def test_master_transfer_prompt_manifest_summary_and_report_helpers(monkeypatch,
     message = box.information.call_args.args[2]
     assert "Catalog: created 1, updated 2" in message
     assert "License Archive: imported 10" in message
-    assert "Contract Templates: templates 11, revisions 12" in message
+    assert "Templates: templates 11, revisions 12" in message
     assert "- Templates" in message
     assert "warning 11" in message
     assert "warning 12" not in message

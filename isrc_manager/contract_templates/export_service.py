@@ -20,7 +20,9 @@ from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication
 
+from isrc_manager.code_registry import CodeRegistryService
 from isrc_manager.file_storage import coalesce_filename, sha256_digest
+from isrc_manager.invoicing.models import DEFAULT_CURRENCY
 
 from .catalog import registry_binding_for_catalog_entry, registry_binding_for_symbol
 from .formatting import DEFAULT_MANUAL_DATE_FORMAT, format_manual_date_value
@@ -55,11 +57,18 @@ _DUPLICATE_BLOCK_RE = re.compile(
 )
 _PAGE_COUNTER_RE = re.compile(rf"{re.escape(_PAGE_INDEX_SYMBOL)}|{re.escape(_PAGE_TOTAL_SYMBOL)}")
 _MAX_DUPLICATE_COPIES = 200
+_DYNAMIC_INVOICE_TOTAL_KEYS = frozenset(
+    {"currency", "subtotal", "vat_total", "total", "lines", "vat_breakdown"}
+)
 _DEFAULT_SCOPE_ENTITY_BY_NAMESPACE = {
     "track": "track",
     "release": "release",
     "work": "work",
     "contract": "contract",
+    "invoice": "invoice",
+    "invoice_line": "invoice_catalog_item",
+    "royalty": "royalty_statement",
+    "royalty_line": "royalty_line_item",
     "owner": "owner",
     "party": "party",
     "right": "right",
@@ -71,6 +80,10 @@ _DEFAULT_SCOPE_POLICY_BY_NAMESPACE = {
     "release": "release_selection_required",
     "work": "work_selection_required",
     "contract": "contract_selection_required",
+    "invoice": "invoice_selection_required",
+    "invoice_line": "invoice_catalog_item_selection_required",
+    "royalty": "royalty_statement_selection_required",
+    "royalty_line": "royalty_line_selection_required",
     "owner": "owner_settings_context",
     "party": "party_selection_required",
     "right": "right_selection_required",
@@ -272,6 +285,7 @@ class ContractTemplateExportService:
         asset_service=None,
         custom_field_definition_service=None,
         custom_field_value_service=None,
+        accounting_resolver=None,
         html_adapter: DOCXHtmlAdapter | None = None,
         html_pdf_adapter: QtWebEngineHtmlPdfAdapter | None = None,
         pages_adapter: PagesTemplateAdapter | None = None,
@@ -288,6 +302,7 @@ class ContractTemplateExportService:
         self.asset_service = asset_service
         self.custom_field_definition_service = custom_field_definition_service
         self.custom_field_value_service = custom_field_value_service
+        self.accounting_resolver = accounting_resolver
         self.html_adapter = (
             html_adapter
             if html_adapter is not None
@@ -300,6 +315,7 @@ class ContractTemplateExportService:
         self.pages_adapter = (
             pages_adapter if pages_adapter is not None else self.template_service.pages_adapter
         )
+        self._code_registry_service = None
         self._owned_qapp = None
 
     def export_draft_to_pdf(self, draft_id: int) -> ContractTemplateExportResult:
@@ -364,6 +380,7 @@ class ContractTemplateExportService:
         db_selections = dict(editable_payload.get("db_selections") or {})
         manual_values = dict(editable_payload.get("manual_values") or {})
         manual_formats = dict(editable_payload.get("manual_formats") or {})
+        invoice_line_inputs = dict(editable_payload.get("invoice_line_inputs") or {})
         iterated_symbols = set(duplicate_iterated_symbols or set())
         resolved: dict[str, str] = {}
         missing_required: list[str] = []
@@ -437,6 +454,7 @@ class ContractTemplateExportService:
                         selection_value=None,
                         draft_id=draft_id,
                         allow_registry_generation=allow_registry_generation,
+                        strict=strict,
                     )
                 except ContractTemplateExportError:
                     if strict:
@@ -472,6 +490,18 @@ class ContractTemplateExportService:
                 getattr(catalog_entry, "key", None),
             )
             if selection_value is None:
+                handled, dynamic_value = self._dynamic_invoice_value_for_placeholder(
+                    catalog_entry=catalog_entry,
+                    db_selections=db_selections,
+                    invoice_line_inputs=invoice_line_inputs,
+                    strict=strict,
+                )
+                if handled:
+                    resolved[canonical] = self._render_catalog_output_value(
+                        catalog_entry=catalog_entry,
+                        value=dynamic_value,
+                    )
+                    continue
                 if canonical in iterated_symbols:
                     resolved[canonical] = ""
                     continue
@@ -485,8 +515,13 @@ class ContractTemplateExportService:
                 resolved_value = self._resolve_catalog_value(
                     catalog_entry=catalog_entry,
                     selection_value=selection_value,
+                    line_input=self._invoice_line_input_for_selection_key(
+                        canonical,
+                        invoice_line_inputs,
+                    ),
                     draft_id=draft_id,
                     allow_registry_generation=allow_registry_generation,
+                    strict=strict,
                 )
             except ContractTemplateExportError:
                 if strict:
@@ -499,6 +534,15 @@ class ContractTemplateExportService:
                 catalog_entry=catalog_entry,
                 value=resolved_value,
             )
+            if (
+                not strict
+                and str(catalog_entry.namespace or "").strip().lower() == "invoice"
+                and str(catalog_entry.key or "").strip().lower() == "number"
+                and str(rendered or "").startswith("DRAFT-")
+            ):
+                warnings.append(
+                    "Invoice number is showing the draft display ID; issue the invoice before strict export."
+                )
             if not rendered and placeholder.required:
                 if strict and str(catalog_entry.namespace or "").strip().lower() == "owner":
                     missing_required.append(
@@ -674,6 +718,7 @@ class ContractTemplateExportService:
         symbols: tuple[str, ...],
         index: int,
         db_selections: dict[str, object],
+        invoice_line_inputs: dict[str, object] | None = None,
         draft_id: int | None,
         allow_registry_generation: bool,
         strict: bool,
@@ -687,8 +732,11 @@ class ContractTemplateExportService:
             catalog_entry = self._catalog_entry_for_symbol(symbol, catalog)
             if catalog_entry is None:
                 continue
-            selection_key = build_contract_template_indexed_selection_key(symbol, index)
-            selection_value = db_selections.get(selection_key)
+            selection_key, selection_value = self._indexed_db_selection_for_symbol(
+                symbol=symbol,
+                index=index,
+                db_selections=db_selections,
+            )
             if selection_value is None:
                 message = (
                     f"Indexed placeholder {symbol} at DB Index {index} does not have "
@@ -703,8 +751,13 @@ class ContractTemplateExportService:
                 resolved_value = self._resolve_catalog_value(
                     catalog_entry=catalog_entry,
                     selection_value=selection_value,
+                    line_input=self._invoice_line_input_for_selection_key(
+                        selection_key,
+                        dict(invoice_line_inputs or {}),
+                    ),
                     draft_id=draft_id,
                     allow_registry_generation=allow_registry_generation,
+                    strict=strict,
                 )
             except ContractTemplateExportError:
                 if strict:
@@ -718,6 +771,39 @@ class ContractTemplateExportService:
                 value=resolved_value,
             )
         return replacements
+
+    def _indexed_db_selection_for_symbol(
+        self,
+        *,
+        symbol: str,
+        index: int,
+        db_selections: dict[str, object],
+    ) -> tuple[str, object | None]:
+        selection_key = build_contract_template_indexed_selection_key(symbol, index)
+        selection_value = db_selections.get(selection_key)
+        if selection_value is not None:
+            return selection_key, selection_value
+        try:
+            token = parse_placeholder(symbol)
+        except ValueError:
+            return selection_key, None
+        for candidate_key, candidate_value in db_selections.items():
+            if candidate_value is None:
+                continue
+            clean_key = str(candidate_key or "").strip()
+            if self._indexed_selection_index(clean_key) != index:
+                continue
+            base_key = clean_key.rsplit("#index:", 1)[0]
+            try:
+                candidate_token = parse_placeholder(base_key)
+            except ValueError:
+                continue
+            if (
+                candidate_token.binding_kind == token.binding_kind == "db"
+                and candidate_token.namespace == token.namespace
+            ):
+                return clean_key, candidate_value
+        return selection_key, None
 
     def _normalized_group_db_selections(
         self,
@@ -791,13 +877,195 @@ class ContractTemplateExportService:
         )
         return build_contract_template_selector_scope_key(scope_entity_type, scope_policy)
 
+    @staticmethod
+    def _indexed_selection_index(selection_key: object | None) -> int | None:
+        text = str(selection_key or "").strip()
+        marker = "#index:"
+        if marker not in text:
+            return None
+        _prefix, raw_index = text.rsplit(marker, 1)
+        try:
+            index = int(raw_index)
+        except ValueError:
+            return None
+        return index if index > 0 else None
+
+    @staticmethod
+    def _line_input_quantity(line_input: object | None) -> object | None:
+        if isinstance(line_input, dict):
+            return line_input.get("quantity")
+        return line_input
+
+    def _invoice_line_input_for_selection_key(
+        self,
+        selection_key: object,
+        invoice_line_inputs: dict[str, object],
+    ) -> object | None:
+        clean_key = str(selection_key or "").strip()
+        if clean_key in invoice_line_inputs:
+            return invoice_line_inputs[clean_key]
+        index = self._indexed_selection_index(clean_key)
+        if index is None:
+            return None
+        for candidate_key, candidate_value in invoice_line_inputs.items():
+            if self._indexed_selection_index(candidate_key) == index:
+                return candidate_value
+        return None
+
+    def _invoice_line_rows_from_payload(
+        self,
+        *,
+        db_selections: dict[str, object],
+        invoice_line_inputs: dict[str, object],
+        strict: bool,
+    ) -> tuple[dict[str, object], ...]:
+        if self.accounting_resolver is None:
+            if strict:
+                raise ContractTemplateExportError(
+                    "Invoice catalog line calculation is unavailable for export."
+                )
+            return ()
+        grouped: dict[str, tuple[int, object, object | None]] = {}
+        for selection_key, selection_value in db_selections.items():
+            clean_key = str(selection_key or "").strip()
+            base_key = clean_key.rsplit("#index:", 1)[0]
+            try:
+                token = parse_placeholder(base_key)
+            except ValueError:
+                continue
+            if token.binding_kind != "db" or token.namespace != "invoice_line":
+                continue
+            index = self._indexed_selection_index(clean_key)
+            group_key = f"index:{index}" if index is not None else "single"
+            if group_key in grouped:
+                continue
+            grouped[group_key] = (
+                index or 0,
+                selection_value,
+                self._invoice_line_input_for_selection_key(clean_key, invoice_line_inputs),
+            )
+        rows: list[dict[str, object]] = []
+        for _index, selection_value, line_input in sorted(
+            grouped.values(), key=lambda item: item[0]
+        ):
+            record_id = self._coerce_record_id(selection_value)
+            if record_id is None:
+                continue
+            try:
+                rows.append(
+                    self.accounting_resolver.preview_invoice_catalog_line(
+                        record_id,
+                        quantity=self._line_input_quantity(line_input),
+                    )
+                )
+            except ValueError as exc:
+                if strict:
+                    raise ContractTemplateExportError(str(exc)) from exc
+        return tuple(rows)
+
+    @staticmethod
+    def _currency_for_invoice_line_rows(rows: tuple[dict[str, object], ...]) -> str:
+        currencies = tuple(
+            dict.fromkeys(str(row.get("currency") or "").strip().upper() for row in rows)
+        )
+        currencies = tuple(currency for currency in currencies if currency)
+        if not currencies:
+            return DEFAULT_CURRENCY
+        if len(currencies) > 1:
+            raise ContractTemplateExportError(
+                "Calculated invoice totals require all selected catalog items to use one currency."
+            )
+        return currencies[0]
+
+    def _dynamic_invoice_value_for_placeholder(
+        self,
+        *,
+        catalog_entry,
+        db_selections: dict[str, object],
+        invoice_line_inputs: dict[str, object],
+        strict: bool,
+    ) -> tuple[bool, object | None]:
+        namespace = str(getattr(catalog_entry, "namespace", "") or "").strip().lower()
+        key = str(getattr(catalog_entry, "key", "") or "").strip().lower()
+        if namespace != "invoice":
+            return False, None
+        if key.startswith(("party_", "buyer_")):
+            party_id = self._party_id_from_db_selections(db_selections)
+            if party_id is not None and self.accounting_resolver is not None:
+                party_key = key.removeprefix("party_").removeprefix("buyer_")
+                if party_key == "name":
+                    party_key = "name"
+                return True, self.accounting_resolver._resolve_party_key(party_id, party_key) or ""
+            return False, None
+        if key not in _DYNAMIC_INVOICE_TOTAL_KEYS:
+            return False, None
+        rows = self._invoice_line_rows_from_payload(
+            db_selections=db_selections,
+            invoice_line_inputs=invoice_line_inputs,
+            strict=strict,
+        )
+        if not rows:
+            return False, None
+        if self.accounting_resolver is None:
+            return False, None
+        currency = self._currency_for_invoice_line_rows(rows)
+        if key == "currency":
+            return True, currency
+        if key == "subtotal":
+            return True, self._format_money(
+                sum(int(row["net_amount_minor"] or 0) for row in rows), currency=currency
+            )
+        if key == "vat_total":
+            return True, self._format_money(
+                sum(int(row["vat_amount_minor"] or 0) for row in rows), currency=currency
+            )
+        if key == "total":
+            return True, self._format_money(
+                sum(int(row["gross_amount_minor"] or 0) for row in rows), currency=currency
+            )
+        if key == "lines":
+            return True, self.accounting_resolver.render_calculated_invoice_lines_table(rows)
+        if key == "vat_breakdown":
+            return True, self.accounting_resolver.render_calculated_invoice_vat_table(rows)
+        return False, None
+
+    @staticmethod
+    def _party_id_from_db_selections(db_selections: dict[str, object]) -> int | None:
+        for selection_key, selection_value in db_selections.items():
+            clean_key = str(selection_key or "").strip()
+            if clean_key.startswith("db_scope.party."):
+                try:
+                    return int(str(selection_value).strip())
+                except TypeError, ValueError:
+                    return None
+        for selection_key, selection_value in db_selections.items():
+            clean_key = str(selection_key or "").strip().rsplit("#index:", 1)[0]
+            try:
+                token = parse_placeholder(clean_key)
+            except ValueError:
+                continue
+            if token.binding_kind == "db" and token.namespace == "party":
+                try:
+                    return int(str(selection_value).strip())
+                except TypeError, ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _format_money(minor_units: int, *, currency: str) -> str:
+        from isrc_manager.invoicing.money import format_money
+
+        return format_money(int(minor_units), currency=currency)
+
     def _resolve_catalog_value(
         self,
         *,
         catalog_entry,
         selection_value: object | None,
+        line_input: object | None = None,
         draft_id: int | None = None,
         allow_registry_generation: bool = False,
+        strict: bool = True,
     ) -> Any:
         namespace = str(catalog_entry.namespace or "").strip().lower()
         key = str(catalog_entry.key or "").strip()
@@ -822,6 +1090,54 @@ class ContractTemplateExportService:
                 f"{catalog_entry.canonical_symbol} does not have a selected record."
             )
         record_id = int(clean_selection)
+        if namespace == "invoice":
+            if self.accounting_resolver is None:
+                raise ContractTemplateExportError(
+                    "Invoice placeholder resolution is unavailable for export."
+                )
+            try:
+                return self.accounting_resolver.resolve_invoice_value(
+                    key,
+                    record_id,
+                    strict=strict,
+                )
+            except ValueError as exc:
+                raise ContractTemplateExportError(str(exc)) from exc
+        if namespace == "invoice_line":
+            if self.accounting_resolver is None:
+                raise ContractTemplateExportError(
+                    "Invoice line placeholder resolution is unavailable for export."
+                )
+            try:
+                return self.accounting_resolver.resolve_invoice_catalog_line_value(
+                    key,
+                    record_id,
+                    quantity=self._line_input_quantity(line_input),
+                )
+            except ValueError as exc:
+                raise ContractTemplateExportError(str(exc)) from exc
+        if namespace == "royalty":
+            if self.accounting_resolver is None:
+                raise ContractTemplateExportError(
+                    "Royalty placeholder resolution is unavailable for export."
+                )
+            try:
+                return self.accounting_resolver.resolve_royalty_value(
+                    key,
+                    record_id,
+                    strict=strict,
+                )
+            except ValueError as exc:
+                raise ContractTemplateExportError(str(exc)) from exc
+        if namespace == "royalty_line":
+            if self.accounting_resolver is None:
+                raise ContractTemplateExportError(
+                    "Royalty line placeholder resolution is unavailable for export."
+                )
+            try:
+                return self.accounting_resolver.resolve_royalty_line_value(key, record_id)
+            except ValueError as exc:
+                raise ContractTemplateExportError(str(exc)) from exc
         if allow_registry_generation and registry_binding is not None:
             try:
                 return self._generate_unlinked_registry_value(
@@ -890,6 +1206,17 @@ class ContractTemplateExportService:
             f"Unsupported placeholder namespace for export: {namespace}"
         )
 
+    def code_registry_service(self):
+        return self._shared_code_registry_service()
+
+    def _shared_code_registry_service(self):
+        if self._code_registry_service is None:
+            conn = getattr(self.template_service, "conn", None)
+            if conn is None:
+                raise ContractTemplateExportError("Code registry service is unavailable.")
+            self._code_registry_service = CodeRegistryService(conn)
+        return self._code_registry_service
+
     def _registry_service_for_binding(self, registry_binding):
         if registry_binding.owner_kind == "contract":
             if self.contract_service is None:
@@ -909,6 +1236,8 @@ class ContractTemplateExportService:
                     "Release service is unavailable for draft-backed registry generation."
                 )
             registry_service = self.release_service.code_registry_service()
+        elif registry_binding.owner_kind == "invoice":
+            registry_service = self._shared_code_registry_service()
         else:
             registry_service = None
         if registry_service is None:
@@ -1269,8 +1598,21 @@ class ContractTemplateExportService:
         rendered_html = replace_html_placeholders(
             source_html,
             effective_replacements,
+            raw_tokens=self._html_fragment_replacement_tokens(effective_replacements),
         )
         return rendered_html, package_root, tuple(dict.fromkeys((*warnings, *duplicate_warnings)))
+
+    def _html_fragment_replacement_tokens(self, replacements: dict[str, object]) -> tuple[str, ...]:
+        catalog = {
+            item.canonical_symbol: item for item in self.catalog_service.list_known_symbols()
+        }
+        raw_tokens: list[str] = []
+        for token in replacements:
+            catalog_entry = self._catalog_entry_for_symbol(str(token), catalog)
+            field_type = str(getattr(catalog_entry, "field_type", "") or "").strip().lower()
+            if field_type == "html_fragment":
+                raw_tokens.append(str(token))
+        return tuple(raw_tokens)
 
     def _apply_duplicate_controls(
         self,
@@ -1291,6 +1633,7 @@ class ContractTemplateExportService:
         manual_values = dict(editable_payload.get("manual_values") or {})
         db_selections = dict(editable_payload.get("db_selections") or {})
         manual_formats = dict(editable_payload.get("manual_formats") or {})
+        invoice_line_inputs = dict(editable_payload.get("invoice_line_inputs") or {})
         count = self._duplicate_copy_count(
             manual_values.get(_DUPLICATE_NUMBER_SYMBOL),
             strict=strict,
@@ -1323,6 +1666,7 @@ class ContractTemplateExportService:
                         symbols=indexed_symbols,
                         index=index,
                         db_selections=db_selections,
+                        invoice_line_inputs=invoice_line_inputs,
                         draft_id=draft_id,
                         allow_registry_generation=allow_registry_generation,
                         strict=strict,
@@ -1439,6 +1783,7 @@ class ContractTemplateExportService:
         stem = _slugify(draft_name or template.name, fallback="contract-template-export")
         rendered_html_bytes = rendered_html.encode("utf-8")
         warnings = tuple(dict.fromkeys((*resolution_warnings, *html_warnings, *docx_warnings)))
+        draft_record = self.template_service.fetch_draft(int(draft_id))
 
         snapshot = self.template_service.create_resolved_snapshot(
             ContractTemplateResolvedSnapshotPayload(
@@ -1453,6 +1798,10 @@ class ContractTemplateExportService:
                     "resolved_source_name": working_filename,
                     "working_copy_path": str(working_html_path),
                 },
+                scope_entity_type=(
+                    draft_record.scope_entity_type if draft_record is not None else None
+                ),
+                scope_entity_id=draft_record.scope_entity_id if draft_record is not None else None,
                 resolved_checksum_sha256=sha256_digest(rendered_html_bytes),
             )
         )
@@ -1694,6 +2043,9 @@ class ContractTemplateExportService:
     def _render_catalog_output_value(cls, *, catalog_entry: object, value: object | None) -> str:
         namespace = str(getattr(catalog_entry, "namespace", "") or "").strip().lower()
         key = str(getattr(catalog_entry, "key", "") or "").strip().lower()
+        field_type = str(getattr(catalog_entry, "field_type", "") or "").strip().lower()
+        if field_type == "html_fragment":
+            return "" if value is None else str(value)
         if namespace == "track" and key == "track_length_sec":
             return cls._render_track_length(value)
         return cls._render_output_value(value)

@@ -41,7 +41,7 @@ def _ensure_contract_template_workspace_dock(self) -> QDockWidget:
     dock = ensure_catalog_workspace_dock(
         self,
         key="contract_template_workspace",
-        title="Contract Template Workspace",
+        title="Template Workspace",
         object_name="contractTemplateWorkspaceDock",
         panel_factory=self._create_contract_template_workspace_panel,
     )
@@ -49,17 +49,32 @@ def _ensure_contract_template_workspace_dock(self) -> QDockWidget:
     return dock
 
 
-def open_contract_template_workspace(self, *, initial_tab: str = "import"):
+def open_contract_template_workspace(
+    self,
+    *,
+    initial_tab: str = "import",
+    template_family: str | None = None,
+    scope_entity_type: str | None = None,
+    scope_entity_id: int | str | None = None,
+):
     if (
         self.contract_template_catalog_service is None
         or self.contract_template_service is None
         or self.contract_template_form_service is None
         or self.contract_template_export_service is None
     ):
-        _message_box().warning(self, "Contract Template Workspace", "Open a profile first.")
+        _message_box().warning(self, "Template Workspace", "Open a profile first.")
         return
     return self._show_workspace_panel(
         self._ensure_contract_template_workspace_dock,
         panel_attr="contract_template_workspace_panel",
-        configure=lambda panel: panel.focus_tab(initial_tab),
+        configure=lambda panel: (
+            panel.apply_external_fill_context(
+                template_family=template_family,
+                scope_entity_type=scope_entity_type,
+                scope_entity_id=scope_entity_id,
+            )
+            if scope_entity_type and scope_entity_id is not None
+            else panel.focus_tab(initial_tab)
+        ),
     )

@@ -680,7 +680,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_browse_menu.addAction(app.promo_code_ledger_action)
     app.contract_template_workspace_action = app._create_action(
-        "Contract Template Workspace…",
+        "Template Workspace…",
         slot=app.open_contract_template_workspace,
         shortcuts=("Ctrl+Alt+Shift+T", "Meta+Alt+Shift+T"),
     )

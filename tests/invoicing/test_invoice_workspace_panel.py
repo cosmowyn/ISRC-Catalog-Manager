@@ -2,20 +2,17 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
-    QDateEdit,
-    QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
-    QLineEdit,
+    QPushButton,
     QScrollArea,
-    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QWidget,
 )
 
@@ -25,27 +22,19 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
     CodeRegistryService,
 )
-from isrc_manager.contract_templates.models import (
-    ContractTemplateFormManualField,
-    build_contract_template_indexed_selection_key,
-)
 from isrc_manager.contracts import ContractPartyPayload, ContractPayload, ContractService
 from isrc_manager.invoicing import controller as invoice_controller
 from isrc_manager.invoicing import workspace as workspace_module
 from isrc_manager.invoicing.invoice_service import InvoiceService
 from isrc_manager.invoicing.royalty_import import RoyaltySourceImportService
-from isrc_manager.invoicing.template_service import InvoiceTemplateService
 from isrc_manager.invoicing.travel_distance import TravelDistanceResult
 from isrc_manager.invoicing.workspace import (
     InvoiceWorkspacePanel,
     _add_kpi_card,
-    _contract_placeholder_token,
     _display_date,
-    _invoice_template_symbol_key,
     _scrollable_page,
     _set_table_rows,
     _status_label,
-    _template_value_preview,
 )
 from isrc_manager.parties import PartyPayload, PartyRecord, PartyService
 from isrc_manager.rights import OwnershipInterestPayload, RightPayload, RightsService
@@ -177,9 +166,15 @@ def _integrated_royalty_fixture(conn: sqlite3.Connection) -> tuple[int, int, int
     return contract_id, work_id, publisher_id, right_id
 
 
-def test_invoice_workspace_panel_creates_issues_templates_and_exports_html(tmp_path):
+def test_invoice_workspace_panel_issues_invoice_without_template_handoff_tab(monkeypatch):
     _app()
     conn = _connection()
+    opened_paths: list[Path] = []
+    monkeypatch.setattr(
+        workspace_module,
+        "open_external_path",
+        lambda path, **_kwargs: opened_paths.append(Path(path)) or True,
+    )
     PartyService(conn).create_party(
         PartyPayload(
             legal_name="Venue BV",
@@ -198,30 +193,66 @@ def test_invoice_workspace_panel_creates_issues_templates_and_exports_html(tmp_p
     panel.invoice_table.selectRow(0)
     panel.issue_selected_invoice()
     panel.invoice_table.selectRow(0)
-    template_path = tmp_path / "invoice-template.html"
-    template_path.write_text(
-        "<html><body><h1>{{invoice.number}}</h1>{{ invoice.lines }}"
-        "<p>{{ invoice.total }}</p><footer>{{ custom.footer_note }}</footer></body></html>",
-        encoding="utf-8",
-    )
-    panel.template_path_field.setText(str(template_path))
-    panel.manual_footer_field.setText("Pay promptly")
-    panel.upload_template()
-    panel.preview_selected_invoice()
-    preview = panel.preview_output.toPlainText()
-    preview_url = panel.preview_output.url()
-    preview_html = Path(preview_url.toLocalFile()).read_text(encoding="utf-8")
-    panel.export_selected_invoice_html()
+    panel.view_selected_final_invoice()
 
     assert panel.invoice_table.rowCount() == 1
-    assert preview_url.isLocalFile()
-    assert "<base href=" in preview_html
-    assert "INV" in preview
-    assert "Venue service" in preview
-    assert "EUR 121.00" in preview
-    assert "Pay promptly" in preview
-    assert conn.execute("SELECT COUNT(*) FROM InvoiceTemplateResolvedSnapshots").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM InvoiceOutputArtifacts").fetchone()[0] == 1
+    status, ledger_transaction_id = conn.execute("""
+        SELECT document_status, issued_ledger_transaction_id
+        FROM Invoices
+        """).fetchone()
+    assert status == "issued"
+    assert ledger_transaction_id is not None
+    artifact_row = conn.execute("""
+        SELECT artifact_type, status, storage_mode, content_blob IS NOT NULL
+        FROM InvoiceOutputArtifacts
+        """).fetchone()
+    assert artifact_row == ("final_html", "final", "database", 1)
+    assert opened_paths
+    assert opened_paths[0].exists()
+    assert "Venue service" in opened_paths[0].read_text(encoding="utf-8")
+    assert not hasattr(panel, "template_linked_document_table")
+    assert panel.findChild(QTableWidget, "invoiceTemplateLinkedDocumentTable") is None
+    button_texts = {
+        button.text() for button in panel.invoice_workflow_tabs.findChildren(QPushButton)
+    }
+    assert {"Open Invoice", "Open File Location", "Purge Selected"}.issubset(button_texts)
+    assert button_texts.isdisjoint(
+        {"Finalize / Issue", "View Final Invoice", "Template Workspace", "Refresh Docs"}
+    )
+
+    panel.deleteLater()
+    conn.close()
+
+
+def test_invoice_workspace_panel_purges_selected_invoice_after_confirmation(monkeypatch):
+    _app()
+    conn = _connection()
+    PartyService(conn).create_party(
+        PartyPayload(
+            legal_name="Cleanup Venue BV",
+            display_name="Cleanup Venue",
+            party_type="organization",
+        )
+    )
+    monkeypatch.setattr(
+        workspace_module.QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: workspace_module.QMessageBox.StandardButton.Yes,
+    )
+    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
+    panel.description_field.setText("Test invoice to purge")
+    panel.unit_price_field.setText("75.00")
+    panel.vat_rate_field.setText("0")
+    panel.create_draft_invoice()
+    panel.refresh_invoices()
+    panel.invoice_table.selectRow(0)
+
+    panel.purge_selected_invoice_for_cleanup()
+
+    assert panel.invoice_table.rowCount() == 0
+    assert conn.execute("SELECT COUNT(*) FROM Invoices").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM InvoiceLineItems").fetchone()[0] == 0
+    assert "Purged invoice cleanup" in panel.invoice_final_status_label.text()
 
     panel.deleteLater()
     conn.close()
@@ -258,7 +289,6 @@ def test_invoice_workspace_panel_exposes_royalties_accounting_navigation():
     ] == [
         "Sales Invoices",
         "Line Allocation",
-        "Create / Edit",
         "Credit Notes",
         "Royalty Payables",
         "E-Invoices",
@@ -290,10 +320,60 @@ def test_invoice_workspace_panel_exposes_royalties_accounting_navigation():
     assert panel.journal_table.horizontalHeaderItem(0).text() == "Journal entry ID"
     assert panel.payables_table.horizontalHeaderItem(0).text() == "Payee"
     assert panel.report_catalog_table.horizontalHeaderItem(0).text() == "Category"
-    preview_toolbar = panel.findChild(QWidget, "invoiceTemplatePreviewToolbar")
-    assert preview_toolbar is not None
-    assert preview_toolbar.maximumHeight() == 56
-    assert preview_toolbar.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
+    settings_tabs = panel.tabs.widget(5).findChild(QTabWidget)
+    assert settings_tabs is not None
+    assert "Templates" not in [
+        settings_tabs.tabText(index) for index in range(settings_tabs.count())
+    ]
+    assert panel.findChild(QTableWidget, "invoiceTemplateLinkedDocumentTable") is None
+
+    panel.deleteLater()
+    conn.close()
+
+
+def test_invoice_workspace_billing_preset_dropdowns_link_to_admin_pages():
+    _app()
+    conn = _connection()
+    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
+
+    assert isinstance(panel.catalog_category_combo, QComboBox)
+    assert isinstance(panel.catalog_account_combo, QComboBox)
+    assert panel.catalog_category_combo.findData("Services") >= 0
+    assert panel.catalog_account_combo.findData("4100") >= 0
+
+    panel.open_catalog_category_admin()
+    settings_tabs = panel.tabs.widget(5).findChild(QTabWidget)
+    assert settings_tabs is not None
+    assert settings_tabs.tabText(settings_tabs.currentIndex()) == "Preset Categories"
+    panel.catalog_category_name_field.setText("Consulting")
+    panel.catalog_category_active_check.setChecked(True)
+    panel.save_catalog_category()
+    assert panel.catalog_category_combo.findData("Consulting") >= 0
+
+    panel.open_ledger_account_admin()
+    assert settings_tabs.tabText(settings_tabs.currentIndex()) == "Ledger Accounts"
+    panel._clear_ledger_account_form()
+    panel.account_code_field.setText("4200")
+    panel.account_name_field.setText("Digital Sales")
+    panel._select_required_combo_data(panel.account_type_combo, "income")
+    panel._select_required_combo_data(panel.account_normal_balance_combo, "credit")
+    panel.save_ledger_account()
+    assert panel.catalog_account_combo.findData("4200") >= 0
+
+    panel._select_combo_text(panel.catalog_category_combo, "Consulting")
+    panel.catalog_account_combo.setCurrentIndex(panel.catalog_account_combo.findData("4200"))
+    panel.catalog_name_field.setText("Mix consulting")
+    panel.catalog_description_field.setText("Mix advice")
+    panel.catalog_quantity_field.setText("1")
+    panel.catalog_unit_price_field.setText("75.00")
+    panel.catalog_vat_rate_field.setText("0")
+    panel.catalog_vat_country_field.setText("NL")
+    panel.save_catalog_preset()
+
+    item = InvoiceService(conn).catalog_service.fetch_item(1)
+    assert item is not None
+    assert item.category == "Consulting"
+    assert item.default_account_code == "4200"
 
     panel.deleteLater()
     conn.close()
@@ -364,6 +444,7 @@ def test_invoice_workspace_helpers_and_no_connection_command_paths(monkeypatch):
         panel.clear_draft_lines,
         panel.save_catalog_preset,
         panel.issue_selected_invoice,
+        panel.view_selected_final_invoice,
         panel.void_selected_invoice,
         panel.record_payment_for_selected_invoice,
         panel.create_credit_note_for_selected_invoice,
@@ -373,16 +454,8 @@ def test_invoice_workspace_helpers_and_no_connection_command_paths(monkeypatch):
         panel.approve_selected_royalty_calculation,
         panel.generate_statement_for_selected_royalty,
         panel.record_artist_payout_for_selected_royalty,
-        panel.upload_template,
-        panel.browse_template_file,
-        lambda: panel._render_selected_invoice(export=True),
     ):
         command()
-
-    original_preview = panel.preview_output
-    panel.preview_output = SimpleNamespace()
-    assert panel._current_invoice_preview_zoom_percent() == 100
-    panel.preview_output = original_preview
 
     panel.description_field.clear()
     panel.quantity_field.setText("2")
@@ -416,8 +489,6 @@ def test_invoice_workspace_helpers_and_no_connection_command_paths(monkeypatch):
     assert panel.travel_km_field.text() == "61.4"
     assert panel.travel_description_field.text() == "Travel costs"
 
-    assert panel._template_party_choices() == ()
-    assert panel._template_track_choices() == ()
     for command in (
         panel._refresh_company_settings,
         panel._refresh_users_roles_settings,
@@ -455,7 +526,7 @@ def test_invoice_workspace_helpers_and_no_connection_command_paths(monkeypatch):
     parent.deleteLater()
 
 
-def test_invoice_workspace_template_preview_and_selection_helpers(tmp_path: Path):
+def test_invoice_workspace_display_and_selection_helpers():
     _app()
     panel = InvoiceWorkspacePanel(conn_provider=lambda: None)
 
@@ -465,16 +536,6 @@ def test_invoice_workspace_template_preview_and_selection_helpers(tmp_path: Path
     assert _display_date("not-a-date") == "not-a-date"
     assert _status_label(None) == "Unknown"
     assert _status_label("needs_setup") == "Needs Setup"
-    assert _contract_placeholder_token(None) is None
-    assert _contract_placeholder_token("{{ bad placeholder }}") is None
-    assert _invoice_template_symbol_key("{{ manual.footer_note }}") == "{{manual.footer_note}}"
-    assert (
-        _invoice_template_symbol_key("{{ db.party.display_name }}") == "invoice.party.display_name"
-    )
-    assert _invoice_template_symbol_key("manual.custom-field") == "{{manual.custom_field}}"
-    assert _invoice_template_symbol_key("manual.bad placeholder") == "custom.bad placeholder"
-    assert _template_value_preview(None) == ""
-    assert _template_value_preview({"a": 1}) == "{'a': 1}"
 
     panel.restore_layout_state(None)
     panel.restore_layout_state(
@@ -490,80 +551,6 @@ def test_invoice_workspace_template_preview_and_selection_helpers(tmp_path: Path
     assert panel.tabs.currentIndex() == 2
     panel.restore_layout_state({"tab_key": "reports"})
     assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Reports"
-
-    template_path = tmp_path / "preview-template.html"
-    template_path.write_text("<html><head></head><body>Template</body></html>", encoding="utf-8")
-    panel.template_path_field.setText(str(template_path))
-    assert panel._active_template_source_path() == template_path
-    panel.template_path_field.setText(str(tmp_path / "missing.html"))
-    assert panel._active_template_source_path() is None
-
-    assert (
-        panel._inject_invoice_preview_base_href("<html></html>", source_path=None)
-        == "<html></html>"
-    )
-    assert (
-        panel._inject_invoice_preview_base_href(
-            "<html><head><base href='x'></head></html>",
-            source_path=template_path,
-        )
-        == "<html><head><base href='x'></head></html>"
-    )
-    assert "<base href=" in panel._inject_invoice_preview_base_href(
-        "<html><head></head><body></body></html>",
-        source_path=template_path,
-    )
-    assert panel._inject_invoice_preview_base_href(
-        "<!doctype html><html></html>",
-        source_path=template_path,
-    ).startswith("<!doctype html><head><base")
-    assert panel._inject_invoice_preview_base_href(
-        "<section>Invoice</section>",
-        source_path=template_path,
-    ).startswith("<head><base")
-
-    class _PreviewSurface:
-        def __init__(self) -> None:
-            self.html = ""
-            self.loaded_url = None
-            self.zoom_requests: list[tuple[int, bool]] = []
-            self.reset_called = False
-            self.reload_marked = False
-
-        def setHtml(self, value: str) -> None:
-            self.html = value
-
-        def mark_programmatic_reload(self) -> None:
-            self.reload_marked = True
-
-        def load(self, url) -> None:
-            self.loaded_url = url
-
-        def reset_to_fit(self) -> None:
-            self.reset_called = True
-
-        def current_zoom_percent(self) -> int:
-            return 133
-
-        def set_zoom_percent(self, value: int, *, user_initiated: bool) -> None:
-            self.zoom_requests.append((value, user_initiated))
-
-    original_preview = panel.preview_output
-    fake_preview = _PreviewSurface()
-    panel.preview_output = fake_preview
-    panel._set_invoice_preview_html("<html><body>Preview</body></html>", source_path=template_path)
-    assert fake_preview.reload_marked
-    assert fake_preview.loaded_url is not None
-    assert panel._invoice_preview_session_dir is not None
-    panel._reset_invoice_html_preview_to_fit()
-    assert fake_preview.reset_called
-    assert panel.invoice_preview_zoom_label.text() == "133%"
-    panel._step_invoice_html_preview_zoom(7)
-    assert fake_preview.zoom_requests == [(140, True)]
-    panel._clear_invoice_preview_surface()
-    assert fake_preview.html == ""
-    assert panel.invoice_preview_zoom_label.text() == "100%"
-    panel.preview_output = original_preview
 
     panel.invoice_table = SimpleNamespace(selectedItems=lambda: [])
     assert panel._selected_invoice_id() is None
@@ -973,8 +960,8 @@ def test_invoice_workspace_panel_vat_tax_settings_use_existing_vat_records():
     panel.catalog_unit_price_field.setText("100.00")
     panel.catalog_vat_rate_field.setText("2100")
     panel.catalog_vat_country_field.setText("NL")
-    panel.catalog_category_field.setText("Services")
-    panel.catalog_account_field.setText("4100")
+    panel._select_combo_text(panel.catalog_category_combo, "Services")
+    panel.catalog_account_combo.setCurrentIndex(panel.catalog_account_combo.findData("4100"))
     panel.save_catalog_preset()
     panel.party_combo.setCurrentIndex(panel.party_combo.findData(venue_id))
     panel.description_field.setText("Venue service")
@@ -1214,171 +1201,6 @@ def test_royalty_import_service_imports_real_dsp_aggregate_statement(tmp_path):
     conn.close()
 
 
-def test_invoice_workspace_panel_renders_template_preview_without_invoice():
-    _app()
-    conn = _connection()
-    selected_party_id = PartyService(conn).create_party(
-        PartyPayload(
-            legal_name="Selected Venue Legal BV",
-            display_name="Selected Venue",
-            company_name="Selected Venue Company BV",
-            party_type="organization",
-            email="selected@example.test",
-            phone="+31 20 123 4567",
-            street_name="Singel",
-            street_number="1",
-            postal_code="1012 AA",
-            city="Amsterdam",
-            country="NL",
-            bank_account_number="NL00 TEST 0000 0000 02",
-            chamber_of_commerce_number="12345678",
-        )
-    )
-    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
-    panel.template_html_editor.setPlainText(
-        "<html><body><h1>{{ invoice.number }}</h1>"
-        "<p>{{ invoice.party.name }}</p>{{ invoice.lines }}{{ db.invoice.total }}"
-        "{{ db.party.company_name }}"
-        "<p>{{ db.party.street_name }} {{ db.party.street_number }}</p>"
-        "<p>{{ db.party.postal_code }} {{ db.party.city }}</p>"
-        "<p>{{ db.party.country }}</p>"
-        "<p>{{ db.party.email }}</p><p>{{ manual.date }}</p>"
-        "<footer>{{ custom.footer_note }}</footer></body></html>"
-    )
-    panel.manual_footer_field.setText("Sample footer")
-    party_index = panel.template_party_selector_combo.findData(str(selected_party_id))
-    panel.template_party_selector_combo.setCurrentIndex(party_index)
-    date_widget = panel.template_manual_widgets["{{manual.date}}"]
-    assert isinstance(date_widget, QDateEdit)
-    date_widget.setDate(QDate(2026, 5, 30))
-    date_widget.setProperty("has_user_value", True)
-
-    panel.preview_selected_invoice()
-
-    preview = panel.preview_output.toPlainText()
-    assert "INV-2026-0001" in preview
-    assert "Selected Venue" in preview
-    assert "Selected Venue Company BV" in preview
-    assert "Singel 1" in preview
-    assert "1012 AA Amsterdam" in preview
-    assert preview.count("Singel") == 1
-    assert "selected@example.test" in preview
-    assert "Example billable service" in preview
-    assert "Sample footer" in preview
-    assert "30.May.2026" in preview
-    assert "EUR 121.00" in preview
-    assert "{{ db.party.company_name }}" not in preview
-    assert "Unresolved:" not in preview
-    symbol_text = " ".join(
-        panel.template_symbol_combo.itemText(index)
-        for index in range(panel.template_symbol_combo.count())
-    )
-    database_text = " ".join(
-        panel.template_database_value_combo.itemText(index)
-        for index in range(panel.template_database_value_combo.count())
-    )
-    group_titles = {group.title() for group in panel.findChildren(QGroupBox)}
-    assert "Source preview" not in group_titles
-    assert "Manual Fields" in group_titles
-    assert "Database-Linked Fields" in group_titles
-    assert "Resolved Symbols" in group_titles
-    assert "db.party.company_name" in symbol_text
-    assert "invoice.party.name" in symbol_text
-    assert "db.invoice.total" in symbol_text
-    assert "{{manual.date}}" in symbol_text
-    assert "Resolved" in symbol_text
-    assert "db.party.company_name" in database_text
-    assert "Party selection" in database_text
-    assert "db.invoice.total" in database_text
-    assert "Invoice context" in database_text
-
-    panel.deleteLater()
-    conn.close()
-
-
-def test_invoice_workspace_template_fill_form_expands_indexed_duplicate_fields():
-    _app()
-    conn = _connection()
-    party_service = PartyService(conn)
-    party_service.create_party(
-        PartyPayload(
-            legal_name="Venue Legal BV",
-            display_name="Venue",
-            party_type="organization",
-        )
-    )
-    artist_id = party_service.create_party(
-        PartyPayload(
-            legal_name="Indexed Artist",
-            display_name="Indexed Artist",
-            party_type="artist",
-        )
-    )
-    track_id = conn.execute(
-        """
-        INSERT INTO Tracks(isrc, isrc_compact, track_title, main_artist_party_id, track_length_sec)
-        VALUES ('NL-C51-26-00001', 'NLC512600001', 'Indexed Track', ?, 185)
-        """,
-        (artist_id,),
-    ).lastrowid
-    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
-    panel.description_field.setText("Template service")
-    panel.unit_price_field.setText("100.00")
-    panel.vat_rate_field.setText("2100")
-    panel.due_date_field.setText("2026-02-01")
-    panel.create_draft_invoice()
-    panel.refresh_invoices()
-    panel.invoice_table.selectRow(0)
-    panel.issue_selected_invoice()
-    panel.invoice_table.selectRow(0)
-
-    html = (
-        "<html><body>{{duplicate.start}}"
-        "<p>{{db.index}} {{db.track.track_title.indexed}} "
-        "{{manual.explicit$bool[Yes;No].indexed}}</p>"
-        "{{duplicate.end}}</body></html>"
-    )
-    InvoiceTemplateService(conn).upload_html_template(name="Indexed", html_content=html)
-    panel.template_html_editor.setPlainText(html)
-    duplicate_widget = panel.template_manual_widgets["{{duplicate.number}}"]
-    assert isinstance(duplicate_widget, QDoubleSpinBox)
-    duplicate_widget.setValue(2)
-    assert panel._template_pending_fill_rebuild is True
-    _app().processEvents()
-    assert panel._template_pending_fill_rebuild is False
-
-    track_symbol = "{{db.track.track_title.indexed}}"
-    explicit_symbol = "{{manual.explicit$bool[Yes;No].indexed}}"
-    track_key_1 = build_contract_template_indexed_selection_key(track_symbol, 1)
-    track_key_2 = build_contract_template_indexed_selection_key(track_symbol, 2)
-    explicit_key_1 = build_contract_template_indexed_selection_key(explicit_symbol, 1)
-    explicit_key_2 = build_contract_template_indexed_selection_key(explicit_symbol, 2)
-    assert track_key_1 in panel.template_indexed_selector_widgets
-    assert track_key_2 in panel.template_indexed_selector_widgets
-    assert explicit_key_1 in panel.template_indexed_manual_widgets
-    assert explicit_key_2 in panel.template_indexed_manual_widgets
-
-    for key in (track_key_1, track_key_2):
-        combo = panel._template_selector_combo(panel.template_indexed_selector_widgets[key])
-        assert combo is not None
-        combo.setCurrentIndex(combo.findData(str(track_id)))
-    for key, value in ((explicit_key_1, "Yes"), (explicit_key_2, "No")):
-        combo = panel._template_selector_combo(panel.template_indexed_manual_widgets[key])
-        assert combo is not None
-        combo.setCurrentIndex(combo.findData(value))
-
-    panel.preview_selected_invoice()
-
-    preview = panel.preview_output.toPlainText()
-    assert "1 Indexed Track Yes" in preview
-    assert "2 Indexed Track No" in preview
-    assert "{{db.track.track_title.indexed}}" not in preview
-    assert "{{manual.explicit$bool[Yes;No].indexed}}" not in preview
-
-    panel.deleteLater()
-    conn.close()
-
-
 def test_invoice_workspace_panel_builds_multi_line_invoice_from_catalog_and_travel(monkeypatch):
     _app()
     conn = _connection()
@@ -1401,9 +1223,13 @@ def test_invoice_workspace_panel_builds_multi_line_invoice_from_catalog_and_trav
     panel.catalog_quantity_field.setText("2")
     panel.catalog_unit_price_field.setText("50.00")
     panel.catalog_vat_rate_field.setText("2100")
-    panel.catalog_category_field.setText("Services")
-    panel.catalog_account_field.setText("4100")
+    panel.catalog_vat_country_field.setText("US")
+    panel._apply_catalog_currency_from_country()
+    assert panel.catalog_currency_combo.currentData() == "USD"
+    panel._select_combo_text(panel.catalog_category_combo, "Services")
+    panel.catalog_account_combo.setCurrentIndex(panel.catalog_account_combo.findData("4100"))
     panel.save_catalog_preset()
+    assert InvoiceService(conn).catalog_service.fetch_item(1).currency == "USD"
     panel.catalog_item_combo.setCurrentIndex(panel.catalog_item_combo.findData(1))
     panel.add_catalog_invoice_line()
 
@@ -1644,13 +1470,12 @@ def test_invoice_workspace_panel_handles_missing_profile_and_empty_selection(mon
     panel.approve_selected_royalty_calculation()
     panel.generate_statement_for_selected_royalty()
     panel.record_artist_payout_for_selected_royalty()
-    panel.preview_selected_invoice()
     panel.create_contract_royalty_term()
     panel.record_royalty_source_event()
     panel.generate_contract_royalty_calculations()
 
     assert warnings
-    assert all(message == "Open a profile first." for message in warnings)
+    assert set(warnings) == {"Open a profile first."}
 
     panel.deleteLater()
 
@@ -1762,14 +1587,6 @@ def test_invoice_workspace_helpers_and_layout_restore_edge_paths() -> None:
     assert _display_date("2026-06-01T12:13:14Z") == "01-Jun-2026"
     assert _display_date("not-a-date") == "not-a-date"
     assert _status_label("") == "Unknown"
-    assert _invoice_template_symbol_key("{{manual.date}}") == "{{manual.date}}"
-    assert _invoice_template_symbol_key("manual.date") == "{{manual.date}}"
-    assert _invoice_template_symbol_key("{{db.invoice.number}}") == "invoice.number"
-    assert _invoice_template_symbol_key("{{current.year}}") == "{{current.year}}"
-    assert _invoice_template_symbol_key("invoice-number") == "invoice_number"
-    assert _contract_placeholder_token("") is None
-    assert _contract_placeholder_token("{{bad }}") is None
-    assert _template_value_preview("<b>A&nbsp; B</b>\n C") == "A B C"
 
     panel.restore_layout_state(None)
     panel.restore_layout_state({"tab": 2, "tab_schema": "legacy_v0", "invoice_tab": 99})
@@ -1833,244 +1650,6 @@ def test_invoice_workspace_panel_edges_warn_and_keep_ui_stable(monkeypatch) -> N
     assert "Track editor is unavailable." in warnings
     assert "Rights matrix is unavailable." in warnings
     assert "No linked work or rights record is available." in warnings
-
-    panel.deleteLater()
-    conn.close()
-
-
-def test_invoice_workspace_template_preview_edges(monkeypatch, tmp_path) -> None:
-    _app()
-    conn = _connection()
-    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
-    source_file = tmp_path / "template.html"
-    source_file.write_text(
-        "<html><head></head><body>{{ invoice.number }}</body></html>", encoding="utf-8"
-    )
-
-    assert panel._inject_invoice_preview_base_href("plain", source_path=None) == "plain"
-    assert "<base href=" in panel._inject_invoice_preview_base_href(
-        "<html><head><title>x</title></head><body>x</body></html>",
-        source_path=source_file,
-    )
-    assert (
-        panel._inject_invoice_preview_base_href(
-            '<html><head><base href="x"></head></html>',
-            source_path=source_file,
-        ).count("<base")
-        == 1
-    )
-    assert panel._inject_invoice_preview_base_href(
-        "<!doctype html><html><body>x</body></html>",
-        source_path=source_file,
-    ).startswith("<!doctype html><head><base")
-    assert panel._inject_invoice_preview_base_href("body only", source_path=source_file).startswith(
-        "<head><base"
-    )
-
-    panel.template_path_field.setText(str(source_file))
-    assert panel._active_template_source_path() == source_file
-    panel.template_path_field.setText(str(tmp_path / "missing.html"))
-    assert panel._active_template_source_path() is None
-
-    monkeypatch.setattr(
-        "isrc_manager.invoicing.workspace.QFileDialog.getOpenFileName",
-        lambda *_args, **_kwargs: ("", ""),
-    )
-    panel.browse_template_file()
-    panel.template_html_editor.setPlainText("<html><body>{{ invoice.number }}</body></html>")
-    panel.template_path_field.setText("")
-    panel.template_name_field.setText("Inline Template")
-    panel.upload_template()
-    assert "Active revision" in panel.template_status_label.text()
-
-    monkeypatch.setattr(
-        "isrc_manager.invoicing.workspace.QFileDialog.getOpenFileName",
-        lambda *_args, **_kwargs: (str(source_file), "HTML templates"),
-    )
-    panel.browse_template_file()
-    assert panel.template_path_field.text() == str(source_file)
-
-    panel.template_html_editor.clear()
-    sample_preview = panel._sample_template_preview_html()
-    assert "Sample preview" in sample_preview
-    assert "INV-2026-0001" in sample_preview
-    panel._refresh_template_symbol_matches(resolved_values={})
-    assert not panel.template_symbol_combo.isEnabled()
-    assert "Upload an HTML template" in panel.template_symbol_detail_output.toPlainText()
-    assert panel._template_duplicate_count({}) == 1
-    assert panel._template_duplicate_count({"{{duplicate.number}}": "bad"}) == 1
-    assert panel._template_duplicate_count({"{{duplicate.number}}": "2.5"}) == 1
-    assert panel._template_duplicate_count({"{{duplicate.number}}": "250"}) == 200
-
-    panel._set_invoice_preview_html("<html><body>Preview</body></html>", source_path=source_file)
-    assert panel._invoice_preview_session_dir is not None
-    panel._clear_invoice_preview_surface()
-    assert panel.invoice_preview_zoom_label.text() == "100%"
-    panel._reset_invoice_html_preview_to_fit()
-    panel._step_invoice_html_preview_zoom(25)
-    assert panel._current_invoice_preview_zoom_percent() >= 100
-
-    panel.deleteLater()
-    conn.close()
-
-
-def test_invoice_workspace_template_form_handles_rich_placeholder_matrix() -> None:
-    _app()
-    conn = _connection()
-    party_id = PartyService(conn).create_party(
-        PartyPayload(
-            legal_name="Template Party Legal BV",
-            display_name="Template Party",
-            company_name="Template Party Company",
-            party_type="licensee",
-            email="template-party@example.test",
-            street_name="Damrak",
-            street_number="1",
-            postal_code="1012 LG",
-            city="Amsterdam",
-            country="NL",
-            vat_number="NL001122334B01",
-        )
-    )
-    owner_id = PartyService(conn).create_party(
-        PartyPayload(
-            legal_name="Owner Legal BV",
-            display_name="Owner Display",
-            company_name="Owner Company",
-            party_type="organization",
-            vat_number="NL009988776B01",
-            street_name="Koelhorst",
-            street_number="25",
-            city="Ede",
-            postal_code="6714 KL",
-            country="NL",
-        )
-    )
-    conn.execute("INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES(1, ?)", (owner_id,))
-    track_id = conn.execute(
-        """
-        INSERT INTO Tracks(
-            isrc, isrc_compact, track_title, main_artist_party_id, composer, track_length_sec
-        )
-        VALUES ('NL-C51-26-00999', 'NLC512600999', 'Template Track', ?,
-                'Template Writer', 241)
-        """,
-        (party_id,),
-    ).lastrowid
-    conn.commit()
-
-    panel = InvoiceWorkspacePanel(conn_provider=lambda: conn)
-    panel.template_html_editor.setPlainText(
-        "\n".join(
-            (
-                "{{db.party.display_name}}",
-                "{{db.party.display_name.indexed}}",
-                "{{db.track.track_title.indexed}}",
-                "{{db.owner.vat_number}}",
-                "{{db.invoice.total}}",
-                "{{db.royalty.statement_number}}",
-                "{{db.unknown.value}}",
-                "{{manual.choice$list[A;B]}}",
-                "{{manual.deadline}}",
-                "{{manual.amount}}",
-                "{{manual.flag$bool[Yes;No]}}",
-                "{{manual.enabled$bool}}",
-                "{{manual.free_text}}",
-                "{{custom.legacy_note}}",
-            )
-        )
-    )
-    definition = panel._template_form_definition()
-    fields = {field.canonical_symbol: field for field in definition.manual_fields}
-    indexed_fields = {field.canonical_symbol: field for field in definition.indexed_manual_fields}
-
-    assert "{{duplicate.number}}" in fields
-    assert fields["{{manual.choice$list[A;B]}}"].field_type == "list"
-    assert fields["{{manual.deadline}}"].field_type == "date"
-    assert fields["{{manual.amount}}"].field_type == "number"
-    assert fields["{{manual.flag$bool[Yes;No]}}"].field_type == "boolean"
-    assert fields["custom.legacy_note"].widget_kind == "text_input"
-    assert "{{manual.free_text}}" in fields
-    assert "custom.enabled$bool" in fields
-    assert "{{manual.flag$bool[Yes;No]}}" not in indexed_fields
-    assert len(definition.selector_fields) == 1
-    assert len(definition.indexed_selector_fields) == 2
-    assert definition.warnings
-
-    panel._rebuild_template_fill_fields()
-    duplicate_widget = panel.template_manual_widgets["{{duplicate.number}}"]
-    assert isinstance(duplicate_widget, QDoubleSpinBox)
-    duplicate_widget.setValue(2)
-    duplicate_widget.setProperty("has_user_value", True)
-    panel._run_deferred_template_fill_field_rebuild()
-
-    list_widget = panel.template_manual_widgets["{{manual.choice$list[A;B]}}"]
-    date_widget = panel.template_manual_widgets["{{manual.deadline}}"]
-    amount_widget = panel.template_manual_widgets["{{manual.amount}}"]
-    bool_options_widget = panel.template_manual_widgets["{{manual.flag$bool[Yes;No]}}"]
-    text_widget = panel.template_manual_widgets["{{manual.free_text}}"]
-    assert isinstance(list_widget, QComboBox)
-    assert isinstance(date_widget, QDateEdit)
-    assert isinstance(amount_widget, QDoubleSpinBox)
-    assert isinstance(bool_options_widget, QComboBox)
-    assert isinstance(text_widget, QLineEdit)
-    bool_checkbox = panel._build_template_manual_widget(
-        ContractTemplateFormManualField(
-            canonical_symbol="{{manual.enabled}}",
-            display_label="Enabled",
-            field_type="boolean",
-            widget_kind="checkbox",
-            required=True,
-            placeholder_count=1,
-            description="Boolean checkbox.",
-        )
-    )
-    assert isinstance(bool_checkbox, QCheckBox)
-    panel.template_manual_widgets["{{manual.enabled}}"] = bool_checkbox
-
-    list_widget.setCurrentIndex(list_widget.findData("B"))
-    panel._write_template_widget_value(date_widget, "2026-06-01", explicit=True)
-    panel._write_template_widget_value(amount_widget, 42.5, explicit=True)
-    panel._write_template_widget_value(bool_options_widget, "Yes", explicit=True)
-    panel._write_template_widget_value(bool_checkbox, True, explicit=True)
-    panel._write_template_widget_value(text_widget, "Manual value", explicit=True)
-
-    party_widget = panel.template_selector_widgets["{{db.party.display_name}}"]
-    panel._write_template_widget_value(party_widget, str(party_id), explicit=True)
-    for key, widget in panel.template_indexed_selector_widgets.items():
-        combo = panel._template_selector_combo(widget)
-        assert combo is not None
-        if "track" in key:
-            panel._write_template_widget_value(widget, str(track_id), explicit=True)
-        else:
-            panel._write_template_widget_value(widget, str(party_id), explicit=True)
-
-    values = panel._template_manual_values()
-    overrides = panel._template_canonical_overrides()
-    panel._refresh_template_symbol_matches(
-        resolved_values={
-            **panel._sample_template_replacements(),
-            **values,
-            **overrides,
-        },
-        warnings=("{{db.unknown.value}} needs attention",),
-    )
-    panel._refresh_template_database_values()
-    panel._refresh_template_database_detail()
-
-    assert values["{{manual.choice$list[A;B]}}"] == "B"
-    assert values["{{manual.amount}}"] == 42.5
-    assert values["{{manual.enabled}}"] is True
-    assert overrides["invoice.party.display_name"] == "Template Party"
-    assert any("Template Track" in str(value) for value in overrides.values())
-    attention_index = panel.template_symbol_combo.findData("{{db.unknown.value}}")
-    assert attention_index >= 0
-    panel.template_symbol_combo.setCurrentIndex(attention_index)
-    panel._refresh_template_symbol_detail()
-    assert "Needs attention" in panel.template_symbol_detail_output.toPlainText()
-    assert "Unsupported database placeholder" in panel.template_database_value_combo.itemText(
-        panel.template_database_value_combo.count() - 1
-    )
 
     panel.deleteLater()
     conn.close()

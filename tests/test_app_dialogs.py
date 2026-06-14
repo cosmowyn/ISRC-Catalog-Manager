@@ -524,7 +524,7 @@ class AppDialogsTests(unittest.TestCase):
                 },
                 {
                     "section_id": "contract_templates",
-                    "label": "Contract Templates",
+                    "label": "Templates",
                     "description": "Template families and revision sources.",
                     "depends_on": [],
                     "entity_counts": {"templates": 1},

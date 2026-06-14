@@ -63,6 +63,15 @@ class AccountingAccountSeed:
     normal_balance: str
 
 
+@dataclass(frozen=True, slots=True)
+class AccountingAccountPayload:
+    code: str
+    name: str
+    account_type: str
+    normal_balance: str
+    active: bool = True
+
+
 @dataclass(slots=True)
 class AccountingAccountRecord:
     id: int
@@ -141,6 +150,24 @@ class FinancialCommandLogRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class InvoiceCatalogCategoryPayload:
+    name: str
+    active: bool = True
+
+
+@dataclass(slots=True)
+class InvoiceCatalogCategoryRecord:
+    id: int
+    name: str
+    active: bool
+    created_at: str | None
+    updated_at: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class InvoiceCatalogItemPayload:
     name: str
     description: str | None = None
@@ -149,7 +176,7 @@ class InvoiceCatalogItemPayload:
     default_vat_treatment: str = VAT_TREATMENT_STANDARD
     default_vat_rate_basis_points: int = 0
     vat_country_code: str | None = None
-    currency: str = DEFAULT_CURRENCY
+    currency: str | None = None
     category: str | None = None
     default_account_code: str | None = None
     active: bool = True
@@ -247,7 +274,7 @@ class InvoiceTemplateRevisionRecord:
 
 @dataclass(slots=True)
 class InvoiceTemplateRenderResult:
-    template_revision_id: int
+    template_revision_id: int | None
     rendered_html: str
     resolved_values: dict[str, object]
     warnings: tuple[str, ...]
@@ -261,10 +288,19 @@ class InvoiceTemplateRenderResult:
 class InvoiceOutputArtifactRecord:
     id: int
     snapshot_id: int
+    invoice_id: int | None
+    ledger_transaction_id: int | None
+    contract_template_draft_id: int | None
+    contract_template_snapshot_id: int | None
+    contract_template_artifact_id: int | None
     artifact_type: str
+    status: str
     output_path: str
     output_filename: str
     mime_type: str | None
+    storage_mode: str | None
+    managed_file_path: str | None
+    content_blob: bytes | None
     size_bytes: int
     checksum_sha256: str | None
     created_at: str | None

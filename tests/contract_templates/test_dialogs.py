@@ -313,7 +313,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         panel_kwargs = self._panel_constructor_kwargs()
         return CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name=object_name,
             panel_factory=lambda outer_dock: ContractTemplateWorkspacePanel(
                 parent=outer_dock,
@@ -369,6 +369,71 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             description="live HTML preview fit zoom to settle",
         )
         return view
+
+    def test_fill_template_family_filter_and_external_invoice_context(self):
+        invoice_template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Invoice HTML Template",
+                template_family="invoice",
+                source_format="html",
+            )
+        )
+        invoice_path = self.root / "invoice-template.html"
+        invoice_path.write_text(
+            "<html><body>{{db.invoice.number}}</body></html>",
+            encoding="utf-8",
+        )
+        self.template_service.import_revision_from_path(
+            invoice_template.template_id,
+            invoice_path,
+            payload=ContractTemplateRevisionPayload(source_filename=invoice_path.name),
+        )
+        generic_template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Generic Template",
+                template_family="generic",
+                source_format="html",
+            )
+        )
+        generic_path = self.root / "generic-template.html"
+        generic_path.write_text(
+            "<html><body>{{manual.note}}</body></html>",
+            encoding="utf-8",
+        )
+        self.template_service.import_revision_from_path(
+            generic_template.template_id,
+            generic_path,
+            payload=ContractTemplateRevisionPayload(source_filename=generic_path.name),
+        )
+
+        self.panel.refresh()
+        self._focus_fill()
+        all_labels = {
+            self.panel.fill_template_combo.itemText(index)
+            for index in range(self.panel.fill_template_combo.count())
+        }
+        self.assertTrue(any("[Contract]" in label for label in all_labels))
+        self.assertTrue(any("[Invoice]" in label for label in all_labels))
+        self.assertTrue(any("[Generic]" in label for label in all_labels))
+
+        self.panel._set_fill_template_family_filter("invoice")
+        self.panel.refresh_fill_form()
+        filtered_template_ids = {
+            self.panel.fill_template_combo.itemData(index)
+            for index in range(self.panel.fill_template_combo.count())
+            if self.panel.fill_template_combo.itemData(index) is not None
+        }
+        self.assertEqual(filtered_template_ids, {invoice_template.template_id})
+
+        self.panel.apply_external_fill_context(
+            template_family="invoice",
+            scope_entity_type="invoice",
+            scope_entity_id=123,
+        )
+        self.assertEqual(self.panel._selected_fill_template_family(), "invoice")
+        self.assertEqual(self.panel._selected_fill_template_id(), invoice_template.template_id)
+        payload = self.panel.current_fill_state()
+        self.assertEqual(payload["db_selections"], {})
 
     def _select_admin_template(self, template_id: int | None = None):
         self._focus_import()
@@ -537,6 +602,37 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.panel.add_revision_from_file()
         self.assertIn("Added revision", self.panel.admin_status_label.text())
 
+        replace_path = self.root / "replacement-template.docx"
+        replace_path.write_bytes(make_docx_bytes(document_paragraphs=(("Replacement",),)))
+        before_replace_template = self.template_service.fetch_template(imported.template_id)
+        self.assertIsNotNone(before_replace_template)
+        assert before_replace_template is not None
+        before_replace_active = before_replace_template.active_revision_id
+        with mock.patch.object(
+            self.panel, "_choose_template_source_path", return_value=replace_path
+        ):
+            self.panel.replace_selected_template_file()
+        replaced_template = self.template_service.fetch_template(imported.template_id)
+        self.assertIsNotNone(replaced_template)
+        assert replaced_template is not None
+        self.assertIn("Replaced", self.panel.admin_status_label.text())
+        self.assertNotEqual(replaced_template.active_revision_id, before_replace_active)
+
+        with (
+            mock.patch.object(
+                self.panel, "_choose_template_source_path", return_value=replace_path
+            ),
+            mock.patch.object(
+                self.template_service,
+                "import_revision_from_path",
+                side_effect=RuntimeError("replace failed"),
+            ),
+            mock.patch("isrc_manager.contract_templates.dialogs.QMessageBox.warning") as warning,
+        ):
+            self.panel.replace_selected_template_file()
+        warning.assert_called_once()
+        self.assertIn("Unable to replace template file", self.panel.admin_status_label.text())
+
         with (
             mock.patch.object(self.panel, "_template_service", return_value=self.template_service),
             mock.patch.object(self.panel, "_selected_admin_template_record", return_value=None),
@@ -589,6 +685,43 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.assertIn("Archived template", self.panel.admin_status_label.text())
         self.panel.toggle_selected_template_archive()
         self.assertIn("Restored template", self.panel.admin_status_label.text())
+
+        with mock.patch(
+            "isrc_manager.contract_templates.dialogs.QInputDialog.getItem",
+            return_value=("Invoice", False),
+        ):
+            self.panel.change_selected_template_family()
+        unchanged = self.template_service.fetch_template(duplicated.template_id)
+        self.assertIsNotNone(unchanged)
+        assert unchanged is not None
+        self.assertEqual(unchanged.template_family, "contract")
+
+        with (
+            mock.patch(
+                "isrc_manager.contract_templates.dialogs.QInputDialog.getItem",
+                return_value=("Invoice", True),
+            ),
+            mock.patch.object(
+                self.template_service,
+                "update_template_family",
+                side_effect=RuntimeError("family failed"),
+            ),
+            mock.patch("isrc_manager.contract_templates.dialogs.QMessageBox.warning") as warning,
+        ):
+            self.panel.change_selected_template_family()
+        warning.assert_called_once()
+        self.assertIn("Unable to update template family", self.panel.admin_status_label.text())
+
+        with mock.patch(
+            "isrc_manager.contract_templates.dialogs.QInputDialog.getItem",
+            return_value=("Invoice", True),
+        ):
+            self.panel.change_selected_template_family()
+        changed = self.template_service.fetch_template(duplicated.template_id)
+        self.assertIsNotNone(changed)
+        assert changed is not None
+        self.assertEqual(changed.template_family, "invoice")
+        self.assertIn("Changed template family", self.panel.admin_status_label.text())
 
         with (
             mock.patch(
@@ -882,6 +1015,8 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         ):
             self.panel.import_template_from_file()
             self.panel.add_revision_from_file()
+            self.panel.replace_selected_template_file()
+            self.panel.change_selected_template_family()
             self.panel.duplicate_selected_template()
             self.panel.toggle_selected_template_archive()
             self.panel.delete_selected_template_record()
@@ -897,7 +1032,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.panel.delete_selected_artifact_record()
             self.panel.delete_selected_artifact_with_file()
 
-        self.assertEqual(warning.call_count, 16)
+        self.assertEqual(warning.call_count, 18)
         information.assert_not_called()
 
         with (
@@ -927,6 +1062,8 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             ) as information,
         ):
             self.panel.add_revision_from_file()
+            self.panel.replace_selected_template_file()
+            self.panel.change_selected_template_family()
             self.panel.duplicate_selected_template()
             self.panel.toggle_selected_template_archive()
             self.panel.delete_selected_template_record()
@@ -944,7 +1081,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.panel.delete_selected_artifact_with_file()
 
         warning.assert_not_called()
-        self.assertEqual(information.call_count, 16)
+        self.assertEqual(information.call_count, 18)
 
     def test_fill_registry_generation_and_manual_widget_branches_cover_guardrails(self):
         self._focus_fill()
@@ -1409,7 +1546,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         saved_definition = self.panel._fill_definition
         self.panel._fill_definition = None
         try:
-            self.assertEqual(self.panel._draft_name_value(), "Contract Template Draft")
+            self.assertEqual(self.panel._draft_name_value(), "Template Draft")
         finally:
             self.panel._fill_definition = saved_definition
         self.assertIn("Dialog Template", self.panel._draft_name_value())
@@ -5366,6 +5503,32 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         refresh_admin.assert_called_once_with(
             selected_template_id=selected_template.template_id,
             selected_revision_id=9901,
+        )
+
+        replacement_package_path = self.root / "dialog-replacement-package.zip"
+        replacement_package_path.write_bytes(b"replacement zip")
+        with (
+            mock.patch.object(self.panel, "_template_service", return_value=zip_service),
+            mock.patch.object(
+                self.panel,
+                "_selected_admin_template_record",
+                return_value=selected_template,
+            ),
+            mock.patch.object(
+                self.panel,
+                "_choose_template_source_path",
+                return_value=replacement_package_path,
+            ),
+            mock.patch.object(self.panel, "refresh"),
+            mock.patch.object(self.panel, "refresh_admin_workspace") as refresh_admin,
+        ):
+            self.panel.replace_selected_template_file()
+        self.assertIn("Replaced", self.panel.admin_status_label.text())
+        self.assertEqual(zip_service.imported_packages[-1][0], selected_template.template_id)
+        self.assertEqual(zip_service.imported_packages[-1][1], replacement_package_path)
+        refresh_admin.assert_called_once_with(
+            selected_template_id=selected_template.template_id,
+            selected_revision_id=9902,
         )
 
         delete_record_template = self.template_service.create_template(

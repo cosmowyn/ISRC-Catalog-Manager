@@ -193,10 +193,10 @@ HELP_SCREENSHOT_REFERENCES: tuple[HelpScreenshot, ...] = (
     ),
     HelpScreenshot(
         filename="contract_template_workspace.png",
-        title="Contract Template Workspace",
-        alt_text="Contract Template workspace with import, parsing, form, and export tabs.",
+        title="Template Workspace",
+        alt_text="Template Workspace with import, parsing, form, and export tabs.",
         caption=(
-            "The Contract Template workspace turns reusable agreement templates into governed "
+            "The Template Workspace turns reusable agreement, invoice, and royalty statement templates into governed "
             "forms and exports."
         ),
     ),
@@ -1088,11 +1088,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="contract-templates",
-        title="Contract Template Workspace",
-        summary="Create reusable contract templates and generated document patterns without confusing templates with signed agreements.",
+        title="Template Workspace",
+        summary="Create reusable document templates for contracts, licenses, invoices, royalty statements, and generated document patterns.",
         keywords=(
             "contract template",
-            "contract template workspace",
+            "template workspace",
+            "invoice template",
+            "royalty statement template",
             "templates",
             "generated document",
             "document verification",
@@ -1100,14 +1102,18 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "clause",
         ),
         content_html="""
-        <p>The <strong>Contract Template Workspace</strong> is for reusable document preparation patterns. A template is not a signed contract; it is a controlled starting point for documents that later become agreement records, drafts, amendments, or supporting files.</p>
+        <p>The <strong>Template Workspace</strong> is for reusable document preparation patterns. A template is not a signed contract or an issued invoice; it is a controlled starting point for documents that later become agreement records, invoice artifacts, royalty statements, drafts, amendments, or supporting files.</p>
         <ul>
-          <li><strong>Template library</strong>: maintain reusable contract, license, amendment, exhibit, and correspondence structures.</li>
-          <li><strong>Merge-field discipline</strong>: keep variable values such as parties, work titles, dates, territories, and payment terms in structured records where possible, then use templates to produce consistent documents.</li>
+          <li><strong>Template library</strong>: maintain reusable contract, license, invoice, royalty statement, amendment, exhibit, and correspondence structures.</li>
+          <li><strong>Import management</strong>: import a new template, replace the selected template file with a new active revision when the source file changes, or change the selected template family if it was uploaded under the wrong category.</li>
+          <li><strong>Merge-field discipline</strong>: keep variable values such as parties, work titles, dates, territories, invoice totals, payment status, and royalty statement values in structured records where possible, then use templates to produce consistent documents.</li>
+          <li><strong>Invoice line drafting</strong>: invoice-line cymbols resolve from saved invoice catalog items. When an invoice template uses indexed invoice-line cymbols inside a duplicate block, the fill form shows a row-count control and each duplicate row gets its own catalog-item selector and quantity input; unit price, net amount, VAT amount, gross amount, VAT breakdowns, and invoice totals are calculated from those selections instead of typed manually.</li>
           <li><strong>Generated document review</strong>: generated documents should be reviewed before they are treated as final. Store signed finals in the Contract Manager document/version workflow.</li>
+          <li><strong>Single template workspace</strong>: invoice and royalty statement templates are imported, filled, previewed, and exported here rather than through a separate Royalties &amp; Accounting settings tab. Use Royalties &amp; Accounting for records, payments, postings, billing presets, and royalty runs.</li>
+          <li><strong>Accounting authority</strong>: invoice templates can issue draft-owned invoice numbers from the code registry during save/export, while selected invoice records, payments, and royalty statement numbers remain resolved from their accounting workflows as canonical database cymbols.</li>
           <li><strong>Separation from rights</strong>: a template can describe language, but the enforceable rights matrix comes from saved rights records linked to source contracts.</li>
         </ul>
-        <p>Use this workspace when you want repeatability. Use Contract Manager when you are recording a real agreement, its parties, effective dates, obligations, documents, and lifecycle state.</p>
+        <p>Use this workspace when you want repeatability. Use Contract Manager when you are recording a real agreement. For invoices, prepare the document here, choose database embedded or managed-file final storage, then mark the resolved draft final so the invoice is posted to the accounting ledger.</p>
         """,
     ),
     HelpChapter(
@@ -1158,9 +1164,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The accounting workspace connects catalog records to financial actions. It is not a general bookkeeping package, but it is strict about the pieces it does manage: invoices, payments, credits, royalty calculations, statements, payouts, reports, and the ledger transactions that prove those actions balance.</p>
         <h3>Core Concepts</h3>
         <ul>
-          <li><strong>Invoice</strong>: a sales document issued to a customer or licensee. It should have parties, dates, lines, VAT/tax snapshots where relevant, and a permanent registry number when issued.</li>
+          <li><strong>Invoice</strong>: a sales document issued to a customer or licensee. It should have parties, dates, lines, VAT/tax snapshots where relevant, a permanent registry number when issued, a posted ledger transaction, and a retained final invoice artifact.</li>
+          <li><strong>Billing presets</strong>: reusable invoice catalog items store quantity, unit price, VAT treatment/rate, VAT country, category, ledger account, and an ISO 4217 currency code. The preset editor provides dropdowns for currency, category, and ledger account; category and account values are maintained from the Preset Categories and Ledger Accounts settings pages.</li>
           <li><strong>Payment</strong>: money received against an invoice. Partial payment and full payment are tracked from ledger-linked payment rows rather than from manually typed status text.</li>
           <li><strong>Credit note</strong>: a correction document that references an issued source invoice and creates its own registry-backed document number.</li>
+          <li><strong>Invoice purge</strong>: a cleanup-only action for accidental or test invoices. Purge Selected permanently removes the selected invoice, linked payments, credit notes, retained final artifacts, accounting transactions, and command-log rows. Use voids, credits, and payments for real business corrections.</li>
           <li><strong>Royalty calculation</strong>: a calculation built from usage or source lines that can be reviewed, approved, and posted.</li>
           <li><strong>Royalty statement</strong>: an immutable statement artifact generated from a posted royalty calculation.</li>
           <li><strong>Artist payout</strong>: a recorded payout that settles royalty payables and moves the calculation toward paid status.</li>
@@ -1168,8 +1176,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <h3>Start-to-Finish Example</h3>
         <ol>
           <li>Open Party Manager and make sure the customer, owner, payee, VAT/tax, billing address, and payout details exist where required.</li>
-          <li>Open Invoice Workspace and create a draft invoice with lines that reference the relevant work, track, release, contract, or service context.</li>
-          <li>Issue the invoice only after required party, date, line, VAT/tax, and registry values are complete.</li>
+          <li>Open Template Workspace, select an invoice template, choose the buyer/customer party, select invoice catalog rows for each indexed invoice line, and fill quantities or use the travel calculator to apply kilometres to a travel row.</li>
+          <li>Export and review the resolved PDF, choose whether the final invoice should be database embedded or stored as a managed file, then use Mark Invoice Final. This posts the invoice to the ledger using the template-generated registry number and stores the final PDF artifact.</li>
+          <li>Open Royalties &amp; Accounting &gt; Invoices to view the invoice ledger. Use Open Invoice to reopen the retained final invoice, Open File Location when the final was stored as a managed file, and Purge Selected only when you need to remove accidental test records from a local profile.</li>
           <li>Record payments as money arrives. The invoice status changes from unpaid to partially paid to paid from linked payment rows.</li>
           <li>If a correction is needed, create a credit note against the issued invoice instead of editing financial history silently.</li>
           <li>Create a royalty calculation from usage lines, review the detail, approve and post it, then generate a royalty statement.</li>

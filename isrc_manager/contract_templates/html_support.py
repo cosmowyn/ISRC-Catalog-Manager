@@ -29,12 +29,19 @@ def decode_html_bytes(source_bytes: bytes) -> str:
     return bytes(source_bytes or b"").decode("utf-8-sig", errors="replace")
 
 
-def replace_html_placeholders(html_text: str, replacements: dict[str, str]) -> str:
+def replace_html_placeholders(
+    html_text: str,
+    replacements: dict[str, str],
+    *,
+    raw_tokens: Iterable[str] = (),
+) -> str:
     rendered = str(html_text or "")
+    raw_token_set = {str(token) for token in raw_tokens}
     for token in sorted(replacements, key=len, reverse=True):
+        replacement = str(replacements[token] or "")
         rendered = rendered.replace(
             token,
-            html_module.escape(str(replacements[token] or ""), quote=True),
+            replacement if token in raw_token_set else html_module.escape(replacement, quote=True),
         )
     return rendered
 

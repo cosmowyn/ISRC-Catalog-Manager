@@ -69,6 +69,10 @@ if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":
 
 from isrc_manager.external_launch import open_external_path, open_external_url
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.invoicing.template_workspace_finalization import (
+    TemplateWorkspaceInvoiceFinalizationService,
+)
+from isrc_manager.invoicing.travel_distance import TravelDistanceService
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -98,6 +102,14 @@ from .models import (
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
     build_contract_template_indexed_selection_key,
+)
+
+_TEMPLATE_FAMILY_CHOICES = (
+    ("Contract", "contract"),
+    ("License", "license"),
+    ("Invoice", "invoice"),
+    ("Royalty Statement", "royalty_statement"),
+    ("Generic", "generic"),
 )
 
 
@@ -925,7 +937,7 @@ class _WorkspaceDockTitleBar(QWidget):
 
 
 class _DockableWorkspaceTab(QMainWindow):
-    """Embedded dock host for one top-level Contract Templates tab."""
+    """Embedded dock host for one top-level Template Workspace tab."""
 
     def __init__(
         self,
@@ -2149,7 +2161,7 @@ class ContractTemplateWorkspacePanel(QWidget):
     _TAB_LAYOUT_VERSIONS = {
         _IMPORT_TAB_KEY: 1,
         _SYMBOLS_TAB_KEY: 1,
-        _FILL_TAB_KEY: 4,
+        _FILL_TAB_KEY: 5,
     }
 
     def __init__(
@@ -2181,11 +2193,23 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._suspend_admin_updates = False
         self._fill_type_overrides: dict[str, str] = {}
         self._fill_payload_extras: dict[str, object] = {}
+        self._external_fill_context: dict[str, object] = {}
+        self._external_fill_context_pending = False
         self._fill_generation_warnings: list[str] = []
         self._fill_indexed_selector_count = 1
         self.fill_html_preview_view = None
         self.fill_preview_stale_label = None
         self.fill_preview_zoom_label = None
+        self.fill_final_storage_combo = QComboBox(self)
+        self.fill_final_status_label = QLabel(self)
+        self.fill_finalize_invoice_button = QPushButton(self)
+        self.fill_open_final_location_button = QPushButton(self)
+        self.travel_origin_field = QLineEdit(self)
+        self.travel_destination_field = QLineEdit(self)
+        self.travel_km_field = QLineEdit(self)
+        self.travel_round_trip_check = QCheckBox("Round trip", self)
+        self.travel_target_index_combo = QComboBox(self)
+        self.travel_status_label = QLabel(self)
         self._fill_preview_host: _DockableWorkspaceTab | None = None
         self._fill_preview_surface: QWidget | None = None
         self._fill_preview_layout: QVBoxLayout | None = None
@@ -2211,7 +2235,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         _add_standard_dialog_header(
             root,
             self,
-            title="Contract Templates",
+            title="Templates",
             subtitle=(
                 "Generate copy-ready placeholder symbols from authoritative app data, "
                 "import scanned template revisions, fill detected placeholders, and "
@@ -2537,9 +2561,17 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "preserved unchanged and normalized into HTML working drafts."
             ),
         )
+        family_form = QFormLayout()
+        _configure_standard_form_layout(family_form)
+        self.admin_template_family_combo = QComboBox(import_surface)
+        self.admin_template_family_combo.setObjectName("contractTemplateFamilyCombo")
+        for label, value in _TEMPLATE_FAMILY_CHOICES:
+            self.admin_template_family_combo.addItem(label, value)
+        family_form.addRow("New Template Family", self.admin_template_family_combo)
+        import_layout.addLayout(family_form)
         self.admin_template_table = self._create_admin_table(
             import_surface,
-            columns=("ID", "Name", "Format", "Active Revision", "Archived", "Updated"),
+            columns=("ID", "Name", "Family", "Format", "Active Revision", "Archived", "Updated"),
             object_name="contractTemplateAdminTemplateTable",
         )
         self.admin_template_table.itemSelectionChanged.connect(self._on_admin_template_changed)
@@ -2558,6 +2590,18 @@ class ContractTemplateWorkspacePanel(QWidget):
                     "Add Revision…",
                     "contractTemplateAdminAddRevisionButton",
                     self.add_revision_from_file,
+                ),
+                self._create_button(
+                    import_surface,
+                    "Replace Template File…",
+                    "contractTemplateAdminReplaceTemplateFileButton",
+                    self.replace_selected_template_file,
+                ),
+                self._create_button(
+                    import_surface,
+                    "Change Template Family…",
+                    "contractTemplateAdminChangeFamilyButton",
+                    self.change_selected_template_family,
                 ),
                 self._create_button(
                     import_surface,
@@ -3180,12 +3224,21 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         selection_form = QFormLayout()
         _configure_standard_form_layout(selection_form)
+        self.fill_template_family_combo = QComboBox(selection_box)
+        self.fill_template_family_combo.setObjectName("contractTemplateFillFamilyCombo")
+        self.fill_template_family_combo.addItem("All Families", None)
+        for label, value in _TEMPLATE_FAMILY_CHOICES:
+            self.fill_template_family_combo.addItem(label, value)
+        self.fill_template_family_combo.currentIndexChanged.connect(
+            self._on_fill_template_family_changed
+        )
         self.fill_template_combo = QComboBox(selection_box)
         self.fill_template_combo.setObjectName("contractTemplateFillTemplateCombo")
         self.fill_template_combo.currentIndexChanged.connect(self._on_fill_template_changed)
         self.fill_revision_combo = QComboBox(selection_box)
         self.fill_revision_combo.setObjectName("contractTemplateFillRevisionCombo")
         self.fill_revision_combo.currentIndexChanged.connect(self._on_fill_revision_changed)
+        selection_form.addRow("Template Family", self.fill_template_family_combo)
         selection_form.addRow("Template", self.fill_template_combo)
         selection_form.addRow("Revision", self.fill_revision_combo)
         selection_layout.addLayout(selection_form)
@@ -3289,9 +3342,32 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_open_latest_pdf_button = QPushButton("Open Latest PDF", export_box)
         self.fill_open_latest_pdf_button.setObjectName("contractTemplateOpenLatestPdfButton")
         self.fill_open_latest_pdf_button.clicked.connect(self.open_latest_pdf_for_current_draft)
+        self.fill_finalize_invoice_button = QPushButton("Mark Invoice Final", export_box)
+        self.fill_finalize_invoice_button.setObjectName("contractTemplateMarkInvoiceFinalButton")
+        self.fill_finalize_invoice_button.clicked.connect(self.mark_current_invoice_final)
+        self.fill_open_final_location_button = QPushButton("Open Final Location", export_box)
+        self.fill_open_final_location_button.setObjectName(
+            "contractTemplateOpenFinalInvoiceLocationButton"
+        )
+        self.fill_open_final_location_button.clicked.connect(
+            self.open_final_invoice_location_for_current_draft
+        )
+        self.fill_final_storage_combo = QComboBox(export_box)
+        self.fill_final_storage_combo.setObjectName("contractTemplateFinalInvoiceStorageCombo")
+        self.fill_final_storage_combo.addItem("Database Embedded", STORAGE_MODE_DATABASE)
+        self.fill_final_storage_combo.addItem("Managed File", STORAGE_MODE_MANAGED_FILE)
+        final_storage_form = QFormLayout()
+        _configure_standard_form_layout(final_storage_form)
+        final_storage_form.addRow("Final Invoice Storage", self.fill_final_storage_combo)
+        export_layout.addLayout(final_storage_form)
         self.fill_export_actions_cluster = _create_action_button_cluster(
             export_box,
-            [self.fill_export_button, self.fill_open_latest_pdf_button],
+            [
+                self.fill_export_button,
+                self.fill_open_latest_pdf_button,
+                self.fill_finalize_invoice_button,
+                self.fill_open_final_location_button,
+            ],
             columns=2,
             min_button_width=170,
         )
@@ -3305,6 +3381,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_export_status_label.setWordWrap(True)
         self.fill_export_status_label.setProperty("role", "secondary")
         export_layout.addWidget(self.fill_export_status_label)
+        self.fill_final_status_label = QLabel(
+            "Template Workspace invoices can be marked final after the draft resolves to PDF.",
+            export_box,
+        )
+        self.fill_final_status_label.setObjectName("contractTemplateFinalInvoiceStatusLabel")
+        self.fill_final_status_label.setWordWrap(True)
+        self.fill_final_status_label.setProperty("role", "secondary")
+        export_layout.addWidget(self.fill_final_status_label)
         export_surface_layout.addWidget(export_box)
         export_surface_layout.addStretch(1)
 
@@ -3326,6 +3410,60 @@ class ContractTemplateWorkspacePanel(QWidget):
         guidance_layout.addWidget(self.fill_guidance_label)
         notes_surface_layout.addWidget(guidance_box)
         notes_surface_layout.addStretch(1)
+
+        travel_surface, travel_surface_layout = self._surface_widget(
+            host.main_window,
+            object_name="contractTemplateFillTravelHelperSurface",
+        )
+        travel_box, travel_layout = _create_standard_section(
+            travel_surface,
+            "Travel Calculator",
+            "Calculate invoice travel distance and apply it to an indexed invoice-line quantity field.",
+        )
+        travel_form = QFormLayout()
+        _configure_standard_form_layout(travel_form)
+        self.travel_origin_field = QLineEdit(travel_box)
+        self.travel_origin_field.setObjectName("contractTemplateTravelOriginField")
+        self.travel_origin_field.setPlaceholderText("From address")
+        self.travel_destination_field = QLineEdit(travel_box)
+        self.travel_destination_field.setObjectName("contractTemplateTravelDestinationField")
+        self.travel_destination_field.setPlaceholderText("To address")
+        self.travel_km_field = QLineEdit(travel_box)
+        self.travel_km_field.setObjectName("contractTemplateTravelKmField")
+        self.travel_km_field.setPlaceholderText("One-way km, e.g. 42.5")
+        self.travel_round_trip_check = QCheckBox("Round trip", travel_box)
+        self.travel_round_trip_check.setObjectName("contractTemplateTravelRoundTripCheck")
+        self.travel_target_index_combo = QComboBox(travel_box)
+        self.travel_target_index_combo.setObjectName("contractTemplateTravelTargetIndexCombo")
+        self._refresh_travel_target_options()
+        travel_form.addRow("From", self.travel_origin_field)
+        travel_form.addRow("To", self.travel_destination_field)
+        travel_form.addRow("One-way km", self.travel_km_field)
+        travel_form.addRow("", self.travel_round_trip_check)
+        travel_form.addRow("Apply to Row", self.travel_target_index_combo)
+        travel_layout.addLayout(travel_form)
+        travel_actions = QHBoxLayout()
+        travel_actions.setSpacing(8)
+        calculate_travel_button = QPushButton("Calculate KM", travel_box)
+        calculate_travel_button.setObjectName("contractTemplateCalculateTravelKmButton")
+        calculate_travel_button.clicked.connect(self.calculate_template_travel_km)
+        apply_travel_button = QPushButton("Apply Quantity", travel_box)
+        apply_travel_button.setObjectName("contractTemplateApplyTravelQuantityButton")
+        apply_travel_button.clicked.connect(self.apply_template_travel_quantity)
+        travel_actions.addWidget(calculate_travel_button)
+        travel_actions.addWidget(apply_travel_button)
+        travel_actions.addStretch(1)
+        travel_layout.addLayout(travel_actions)
+        self.travel_status_label = QLabel(
+            "Travel distance can fill the selected invoice-line quantity.",
+            travel_box,
+        )
+        self.travel_status_label.setObjectName("contractTemplateTravelStatusLabel")
+        self.travel_status_label.setWordWrap(True)
+        self.travel_status_label.setProperty("role", "secondary")
+        travel_layout.addWidget(self.travel_status_label)
+        travel_surface_layout.addWidget(travel_box)
+        travel_surface_layout.addStretch(1)
 
         auto_surface, auto_surface_layout = self._surface_widget(
             host.main_window,
@@ -3486,6 +3624,12 @@ class ContractTemplateWorkspacePanel(QWidget):
             object_name="contractTemplateFillDraftNotesDock",
             content=notes_surface,
         )
+        travel_dock = self._create_workspace_dock(
+            host,
+            title="Travel Calculator",
+            object_name="contractTemplateFillTravelHelperDock",
+            content=travel_surface,
+        )
         auto_dock = self._create_workspace_dock(
             host,
             title="Automatic Fields",
@@ -3525,6 +3669,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 draft_dock,
                 export_dock,
                 notes_dock,
+                travel_dock,
                 auto_dock,
                 selector_dock,
                 manual_dock,
@@ -3544,6 +3689,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
         export_dock = docks["contractTemplateFillResolvedExportDock"]
         notes_dock = docks["contractTemplateFillDraftNotesDock"]
+        travel_dock = docks["contractTemplateFillTravelHelperDock"]
         auto_dock = docks["contractTemplateFillAutomaticFieldsDock"]
         selector_dock = docks["contractTemplateFillDatabaseFieldsDock"]
         manual_dock = docks["contractTemplateFillManualFieldsDock"]
@@ -3553,6 +3699,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             draft_dock,
             export_dock,
             notes_dock,
+            travel_dock,
             auto_dock,
             selector_dock,
             manual_dock,
@@ -3565,6 +3712,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         window.splitDockWidget(revision_dock, draft_dock, Qt.Vertical)
         window.splitDockWidget(draft_dock, export_dock, Qt.Vertical)
         window.splitDockWidget(export_dock, notes_dock, Qt.Vertical)
+        window.splitDockWidget(notes_dock, travel_dock, Qt.Vertical)
         window.splitDockWidget(auto_dock, selector_dock, Qt.Vertical)
         window.splitDockWidget(selector_dock, manual_dock, Qt.Vertical)
         self._normalize_fill_workspace_layout()
@@ -3579,6 +3727,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
         export_dock = docks["contractTemplateFillResolvedExportDock"]
         notes_dock = docks["contractTemplateFillDraftNotesDock"]
+        travel_dock = docks["contractTemplateFillTravelHelperDock"]
         auto_dock = docks["contractTemplateFillAutomaticFieldsDock"]
         selector_dock = docks["contractTemplateFillDatabaseFieldsDock"]
         manual_dock = docks["contractTemplateFillManualFieldsDock"]
@@ -3593,8 +3742,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             )
             self._resize_visible_docks(
                 window,
-                [revision_dock, draft_dock, export_dock, notes_dock],
-                [280, 360, 200, 160],
+                [revision_dock, draft_dock, export_dock, notes_dock, travel_dock],
+                [260, 320, 210, 140, 180],
                 Qt.Vertical,
             )
             self._resize_visible_docks(
@@ -3689,6 +3838,30 @@ class ContractTemplateWorkspacePanel(QWidget):
             normalized_tab=str(key),
             already_current=bool(already_current),
         )
+
+    def apply_external_fill_context(
+        self,
+        *,
+        template_family: str | None = None,
+        scope_entity_type: str | None = None,
+        scope_entity_id: int | str | None = None,
+    ) -> None:
+        clean_scope = str(scope_entity_type or "").strip().lower()
+        clean_scope_id = _clean_text(scope_entity_id)
+        clean_family = str(template_family or "").strip().lower()
+        self._external_fill_context = {
+            "template_family": clean_family,
+            "scope_entity_type": clean_scope,
+            "scope_entity_id": clean_scope_id,
+        }
+        self._external_fill_context_pending = True
+        self._loaded_draft_id = None
+        self._fill_type_overrides = {}
+        self._fill_payload_extras = {}
+        self.focus_tab("fill")
+        if clean_family:
+            self._set_fill_template_family_filter(clean_family)
+        self.refresh_fill_form()
 
     def focus_namespace(self, namespace: str | None = None) -> None:
         self._ensure_symbol_workspace()
@@ -3953,7 +4126,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             self._populate_fill_template_combo(())
             self._populate_fill_revision_combo(())
             self._clear_fill_fields()
-            self._clear_fill_drafts("Open a profile to browse and resume contract template drafts.")
+            self._clear_fill_drafts("Open a profile to browse and resume template drafts.")
             self.fill_status_label.setText("Open a profile to browse imported template revisions.")
             self.fill_warning_label.setText("")
             self._sync_html_preview_state(None)
@@ -3965,6 +4138,29 @@ class ContractTemplateWorkspacePanel(QWidget):
             return
 
         templates = tuple(template_service.list_templates())
+        external_family = _clean_text(self._external_fill_context.get("template_family"))
+        if self._external_fill_context_pending and external_family:
+            self._set_fill_template_family_filter(external_family)
+        family_filter = self._selected_fill_template_family()
+        if family_filter:
+            templates = tuple(
+                template
+                for template in templates
+                if str(getattr(template, "template_family", "") or "contract").strip().lower()
+                == family_filter
+            )
+        if self._external_fill_context_pending and external_family:
+            matched_template = next(
+                (
+                    template
+                    for template in templates
+                    if str(getattr(template, "template_family", "") or "").strip().lower()
+                    == external_family
+                ),
+                None,
+            )
+            if matched_template is not None:
+                selected_template_id = int(matched_template.template_id)
         self._populate_fill_template_combo(templates, selected_template_id=selected_template_id)
         template_id = self._selected_fill_template_id()
         if template_id is None:
@@ -4062,12 +4258,20 @@ class ContractTemplateWorkspacePanel(QWidget):
 
         self._fill_definition = form_definition
         self._rebuild_fill_fields(form_definition)
-        if preserved_state is not None and int(preserved_state.get("revision_id") or 0) == int(
+        external_payload = self._external_fill_payload_for_definition(
+            form_definition,
+            revision_id=revision_id,
+        )
+        if external_payload is not None:
+            self.apply_editable_payload(external_payload, refresh_preview=False)
+        elif preserved_state is not None and int(preserved_state.get("revision_id") or 0) == int(
             revision_id
         ):
             self.apply_editable_payload(preserved_state, refresh_preview=False)
         else:
             self._fill_dirty = False
+        if external_payload is not None:
+            self._external_fill_context_pending = False
         self.refresh_fill_drafts(selected_draft_id=selected_draft_id)
         status_bits = [
             f"{len(form_definition.auto_fields)} automatic field"
@@ -4120,12 +4324,17 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "manual_values": {},
                 "type_overrides": {},
             }
-        db_selections = {
-            key: value
-            for key, widget in self.selector_widgets.items()
-            for value in [self._read_widget_value(widget)]
-            if value is not None
-        }
+        db_selections: dict[str, object] = {}
+        invoice_line_inputs: dict[str, object] = {}
+        for key, widget in self.selector_widgets.items():
+            value = self._read_widget_value(widget)
+            if value is None:
+                continue
+            db_selections[key] = value
+            quantity = self._read_invoice_line_quantity(widget)
+            if quantity is not None:
+                selector_key = str(widget.property("selector_key") or key)
+                invoice_line_inputs[selector_key] = {"quantity": quantity}
         manual_values = {
             key: value
             for key, widget in self.manual_widgets.items()
@@ -4145,8 +4354,37 @@ class ContractTemplateWorkspacePanel(QWidget):
             manual_formats=manual_formats,
             type_overrides=self._fill_type_overrides,
         )
+        if invoice_line_inputs:
+            payload["invoice_line_inputs"] = invoice_line_inputs
         payload.update(self._fill_payload_extras)
         return payload
+
+    def _external_fill_payload_for_definition(
+        self,
+        form_definition: ContractTemplateFormDefinition,
+        *,
+        revision_id: int,
+    ) -> dict[str, object] | None:
+        clean_scope = _clean_text(self._external_fill_context.get("scope_entity_type"))
+        clean_scope_id = _clean_text(self._external_fill_context.get("scope_entity_id"))
+        if not clean_scope or clean_scope_id is None:
+            return None
+        db_selections: dict[str, object] = {}
+        for field in form_definition.selector_fields:
+            if str(field.scope_entity_type or "").strip().lower() != clean_scope:
+                continue
+            for placeholder_symbol in field.placeholder_symbols:
+                db_selections[placeholder_symbol] = clean_scope_id
+        if not db_selections:
+            return None
+        return {
+            "revision_id": int(revision_id),
+            "db_selections": db_selections,
+            "manual_values": {},
+            "type_overrides": {},
+            "scope_entity_type": clean_scope,
+            "scope_entity_id": clean_scope_id,
+        }
 
     def refresh_fill_drafts(self, *, selected_draft_id: int | None = None) -> None:
         if self._FILL_TAB_KEY not in self._tab_hosts:
@@ -4308,9 +4546,7 @@ class ContractTemplateWorkspacePanel(QWidget):
     def export_current_pdf(self) -> None:
         export_service = self._export_service()
         if export_service is None:
-            self.fill_export_status_label.setText(
-                "Open a profile to export contract template PDFs."
-            )
+            self.fill_export_status_label.setText("Open a profile to export template PDFs.")
             return
         try:
             draft = self._ensure_export_draft_record()
@@ -4322,7 +4558,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             result = export_service.export_draft_to_pdf(draft.draft_id)
         except Exception as exc:
             self.fill_export_status_label.setText(f"Unable to export PDF: {exc}")
-            QMessageBox.warning(self, "Contract Template Export", str(exc))
+            QMessageBox.warning(self, "Template Export", str(exc))
             return
         self.refresh_fill_drafts(selected_draft_id=draft.draft_id)
         self.refresh_admin_workspace(
@@ -4342,11 +4578,47 @@ class ContractTemplateWorkspacePanel(QWidget):
                 delay_ms=0,
             )
 
+    def mark_current_invoice_final(self) -> None:
+        export_service = self._export_service()
+        finalization_service = self._template_invoice_finalization_service()
+        if export_service is None or finalization_service is None:
+            self.fill_final_status_label.setText("Open a profile to finalize template invoices.")
+            return
+        try:
+            draft = self._ensure_export_draft_record()
+            if draft is None:
+                self.fill_final_status_label.setText(
+                    "Save or select a draft before marking an invoice final."
+                )
+                return
+            result = export_service.export_draft_to_pdf(draft.draft_id)
+            final = finalization_service.finalize_from_pdf_artifact(
+                draft_id=draft.draft_id,
+                pdf_artifact=result.pdf_artifact,
+                resolved_html_artifact=result.resolved_html_artifact,
+                storage_mode=self._selected_final_invoice_storage_mode(),
+            )
+        except Exception as exc:
+            self.fill_final_status_label.setText(f"Unable to finalize invoice: {exc}")
+            QMessageBox.warning(self, "Mark Invoice Final", str(exc))
+            return
+        self.refresh_fill_drafts(selected_draft_id=draft.draft_id)
+        self.refresh_admin_workspace(
+            selected_template_id=self._selected_fill_template_id(),
+            selected_revision_id=self._selected_fill_revision_id(),
+            selected_draft_id=draft.draft_id,
+        )
+        self.fill_final_status_label.setText(
+            f"{'Reused' if final.reused else 'Stored'} final invoice "
+            f"{final.invoice.invoice_number or final.invoice.id} as "
+            f"{self._storage_label(final.final_artifact.storage_mode)}."
+        )
+
     def refresh_current_html_preview(self) -> None:
         template_service = self._template_service()
         if self._fill_preview_controller is None or template_service is None:
             self.fill_preview_status_label.setText(
-                "Open a profile to preview HTML contract template drafts."
+                "Open a profile to preview HTML template drafts."
             )
             return
         if self.fill_html_preview_view is None or (
@@ -4399,6 +4671,48 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"{'Opened' if opened else 'Could not open'} PDF artifact: {artifact.output_path}"
         )
 
+    def open_final_invoice_location_for_current_draft(self) -> None:
+        draft = self._selected_fill_draft_record() or self._loaded_draft_record()
+        if draft is None:
+            self.fill_final_status_label.setText("Select or load a draft first.")
+            return
+        finalization_service = self._template_invoice_finalization_service()
+        if finalization_service is None:
+            self.fill_final_status_label.setText("Open a profile to open final invoice files.")
+            return
+        artifact = (
+            finalization_service.invoice_artifacts.fetch_latest_template_invoice_output_artifact(
+                contract_template_draft_id=int(draft.draft_id),
+                artifact_type="final_pdf",
+            )
+        )
+        if artifact is None:
+            self.fill_final_status_label.setText(
+                f"Draft #{draft.draft_id} has no final invoice artifact yet."
+            )
+            return
+        if artifact.storage_mode != STORAGE_MODE_MANAGED_FILE:
+            self.fill_final_status_label.setText(
+                "This final invoice is database embedded and has no managed file location."
+            )
+            return
+        try:
+            path = finalization_service.invoice_artifacts.materialize_output_artifact(
+                int(artifact.id)
+            )
+        except Exception as exc:
+            self.fill_final_status_label.setText(f"Unable to open final location: {exc}")
+            QMessageBox.warning(self, "Open Final Location", str(exc))
+            return
+        opened = open_external_path(
+            path.parent,
+            source="ContractTemplateWorkspacePanel.open_final_invoice_location",
+            metadata={"artifact_id": int(artifact.id), "draft_id": int(draft.draft_id)},
+        )
+        self.fill_final_status_label.setText(
+            f"{'Opened' if opened else 'Could not open'} final invoice folder: {path.parent}"
+        )
+
     def apply_editable_payload(
         self,
         payload: object | None,
@@ -4419,12 +4733,14 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "db_selections",
                 "manual_values",
                 "manual_formats",
+                "invoice_line_inputs",
                 "type_overrides",
             }
         }
         db_values = dict(payload_map.get("db_selections") or {})
         manual_values = dict(payload_map.get("manual_values") or {})
         manual_formats = dict(payload_map.get("manual_formats") or {})
+        invoice_line_inputs = dict(payload_map.get("invoice_line_inputs") or {})
         if self._fill_definition is not None and (
             self._fill_definition.indexed_selector_fields
             or self._fill_definition.indexed_manual_fields
@@ -4434,6 +4750,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 self._rebuild_selector_fields(
                     self._fill_definition,
                     indexed_count=indexed_count,
+                    preserved_line_inputs=invoice_line_inputs,
                 )
                 self._rebuild_manual_fields(
                     self._fill_definition,
@@ -4447,6 +4764,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 widget = self.selector_widgets.get(str(key))
                 if widget is not None:
                     self._write_widget_value(widget, value, explicit=True)
+            self._write_invoice_line_inputs(invoice_line_inputs)
             for key, value in manual_values.items():
                 widget = self.manual_widgets.get(str(key))
                 if widget is not None:
@@ -4521,6 +4839,9 @@ class ContractTemplateWorkspacePanel(QWidget):
         selected_index = 0
         for index, template in enumerate(templates, start=1):
             label = str(getattr(template, "name", "") or f"Template #{index}")
+            family = str(getattr(template, "template_family", "") or "contract")
+            if self._selected_fill_template_family() is None:
+                label = f"{label} [{family.replace('_', ' ').title()}]"
             if getattr(template, "active_revision_id", None) is not None:
                 label = f"{label} (active revision)"
             self.fill_template_combo.addItem(label, int(template.template_id))
@@ -4725,6 +5046,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 row_values = (
                     (str(template.template_id), template.template_id),
                     (template.name, None),
+                    (str(template.template_family or "contract").replace("_", " ").title(), None),
                     (str(template.source_format or "-"), None),
                     (str(template.active_revision_id or "-"), None),
                     ("Yes" if template.archived else "No", None),
@@ -4939,6 +5261,43 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _selected_admin_template_id(self) -> int | None:
         return self._selected_table_id(self.admin_template_table)
 
+    def _selected_new_template_family(self) -> str:
+        combo = getattr(self, "admin_template_family_combo", None)
+        if isinstance(combo, QComboBox):
+            clean = _clean_text(combo.currentData())
+            if clean:
+                return clean
+        return "contract"
+
+    @staticmethod
+    def _template_family_label(template_family: str | None) -> str:
+        clean_family = str(template_family or "").strip().lower()
+        for label, value in _TEMPLATE_FAMILY_CHOICES:
+            if value == clean_family:
+                return label
+        return clean_family.replace("_", " ").title() if clean_family else "Contract"
+
+    def _selected_fill_template_family(self) -> str | None:
+        combo = getattr(self, "fill_template_family_combo", None)
+        if isinstance(combo, QComboBox):
+            clean = _clean_text(combo.currentData())
+            return str(clean).lower() if clean else None
+        return None
+
+    def _set_fill_template_family_filter(self, template_family: str | None) -> None:
+        combo = getattr(self, "fill_template_family_combo", None)
+        if not isinstance(combo, QComboBox):
+            return
+        clean = _clean_text(template_family)
+        index = combo.findData(clean) if clean else 0
+        if index < 0:
+            index = 0
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(previous_state)
+
     def _selected_admin_revision_id(self) -> int | None:
         return self._selected_table_id(self.admin_revision_table)
 
@@ -5000,15 +5359,15 @@ class ContractTemplateWorkspacePanel(QWidget):
     def import_template_from_file(self) -> None:
         template_service = self._template_service()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
-        source_path = self._choose_template_source_path(title="Import Contract Template")
+        source_path = self._choose_template_source_path(title="Import Template")
         if source_path is None:
             return
-        default_name = source_path.stem or "Contract Template"
+        default_name = source_path.stem or "Template"
         name, accepted = QInputDialog.getText(
             self,
-            "Import Contract Template",
+            "Import Template",
             "Template Name",
             text=default_name,
         )
@@ -5023,7 +5382,11 @@ class ContractTemplateWorkspacePanel(QWidget):
                 else detect_template_source_format(source_filename=source_path.name)
             )
             template = template_service.create_template(
-                ContractTemplatePayload(name=clean_name, source_format=source_format)
+                ContractTemplatePayload(
+                    name=clean_name,
+                    template_family=self._selected_new_template_family(),
+                    source_format=source_format,
+                )
             )
             if is_zip_package:
                 result = template_service.import_html_package_from_path(
@@ -5044,7 +5407,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                     ),
                 )
         except Exception as exc:
-            QMessageBox.warning(self, "Import Contract Template", str(exc))
+            QMessageBox.warning(self, "Import Template", str(exc))
             self.admin_status_label.setText(f"Unable to import template: {exc}")
             return
         self.refresh()
@@ -5060,7 +5423,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         template = self._selected_admin_template_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if template is None:
             QMessageBox.information(
@@ -5069,7 +5432,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "Select a template row before adding a new revision.",
             )
             return
-        source_path = self._choose_template_source_path(title="Add Contract Template Revision")
+        source_path = self._choose_template_source_path(title="Add Template Revision")
         if source_path is None:
             return
         try:
@@ -5105,11 +5468,105 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"Added revision #{result.revision.revision_id} to '{template.name}' ({result.scan_result.scan_status})."
         )
 
+    def replace_selected_template_file(self) -> None:
+        template_service = self._template_service()
+        template = self._selected_admin_template_record()
+        if template_service is None:
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
+            return
+        if template is None:
+            QMessageBox.information(
+                self,
+                "Replace Template File",
+                "Select a template row before replacing its file.",
+            )
+            return
+        source_path = self._choose_template_source_path(title="Replace Template File")
+        if source_path is None:
+            return
+        try:
+            if source_path.suffix.lower() == ".zip":
+                result = template_service.import_html_package_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format="html",
+                    ),
+                )
+            else:
+                source_format = detect_template_source_format(source_filename=source_path.name)
+                result = template_service.import_revision_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format=source_format,
+                    ),
+                )
+        except Exception as exc:
+            QMessageBox.warning(self, "Replace Template File", str(exc))
+            self.admin_status_label.setText(f"Unable to replace template file: {exc}")
+            return
+        self.refresh()
+        self.refresh_admin_workspace(
+            selected_template_id=template.template_id,
+            selected_revision_id=result.revision.revision_id,
+        )
+        self.admin_status_label.setText(
+            f"Replaced '{template.name}' with revision #{result.revision.revision_id} ({result.scan_result.scan_status})."
+        )
+
+    def change_selected_template_family(self) -> None:
+        template_service = self._template_service()
+        template = self._selected_admin_template_record()
+        if template_service is None:
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
+            return
+        if template is None:
+            QMessageBox.information(
+                self,
+                "Change Template Family",
+                "Select a template row before changing its family.",
+            )
+            return
+        labels = [label for label, _value in _TEMPLATE_FAMILY_CHOICES]
+        current_label = self._template_family_label(template.template_family)
+        current_index = labels.index(current_label) if current_label in labels else 0
+        selected_label, accepted = QInputDialog.getItem(
+            self,
+            "Change Template Family",
+            "Template Family",
+            labels,
+            current_index,
+            False,
+        )
+        if not accepted:
+            return
+        family_lookup = dict(_TEMPLATE_FAMILY_CHOICES)
+        selected_family = family_lookup.get(str(selected_label or "").strip())
+        if not selected_family:
+            return
+        try:
+            updated = template_service.update_template_family(
+                template.template_id,
+                template_family=selected_family,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Change Template Family", str(exc))
+            self.admin_status_label.setText(f"Unable to update template family: {exc}")
+            return
+        self.refresh()
+        self.refresh_admin_workspace(selected_template_id=updated.template_id)
+        self.admin_status_label.setText(
+            f"Changed template family for '{updated.name}' to {self._template_family_label(updated.template_family)}."
+        )
+
     def duplicate_selected_template(self) -> None:
         template_service = self._template_service()
         template = self._selected_admin_template_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if template is None:
             QMessageBox.information(
@@ -5134,7 +5591,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         template = self._selected_admin_template_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if template is None:
             QMessageBox.information(self, "Archive Template", "Select a template row first.")
@@ -5158,14 +5615,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         template = self._selected_admin_template_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if template is None:
             QMessageBox.information(self, "Delete Template Record", "Select a template row first.")
             return
         if not _confirm_destructive_action(
             self,
-            title="Delete Contract Template Record",
+            title="Delete Template Record",
             prompt=f"Delete the database record for '{template.name}'?",
             consequences=[
                 "This removes template, revision, draft, snapshot, and artifact rows from the database only.",
@@ -5188,14 +5645,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         template = self._selected_admin_template_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if template is None:
             QMessageBox.information(self, "Delete Template + Files", "Select a template row first.")
             return
         if not _confirm_destructive_action(
             self,
-            title="Delete Contract Template And Files",
+            title="Delete Template And Files",
             prompt=f"Delete '{template.name}' and its retained managed files?",
             consequences=[
                 "This removes the database record and also deletes managed source, draft, and artifact files under the contract template storage roots.",
@@ -5224,7 +5681,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template = self._selected_admin_template_record()
         revision = self._selected_admin_revision_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if revision is None:
             QMessageBox.information(self, "Rescan Revision", "Select a revision row first.")
@@ -5256,7 +5713,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         form_service = self._form_service()
         revision = self._selected_admin_revision_record()
         if form_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if revision is None:
             QMessageBox.information(
@@ -5283,7 +5740,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         revision = self._selected_admin_revision_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if revision is None:
             QMessageBox.information(self, "Set Active Revision", "Select a revision row first.")
@@ -5307,7 +5764,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         draft = self._selected_admin_draft_record()
         template_service = self._template_service()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if draft is None:
             QMessageBox.information(self, "Open Draft In Fill Tab", "Select a draft row first.")
@@ -5330,7 +5787,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         export_service = self._export_service()
         draft = self._selected_admin_draft_record()
         if export_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if draft is None:
             QMessageBox.information(
@@ -5360,7 +5817,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         draft = self._selected_admin_draft_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if draft is None:
             QMessageBox.information(self, "Archive Draft", "Select a draft row first.")
@@ -5386,14 +5843,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         draft = self._selected_admin_draft_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if draft is None:
             QMessageBox.information(self, "Delete Draft Record", "Select a draft row first.")
             return
         if not _confirm_destructive_action(
             self,
-            title="Delete Contract Template Draft Record",
+            title="Delete Template Draft Record",
             prompt=f"Delete the database record for draft '{draft.name}'?",
             consequences=[
                 "This removes the draft row and its snapshot/artifact rows from the database only.",
@@ -5415,14 +5872,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         draft = self._selected_admin_draft_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if draft is None:
             QMessageBox.information(self, "Delete Draft + Files", "Select a draft row first.")
             return
         if not _confirm_destructive_action(
             self,
-            title="Delete Contract Template Draft And Files",
+            title="Delete Template Draft And Files",
             prompt=f"Delete draft '{draft.name}' and its retained managed files?",
             consequences=[
                 "This removes the draft row and also deletes its managed payload plus retained output artifacts inside the contract template storage roots.",
@@ -5472,7 +5929,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         template_service = self._template_service()
         artifact = self._selected_admin_artifact_record()
         if template_service is None:
-            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            QMessageBox.warning(self, "Template Workspace", "Open a profile first.")
             return
         if artifact is None:
             QMessageBox.information(
@@ -5598,16 +6055,20 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def _draft_payload_for_revision(self, revision_id: int) -> ContractTemplateDraftPayload:
         current_record = self._selected_fill_draft_record() or self._loaded_draft_record()
+        context_scope_type = _clean_text(self._external_fill_context.get("scope_entity_type"))
+        context_scope_id = _clean_text(self._external_fill_context.get("scope_entity_id"))
         return ContractTemplateDraftPayload(
             revision_id=int(revision_id),
             name=self._draft_name_value(),
             editable_payload=self.current_fill_state(),
             status=(current_record.status if current_record is not None else "draft"),
             scope_entity_type=(
-                current_record.scope_entity_type if current_record is not None else None
+                current_record.scope_entity_type
+                if current_record is not None
+                else context_scope_type
             ),
             scope_entity_id=(
-                current_record.scope_entity_id if current_record is not None else None
+                current_record.scope_entity_id if current_record is not None else context_scope_id
             ),
             storage_mode=self._selected_storage_mode_value(),
             filename=(current_record.filename if current_record is not None else None),
@@ -5624,7 +6085,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         if clean_name:
             return clean_name
         if self._fill_definition is None:
-            return "Contract Template Draft"
+            return "Template Draft"
         revision_label = _clean_text(self._fill_definition.revision_label) or (
             f"Revision {self._fill_definition.revision_id}"
         )
@@ -5638,6 +6099,104 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def _set_storage_mode_value(self, storage_mode: str) -> None:
         self._select_combo_data(self.fill_draft_storage_combo, storage_mode)
+
+    def _selected_final_invoice_storage_mode(self) -> str:
+        clean_mode = _clean_text(self.fill_final_storage_combo.currentData())
+        if clean_mode in {STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE}:
+            return str(clean_mode)
+        return STORAGE_MODE_DATABASE
+
+    def _template_invoice_finalization_service(
+        self,
+    ) -> TemplateWorkspaceInvoiceFinalizationService | None:
+        template_service = self._template_service()
+        conn = getattr(template_service, "conn", None)
+        if conn is None:
+            return None
+        return TemplateWorkspaceInvoiceFinalizationService(
+            conn,
+            data_root=getattr(template_service, "data_root", None),
+        )
+
+    def calculate_template_travel_km(self) -> None:
+        try:
+            result = TravelDistanceService().estimate_one_way_km(
+                self.travel_origin_field.text(),
+                self.travel_destination_field.text(),
+            )
+            self.travel_km_field.setText(result.one_way_km)
+            self.travel_status_label.setText(f"Travel distance: {result.one_way_km} km one way.")
+        except Exception as exc:
+            self.travel_status_label.setText(f"Unable to calculate travel distance: {exc}")
+            QMessageBox.warning(self, "Travel Calculator", str(exc))
+
+    def apply_template_travel_quantity(self) -> None:
+        target_key = _clean_text(self.travel_target_index_combo.currentData())
+        if target_key is None:
+            self.travel_status_label.setText("Select an invoice row quantity target first.")
+            return
+        try:
+            km_value = float(str(self.travel_km_field.text() or "0").replace(",", "."))
+        except ValueError:
+            self.travel_status_label.setText("Enter a valid kilometre value first.")
+            return
+        if km_value <= 0:
+            self.travel_status_label.setText("Enter a kilometre value greater than zero.")
+            return
+        quantity = km_value * (2 if self.travel_round_trip_check.isChecked() else 1)
+        quantity_text = f"{quantity:.3f}".rstrip("0").rstrip(".")
+        applied = False
+        for widget in self._selector_widgets_for_payload_key(target_key):
+            quantity_widget = widget.property("invoice_line_quantity_edit")
+            if isinstance(quantity_widget, QLineEdit):
+                quantity_widget.setText(quantity_text)
+                applied = True
+        if not applied:
+            self.travel_status_label.setText("The selected invoice row has no quantity field.")
+            return
+        self._mark_fill_dirty()
+        self.travel_status_label.setText(
+            f"Applied {quantity_text} km to invoice row {self.travel_target_index_combo.currentText()}."
+        )
+
+    def _refresh_travel_target_options(self) -> None:
+        if not isinstance(self.travel_target_index_combo, QComboBox):
+            return
+        current = self.travel_target_index_combo.currentData()
+        self.travel_target_index_combo.blockSignals(True)
+        self.travel_target_index_combo.clear()
+        seen_widgets: set[int] = set()
+        targets: list[tuple[str, str]] = []
+        for key, widget in self.selector_widgets.items():
+            widget_id = id(widget)
+            if widget_id in seen_widgets:
+                continue
+            seen_widgets.add(widget_id)
+            if (
+                str(widget.property("scope_entity_type") or "").strip().lower()
+                != "invoice_catalog_item"
+            ):
+                continue
+            if not isinstance(widget.property("invoice_line_quantity_edit"), QLineEdit):
+                continue
+            selector_key = str(widget.property("selector_key") or key)
+            index = self._selection_key_index(selector_key) or len(targets) + 1
+            combo = self._selector_combo(widget)
+            selected_label = _clean_text(combo.currentText()) if combo is not None else None
+            label = f"{index}"
+            if selected_label and not selected_label.lower().startswith("choose "):
+                label = f"{index} - {selected_label}"
+            targets.append((label, selector_key))
+        if not targets:
+            self.travel_target_index_combo.addItem("No invoice rows", None)
+        else:
+            for label, selector_key in targets:
+                self.travel_target_index_combo.addItem(label, selector_key)
+            if current is not None:
+                index = self.travel_target_index_combo.findData(current)
+                if index >= 0:
+                    self.travel_target_index_combo.setCurrentIndex(index)
+        self.travel_target_index_combo.blockSignals(False)
 
     def _sync_html_preview_state(self, revision_id: int | None) -> None:
         template_service = self._template_service()
@@ -5841,6 +6400,18 @@ class ContractTemplateWorkspacePanel(QWidget):
             for format_code in [str(widget.text() or "").strip()]
             if key in self.manual_widgets and format_code
         }
+        preserved_line_inputs: dict[str, object] = {}
+        seen_widgets: set[int] = set()
+        for key, widget in self.selector_widgets.items():
+            widget_id = id(widget)
+            if widget_id in seen_widgets:
+                continue
+            seen_widgets.add(widget_id)
+            quantity = self._read_invoice_line_quantity(widget)
+            if quantity is None:
+                continue
+            selector_key = str(widget.property("selector_key") or key)
+            preserved_line_inputs[selector_key] = {"quantity": quantity}
         previous_suspend = self._suspend_fill_updates
         self._suspend_fill_updates = True
         try:
@@ -5848,6 +6419,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 self._fill_definition,
                 indexed_count=indexed_count,
                 preserved_values=preserved_values,
+                preserved_line_inputs=preserved_line_inputs,
             )
             if getattr(self._fill_definition, "manual_fields", None) is not None:
                 self._rebuild_manual_fields(
@@ -5888,6 +6460,13 @@ class ContractTemplateWorkspacePanel(QWidget):
                 index = combo.findData(str(value))
             if index < 0:
                 index = combo.findText(str(value))
+            if index < 0:
+                scope = _clean_text(combo.property("scope_entity_type")) or _clean_text(
+                    widget.property("scope_entity_type")
+                )
+                scope_label = (scope or "record").replace("_", " ").title()
+                combo.addItem(f"Linked {scope_label} #{value}", str(value))
+                index = combo.count() - 1
             combo.setCurrentIndex(index if index >= 0 else 0)
             return
         if isinstance(widget, QCheckBox):
@@ -5971,6 +6550,56 @@ class ContractTemplateWorkspacePanel(QWidget):
         if isinstance(widget, QLineEdit):
             return _clean_text(widget.text())
         return None
+
+    @staticmethod
+    def _read_invoice_line_quantity(widget: QWidget) -> object | None:
+        quantity_widget = widget.property("invoice_line_quantity_edit")
+        if isinstance(quantity_widget, QLineEdit):
+            return _clean_text(quantity_widget.text())
+        return None
+
+    def _selector_widgets_for_payload_key(self, key: str) -> list[QWidget]:
+        widgets: list[QWidget] = []
+        seen: set[int] = set()
+        direct = self.selector_widgets.get(str(key))
+        if direct is not None:
+            widgets.append(direct)
+            seen.add(id(direct))
+        target_index = self._selection_key_index(key)
+        for widget in self.selector_widgets.values():
+            widget_id = id(widget)
+            if widget_id in seen:
+                continue
+            selector_key = str(widget.property("selector_key") or "")
+            if selector_key == key or (
+                target_index is not None and self._selection_key_index(selector_key) == target_index
+            ):
+                widgets.append(widget)
+                seen.add(widget_id)
+        return widgets
+
+    @staticmethod
+    def _selection_key_index(key: object | None) -> int | None:
+        text = str(key or "").strip()
+        marker = "#index:"
+        if marker not in text:
+            return None
+        _prefix, raw_index = text.rsplit(marker, 1)
+        try:
+            index = int(raw_index)
+        except ValueError:
+            return None
+        return index if index > 0 else None
+
+    def _write_invoice_line_inputs(self, invoice_line_inputs: dict[str, object]) -> None:
+        for key, value in dict(invoice_line_inputs or {}).items():
+            quantity = value.get("quantity") if isinstance(value, dict) else value
+            if quantity is None:
+                continue
+            for widget in self._selector_widgets_for_payload_key(str(key)):
+                quantity_widget = widget.property("invoice_line_quantity_edit")
+                if isinstance(quantity_widget, QLineEdit):
+                    quantity_widget.setText(str(quantity))
 
     @staticmethod
     def _selector_combo(widget: QWidget | None) -> QComboBox | None:
@@ -6157,6 +6786,15 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._fill_dirty = False
         self.refresh_fill_form()
 
+    def _on_fill_template_family_changed(self) -> None:
+        if self._suspend_fill_updates:
+            return
+        self._loaded_draft_id = None
+        self._fill_type_overrides = {}
+        self._fill_payload_extras = {}
+        self._fill_dirty = False
+        self.refresh_fill_form()
+
     def _on_fill_revision_changed(self) -> None:
         if self._suspend_fill_updates:
             return
@@ -6207,6 +6845,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         *,
         indexed_count: int,
         preserved_values: dict[str, object] | None = None,
+        preserved_line_inputs: dict[str, object] | None = None,
     ) -> None:
         self._clear_form_layout(self.fill_selector_form)
         self.selector_widgets = {}
@@ -6231,7 +6870,9 @@ class ContractTemplateWorkspacePanel(QWidget):
             widget = self.selector_widgets.get(str(key))
             if widget is not None:
                 self._write_widget_value(widget, value, explicit=True)
+        self._write_invoice_line_inputs(dict(preserved_line_inputs or {}))
         self.fill_selector_empty_label.setVisible(not bool(fields))
+        self._refresh_travel_target_options()
 
     def _rebuild_manual_fields(
         self,
@@ -6383,6 +7024,16 @@ class ContractTemplateWorkspacePanel(QWidget):
         combo.currentIndexChanged.connect(self._mark_fill_dirty)
         container.setProperty("selector_combo", combo)
         row.addWidget(combo, 1)
+        if str(field.scope_entity_type or "").strip().lower() == "invoice_catalog_item":
+            combo.currentIndexChanged.connect(lambda *_args: self._refresh_travel_target_options())
+            quantity_edit = QLineEdit(container)
+            quantity_edit.setObjectName("contractTemplateInvoiceLineQuantityWidget")
+            quantity_edit.setPlaceholderText("Qty")
+            quantity_edit.setMaximumWidth(90)
+            quantity_edit.setProperty("invoice_line_input", "quantity")
+            quantity_edit.textChanged.connect(self._mark_fill_dirty)
+            container.setProperty("invoice_line_quantity_edit", quantity_edit)
+            row.addWidget(quantity_edit)
         generation_warning_lines: list[str] = []
         for label, system_key in self._selector_generate_actions(field):
             button = QPushButton(label, container)
@@ -6437,6 +7088,14 @@ class ContractTemplateWorkspacePanel(QWidget):
             if export_service.release_service is None:
                 return "Release service is unavailable for registry generation."
             registry_service = export_service.release_service.code_registry_service()
+        elif scope_entity_type == "invoice":
+            registry_provider = getattr(export_service, "code_registry_service", None)
+            if not callable(registry_provider):
+                return "Code registry service is unavailable."
+            try:
+                registry_service = registry_provider()
+            except Exception as exc:
+                return str(exc)
         if registry_service is None:
             return "Code registry service is unavailable."
         return registry_service.generation_unavailable_reason(system_key=system_key)
@@ -6663,6 +7322,10 @@ class ContractTemplateWorkspacePanel(QWidget):
             "party_selection_required": "Needs party selection",
             "right_selection_required": "Needs right selection",
             "asset_selection_required": "Needs asset selection",
+            "invoice_selection_required": "Needs invoice selection",
+            "invoice_catalog_item_selection_required": "Needs invoice catalog item selection",
+            "royalty_statement_selection_required": "Needs royalty statement selection",
+            "royalty_line_selection_required": "Needs royalty line selection",
             "manual_entry": "Manual entry",
         }
         return mapping.get(str(entry.scope_policy or ""), str(entry.scope_policy or "-"))

@@ -269,6 +269,7 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
                     ("Contract Number ", "{{db.contract.contract_number}}"),
                     ("License Number ", "{{db.contract.license_number}}"),
                     ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+                    ("Invoice Number ", "{{db.invoice.number}}"),
                 )
             )
         )
@@ -289,6 +290,7 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
                 "{{db.contract.contract_number}}",
                 "{{db.contract.license_number}}",
                 "{{db.contract.registry_sha256_key}}",
+                "{{db.invoice.number}}",
             },
         )
         self.assertEqual(auto_fields["{{db.track.catalog_number}}"].source_label, "Draft Registry")
@@ -303,14 +305,22 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         }
 
         invoice_number = entries["{{db.invoice.number}}"]
+        invoice_currency = entries["{{db.invoice.currency}}"]
         invoice_party = entries["{{db.invoice.party_name}}"]
+        invoice_line_currency = entries["{{db.invoice_line.currency}}"]
         royalty_net = entries["{{db.royalty.net_payable}}"]
 
         self.assertEqual(invoice_number.scope_entity_type, "invoice")
         self.assertEqual(invoice_number.scope_policy, "invoice_selection_required")
-        self.assertEqual(invoice_party.display_label, "Invoice Party Name")
+        self.assertEqual(invoice_currency.field_type, "dropdown")
+        self.assertIn("USD", invoice_currency.options)
+        self.assertEqual(invoice_line_currency.field_type, "dropdown")
+        self.assertEqual(invoice_party.display_label, "Invoice Buyer Name")
         self.assertEqual(royalty_net.scope_entity_type, "royalty_statement")
         self.assertEqual(royalty_net.scope_policy, "royalty_statement_selection_required")
+        self.assertIn("{{db.invoice_line.description}}", entries)
+        self.assertIn("{{db.royalty.lines}}", entries)
+        self.assertIn("{{db.royalty_line.net_payable}}", entries)
 
     def test_party_scope_fields_use_one_selector_and_fallback_party_labels(self):
         template = self._create_template()
@@ -433,6 +443,42 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(auto_fields["{{custom.index}}"].source_label, "Custom Counter")
         self.assertEqual(manual_fields["{{duplicate.number}}"].field_type, "number")
         self.assertEqual(manual_fields["{{duplicate.number}}"].widget_kind, "number_input")
+
+    def test_duplicate_start_end_markers_create_repeat_count_control(self):
+        template = self._create_template()
+        source_path = self.root / "runtime-control-form-without-number.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Rows ",
+                        "{{duplicate.start}}",
+                        "{{db.index}}",
+                        "{{db.track.track_title.indexed}}",
+                        "{{duplicate.end}}",
+                    ),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+        manual_fields = {item.canonical_symbol: item for item in definition.manual_fields}
+
+        self.assertEqual(manual_fields["{{duplicate.number}}"].field_type, "number")
+        self.assertEqual(manual_fields["{{duplicate.number}}"].widget_kind, "number_input")
+        self.assertIn(
+            "shown automatically",
+            manual_fields["{{duplicate.number}}"].description or "",
+        )
+        self.assertEqual(
+            definition.indexed_selector_fields[0].placeholder_symbols,
+            ("{{db.track.track_title.indexed}}",),
+        )
 
     def test_indexed_db_symbols_build_indexed_selector_templates(self):
         template = self._create_template()

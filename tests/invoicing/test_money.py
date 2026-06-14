@@ -1,8 +1,10 @@
 import pytest
 
 from isrc_manager.invoicing import (
+    ISO_4217_CURRENCY_CODES,
     VAT_TREATMENT_REVERSE_CHARGE,
     calculate_vat_minor,
+    currency_for_country,
     format_money,
     format_quantity,
     line_net_amount_minor,
@@ -15,9 +17,15 @@ def test_money_uses_integer_minor_units_and_rejects_float():
     assert parse_money_minor("12.34") == 1234
     assert parse_money_minor("12,345") == 1235
     assert format_money(1234) == "EUR 12.34"
+    assert format_money(1234, currency="usd") == "USD 12.34"
+    assert "USD" in ISO_4217_CURRENCY_CODES
+    assert currency_for_country("The Netherlands") == "EUR"
+    assert currency_for_country("US") == "USD"
 
     with pytest.raises(TypeError):
         parse_money_minor(12.34)
+    with pytest.raises(ValueError, match="Unsupported ISO 4217"):
+        format_money(1234, currency="ZZZ")
 
 
 def test_quantity_uses_value_and_scale_without_float_arithmetic():

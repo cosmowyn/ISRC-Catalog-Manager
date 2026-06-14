@@ -206,7 +206,7 @@ def test_contract_template_workspace_controller_wires_services_and_focuses_tab()
         {
             "host": host,
             "key": "contract_template_workspace",
-            "title": "Contract Template Workspace",
+            "title": "Template Workspace",
             "object_name": "contractTemplateWorkspaceDock",
             "panel_factory": host._create_contract_template_workspace_panel,
         }
@@ -227,9 +227,7 @@ def test_contract_template_workspace_controller_warns_when_any_service_missing()
     ):
         assert contract_template_controller.open_contract_template_workspace(host) is None
 
-    assert _FakeMessageBox.warnings == [
-        (host, "Contract Template Workspace", "Open a profile first.")
-    ]
+    assert _FakeMessageBox.warnings == [(host, "Template Workspace", "Open a profile first.")]
 
 
 def test_rights_matrix_controller_wires_services_and_workspace_panel() -> None:

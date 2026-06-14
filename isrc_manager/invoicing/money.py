@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+from .currencies import is_iso_4217_currency_code
 from .models import (
     DEFAULT_CURRENCY,
     VAT_TREATMENT_STANDARD,
@@ -21,6 +22,8 @@ def normalize_currency(value: object | None, *, default: str = DEFAULT_CURRENCY)
     currency = str(value or default).strip().upper()
     if not re.fullmatch(r"[A-Z]{3}", currency):
         raise ValueError("Currency must be a three-letter ISO code.")
+    if not is_iso_4217_currency_code(currency):
+        raise ValueError(f"Unsupported ISO 4217 currency code: {currency}.")
     return currency
 
 
@@ -50,7 +53,7 @@ def parse_money_minor(value: object | None, *, scale: int = 2) -> int:
 
 
 def format_money(minor_units: int, *, currency: str = DEFAULT_CURRENCY, scale: int = 2) -> str:
-    normalize_currency(currency)
+    currency = normalize_currency(currency)
     amount = Decimal(int(minor_units)).scaleb(-int(scale))
     return f"{currency} {amount:.{int(scale)}f}"
 

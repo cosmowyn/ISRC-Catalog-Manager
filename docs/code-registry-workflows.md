@@ -64,7 +64,7 @@ Bulk track edit can assign an existing internal value or an external/manual valu
 
 Generating an internal code or Registry SHA-256 Key creates a real authoritative row immediately. That row is append-only and does not get mutated later.
 
-The same authoritative registry service is also used by the `Contract Template Workspace` when a template contains registry-backed symbols such as catalog numbers, contract numbers, license numbers, or `Registry SHA-256 Key` placeholders. In that workflow, the first saved draft can issue the value and persist it for the draft lifecycle instead of forcing users to pre-generate everything elsewhere.
+The same authoritative registry service is also used by the `Template Workspace` when a template contains registry-backed symbols such as catalog numbers, contract numbers, license numbers, invoice numbers, or `Registry SHA-256 Key` placeholders. In that workflow, the first saved draft can issue contract/catalog/license/invoice values and persist them for the draft lifecycle instead of forcing users to pre-generate everything elsewhere. Royalty statement numbers remain owned by the accounting workflow.
 
 If a value is generated outside a specific editor context, it can still be assigned later:
 
@@ -129,5 +129,5 @@ That means:
 - [Repository README](../README.md)
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md)
 - [Import and Merge Workflows](import-and-merge-workflows.md)
-- [Contract Template Workflows](contract-template-workflows.md)
+- [Template Workspace Workflows](contract-template-workflows.md)
 - [Undo, History, and Snapshots](undo_redo_strategy.md)

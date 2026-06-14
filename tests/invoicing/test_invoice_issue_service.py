@@ -1,15 +1,26 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
-from isrc_manager.code_registry import BUILTIN_CATEGORY_INVOICE_NUMBER, CodeRegistryService
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,
+    BUILTIN_CATEGORY_INVOICE_NUMBER,
+    CodeRegistryService,
+)
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.invoicing import (
+    CreditNotePayload,
+    CreditNoteService,
     InvoiceCatalogItemPayload,
     InvoiceDraftPayload,
     InvoiceLinePayload,
+    InvoicePaymentPayload,
+    InvoicePaymentService,
     InvoiceService,
     LedgerPostingService,
 )
+from isrc_manager.invoicing.template_service import InvoiceTemplateService
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.services import DatabaseSchemaService
 
@@ -28,6 +39,14 @@ def _connection() -> sqlite3.Connection:
         WHERE system_key=?
         """,
         (BUILTIN_CATEGORY_INVOICE_NUMBER,),
+    )
+    conn.execute(
+        """
+        UPDATE CodeRegistryCategories
+        SET prefix='CN', normalized_prefix='CN'
+        WHERE system_key=?
+        """,
+        (BUILTIN_CATEGORY_CREDIT_NOTE_NUMBER,),
     )
     conn.commit()
     return conn
@@ -137,6 +156,14 @@ def test_catalog_items_update_filter_and_validation_edges(monkeypatch):
             active=False,
         )
     )
+    inferred_id = catalog.create_item(
+        InvoiceCatalogItemPayload(
+            name="US travel",
+            default_unit_price_minor=2_000,
+            vat_country_code="US",
+            active=False,
+        )
+    )
 
     updated = catalog.update_item(
         active_id,
@@ -147,6 +174,7 @@ def test_catalog_items_update_filter_and_validation_edges(monkeypatch):
             default_unit_price_minor=7_500,
             default_vat_rate_basis_points=900,
             vat_country_code="NL",
+            currency="USD",
             category="Delivery",
             default_account_code="4300",
             active=True,
@@ -161,6 +189,8 @@ def test_catalog_items_update_filter_and_validation_edges(monkeypatch):
     assert updated.default_unit_price_minor == 7_500
     assert updated.default_vat_rate_basis_points == 900
     assert updated.vat_country_code == "NL"
+    assert updated.currency == "USD"
+    assert catalog.fetch_item(inferred_id).currency == "USD"
     assert updated.category == "Delivery"
     assert updated.default_account_code == "4300"
     assert [item.id for item in active_items] == [active_id]
@@ -231,6 +261,157 @@ def test_issue_invoice_generates_number_posts_ledger_and_is_idempotent():
         ("2100", None, 2_100, None),
     ]
     assert LedgerPostingService(conn).party_balance_minor(party_id) == 12_100
+
+    conn.close()
+
+
+def test_finalize_invoice_stores_database_and_managed_artifacts(tmp_path: Path):
+    conn = _connection()
+    party_id = _party_id(conn)
+    invoice_service = InvoiceService(conn, data_root=tmp_path)
+    template_service = InvoiceTemplateService(conn, data_root=tmp_path)
+    first = invoice_service.create_draft_invoice(
+        InvoiceDraftPayload(
+            party_id=party_id,
+            lines=(
+                InvoiceLinePayload(
+                    description="Database final invoice",
+                    quantity="1",
+                    unit_price_minor=10_000,
+                    vat_rate_basis_points=2100,
+                    ledger_account_code="4100",
+                ),
+            ),
+        )
+    )
+    second = invoice_service.create_draft_invoice(
+        InvoiceDraftPayload(
+            party_id=party_id,
+            lines=(
+                InvoiceLinePayload(
+                    description="Managed final invoice",
+                    quantity="1",
+                    unit_price_minor=5_000,
+                    vat_rate_basis_points=0,
+                    ledger_account_code="4100",
+                ),
+            ),
+        )
+    )
+
+    database_artifact = template_service.finalize_invoice(
+        first.id,
+        command_key="finalize-database",
+        storage_mode=STORAGE_MODE_DATABASE,
+    )
+    managed_artifact = template_service.finalize_invoice(
+        second.id,
+        command_key="finalize-managed",
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+
+    db_path = template_service.materialize_output_artifact(database_artifact.id)
+    managed_path = template_service.materialize_output_artifact(managed_artifact.id)
+    artifact_rows = conn.execute("""
+        SELECT artifact_type, status, storage_mode, managed_file_path, content_blob IS NOT NULL
+        FROM InvoiceOutputArtifacts
+        ORDER BY id
+        """).fetchall()
+
+    assert database_artifact.ledger_transaction_id is not None
+    assert database_artifact.storage_mode == STORAGE_MODE_DATABASE
+    assert database_artifact.content_blob is not None
+    assert managed_artifact.ledger_transaction_id is not None
+    assert managed_artifact.storage_mode == STORAGE_MODE_MANAGED_FILE
+    assert managed_artifact.content_blob is None
+    assert managed_artifact.managed_file_path
+    assert managed_path.exists()
+    assert managed_path == tmp_path / managed_artifact.managed_file_path
+    assert db_path.exists()
+    assert "Database final invoice" in db_path.read_text(encoding="utf-8")
+    assert "Managed final invoice" in managed_path.read_text(encoding="utf-8")
+    assert artifact_rows == [
+        ("final_html", "final", STORAGE_MODE_DATABASE, None, 1),
+        ("final_html", "final", STORAGE_MODE_MANAGED_FILE, managed_artifact.managed_file_path, 0),
+    ]
+
+    conn.close()
+
+
+def test_purge_invoice_for_cleanup_removes_linked_accounting_cluster(tmp_path: Path):
+    conn = _connection()
+    party_id = _party_id(conn)
+    invoice_service = InvoiceService(conn, data_root=tmp_path)
+    template_service = InvoiceTemplateService(conn, data_root=tmp_path)
+    invoice = invoice_service.create_draft_invoice(
+        InvoiceDraftPayload(
+            party_id=party_id,
+            lines=(
+                InvoiceLinePayload(
+                    description="Cleanup invoice",
+                    quantity="1",
+                    unit_price_minor=10_000,
+                    vat_rate_basis_points=0,
+                    ledger_account_code="4100",
+                ),
+            ),
+        )
+    )
+    artifact = template_service.finalize_invoice(
+        invoice.id,
+        command_key="cleanup-issue",
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+    managed_path = template_service.materialize_output_artifact(artifact.id)
+    InvoicePaymentService(conn).record_invoice_payment(
+        InvoicePaymentPayload(
+            invoice_id=invoice.id,
+            party_id=party_id,
+            amount_minor=2_500,
+            paid_at="2026-02-01",
+            idempotency_key="cleanup-payment",
+        )
+    )
+    CreditNoteService(conn).create_credit_note(
+        CreditNotePayload(
+            invoice_id=invoice.id,
+            party_id=party_id,
+            reason="Cleanup credit",
+            issue_date="2026-02-02",
+            subtotal_minor=7_500,
+            vat_total_minor=0,
+            idempotency_key="cleanup-credit",
+        )
+    )
+
+    summary = invoice_service.purge_invoice_for_cleanup(invoice.id)
+
+    assert summary == {
+        "invoices": 1,
+        "payments": 1,
+        "credit_notes": 1,
+        "artifacts": 1,
+        "ledger_transactions": 3,
+        "command_log_entries": 3,
+        "managed_files": 1,
+    }
+    assert not managed_path.exists()
+    for table in (
+        "Invoices",
+        "InvoiceLineItems",
+        "InvoiceVatBreakdown",
+        "InvoicePayments",
+        "CreditNotes",
+        "CreditNoteLineAllocations",
+        "InvoiceTemplateResolvedSnapshots",
+        "InvoiceOutputArtifacts",
+        "AccountingTransactions",
+        "AccountingEntries",
+        "AccountingTransactionLinks",
+        "FinancialCommandLog",
+    ):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+    assert LedgerPostingService(conn).party_balance_minor(party_id) == 0
 
     conn.close()
 

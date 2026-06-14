@@ -55,7 +55,7 @@ SECTION_LABELS = {
     CATALOG_SECTION_ID: "Catalog Exchange Package",
     REPERTOIRE_SECTION_ID: "Contracts and Rights Package",
     LICENSES_SECTION_ID: "License Archive",
-    CONTRACT_TEMPLATES_SECTION_ID: "Contract Templates",
+    CONTRACT_TEMPLATES_SECTION_ID: "Templates",
 }
 
 SECTION_DEPENDENCIES = {
@@ -569,7 +569,7 @@ class MasterTransferService:
                     section_id=CONTRACT_TEMPLATES_SECTION_ID,
                     item_type="contract_template",
                     item_id="section",
-                    label="Contract Templates",
+                    label="Templates",
                     reason="Contract template service is unavailable.",
                     action="section omitted",
                 )
@@ -1617,7 +1617,7 @@ class MasterTransferService:
                         section_id=CONTRACT_TEMPLATES_SECTION_ID,
                         item_type="contract_template",
                         item_id="section",
-                        label="Contract Templates",
+                        label="Templates",
                         reason=message,
                         action="section omitted",
                     )
@@ -1721,7 +1721,7 @@ class MasterTransferService:
     ) -> MasterTransferSection:
         return MasterTransferSection(
             section_id=CONTRACT_TEMPLATES_SECTION_ID,
-            label="Contract Templates",
+            label="Templates",
             artifact_path=f"sections/{CONTRACT_TEMPLATES_SECTION_ID}/templates.json",
             payload_kind="file",
             section_format="contract_templates_json",
@@ -2243,7 +2243,7 @@ class MasterTransferService:
         for template in templates[:4]:
             rows.append(
                 {
-                    "Section": "Contract Templates",
+                    "Section": "Templates",
                     "Entity": "Template",
                     "Action": "Import",
                     "Label": str(template.get("name") or "").strip() or "Imported Template",
@@ -2436,7 +2436,7 @@ class MasterTransferService:
             },
             {
                 "section_id": "contract_template_runtime_artifacts",
-                "label": "Contract Template Runtime Artifacts",
+                "label": "Template Runtime Artifacts",
                 "reason": (
                     "Contract template drafts, resolved snapshots, and generated output artifacts "
                     "are not included in master transfer format v2."

@@ -502,7 +502,7 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertIn("Catalog", preview_sections)
         self.assertIn("Contracts and Rights", preview_sections)
         self.assertIn("License Archive", preview_sections)
-        self.assertIn("Contract Templates", preview_sections)
+        self.assertIn("Templates", preview_sections)
         self.assertEqual(self._count(target, "Tracks"), 0)
         self.assertEqual(self._count(target, "Works"), 0)
         self.assertEqual(self._count(target, "Contracts"), 0)
@@ -520,7 +520,7 @@ class MasterTransferServiceTests(unittest.TestCase):
         inspection = target["master_transfer_service"].inspect_package(package_path)
 
         preview_sections = {str(row.get("Section") or "") for row in inspection.preview_rows}
-        self.assertEqual(preview_sections, {"Catalog", "Contract Templates"})
+        self.assertEqual(preview_sections, {"Catalog", "Templates"})
         self.assertTrue(
             any("Intentionally omitted sections:" in line for line in inspection.summary_lines)
         )
@@ -987,7 +987,7 @@ class MasterTransferServiceTests(unittest.TestCase):
                 },
                 {
                     "section_id": "contract_templates",
-                    "label": "Contract Templates",
+                    "label": "Templates",
                     "depends_on": [],
                     "reason": "Excluded by export selection.",
                     "omission_kind": "user_excluded",
@@ -1071,7 +1071,7 @@ class MasterTransferServiceTests(unittest.TestCase):
                     },
                     {
                         "section_id": "contract_templates",
-                        "label": "Contract Templates",
+                        "label": "Templates",
                         "depends_on": [],
                         "reason": "Excluded by export selection.",
                         "omission_kind": "user_excluded",

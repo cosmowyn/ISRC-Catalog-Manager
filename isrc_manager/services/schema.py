@@ -1721,6 +1721,13 @@ class DatabaseSchemaService:
             CREATE INDEX IF NOT EXISTS idx_financial_command_log_source
             ON FinancialCommandLog(source_type, source_id, command_type)
             """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS AccountingMaintenanceBypass (
+                scope TEXT PRIMARY KEY,
+                reason TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
 
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS AccountingTransactions (
@@ -1824,6 +1831,19 @@ class DatabaseSchemaService:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
+            """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS InvoiceCatalogCategories (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_catalog_categories_active_name
+            ON InvoiceCatalogCategories(active, name)
             """)
         invoice_catalog_columns = self._table_columns("InvoiceCatalogItems")
         if "default_quantity_value" not in invoice_catalog_columns:
@@ -2066,18 +2086,72 @@ class DatabaseSchemaService:
             CREATE TABLE IF NOT EXISTS InvoiceOutputArtifacts (
                 id INTEGER PRIMARY KEY,
                 snapshot_id INTEGER NOT NULL REFERENCES InvoiceTemplateResolvedSnapshots(id) ON DELETE RESTRICT,
+                invoice_id INTEGER REFERENCES Invoices(id) ON DELETE RESTRICT,
+                ledger_transaction_id INTEGER REFERENCES AccountingTransactions(id) ON DELETE RESTRICT,
                 artifact_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'generated',
                 output_path TEXT NOT NULL,
                 output_filename TEXT NOT NULL,
                 mime_type TEXT,
+                storage_mode TEXT,
+                managed_file_path TEXT,
+                content_blob BLOB,
                 size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(size_bytes >= 0),
                 checksum_sha256 TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """)
+        invoice_artifact_columns = self._table_columns("InvoiceOutputArtifacts")
+        for column_name, column_sql in (
+            ("invoice_id", "INTEGER REFERENCES Invoices(id) ON DELETE RESTRICT"),
+            (
+                "ledger_transaction_id",
+                "INTEGER REFERENCES AccountingTransactions(id) ON DELETE RESTRICT",
+            ),
+            (
+                "contract_template_draft_id",
+                "INTEGER REFERENCES ContractTemplateDrafts(id) ON DELETE SET NULL",
+            ),
+            (
+                "contract_template_snapshot_id",
+                "INTEGER REFERENCES ContractTemplateResolvedSnapshots(id) ON DELETE SET NULL",
+            ),
+            (
+                "contract_template_artifact_id",
+                "INTEGER REFERENCES ContractTemplateOutputArtifacts(id) ON DELETE SET NULL",
+            ),
+            ("status", "TEXT NOT NULL DEFAULT 'generated'"),
+            ("storage_mode", "TEXT"),
+            ("managed_file_path", "TEXT"),
+            ("content_blob", "BLOB"),
+        ):
+            if column_name not in invoice_artifact_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE InvoiceOutputArtifacts ADD COLUMN {column_name} {column_sql}"
+                )
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_snapshot
             ON InvoiceOutputArtifacts(snapshot_id, artifact_type, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_invoice
+            ON InvoiceOutputArtifacts(invoice_id, artifact_type, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_ledger_transaction
+            ON InvoiceOutputArtifacts(ledger_transaction_id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_contract_draft
+            ON InvoiceOutputArtifacts(contract_template_draft_id, artifact_type, id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_contract_snapshot
+            ON InvoiceOutputArtifacts(contract_template_snapshot_id)
+            """)
+        self.cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_invoice_output_artifacts_contract_artifact
+            ON InvoiceOutputArtifacts(contract_template_artifact_id)
             """)
 
         self.cursor.execute("""
@@ -2355,24 +2429,51 @@ class DatabaseSchemaService:
 
         self._ensure_invoicing_accounting_triggers()
         try:
+            from isrc_manager.invoicing.invoice_service import (
+                ensure_default_invoice_catalog_categories,
+            )
             from isrc_manager.invoicing.ledger_service import ensure_default_accounts
 
             ensure_default_accounts(self.conn)
+            ensure_default_invoice_catalog_categories(self.conn)
         except Exception:
             self.logger.exception("Could not seed default accounting accounts.")
             raise
 
     def _ensure_invoicing_accounting_triggers(self) -> None:
-        self.cursor.execute("""
+        cleanup_bypass_sql = (
+            "NOT EXISTS ("
+            "SELECT 1 FROM AccountingMaintenanceBypass WHERE scope='invoice_cleanup'"
+            ")"
+        )
+        for trigger_name in (
+            "trg_accounting_transactions_no_update",
+            "trg_accounting_transactions_no_delete",
+            "trg_accounting_entries_no_delete",
+            "trg_invoices_no_delete_issued",
+            "trg_invoice_snapshots_no_delete",
+            "trg_invoice_output_artifacts_no_delete",
+            "trg_credit_notes_no_delete",
+            "trg_credit_note_line_allocations_no_delete",
+            "trg_invoice_payments_no_delete",
+            "trg_invoice_lines_no_delete_after_draft",
+            "trg_invoice_vat_breakdown_no_delete_after_draft",
+            "trg_accounting_transaction_links_no_delete",
+        ):
+            self.cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_accounting_transactions_no_update
             BEFORE UPDATE ON AccountingTransactions
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'AccountingTransactions are append-only (UPDATE forbidden)');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_accounting_transactions_no_delete
             BEFORE DELETE ON AccountingTransactions
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'AccountingTransactions are append-only (DELETE forbidden)');
             END
@@ -2384,9 +2485,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'AccountingEntries are append-only (UPDATE forbidden)');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_no_delete
             BEFORE DELETE ON AccountingEntries
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'AccountingEntries are append-only (DELETE forbidden)');
             END
@@ -2399,10 +2501,11 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Issued invoice numbers are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoices_no_delete_issued
             BEFORE DELETE ON Invoices
             WHEN OLD.document_status != 'draft'
+              AND {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Issued invoices cannot be hard-deleted');
             END
@@ -2414,9 +2517,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Invoice resolved snapshots are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoice_snapshots_no_delete
             BEFORE DELETE ON InvoiceTemplateResolvedSnapshots
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Invoice resolved snapshots are immutable');
             END
@@ -2428,9 +2532,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Invoice output artifacts are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoice_output_artifacts_no_delete
             BEFORE DELETE ON InvoiceOutputArtifacts
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Invoice output artifacts are immutable');
             END
@@ -2443,9 +2548,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Issued credit note numbers are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_credit_notes_no_delete
             BEFORE DELETE ON CreditNotes
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Credit notes cannot be hard-deleted');
             END
@@ -2465,9 +2571,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Credit note line allocations are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_credit_note_line_allocations_no_delete
             BEFORE DELETE ON CreditNoteLineAllocations
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Credit note line allocations are immutable');
             END
@@ -2536,9 +2643,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Posted invoice payments are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoice_payments_no_delete
             BEFORE DELETE ON InvoicePayments
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Invoice payments cannot be hard-deleted');
             END
@@ -2574,10 +2682,11 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Issued invoice line snapshots are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_delete_after_draft
             BEFORE DELETE ON InvoiceLineItems
             WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+              AND {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Issued invoice line snapshots are immutable');
             END
@@ -2598,10 +2707,11 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Issued invoice VAT snapshots are immutable');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_invoice_vat_breakdown_no_delete_after_draft
             BEFORE DELETE ON InvoiceVatBreakdown
             WHEN (SELECT document_status FROM Invoices WHERE id=OLD.invoice_id) != 'draft'
+              AND {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Issued invoice VAT snapshots are immutable');
             END
@@ -2654,9 +2764,10 @@ class DatabaseSchemaService:
                 SELECT RAISE(ABORT, 'Accounting transaction links are append-only');
             END
             """)
-        self.cursor.execute("""
+        self.cursor.execute(f"""
             CREATE TRIGGER IF NOT EXISTS trg_accounting_transaction_links_no_delete
             BEFORE DELETE ON AccountingTransactionLinks
+            WHEN {cleanup_bypass_sql}
             BEGIN
                 SELECT RAISE(ABORT, 'Accounting transaction links are append-only');
             END

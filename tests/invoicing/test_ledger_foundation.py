@@ -56,6 +56,7 @@ def test_schema_adds_accounting_tables_accounts_and_registry_categories():
     assert "AccountingTransactions" in tables
     assert "AccountingEntries" in tables
     assert "FinancialCommandLog" in tables
+    assert "AccountingMaintenanceBypass" in tables
     assert "InvoicePayments" in tables
     assert "CreditNotes" in tables
     assert "RoyaltyCalculations" in tables

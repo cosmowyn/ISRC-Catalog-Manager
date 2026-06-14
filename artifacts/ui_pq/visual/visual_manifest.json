@@ -6,7 +6,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/main_window.png",
       "sample_count": 272,
-      "sha256": "bf3850681f9cf32a1833a3b87cf158801c82965fe132378158e528839c37aa92",
+      "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
       "unique_sample_colors": 9,
       "width": 1506
     },
@@ -16,7 +16,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
       "sample_count": 289,
-      "sha256": "d83a1ace25f122360dabb50996894e3509f0dabc217c150908559e2b9d625941",
+      "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
       "unique_sample_colors": 7,
       "width": 1174
     },
@@ -26,7 +26,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
       "sample_count": 272,
-      "sha256": "fb78515f0f212abae9ad61bc7fc4d7fbe643d94af4282a2c90083d36f06c5d49",
+      "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
       "unique_sample_colors": 20,
       "width": 320
     },
@@ -36,7 +36,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
       "sample_count": 289,
-      "sha256": "1f2e83e7a996e18a494091cda00d2b97badc7a63df5e2990a156f5d27e178687",
+      "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
       "unique_sample_colors": 11,
       "width": 1174
     },
@@ -46,8 +46,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
       "sample_count": 289,
-      "sha256": "5ad40865caaa6f4f3984f8de005b755171219eba97e2b53ce11510ea9fcecf71",
-      "unique_sample_colors": 11,
+      "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+      "unique_sample_colors": 12,
       "width": 1174
     },
     {
@@ -56,8 +56,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
       "sample_count": 289,
-      "sha256": "b4471d794cc5dd018abe598ff448be34cbc4ac0643ff1ab4f36845cacfca5921",
-      "unique_sample_colors": 8,
+      "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "unique_sample_colors": 7,
       "width": 1174
     },
     {
@@ -66,7 +66,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
       "sample_count": 289,
-      "sha256": "36ed76fd6c3df2da29611a9f86489719496f677b42c76c80834737df330a9036",
+      "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
       "unique_sample_colors": 11,
       "width": 1174
     },
@@ -76,8 +76,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
       "sample_count": 289,
-      "sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
-      "unique_sample_colors": 26,
+      "sha256": "1a57bad4f1c19f09c283a25b7967519b08833a3216152a179d4472e84a0ce5e4",
+      "unique_sample_colors": 25,
       "width": 1174
     },
     {
@@ -86,7 +86,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
       "sample_count": 289,
-      "sha256": "6e3522c945e6c5b0dd6e67fe43a6231b67b4cdda1b416d6506186ec798000873",
+      "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -96,7 +96,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
       "sample_count": 289,
-      "sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+      "sha256": "26bc34909762b086e53b57b9988976d09dc60d1bca800d2271d2d1a545b82892",
       "unique_sample_colors": 5,
       "width": 1174
     },
@@ -106,7 +106,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
       "sample_count": 289,
-      "sha256": "bb52414a676fae9c3acff25a83db2b82bbbd14b9399826c4801f55a5f59558ad",
+      "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
       "unique_sample_colors": 8,
       "width": 1174
     },
@@ -116,7 +116,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
       "sample_count": 289,
-      "sha256": "059069de21ade45b0c662210e333aa57c4898652b285f0c3aaad2a660da470c4",
+      "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
       "unique_sample_colors": 13,
       "width": 1174
     },
@@ -126,7 +126,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
       "sample_count": 289,
-      "sha256": "40b65a74f6ce22527f39d338034ea3365e293f51f7d1f9814a1f409143d3d099",
+      "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
       "unique_sample_colors": 3,
       "width": 1174
     },
@@ -136,7 +136,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
       "sample_count": 289,
-      "sha256": "d8845bfe0f192aed212dc99a485bbc83a510610708106155db8ef618cddb0c33",
+      "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
       "unique_sample_colors": 6,
       "width": 1174
     },
@@ -146,8 +146,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
       "sample_count": 289,
-      "sha256": "2b64609e6c332bd0dc5a7d47b6cd237684ffa2b26a2afd4897350267a446f2b9",
-      "unique_sample_colors": 8,
+      "sha256": "949e1864994af67b02539d60518b3b42bcb15c2c129c34838cb10e3d712620ad",
+      "unique_sample_colors": 7,
       "width": 1180
     },
     {
@@ -156,7 +156,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
       "sample_count": 272,
-      "sha256": "2b64ec7fe0080b601655e0a430a0bbfd7129fdba27dc5b09b050408d61e490a9",
+      "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
       "unique_sample_colors": 8,
       "width": 1120
     },
@@ -166,8 +166,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
       "sample_count": 289,
-      "sha256": "d9b3aac4f7f25cbcceab52c22928a25239a402f162cb78a58d3b53cb0dd812f3",
-      "unique_sample_colors": 13,
+      "sha256": "9460fc7ce45474fc8d32ec619ae15f3a0e021df6e11f586691d8887455d2dbb2",
+      "unique_sample_colors": 14,
       "width": 1233
     },
     {
@@ -176,7 +176,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
       "sample_count": 272,
-      "sha256": "e9af6d31375873eab8f4bc657dff4bc1dce0461bd03706b652c0f650273f2360",
+      "sha256": "4886fac120b016ef0e0fd4b5b208f6199da01ec7b1443e7b480cfb94cf62678a",
       "unique_sample_colors": 22,
       "width": 720
     },
@@ -186,8 +186,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
       "sample_count": 289,
-      "sha256": "86d30aab557faba63802880ca7b8d4f9769c9f996aa2a603130ae9cbb151dd7f",
-      "unique_sample_colors": 31,
+      "sha256": "87f165b3ca47bc3ec4f8b468058cf9e515069e0d37e0a4d4f8609ef2055394e2",
+      "unique_sample_colors": 33,
       "width": 1180
     },
     {
@@ -196,7 +196,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
       "sample_count": 256,
-      "sha256": "cb1837368d65b6e12111659febf3e5b0358a636a94a07331fdd0a882f4ecf185",
+      "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
       "unique_sample_colors": 13,
       "width": 960
     },
@@ -206,7 +206,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
       "sample_count": 272,
-      "sha256": "6d24269ca7fc76ab45e98b75c0fd4e20a311e38902f66f716ed412f19d22e7cf",
+      "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
       "unique_sample_colors": 20,
       "width": 760
     },
@@ -216,7 +216,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
       "sample_count": 289,
-      "sha256": "1b1d3dbdcdce6c3a6c8e9cc81afe32a6c82f3528ec623cdaf6fea8a30c22a3e6",
+      "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
       "unique_sample_colors": 8,
       "width": 760
     },
@@ -226,8 +226,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
       "sample_count": 272,
-      "sha256": "c3ab3bf9b14bf85b92280e7c80e11596a8d49f512ddfaca7757639fef40b5780",
-      "unique_sample_colors": 7,
+      "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+      "unique_sample_colors": 6,
       "width": 1080
     },
     {
@@ -236,7 +236,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
       "sample_count": 289,
-      "sha256": "efb6d6d0194de9c0a8f0688cbd53ffda13e08d2ac2b9636553621b50fb62f091",
+      "sha256": "5ee7b25cc5ee18bf51e681a7ba418b91bcd74367c215b321eccd112fbb1af166",
       "unique_sample_colors": 22,
       "width": 1080
     },
@@ -246,7 +246,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
       "sample_count": 289,
-      "sha256": "bbfa013f5897cd651b17f1787724bab59762fb4036137e51710577269c80f883",
+      "sha256": "27fd6075caa3b8f779110d347d87d89221ab0935ce6b2b8a02841eb4346d4aaf",
       "unique_sample_colors": 20,
       "width": 1220
     },
@@ -256,8 +256,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
       "sample_count": 289,
-      "sha256": "a269559aedfdee92b9eb14dfb893fc1ae5556742761b39e34ec00c2b8720df14",
-      "unique_sample_colors": 30,
+      "sha256": "104184cd9baad5daf19e3c93d230068d72f3bb3bd94df57aed94472a11066fe2",
+      "unique_sample_colors": 29,
       "width": 860
     },
     {
@@ -266,7 +266,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
       "sample_count": 256,
-      "sha256": "4af15d7556c4318d0fa7069a9a8afd770081c27d238768a61eb9dce8041d615f",
+      "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
       "unique_sample_colors": 14,
       "width": 1040
     },
@@ -276,8 +276,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
       "sample_count": 289,
-      "sha256": "e6d58314f6b14cb722a93a3ea9804976da2db34fb48bd2cfdaf0cae2580d93a0",
-      "unique_sample_colors": 28,
+      "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+      "unique_sample_colors": 29,
       "width": 980
     },
     {
@@ -286,7 +286,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
       "sample_count": 289,
-      "sha256": "5027649ce5563edc0467f09d482b8693f01c80770b9e6a618e9d67c0344241d9",
+      "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
       "unique_sample_colors": 24,
       "width": 780
     },
@@ -296,8 +296,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
       "sample_count": 289,
-      "sha256": "4513267156191f6fd76db97701ca03487ebc86a8ec715dfbf13437e044b733cf",
-      "unique_sample_colors": 33,
+      "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+      "unique_sample_colors": 34,
       "width": 481
     },
     {
@@ -306,7 +306,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
       "sample_count": 289,
-      "sha256": "b22281b0f174acd299f6f0adf0c11c7ddb03eaab60d7b0abe3a41601ceb35169",
+      "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
       "unique_sample_colors": 23,
       "width": 600
     },
@@ -316,7 +316,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
       "sample_count": 289,
-      "sha256": "f009559c1390acb604e1869d80400fe77b8ec651654bee726aa5a30d67d22420",
+      "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
       "unique_sample_colors": 13,
       "width": 1788
     }
@@ -324,7 +324,7 @@
   "comparisons": [
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/main_window.png",
-      "actual_sha256": "bf3850681f9cf32a1833a3b87cf158801c82965fe132378158e528839c37aa92",
+      "actual_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/main_window.png",
       "baseline_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
@@ -336,7 +336,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/main_window.png",
           "sample_count": 272,
-          "sha256": "bf3850681f9cf32a1833a3b87cf158801c82965fe132378158e528839c37aa92",
+          "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
           "unique_sample_colors": 9,
           "width": 1506
         },
@@ -359,7 +359,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
-      "actual_sha256": "d83a1ace25f122360dabb50996894e3509f0dabc217c150908559e2b9d625941",
+      "actual_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/catalog_table_workspace.png",
       "baseline_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
@@ -371,14 +371,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/catalog_table_workspace.png",
           "sample_count": 289,
-          "sha256": "d83a1ace25f122360dabb50996894e3509f0dabc217c150908559e2b9d625941",
+          "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
           "unique_sample_colors": 7,
           "width": 1174
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.004456327985739751,
-          "changed_samples": 5,
-          "mean_channel_delta": 0.05102495543672014,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1122,
@@ -394,7 +394,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
-      "actual_sha256": "fb78515f0f212abae9ad61bc7fc4d7fbe643d94af4282a2c90083d36f06c5d49",
+      "actual_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/add_track_workspace.png",
       "baseline_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
@@ -406,7 +406,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/add_track_workspace.png",
           "sample_count": 272,
-          "sha256": "fb78515f0f212abae9ad61bc7fc4d7fbe643d94af4282a2c90083d36f06c5d49",
+          "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
           "unique_sample_colors": 20,
           "width": 320
         },
@@ -429,7 +429,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
-      "actual_sha256": "1f2e83e7a996e18a494091cda00d2b97badc7a63df5e2990a156f5d27e178687",
+      "actual_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/release_browser.png",
       "baseline_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
@@ -441,7 +441,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/release_browser.png",
           "sample_count": 289,
-          "sha256": "1f2e83e7a996e18a494091cda00d2b97badc7a63df5e2990a156f5d27e178687",
+          "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
           "unique_sample_colors": 11,
           "width": 1174
         },
@@ -464,7 +464,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
-      "actual_sha256": "5ad40865caaa6f4f3984f8de005b755171219eba97e2b53ce11510ea9fcecf71",
+      "actual_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/code_registry_workspace.png",
       "baseline_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
@@ -476,113 +476,8 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/code_registry_workspace.png",
           "sample_count": 289,
-          "sha256": "5ad40865caaa6f4f3984f8de005b755171219eba97e2b53ce11510ea9fcecf71",
-          "unique_sample_colors": 11,
-          "width": 1174
-        },
-        "comparison_profile": {
-          "changed_sample_ratio": 0.028466483011937556,
-          "changed_samples": 31,
-          "mean_channel_delta": 0.8973829201101928,
-          "passed": true,
-          "same_size": true,
-          "sample_count": 1089,
-          "tolerance": {
-            "max_changed_sample_ratio": 0.35,
-            "max_mean_channel_delta": 6.0
-          }
-        }
-      },
-      "name": "code_registry_workspace",
-      "passed": true,
-      "reason": "Screenshot is visually within the baseline tolerance."
-    },
-    {
-      "actual_path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
-      "actual_sha256": "b4471d794cc5dd018abe598ff448be34cbc4ac0643ff1ab4f36845cacfca5921",
-      "baseline_created": false,
-      "baseline_path": "artifacts/ui_pq/visual/baselines/promo_code_ledger.png",
-      "baseline_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
-      "comparison_type": "screenshot",
-      "details": {
-        "capture": {
-          "height": 1304,
-          "name": "promo_code_ledger",
-          "non_blank": true,
-          "path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
-          "sample_count": 289,
-          "sha256": "b4471d794cc5dd018abe598ff448be34cbc4ac0643ff1ab4f36845cacfca5921",
-          "unique_sample_colors": 8,
-          "width": 1174
-        },
-        "comparison_profile": {
-          "changed_sample_ratio": 0.07988980716253444,
-          "changed_samples": 87,
-          "mean_channel_delta": 0.6990358126721763,
-          "passed": true,
-          "same_size": true,
-          "sample_count": 1089,
-          "tolerance": {
-            "max_changed_sample_ratio": 0.35,
-            "max_mean_channel_delta": 6.0
-          }
-        }
-      },
-      "name": "promo_code_ledger",
-      "passed": true,
-      "reason": "Screenshot is visually within the baseline tolerance."
-    },
-    {
-      "actual_path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
-      "actual_sha256": "36ed76fd6c3df2da29611a9f86489719496f677b42c76c80834737df330a9036",
-      "baseline_created": false,
-      "baseline_path": "artifacts/ui_pq/visual/baselines/global_search_workspace.png",
-      "baseline_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
-      "comparison_type": "screenshot",
-      "details": {
-        "capture": {
-          "height": 1304,
-          "name": "global_search_workspace",
-          "non_blank": true,
-          "path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
-          "sample_count": 289,
-          "sha256": "36ed76fd6c3df2da29611a9f86489719496f677b42c76c80834737df330a9036",
-          "unique_sample_colors": 11,
-          "width": 1174
-        },
-        "comparison_profile": {
-          "changed_sample_ratio": 0.011937557392102846,
-          "changed_samples": 13,
-          "mean_channel_delta": 0.9090909090909091,
-          "passed": true,
-          "same_size": true,
-          "sample_count": 1089,
-          "tolerance": {
-            "max_changed_sample_ratio": 0.35,
-            "max_mean_channel_delta": 6.0
-          }
-        }
-      },
-      "name": "global_search_workspace",
-      "passed": true,
-      "reason": "Screenshot is visually within the baseline tolerance."
-    },
-    {
-      "actual_path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
-      "actual_sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
-      "baseline_created": false,
-      "baseline_path": "artifacts/ui_pq/visual/baselines/contract_template_workspace.png",
-      "baseline_sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
-      "comparison_type": "screenshot",
-      "details": {
-        "capture": {
-          "height": 1304,
-          "name": "contract_template_workspace",
-          "non_blank": true,
-          "path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
-          "sample_count": 289,
-          "sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
-          "unique_sample_colors": 26,
+          "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+          "unique_sample_colors": 12,
           "width": 1174
         },
         "comparison_profile": {
@@ -598,13 +493,118 @@
           }
         }
       },
+      "name": "code_registry_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
+      "actual_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/promo_code_ledger.png",
+      "baseline_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "promo_code_ledger",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/promo_code_ledger.png",
+          "sample_count": 289,
+          "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+          "unique_sample_colors": 7,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "promo_code_ledger",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
+      "actual_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/global_search_workspace.png",
+      "baseline_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "global_search_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/global_search_workspace.png",
+          "sample_count": 289,
+          "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+          "unique_sample_colors": 11,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
+      "name": "global_search_workspace",
+      "passed": true,
+      "reason": "Screenshot is visually within the baseline tolerance."
+    },
+    {
+      "actual_path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
+      "actual_sha256": "1a57bad4f1c19f09c283a25b7967519b08833a3216152a179d4472e84a0ce5e4",
+      "baseline_created": false,
+      "baseline_path": "artifacts/ui_pq/visual/baselines/contract_template_workspace.png",
+      "baseline_sha256": "30e29c41e78aadc0b61b309b570d0a8a9b2ad90589bd6b4aa1130ddcf16d80bf",
+      "comparison_type": "screenshot",
+      "details": {
+        "capture": {
+          "height": 1304,
+          "name": "contract_template_workspace",
+          "non_blank": true,
+          "path": "artifacts/ui_pq/visual/screenshots/contract_template_workspace.png",
+          "sample_count": 289,
+          "sha256": "1a57bad4f1c19f09c283a25b7967519b08833a3216152a179d4472e84a0ce5e4",
+          "unique_sample_colors": 25,
+          "width": 1174
+        },
+        "comparison_profile": {
+          "changed_sample_ratio": 0.04040404040404041,
+          "changed_samples": 44,
+          "mean_channel_delta": 0.48140495867768596,
+          "passed": true,
+          "same_size": true,
+          "sample_count": 1089,
+          "tolerance": {
+            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": 6.0
+          }
+        }
+      },
       "name": "contract_template_workspace",
       "passed": true,
       "reason": "Screenshot is visually within the baseline tolerance."
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
-      "actual_sha256": "6e3522c945e6c5b0dd6e67fe43a6231b67b4cdda1b416d6506186ec798000873",
+      "actual_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/asset_registry.png",
       "baseline_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
@@ -616,7 +616,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/asset_registry.png",
           "sample_count": 289,
-          "sha256": "6e3522c945e6c5b0dd6e67fe43a6231b67b4cdda1b416d6506186ec798000873",
+          "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -639,7 +639,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
-      "actual_sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+      "actual_sha256": "26bc34909762b086e53b57b9988976d09dc60d1bca800d2271d2d1a545b82892",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/invoice_workspace.png",
       "baseline_sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
@@ -651,14 +651,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/invoice_workspace.png",
           "sample_count": 289,
-          "sha256": "3a2b7e4049aac72912969ee04ecafe7522c0f0a2cbdc6a71d9493905d00d9617",
+          "sha256": "26bc34909762b086e53b57b9988976d09dc60d1bca800d2271d2d1a545b82892",
           "unique_sample_colors": 5,
           "width": 1174
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.0,
-          "changed_samples": 0,
-          "mean_channel_delta": 0.0,
+          "changed_sample_ratio": 0.0027548209366391185,
+          "changed_samples": 3,
+          "mean_channel_delta": 0.004132231404958678,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -674,7 +674,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
-      "actual_sha256": "bb52414a676fae9c3acff25a83db2b82bbbd14b9399826c4801f55a5f59558ad",
+      "actual_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/work_manager.png",
       "baseline_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
@@ -686,7 +686,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/work_manager.png",
           "sample_count": 289,
-          "sha256": "bb52414a676fae9c3acff25a83db2b82bbbd14b9399826c4801f55a5f59558ad",
+          "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
           "unique_sample_colors": 8,
           "width": 1174
         },
@@ -709,7 +709,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
-      "actual_sha256": "059069de21ade45b0c662210e333aa57c4898652b285f0c3aaad2a660da470c4",
+      "actual_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/party_manager.png",
       "baseline_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
@@ -721,7 +721,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/party_manager.png",
           "sample_count": 289,
-          "sha256": "059069de21ade45b0c662210e333aa57c4898652b285f0c3aaad2a660da470c4",
+          "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
           "unique_sample_colors": 13,
           "width": 1174
         },
@@ -744,7 +744,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
-      "actual_sha256": "40b65a74f6ce22527f39d338034ea3365e293f51f7d1f9814a1f409143d3d099",
+      "actual_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/contract_manager.png",
       "baseline_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
@@ -756,7 +756,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/contract_manager.png",
           "sample_count": 289,
-          "sha256": "40b65a74f6ce22527f39d338034ea3365e293f51f7d1f9814a1f409143d3d099",
+          "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
           "unique_sample_colors": 3,
           "width": 1174
         },
@@ -779,7 +779,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
-      "actual_sha256": "d8845bfe0f192aed212dc99a485bbc83a510610708106155db8ef618cddb0c33",
+      "actual_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/rights_matrix.png",
       "baseline_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
@@ -791,7 +791,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/rights_matrix.png",
           "sample_count": 289,
-          "sha256": "d8845bfe0f192aed212dc99a485bbc83a510610708106155db8ef618cddb0c33",
+          "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
           "unique_sample_colors": 6,
           "width": 1174
         },
@@ -814,7 +814,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
-      "actual_sha256": "2b64609e6c332bd0dc5a7d47b6cd237684ffa2b26a2afd4897350267a446f2b9",
+      "actual_sha256": "949e1864994af67b02539d60518b3b42bcb15c2c129c34838cb10e3d712620ad",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/quality_dashboard_dialog.png",
       "baseline_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
@@ -826,14 +826,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/quality_dashboard_dialog.png",
           "sample_count": 289,
-          "sha256": "2b64609e6c332bd0dc5a7d47b6cd237684ffa2b26a2afd4897350267a446f2b9",
-          "unique_sample_colors": 8,
+          "sha256": "949e1864994af67b02539d60518b3b42bcb15c2c129c34838cb10e3d712620ad",
+          "unique_sample_colors": 7,
           "width": 1180
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.06795224977043159,
-          "changed_samples": 74,
-          "mean_channel_delta": 5.688246097337006,
+          "changed_sample_ratio": 0.06244260789715335,
+          "changed_samples": 68,
+          "mean_channel_delta": 5.297291092745638,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -849,7 +849,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
-      "actual_sha256": "2b64ec7fe0080b601655e0a430a0bbfd7129fdba27dc5b09b050408d61e490a9",
+      "actual_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/conversion_dialog.png",
       "baseline_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
@@ -861,14 +861,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/conversion_dialog.png",
           "sample_count": 272,
-          "sha256": "2b64ec7fe0080b601655e0a430a0bbfd7129fdba27dc5b09b050408d61e490a9",
+          "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
           "unique_sample_colors": 8,
           "width": 1120
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.017463235294117647,
-          "changed_samples": 19,
-          "mean_channel_delta": 0.2502297794117647,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1088,
@@ -884,7 +884,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
-      "actual_sha256": "d9b3aac4f7f25cbcceab52c22928a25239a402f162cb78a58d3b53cb0dd812f3",
+      "actual_sha256": "9460fc7ce45474fc8d32ec619ae15f3a0e021df6e11f586691d8887455d2dbb2",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/settings_dialog.png",
       "baseline_sha256": "713b99fa31de7a7355f44d38a92a764638817441dab1122b5123f4e55e737c93",
@@ -896,14 +896,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/settings_dialog.png",
           "sample_count": 289,
-          "sha256": "d9b3aac4f7f25cbcceab52c22928a25239a402f162cb78a58d3b53cb0dd812f3",
-          "unique_sample_colors": 13,
+          "sha256": "9460fc7ce45474fc8d32ec619ae15f3a0e021df6e11f586691d8887455d2dbb2",
+          "unique_sample_colors": 14,
           "width": 1233
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.012855831037649219,
-          "changed_samples": 14,
-          "mean_channel_delta": 0.6386593204775023,
+          "changed_sample_ratio": 0.009182736455463728,
+          "changed_samples": 10,
+          "mean_channel_delta": 1.0778236914600552,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -919,7 +919,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
-      "actual_sha256": "e9af6d31375873eab8f4bc657dff4bc1dce0461bd03706b652c0f650273f2360",
+      "actual_sha256": "4886fac120b016ef0e0fd4b5b208f6199da01ec7b1443e7b480cfb94cf62678a",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/about_dialog.png",
       "baseline_sha256": "42f6d19328dfd599d716d21df376b96afd0dd244d77d864bc7b7c149b16dfd66",
@@ -931,14 +931,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/about_dialog.png",
           "sample_count": 272,
-          "sha256": "e9af6d31375873eab8f4bc657dff4bc1dce0461bd03706b652c0f650273f2360",
+          "sha256": "4886fac120b016ef0e0fd4b5b208f6199da01ec7b1443e7b480cfb94cf62678a",
           "unique_sample_colors": 22,
           "width": 720
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.010101010101010102,
-          "changed_samples": 11,
-          "mean_channel_delta": 0.12190082644628099,
+          "changed_sample_ratio": 0.004591368227731864,
+          "changed_samples": 5,
+          "mean_channel_delta": 0.17699724517906337,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -954,7 +954,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
-      "actual_sha256": "86d30aab557faba63802880ca7b8d4f9769c9f996aa2a603130ae9cbb151dd7f",
+      "actual_sha256": "87f165b3ca47bc3ec4f8b468058cf9e515069e0d37e0a4d4f8609ef2055394e2",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/help_contents_dialog.png",
       "baseline_sha256": "c3953f56f5e3d9e422d7d8c18ab3849424cf2dbd70c54e9014300a467997870e",
@@ -966,14 +966,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/help_contents_dialog.png",
           "sample_count": 289,
-          "sha256": "86d30aab557faba63802880ca7b8d4f9769c9f996aa2a603130ae9cbb151dd7f",
-          "unique_sample_colors": 31,
+          "sha256": "87f165b3ca47bc3ec4f8b468058cf9e515069e0d37e0a4d4f8609ef2055394e2",
+          "unique_sample_colors": 33,
           "width": 1180
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.010101010101010102,
-          "changed_samples": 11,
-          "mean_channel_delta": 0.44077134986225897,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -989,7 +989,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
-      "actual_sha256": "cb1837368d65b6e12111659febf3e5b0358a636a94a07331fdd0a882f4ecf185",
+      "actual_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/add_album_dialog.png",
       "baseline_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
@@ -1001,14 +1001,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/add_album_dialog.png",
           "sample_count": 256,
-          "sha256": "cb1837368d65b6e12111659febf3e5b0358a636a94a07331fdd0a882f4ecf185",
+          "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
           "unique_sample_colors": 13,
           "width": 960
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.033203125,
-          "changed_samples": 34,
-          "mean_channel_delta": 0.031982421875,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1024,
@@ -1024,7 +1024,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
-      "actual_sha256": "6d24269ca7fc76ab45e98b75c0fd4e20a311e38902f66f716ed412f19d22e7cf",
+      "actual_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/custom_columns_dialog.png",
       "baseline_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
@@ -1036,14 +1036,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/custom_columns_dialog.png",
           "sample_count": 272,
-          "sha256": "6d24269ca7fc76ab45e98b75c0fd4e20a311e38902f66f716ed412f19d22e7cf",
+          "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
           "unique_sample_colors": 20,
           "width": 760
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.020499108734402853,
-          "changed_samples": 23,
-          "mean_channel_delta": 0.9737076648841355,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1122,
@@ -1059,7 +1059,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
-      "actual_sha256": "1b1d3dbdcdce6c3a6c8e9cc81afe32a6c82f3528ec623cdaf6fea8a30c22a3e6",
+      "actual_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/edit_track_dialog.png",
       "baseline_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
@@ -1071,14 +1071,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/edit_track_dialog.png",
           "sample_count": 289,
-          "sha256": "1b1d3dbdcdce6c3a6c8e9cc81afe32a6c82f3528ec623cdaf6fea8a30c22a3e6",
+          "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
           "unique_sample_colors": 8,
           "width": 760
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.004325259515570935,
-          "changed_samples": 5,
-          "mean_channel_delta": 0.009083044982698962,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1156,
@@ -1094,7 +1094,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
-      "actual_sha256": "c3ab3bf9b14bf85b92280e7c80e11596a8d49f512ddfaca7757639fef40b5780",
+      "actual_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/bulk_audio_attach_dialog.png",
       "baseline_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
@@ -1106,14 +1106,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/bulk_audio_attach_dialog.png",
           "sample_count": 272,
-          "sha256": "c3ab3bf9b14bf85b92280e7c80e11596a8d49f512ddfaca7757639fef40b5780",
-          "unique_sample_colors": 7,
+          "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+          "unique_sample_colors": 6,
           "width": 1080
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.025711662075298437,
-          "changed_samples": 28,
-          "mean_channel_delta": 0.09022038567493113,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1129,7 +1129,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
-      "actual_sha256": "efb6d6d0194de9c0a8f0688cbd53ffda13e08d2ac2b9636553621b50fb62f091",
+      "actual_sha256": "5ee7b25cc5ee18bf51e681a7ba418b91bcd74367c215b321eccd112fbb1af166",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/diagnostics_dialog.png",
       "baseline_sha256": "e64f2118e2f1135b44514d8297f7b222f264d8d2628ffd824124e63d64e404e5",
@@ -1141,14 +1141,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/diagnostics_dialog.png",
           "sample_count": 289,
-          "sha256": "efb6d6d0194de9c0a8f0688cbd53ffda13e08d2ac2b9636553621b50fb62f091",
+          "sha256": "5ee7b25cc5ee18bf51e681a7ba418b91bcd74367c215b321eccd112fbb1af166",
           "unique_sample_colors": 22,
           "width": 1080
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.031221303948576674,
-          "changed_samples": 34,
-          "mean_channel_delta": 1.8181818181818181,
+          "changed_sample_ratio": 0.020202020202020204,
+          "changed_samples": 22,
+          "mean_channel_delta": 1.272038567493113,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1164,7 +1164,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
-      "actual_sha256": "bbfa013f5897cd651b17f1787724bab59762fb4036137e51710577269c80f883",
+      "actual_sha256": "27fd6075caa3b8f779110d347d87d89221ab0935ce6b2b8a02841eb4346d4aaf",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/application_storage_admin_dialog.png",
       "baseline_sha256": "a6dace1baffef2425bdb0eeca6634d171e02c7663bf8dbe86568df9a0e5d217c",
@@ -1176,14 +1176,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/application_storage_admin_dialog.png",
           "sample_count": 289,
-          "sha256": "bbfa013f5897cd651b17f1787724bab59762fb4036137e51710577269c80f883",
+          "sha256": "27fd6075caa3b8f779110d347d87d89221ab0935ce6b2b8a02841eb4346d4aaf",
           "unique_sample_colors": 20,
           "width": 1220
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.06327985739750445,
-          "changed_samples": 71,
-          "mean_channel_delta": 0.8972816399286988,
+          "changed_sample_ratio": 0.00089126559714795,
+          "changed_samples": 1,
+          "mean_channel_delta": 0.17045454545454544,
           "passed": true,
           "same_size": true,
           "sample_count": 1122,
@@ -1199,7 +1199,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
-      "actual_sha256": "a269559aedfdee92b9eb14dfb893fc1ae5556742761b39e34ec00c2b8720df14",
+      "actual_sha256": "104184cd9baad5daf19e3c93d230068d72f3bb3bd94df57aed94472a11066fe2",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/application_log_dialog.png",
       "baseline_sha256": "447cba52926f6bfa7003933fe9d32a64185062dae1ccdb79deb39c4a6e69d8e4",
@@ -1211,14 +1211,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/application_log_dialog.png",
           "sample_count": 289,
-          "sha256": "a269559aedfdee92b9eb14dfb893fc1ae5556742761b39e34ec00c2b8720df14",
-          "unique_sample_colors": 30,
+          "sha256": "104184cd9baad5daf19e3c93d230068d72f3bb3bd94df57aed94472a11066fe2",
+          "unique_sample_colors": 29,
           "width": 860
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.01903114186851211,
-          "changed_samples": 22,
-          "mean_channel_delta": 1.0707179930795847,
+          "changed_sample_ratio": 0.018166089965397925,
+          "changed_samples": 21,
+          "mean_channel_delta": 2.045631487889273,
           "passed": true,
           "same_size": true,
           "sample_count": 1156,
@@ -1234,7 +1234,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
-      "actual_sha256": "4af15d7556c4318d0fa7069a9a8afd770081c27d238768a61eb9dce8041d615f",
+      "actual_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/history_dialog.png",
       "baseline_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
@@ -1246,14 +1246,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/history_dialog.png",
           "sample_count": 256,
-          "sha256": "4af15d7556c4318d0fa7069a9a8afd770081c27d238768a61eb9dce8041d615f",
+          "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
           "unique_sample_colors": 14,
           "width": 1040
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.014692378328741965,
-          "changed_samples": 16,
-          "mean_channel_delta": 0.011019283746556474,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1269,7 +1269,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
-      "actual_sha256": "e6d58314f6b14cb722a93a3ea9804976da2db34fb48bd2cfdaf0cae2580d93a0",
+      "actual_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/action_ribbon_dialog.png",
       "baseline_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
@@ -1281,14 +1281,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/action_ribbon_dialog.png",
           "sample_count": 289,
-          "sha256": "e6d58314f6b14cb722a93a3ea9804976da2db34fb48bd2cfdaf0cae2580d93a0",
-          "unique_sample_colors": 28,
+          "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+          "unique_sample_colors": 29,
           "width": 980
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.09733700642791551,
-          "changed_samples": 106,
-          "mean_channel_delta": 0.8677685950413223,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1304,7 +1304,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
-      "actual_sha256": "5027649ce5563edc0467f09d482b8693f01c80770b9e6a618e9d67c0344241d9",
+      "actual_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/authenticity_verification_dialog.png",
       "baseline_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
@@ -1316,14 +1316,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/authenticity_verification_dialog.png",
           "sample_count": 289,
-          "sha256": "5027649ce5563edc0467f09d482b8693f01c80770b9e6a618e9d67c0344241d9",
+          "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
           "unique_sample_colors": 24,
           "width": 780
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.005509641873278237,
-          "changed_samples": 6,
-          "mean_channel_delta": 0.013085399449035813,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1339,7 +1339,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
-      "actual_sha256": "4513267156191f6fd76db97701ca03487ebc86a8ec715dfbf13437e044b733cf",
+      "actual_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/forensic_export_dialog.png",
       "baseline_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
@@ -1351,14 +1351,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/forensic_export_dialog.png",
           "sample_count": 289,
-          "sha256": "4513267156191f6fd76db97701ca03487ebc86a8ec715dfbf13437e044b733cf",
-          "unique_sample_colors": 33,
+          "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+          "unique_sample_colors": 34,
           "width": 481
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.012477718360071301,
-          "changed_samples": 14,
-          "mean_channel_delta": 0.13012477718360071,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1122,
@@ -1374,7 +1374,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
-      "actual_sha256": "b22281b0f174acd299f6f0adf0c11c7ddb03eaab60d7b0abe3a41601ceb35169",
+      "actual_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/media_equalizer_dialog.png",
       "baseline_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
@@ -1386,14 +1386,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/media_equalizer_dialog.png",
           "sample_count": 289,
-          "sha256": "b22281b0f174acd299f6f0adf0c11c7ddb03eaab60d7b0abe3a41601ceb35169",
+          "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
           "unique_sample_colors": 23,
           "width": 600
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.009243697478991597,
-          "changed_samples": 11,
-          "mean_channel_delta": 0.15378151260504203,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1190,
@@ -1409,7 +1409,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
-      "actual_sha256": "f009559c1390acb604e1869d80400fe77b8ec651654bee726aa5a30d67d22420",
+      "actual_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/soundcloud_publish_dialog.png",
       "baseline_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
@@ -1421,14 +1421,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/soundcloud_publish_dialog.png",
           "sample_count": 289,
-          "sha256": "f009559c1390acb604e1869d80400fe77b8ec651654bee726aa5a30d67d22420",
+          "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
           "unique_sample_colors": 13,
           "width": 1788
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.024793388429752067,
-          "changed_samples": 27,
-          "mean_channel_delta": 0.2706611570247934,
+          "changed_sample_ratio": 0.0,
+          "changed_samples": 0,
+          "mean_channel_delta": 0.0,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,

@@ -1,10 +1,11 @@
-# Contract Template Workflows
+# Template Workspace Workflows
 
-The `Contract Template Workspace` is the app's drafting surface for placeholder-driven contract and
-license templates.
+The `Template Workspace` is the app's drafting surface for placeholder-driven contract, license,
+invoice, royalty statement, and generic templates.
 
 It is designed for users who want to keep original source files intact while filling reusable
-template symbols from authoritative catalog and repertoire data.
+template symbols from authoritative catalog, repertoire, invoicing, royalty accounting, and owner
+data.
 
 ## What the workspace does
 
@@ -38,6 +39,12 @@ Pages and DOCX imports are still supported, but they are normalized behind the s
 working drafts so preview and PDF export stay consistent.
 
 ## Import behavior
+
+The `Import` tab manages the template record and its revision history. `Import Template...` creates
+a new template under the selected family. `Replace Template File...` imports a new source file for
+the selected template and makes that revision active, while preserving earlier revisions for audit
+and recovery. `Change Template Family...` reclassifies the selected template when it was imported
+under the wrong category.
 
 ### Pages
 
@@ -75,6 +82,17 @@ When one of those symbols is present, the fill workflow validates the required r
 
 The symbol catalog and generator are there so source templates can use the same canonical placeholder
 syntax the fill form understands.
+
+Invoice-line symbols resolve from the invoice catalog preset table. For reusable invoice tables,
+place `{{db.invoice_line.*.indexed}}` symbols between `{{duplicate.start}}` and
+`{{duplicate.end}}`. A matching duplicate block automatically creates a `Duplicate Number` row-count
+field in the fill form, and changing that count creates one invoice catalog item selector per DB
+Index. Each indexed row keeps its own quantity input. Line values such as unit price, net amount,
+VAT amount, and gross amount are calculated from the
+selected catalog item and quantity. Invoice summary symbols such as `{{db.invoice.subtotal}}`,
+`{{db.invoice.vat_total}}`, `{{db.invoice.total}}`, and `{{db.invoice.vat_breakdown}}` are calculated
+from those repeated line selections when the template is driven by invoice-line cymbols, so totals do
+not need to be typed manually.
 
 ## Bundled example template
 

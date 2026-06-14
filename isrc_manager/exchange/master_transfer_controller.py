@@ -566,7 +566,7 @@ def _show_master_transfer_import_report(app, path: str, result) -> None:
         )
     if "contract_templates" in included_section_ids:
         lines.append(
-            "Contract Templates: "
+            "Templates: "
             f"templates {int(result.imported_contract_templates or 0)}, "
             f"revisions {int(result.imported_template_revisions or 0)}"
         )

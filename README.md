@@ -11,7 +11,7 @@
 ![Local First](https://img.shields.io/badge/architecture-local--first-blueviolet)
 ![SoundCloud Publishing](https://img.shields.io/badge/SoundCloud-live-orange)
 ![Rights Management](https://img.shields.io/badge/rights-integrated-success)
-![Contract Templates](https://img.shields.io/badge/contracts-integrated-success)
+![Templates](https://img.shields.io/badge/templates-integrated-success)
 ![Audio Authenticity](https://img.shields.io/badge/audio-authenticity-blue)
 ![Watermarking](https://img.shields.io/badge/watermarking-integrated-blue)
 ![ISRC](https://img.shields.io/badge/ISRC-managed-green)
@@ -165,17 +165,18 @@ The import layer is a reviewed workflow surface rather than a blind file picker.
 - reviewed bulk audio attachment and single-file album-art attachment
 - package round-tripping with preserved storage-mode behavior
 
-### Contract and license templates
+### Template Workspace
 
-The `Contract Template Workspace` is a dockable drafting surface for placeholder-driven contract
-and license templates.
+The `Template Workspace` is a dockable drafting surface for placeholder-driven contract,
+license, invoice, royalty statement, and generic HTML templates.
 
 It supports:
 
 - importing Pages, DOCX, HTML, and HTML package sources
 - preserving the original imported source file unchanged
 - symbol lookup through the placeholder catalog and symbol generator
-- fill-form drafting against authoritative catalog, party, contract, rights, and owner data
+- fill-form drafting against authoritative catalog, party, contract, rights, invoice,
+  royalty, and owner data
 - live HTML preview from the current editable draft state
 - PDF export from the same HTML working draft used for preview
 
@@ -244,7 +245,7 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 
 - the docked workspace keeps Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, and Global Search open beside the table as tabbed panels, while stored artist/album cleanup lives with Diagnostics
 - the Code Registry Workspace separates app-managed internal codes from external identifiers, shows shared usage counts, and lets you link an unassigned generated value later
-- the Contract Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive drafting, preview, and PDF export from one HTML working draft
+- the Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive contract, license, invoice, royalty statement, and generic drafting, preview, and PDF export from one HTML working draft
 - exchange import can classify canonical internal-looking catalog values into the internal registry, keep non-conforming values as external identifiers, and report accepted, external, mismatch, skipped, merged, and conflicted outcomes explicitly
 - the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
@@ -358,7 +359,7 @@ Start with `Help > Help Contents` inside the app for the integrated manual, then
 - [Media Player Guide](docs/media-player.md)
 - [Import and Merge Workflows](docs/import-and-merge-workflows.md)
 - [Catalog Workspace Workflows](docs/catalog-workspace-workflows.md)
-- [Contract Template Workflows](docs/contract-template-workflows.md)
+- [Template Workspace Workflows](docs/contract-template-workflows.md)
 - [Diagnostics and Recovery](docs/diagnostics-and-recovery.md)
 - [Attachment Storage Modes](docs/file_storage_modes.md)
 - [Repertoire Knowledge System](docs/repertoire_knowledge_system.md)

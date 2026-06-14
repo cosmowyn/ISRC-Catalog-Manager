@@ -61,7 +61,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -89,7 +89,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -121,7 +121,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -156,7 +156,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -189,7 +189,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -219,7 +219,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -249,7 +249,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -285,7 +285,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )
@@ -325,7 +325,7 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
         panel = _DummyPanel()
         dock = CatalogWorkspaceDock(
             window,
-            dock_title="Contract Template Workspace",
+            dock_title="Template Workspace",
             dock_object_name="contractTemplateWorkspaceDock",
             panel_factory=lambda _dock: panel,
         )

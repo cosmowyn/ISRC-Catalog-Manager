@@ -63,6 +63,7 @@ def _create_invoice_workspace_panel(self: Any, parent: QWidget) -> InvoiceWorksp
 
     return panel_class(
         conn_provider=lambda: self.conn,
+        data_root=getattr(self, "data_root", None),
         open_contract_manager=open_contract_manager,
         open_work_manager=open_work_manager,
         open_track_editor=open_track_editor,

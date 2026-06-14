@@ -15,6 +15,7 @@ from isrc_manager.authenticity import (
 )
 from isrc_manager.blob_icons import BlobIconSettingsService
 from isrc_manager.contract_templates import ContractTemplateService
+from isrc_manager.contract_templates.accounting_resolver import AccountingTemplateResolver
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
 from isrc_manager.contract_templates.export_service import ContractTemplateExportService
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
@@ -189,6 +190,11 @@ def initialize_foreground_services(app: Any) -> None:
     )
     app.rights_service = RightsService(app.conn) if app.conn is not None else None
     app.asset_service = AssetService(app.conn, app.data_root) if app.conn is not None else None
+    app.accounting_template_resolver = (
+        AccountingTemplateResolver(app.conn, settings_reads=app.settings_reads)
+        if app.conn is not None
+        else None
+    )
     app.contract_template_form_service = (
         ContractTemplateFormService(
             template_service=app.contract_template_service,
@@ -200,6 +206,7 @@ def initialize_foreground_services(app: Any) -> None:
             party_service=app.party_service,
             rights_service=app.rights_service,
             asset_service=app.asset_service,
+            accounting_resolver=app.accounting_template_resolver,
         )
         if app.contract_template_service is not None
         and app.contract_template_catalog_service is not None
@@ -219,6 +226,7 @@ def initialize_foreground_services(app: Any) -> None:
             asset_service=app.asset_service,
             custom_field_definition_service=app.custom_field_definitions,
             custom_field_value_service=app.custom_field_values,
+            accounting_resolver=app.accounting_template_resolver,
         )
         if app.contract_template_service is not None
         and app.contract_template_catalog_service is not None

@@ -11,6 +11,7 @@ from .models import (
     DEFAULT_CURRENCY,
     NORMAL_BALANCE_CREDIT,
     NORMAL_BALANCE_DEBIT,
+    AccountingAccountPayload,
     AccountingAccountRecord,
     AccountingAccountSeed,
     AccountingTransactionLinkDraft,
@@ -37,6 +38,9 @@ DEFAULT_ACCOUNT_SEEDS: tuple[AccountingAccountSeed, ...] = (
         NORMAL_BALANCE_CREDIT,
     ),
 )
+
+ACCOUNT_TYPES = frozenset({"asset", "liability", "equity", "income", "expense"})
+NORMAL_BALANCES = frozenset({NORMAL_BALANCE_DEBIT, NORMAL_BALANCE_CREDIT})
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -65,6 +69,121 @@ def ensure_default_accounts(conn: sqlite3.Connection) -> None:
                 updated_at=datetime('now')
             """,
             (seed.code, seed.name, seed.account_type, seed.normal_balance),
+        )
+
+
+class AccountingAccountService:
+    """Maintains the editable chart-of-accounts records used by ledger postings."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def list_accounts(self, *, active_only: bool = False) -> list[AccountingAccountRecord]:
+        where_sql = "WHERE active=1" if active_only else ""
+        rows = self.conn.execute(f"""
+            SELECT id, code, name, account_type, normal_balance, system_flag, active, created_at, updated_at
+            FROM AccountingAccounts
+            {where_sql}
+            ORDER BY active DESC, code
+            """).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def fetch_account(self, account_id: int) -> AccountingAccountRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT id, code, name, account_type, normal_balance, system_flag, active, created_at, updated_at
+            FROM AccountingAccounts
+            WHERE id=?
+            """,
+            (int(account_id),),
+        ).fetchone()
+        return self._row_to_record(row) if row else None
+
+    def fetch_account_by_code(self, account_code: str) -> AccountingAccountRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT id, code, name, account_type, normal_balance, system_flag, active, created_at, updated_at
+            FROM AccountingAccounts
+            WHERE code=?
+            """,
+            (str(account_code or "").strip(),),
+        ).fetchone()
+        return self._row_to_record(row) if row else None
+
+    def create_account(self, payload: AccountingAccountPayload) -> int:
+        clean_code, clean_name, account_type, normal_balance = self._validated_payload(payload)
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                INSERT INTO AccountingAccounts(
+                    code, name, account_type, normal_balance, system_flag, active
+                )
+                VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (clean_code, clean_name, account_type, normal_balance, 1 if payload.active else 0),
+            )
+            return int(cur.lastrowid)
+
+    def update_account(
+        self, account_id: int, payload: AccountingAccountPayload
+    ) -> AccountingAccountRecord:
+        clean_code, clean_name, account_type, normal_balance = self._validated_payload(payload)
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                UPDATE AccountingAccounts
+                SET code=?,
+                    name=?,
+                    account_type=?,
+                    normal_balance=?,
+                    active=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    clean_code,
+                    clean_name,
+                    account_type,
+                    normal_balance,
+                    1 if payload.active else 0,
+                    int(account_id),
+                ),
+            )
+            if cur.rowcount != 1:
+                raise ValueError(f"Accounting account {int(account_id)} was not found.")
+        record = self.fetch_account(account_id)
+        if record is None:
+            raise RuntimeError("Accounting account could not be reloaded.")
+        return record
+
+    @staticmethod
+    def _validated_payload(payload: AccountingAccountPayload) -> tuple[str, str, str, str]:
+        clean_code = _clean_text(payload.code)
+        clean_name = _clean_text(payload.name)
+        account_type = str(payload.account_type or "").strip().lower()
+        normal_balance = str(payload.normal_balance or "").strip().lower()
+        if clean_code is None:
+            raise ValueError("Accounting account code is required.")
+        if clean_name is None:
+            raise ValueError("Accounting account name is required.")
+        if account_type not in ACCOUNT_TYPES:
+            raise ValueError("Accounting account type is invalid.")
+        if normal_balance not in NORMAL_BALANCES:
+            raise ValueError("Accounting normal balance is invalid.")
+        return clean_code, clean_name, account_type, normal_balance
+
+    @staticmethod
+    def _row_to_record(row) -> AccountingAccountRecord:
+        return AccountingAccountRecord(
+            id=int(row[0]),
+            code=str(row[1] or ""),
+            name=str(row[2] or ""),
+            account_type=str(row[3] or ""),
+            normal_balance=str(row[4] or ""),
+            system_flag=bool(row[5]),
+            active=bool(row[6]),
+            created_at=_clean_text(row[7]),
+            updated_at=_clean_text(row[8]),
         )
 
 

@@ -16,7 +16,7 @@ This `docs/` directory is the repository-side companion to that help surface. It
 - [Media Player Guide](media-player.md): audio-player auditioning, waveform, queue, album playlist, export, and app sound controls
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md): docked workspace, diagnostics catalog cleanup, media intake, and daily review flow
 - [Code Registry Workflows](code-registry-workflows.md): internal business codes, external catalog identifiers, generation, linking, and Registry SHA-256 Keys
-- [Contract Template Workflows](contract-template-workflows.md): template import, symbol generation, fill-form drafting, live HTML preview, and PDF export
+- [Template Workspace Workflows](contract-template-workflows.md): template import, symbol generation, fill-form drafting, live HTML preview, and PDF export
 - [Template Conversion Workflow](template-conversion-workflow.md): rigid CSV/XLSX/XML template inspection, source mapping, saved reusable upload templates, preview, and faithful export
 - [Bundled HTML License Template Example](../HTML license template/README.md): print-safe starter package, placeholder list, asset rules, draft-generation notes, and legal disclaimer
 - [Import and Merge Workflows](import-and-merge-workflows.md): exchange import, XML review, mapping, match rules, and reviewed media attachment

@@ -7,6 +7,7 @@ from unittest import mock
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_INVOICE_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
 )
 from isrc_manager.contract_templates import (
@@ -50,12 +51,15 @@ class ContractTemplateRegistryGenerationTests(unittest.TestCase):
         registry = self.track_service.code_registry_service()
         catalog_category = registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER)
         contract_category = registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CONTRACT_NUMBER)
+        invoice_category = registry.fetch_category_by_system_key(BUILTIN_CATEGORY_INVOICE_NUMBER)
         license_category = registry.fetch_category_by_system_key(BUILTIN_CATEGORY_LICENSE_NUMBER)
         assert catalog_category is not None
         assert contract_category is not None
+        assert invoice_category is not None
         assert license_category is not None
         registry.update_category(catalog_category.id, prefix="ACR")
         registry.update_category(contract_category.id, prefix="CTR")
+        registry.update_category(invoice_category.id, prefix="INV")
         registry.update_category(license_category.id, prefix="LIC")
 
         self.track_id = self.track_service.create_track(
@@ -108,6 +112,7 @@ class ContractTemplateRegistryGenerationTests(unittest.TestCase):
                     ("Contract Number ", "{{db.contract.contract_number}}"),
                     ("License Number ", "{{db.contract.license_number}}"),
                     ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+                    ("Invoice Number ", "{{db.invoice.number}}"),
                 )
             )
         )
@@ -166,6 +171,7 @@ class ContractTemplateRegistryGenerationTests(unittest.TestCase):
                 "{{db.contract.contract_number}}",
                 "{{db.contract.license_number}}",
                 "{{db.contract.registry_sha256_key}}",
+                "{{db.invoice.number}}",
             },
         )
         self.assertEqual(self.panel.selector_widgets, {})
@@ -182,7 +188,7 @@ class ContractTemplateRegistryGenerationTests(unittest.TestCase):
         drafts = self.template_service.list_drafts(revision_id=self.revision.revision_id)
         self.assertEqual(len(drafts), 1)
         assignments = self.template_service.list_draft_registry_assignments(drafts[0].draft_id)
-        self.assertEqual(len(assignments), 5)
+        self.assertEqual(len(assignments), 6)
         assignment_values = {
             assignment.canonical_symbol: assignment.registry_value for assignment in assignments
         }
@@ -207,6 +213,7 @@ class ContractTemplateRegistryGenerationTests(unittest.TestCase):
         self.assertTrue(assignment_values["{{db.release.catalog_number}}"].startswith("ACR"))
         self.assertTrue(assignment_values["{{db.contract.contract_number}}"].startswith("CTR"))
         self.assertTrue(assignment_values["{{db.contract.license_number}}"].startswith("LIC"))
+        self.assertTrue(assignment_values["{{db.invoice.number}}"].startswith("INV"))
         self.assertRegex(
             assignment_values["{{db.contract.registry_sha256_key}}"],
             r"^[0-9a-f]{64}$",

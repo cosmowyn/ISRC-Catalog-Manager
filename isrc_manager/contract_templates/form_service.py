@@ -52,7 +52,15 @@ class ContractTemplateFormService:
         "party": "Party Selection",
         "right": "Right Selection",
         "asset": "Asset Selection",
+        "invoice": "Invoice Selection",
+        "invoice_catalog_item": "Invoice Catalog Item Selection",
+        "invoice_line_item": "Invoice Line Selection",
+        "royalty_statement": "Royalty Statement Selection",
+        "royalty_line_item": "Royalty Line Selection",
     }
+    _DYNAMIC_INVOICE_TOTAL_KEYS = frozenset(
+        {"subtotal", "vat_total", "total", "lines", "vat_breakdown"}
+    )
     _AUTO_SCOPE_POLICIES = frozenset({"owner_settings_context"})
 
     def __init__(
@@ -67,6 +75,7 @@ class ContractTemplateFormService:
         party_service=None,
         rights_service=None,
         asset_service=None,
+        accounting_resolver=None,
     ):
         self.template_service = template_service
         self.catalog_service = catalog_service
@@ -77,6 +86,7 @@ class ContractTemplateFormService:
         self.party_service = party_service
         self.rights_service = rights_service
         self.asset_service = asset_service
+        self.accounting_resolver = accounting_resolver
 
     def synchronize_bindings(
         self, revision_id: int
@@ -143,6 +153,18 @@ class ContractTemplateFormService:
                 ]
             ],
         ] = {}
+        has_duplicate_start = False
+        has_duplicate_end = False
+        has_duplicate_number = False
+        duplicate_marker_occurrences = 0
+
+        has_invoice_line_context = any(
+            (
+                parse_placeholder(item.canonical_symbol).binding_kind == "db"
+                and parse_placeholder(item.canonical_symbol).namespace == "invoice_line"
+            )
+            for item in placeholders
+        )
 
         for placeholder in placeholders:
             token = parse_placeholder(placeholder.canonical_symbol)
@@ -155,6 +177,18 @@ class ContractTemplateFormService:
                     placeholder.canonical_symbol,
                     catalog,
                 )
+                if (
+                    has_invoice_line_context
+                    and token.namespace == "invoice"
+                    and token.key in self._DYNAMIC_INVOICE_TOTAL_KEYS
+                ):
+                    auto_fields.append(
+                        self._calculated_invoice_auto_field(
+                            placeholder,
+                            catalog_entry=catalog_entry,
+                        )
+                    )
+                    continue
                 if not token.indexed and self._is_auto_resolved_scope(
                     placeholder,
                     binding=binding,
@@ -203,6 +237,7 @@ class ContractTemplateFormService:
                 continue
             if token.binding_kind == "duplicate":
                 if token.key == "number":
+                    has_duplicate_number = True
                     manual_fields.append(
                         self._manual_field(
                             placeholder,
@@ -210,6 +245,11 @@ class ContractTemplateFormService:
                         )
                     )
                 else:
+                    if token.key == "start":
+                        has_duplicate_start = True
+                    elif token.key == "end":
+                        has_duplicate_end = True
+                    duplicate_marker_occurrences += int(placeholder.source_occurrence_count or 0)
                     auto_fields.append(self._duplicate_marker_auto_field(placeholder))
                 continue
             if token.binding_kind == "manual":
@@ -229,6 +269,13 @@ class ContractTemplateFormService:
                     )
                 continue
             unresolved.append(placeholder.canonical_symbol)
+
+        if has_duplicate_start and has_duplicate_end and not has_duplicate_number:
+            manual_fields.append(
+                self._synthetic_duplicate_number_manual_field(
+                    placeholder_count=duplicate_marker_occurrences,
+                )
+            )
 
         for group in selector_groups.values():
             selector_field = self._selector_field(group)
@@ -582,6 +629,26 @@ class ContractTemplateFormService:
             ),
         )
 
+    @staticmethod
+    def _synthetic_duplicate_number_manual_field(
+        *,
+        placeholder_count: int,
+    ) -> ContractTemplateFormManualField:
+        return ContractTemplateFormManualField(
+            canonical_symbol="{{duplicate.number}}",
+            display_label="Duplicate Number",
+            field_type="number",
+            widget_kind="number_input",
+            required=True,
+            placeholder_count=max(0, int(placeholder_count or 0)),
+            description=(
+                "Number of rendered copies for every duplicate block. This row-count control "
+                "is shown automatically because the template contains matching "
+                "{{duplicate.start}} and {{duplicate.end}} cymbols. Indexed database cymbols "
+                "create one selector set per rendered copy."
+            ),
+        )
+
     def _counter_auto_field(
         self,
         placeholder: ContractTemplatePlaceholderRecord,
@@ -600,6 +667,29 @@ class ContractTemplateFormService:
             description=(
                 f"{display_label} resolves automatically from the final HTML output after "
                 "duplicate blocks are expanded."
+            ),
+        )
+
+    def _calculated_invoice_auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+        *,
+        catalog_entry: ContractTemplateCatalogEntry | None,
+    ) -> ContractTemplateFormAutoField:
+        display_label = (
+            placeholder.display_label
+            or (catalog_entry.display_label if catalog_entry is not None else None)
+            or _display_label_from_key(placeholder.placeholder_key)
+        )
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label="Calculated Invoice Lines",
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=(
+                f"{display_label} is calculated from the selected invoice catalog items "
+                "and their quantity overrides in this fill form."
             ),
         )
 
@@ -761,10 +851,10 @@ class ContractTemplateFormService:
             required=placeholder.required,
             placeholder_count=placeholder.source_occurrence_count,
             description=(
-                "Number of rendered copies for every duplicate block. Place "
-                "{{duplicate.number}} once outside the {{duplicate.start}}/{{duplicate.end}} "
-                "block in the template source. Indexed database cymbols create one selector set "
-                "per rendered copy."
+                "Number of rendered copies for every duplicate block. The fill form also creates "
+                "this control automatically when a template contains matching "
+                "{{duplicate.start}} and {{duplicate.end}} cymbols. Indexed database cymbols "
+                "create one selector set per rendered copy."
                 if token.binding_kind == "duplicate" and token.key == "number"
                 else f"Manual value for {placeholder.canonical_symbol}."
             ),
@@ -810,6 +900,10 @@ class ContractTemplateFormService:
             "release": "release",
             "work": "work",
             "contract": "contract",
+            "invoice": "invoice",
+            "invoice_line": "invoice_catalog_item",
+            "royalty": "royalty_statement",
+            "royalty_line": "royalty_line_item",
             "owner": "owner",
             "party": "party",
             "right": "right",
@@ -825,6 +919,10 @@ class ContractTemplateFormService:
             "release": "release_selection_required",
             "work": "work_selection_required",
             "contract": "contract_selection_required",
+            "invoice": "invoice_selection_required",
+            "invoice_line": "invoice_catalog_item_selection_required",
+            "royalty": "royalty_statement_selection_required",
+            "royalty_line": "royalty_line_selection_required",
             "owner": "owner_settings_context",
             "party": "party_selection_required",
             "right": "right_selection_required",
@@ -849,6 +947,16 @@ class ContractTemplateFormService:
             return self._right_choices()
         if clean_type == "asset":
             return self._asset_choices()
+        if clean_type in {
+            "invoice",
+            "invoice_catalog_item",
+            "invoice_line_item",
+            "royalty_statement",
+            "royalty_line_item",
+        }:
+            if self.accounting_resolver is None:
+                return ()
+            return self.accounting_resolver.choices_for_entity_type(clean_type)
         return ()
 
     def _track_choices(self) -> tuple[ContractTemplateFormChoice, ...]:

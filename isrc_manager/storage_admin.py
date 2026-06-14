@@ -202,7 +202,7 @@ class ApplicationStorageAdminService:
             "label_template": "Contract template source #{row_id}",
             "detail_template": "Contract template source #{row_id} '{name}'",
             "category_key": "contract_template_source",
-            "category_label": "Contract Template Source",
+            "category_label": "Template Source",
         },
         {
             "root": "contract_template_sources",
@@ -212,7 +212,7 @@ class ApplicationStorageAdminService:
             "label_template": "Contract template source asset #{row_id}",
             "detail_template": "Contract template source asset #{row_id} '{name}'",
             "category_key": "contract_template_source_asset",
-            "category_label": "Contract Template Source Asset",
+            "category_label": "Template Source Asset",
         },
         {
             "root": "contract_template_drafts",
@@ -222,7 +222,7 @@ class ApplicationStorageAdminService:
             "label_template": "Contract template draft #{row_id}",
             "detail_template": "Contract template draft #{row_id} '{name}'",
             "category_key": "contract_template_draft",
-            "category_label": "Contract Template Draft",
+            "category_label": "Template Draft",
         },
         {
             "root": "contract_template_drafts",
@@ -232,7 +232,7 @@ class ApplicationStorageAdminService:
             "label_template": "Contract template draft working file #{row_id}",
             "detail_template": "Contract template draft working file #{row_id} '{name}'",
             "category_key": "contract_template_draft_working_file",
-            "category_label": "Contract Template Draft Working File",
+            "category_label": "Template Draft Working File",
         },
         {
             "root": "contract_template_artifacts",
@@ -242,7 +242,7 @@ class ApplicationStorageAdminService:
             "label_template": "Contract template output #{row_id}",
             "detail_template": "Contract template output #{row_id} '{name}'",
             "category_key": "contract_template_artifact",
-            "category_label": "Contract Template Artifact",
+            "category_label": "Template Artifact",
         },
     )
     _MANAGED_ROOT_CATEGORIES = {
@@ -253,11 +253,11 @@ class ApplicationStorageAdminService:
         "asset_registry": ("asset_file", "Asset Registry File"),
         "custom_field_media": ("custom_field_file", "Custom Field File"),
         "gs1_templates": ("gs1_template", "GS1 Template"),
-        "contract_template_sources": ("contract_template_source", "Contract Template Source"),
-        "contract_template_drafts": ("contract_template_draft", "Contract Template Draft"),
+        "contract_template_sources": ("contract_template_source", "Template Source"),
+        "contract_template_drafts": ("contract_template_draft", "Template Draft"),
         "contract_template_artifacts": (
             "contract_template_artifact",
-            "Contract Template Artifact",
+            "Template Artifact",
         ),
     }
 

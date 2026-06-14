@@ -20,6 +20,12 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
     CodeRegistryService,
 )
+from isrc_manager.contract_templates.models import (
+    ContractTemplateDraftPayload,
+    ContractTemplatePayload,
+    ContractTemplateRevisionPayload,
+    build_contract_template_indexed_selection_key,
+)
 from isrc_manager.help_content import (
     copy_help_screenshots,
     help_screenshot_source_dir,
@@ -37,6 +43,10 @@ from isrc_manager.integrations.soundcloud.models import (
 from isrc_manager.integrations.soundcloud.persistence import SoundCloudSQLiteRepository
 from isrc_manager.integrations.soundcloud.service import SoundCloudPublishPlanner
 from isrc_manager.integrations.soundcloud.ui import SoundCloudPublishDialog
+from isrc_manager.invoicing import InvoiceCatalogItemPayload, InvoiceService
+from isrc_manager.invoicing.template_workspace_finalization import (
+    TemplateWorkspaceInvoiceFinalizationService,
+)
 from isrc_manager.media.conversion import AudioConversionResult
 
 from .commands import table_contains_text
@@ -1095,22 +1105,95 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
     harness.process_events(cycles=8)
     visuals: dict[str, dict[str, object]] = {}
 
-    def _new_invoice_via_ui(description: str, visual_prefix: str) -> tuple[int, int]:
+    def _new_invoice_via_template_workspace(
+        description: str,
+        visual_prefix: str,
+    ) -> tuple[int, int]:
         previous_id = _single_int(conn, "SELECT COALESCE(MAX(id), 0) FROM Invoices")
-        panel.focus_tab("invoices")
-        panel.invoice_workflow_tabs.setCurrentIndex(2)
-        _set_combo_by_data(panel.party_combo, ids.party_id)
-        panel.due_date_field.setText("2026-06-30")
-        panel.description_field.setText(description)
-        panel.quantity_field.setText("1")
-        panel.unit_price_field.setText("100.00")
-        panel.vat_rate_field.setText("2100")
-        _click_button(panel, "Add Manual Line")
+        template_service = getattr(window, "contract_template_service", None)
+        export_service = getattr(window, "contract_template_export_service", None)
+        if template_service is None or export_service is None:
+            raise AssertionError("Template Workspace services were unavailable for invoice PQ.")
+        invoice_service = getattr(window, "invoice_service", None) or InvoiceService(conn)
+        catalog_item_id = invoice_service.catalog_service.create_item(
+            InvoiceCatalogItemPayload(
+                name=f"{visual_prefix} billable preset",
+                description=description,
+                default_unit_price_minor=10_000,
+                default_vat_rate_basis_points=2100,
+                default_account_code="4100",
+                currency="EUR",
+            )
+        )
+        template = template_service.create_template(
+            ContractTemplatePayload(
+                name=f"{visual_prefix} invoice template",
+                template_family="invoice",
+                source_format="html",
+            )
+        )
+        html = (
+            "<html><body>"
+            "<p>Invoice {{db.invoice.number}}</p>"
+            "<p>{{db.party.display_name}}</p>"
+            "<p>{{db.invoice.total}}</p>"
+            "{{duplicate.start}}"
+            "<p>{{db.invoice_line.description.indexed}} "
+            "{{db.invoice_line.quantity.indexed}} "
+            "{{db.invoice_line.net_amount.indexed}} "
+            "{{db.invoice_line.vat_amount.indexed}} "
+            "{{db.invoice_line.gross_amount.indexed}}</p>"
+            "{{duplicate.end}}{{duplicate.number}}"
+            "</body></html>"
+        )
+        revision = template_service.import_revision_from_bytes(
+            int(template.template_id),
+            html.encode("utf-8"),
+            payload=ContractTemplateRevisionPayload(
+                revision_label="UI PQ invoice",
+                source_filename=f"{visual_prefix}.html",
+                source_format="html",
+                storage_mode="database",
+            ),
+        ).revision
+        line_key = build_contract_template_indexed_selection_key(
+            "{{db.invoice_line.description.indexed}}",
+            1,
+        )
+        draft = template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=int(revision.revision_id),
+                name=f"{visual_prefix} final invoice draft",
+                editable_payload={
+                    "revision_id": int(revision.revision_id),
+                    "db_selections": {
+                        "db_scope.party.party_selection_required": str(ids.party_id),
+                        line_key: str(catalog_item_id),
+                    },
+                    "invoice_line_inputs": {line_key: {"quantity": "1"}},
+                    "manual_values": {"{{duplicate.number}}": 1},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+        template_panel = window.open_contract_template_workspace(initial_tab="fill")
         harness.process_events(cycles=6)
         visuals[f"{visual_prefix}_line_entry"] = _capture_workflow_widget(
-            harness, panel, f"{visual_prefix}_line_entry"
+            harness, template_panel or panel, f"{visual_prefix}_line_entry"
         )
-        _click_button(panel, "Create Draft Invoice")
+        export_result = export_service.export_draft_to_pdf(int(draft.draft_id))
+        finalized = TemplateWorkspaceInvoiceFinalizationService(
+            conn,
+            data_root=getattr(window, "data_root", None),
+        ).finalize_from_pdf_artifact(
+            draft_id=int(draft.draft_id),
+            pdf_artifact=export_result.pdf_artifact,
+            resolved_html_artifact=export_result.resolved_html_artifact,
+            storage_mode="database",
+        )
+        harness.process_events(cycles=6)
+        panel.refresh_all()
         invoice_id, total_minor = _wait_for_row(
             harness,
             """
@@ -1123,6 +1206,8 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
             (previous_id, ids.party_id),
             label=f"{visual_prefix} invoice",
         )
+        if int(invoice_id) != int(finalized.invoice.id):
+            raise AssertionError("Template Workspace final invoice was not selected in ledger.")
         panel._select_invoice_id(int(invoice_id))
         harness.process_events(cycles=6)
         visuals[f"{visual_prefix}_draft_created"] = _capture_workflow_widget(
@@ -1139,7 +1224,6 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
         panel.invoice_workflow_tabs.setCurrentIndex(0)
         panel._select_invoice_id(invoice_id)
         harness.process_events(cycles=4)
-        _click_button(panel, "Issue")
         invoice_number, document_status = _wait_for_row(
             harness,
             """
@@ -1155,7 +1239,7 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
         visuals[visual_name] = _capture_workflow_widget(harness, panel, visual_name)
         return str(invoice_number or document_status)
 
-    paid_invoice_id, paid_total_minor = _new_invoice_via_ui(
+    paid_invoice_id, paid_total_minor = _new_invoice_via_template_workspace(
         "UI PQ user-entered invoice for payment", "accounting_paid_invoice"
     )
     paid_invoice_number = _issue_invoice_via_ui(paid_invoice_id, "accounting_invoice_posted")
@@ -1198,7 +1282,7 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
         harness, panel, "accounting_payment_entered"
     )
 
-    credited_invoice_id, credited_total_minor = _new_invoice_via_ui(
+    credited_invoice_id, credited_total_minor = _new_invoice_via_template_workspace(
         "UI PQ user-entered invoice for credit note", "accounting_credit_invoice"
     )
     credited_invoice_number = _issue_invoice_via_ui(
@@ -1413,9 +1497,10 @@ def run_accounting_workflow(harness: Any, ids: QARepertoireIds) -> None:
         data={
             "workflow_status": "fully_ui_led",
             "ui_control_path": (
-                "Invoice Workspace controls: Create Draft Invoice, Issue, Payment, "
-                "Create Credit Note, Create Calculation, Approve / Post, Generate "
-                "Statement, Record Payout, Refresh Reports."
+                "Template Workspace controls: Export PDF, Mark Invoice Final; "
+                "Invoice Workspace controls: Open Invoice, Open File Location, Payment, "
+                "Create Credit Note, Create Calculation, Approve / Post, Generate Statement, "
+                "Record Payout, Refresh Reports."
             ),
             "service_layer_shortcuts": [],
             "paid_invoice_id": paid_invoice_id,

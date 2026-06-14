@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import html
-import re
-import shutil
 import sqlite3
-import tempfile
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
-from PySide6.QtCore import QDate, Qt, QTimer, QUrl
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -52,42 +45,24 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_ROYALTY_STATEMENT_NUMBER,
     CodeRegistryService,
 )
-from isrc_manager.contract_templates.dialogs import (
-    QWebEngineView as _ContractQWebEngineView,
-)
-from isrc_manager.contract_templates.dialogs import (
-    _FallbackHtmlPreviewView as _ContractFallbackHtmlPreviewView,
-)
-from isrc_manager.contract_templates.dialogs import (
-    _InteractiveHtmlPreviewView as _ContractInteractiveHtmlPreviewView,
-)
-from isrc_manager.contract_templates.formatting import (
-    DEFAULT_MANUAL_DATE_FORMAT,
-    MANUAL_DATE_FORMAT_PRESETS,
-    format_manual_date_value,
-)
-from isrc_manager.contract_templates.models import (
-    ContractTemplateFormChoice,
-    ContractTemplateFormDefinition,
-    ContractTemplateFormManualField,
-    ContractTemplateFormSelectorField,
-    build_contract_template_indexed_selection_key,
-)
-from isrc_manager.contract_templates.parser import (
-    InvalidPlaceholderError,
-    parse_placeholder,
-)
+from isrc_manager.external_launch import open_external_path
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.parties import PartyRecord, PartyService
 from isrc_manager.services.settings_reads import OwnerPartySettings, SettingsReadService
 from isrc_manager.ui_common import _configure_standard_form_layout, _create_standard_section
 
 from .credit_note_service import CreditNoteService
-from .invoice_service import InvoiceCatalogService, InvoiceService
+from .currencies import ISO_4217_CURRENCY_CODES, currency_for_country
+from .invoice_service import InvoiceCatalogCategoryService, InvoiceCatalogService, InvoiceService
+from .ledger_service import ACCOUNT_TYPES, NORMAL_BALANCES, AccountingAccountService
 from .models import (
+    DEFAULT_CURRENCY,
     VAT_TREATMENTS,
+    AccountingAccountPayload,
     ArtistPayoutPayload,
     CreditNoteLineAllocationPayload,
     CreditNotePayload,
+    InvoiceCatalogCategoryPayload,
     InvoiceCatalogItemPayload,
     InvoiceDraftPayload,
     InvoiceLinePayload,
@@ -111,195 +86,6 @@ from .royalty_integration import (
 from .royalty_service import RoyaltyAccountingService
 from .template_service import InvoiceTemplateService
 from .travel_distance import TravelDistanceService
-
-_INVOICE_TEMPLATE_SYMBOL_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
-_INVOICE_TEMPLATE_SYMBOL_ALIASES: dict[str, str] = {
-    "contract.license_number": "invoice.number",
-    "contract.number": "invoice.number",
-    "contract.reference": "invoice.number",
-    "party.company_name": "invoice.party.company_name",
-    "party.display_name": "invoice.party.display_name",
-    "party.name": "invoice.party.name",
-    "party.legal_name": "invoice.party.legal_name",
-    "party.address": "invoice.party.address",
-    "party.address_line1": "invoice.party.address_line1",
-    "party.address_line2": "invoice.party.address_line2",
-    "party.street_name": "invoice.party.street_name",
-    "party.street_number": "invoice.party.street_number",
-    "party.postal_code": "invoice.party.postal_code",
-    "party.city": "invoice.party.city",
-    "party.region": "invoice.party.region",
-    "party.country": "invoice.party.country",
-    "party.vat_number": "invoice.party.vat_number",
-    "party.tax_id": "invoice.party.tax_id",
-    "party.email": "invoice.party.email",
-    "party.phone": "invoice.party.phone",
-    "party.bank_account_number": "invoice.party.bank_account_number",
-    "party.chamber_of_commerce_number": "invoice.party.chamber_of_commerce_number",
-    "invoice.party_name": "invoice.party.name",
-    "invoice.party_company_name": "invoice.party.company_name",
-    "invoice.party_display_name": "invoice.party.display_name",
-    "invoice.party_legal_name": "invoice.party.legal_name",
-    "invoice.party_address": "invoice.party.address",
-    "invoice.party_address_line1": "invoice.party.address_line1",
-    "invoice.party_address_line2": "invoice.party.address_line2",
-    "invoice.party_street_name": "invoice.party.street_name",
-    "invoice.party_street_number": "invoice.party.street_number",
-    "invoice.party_postal_code": "invoice.party.postal_code",
-    "invoice.party_city": "invoice.party.city",
-    "invoice.party_region": "invoice.party.region",
-    "invoice.party_country": "invoice.party.country",
-    "invoice.party_vat_number": "invoice.party.vat_number",
-    "invoice.party_tax_id": "invoice.party.tax_id",
-    "invoice.party_email": "invoice.party.email",
-    "invoice.party_phone": "invoice.party.phone",
-    "invoice.party_bank_account_number": "invoice.party.bank_account_number",
-    "invoice.party_chamber_of_commerce_number": "invoice.party.chamber_of_commerce_number",
-    "owner.company_name": "company.company_name",
-    "owner.display_name": "company.display_name",
-    "owner.legal_name": "company.legal_name",
-    "owner.name": "company.name",
-    "owner.address": "company.address",
-    "owner.address_line1": "company.address_line1",
-    "owner.address_line2": "company.address_line2",
-    "owner.street_name": "company.street_name",
-    "owner.street_number": "company.street_number",
-    "owner.postal_code": "company.postal_code",
-    "owner.city": "company.city",
-    "owner.region": "company.region",
-    "owner.country": "company.country",
-    "owner.vat_number": "company.vat_number",
-    "owner.email": "company.email",
-    "owner.phone": "company.phone",
-    "owner.bank_account_number": "company.payment_details",
-    "owner.chamber_of_commerce_number": "company.chamber_of_commerce_number",
-}
-_INVOICE_TEMPLATE_RENDER_MODES: dict[str, str] = {
-    "invoice.number": "text",
-    "invoice.issue_date": "date",
-    "invoice.due_date": "date",
-    "invoice.document_status": "text",
-    "invoice.payment_status": "text",
-    "invoice.due_status": "text",
-    "invoice.currency": "text",
-    "invoice.subtotal": "money",
-    "invoice.vat_total": "money",
-    "invoice.total": "money",
-    "invoice.outstanding_balance": "money",
-    "invoice.lines": "table",
-    "invoice.vat_breakdown": "table",
-    "invoice.party.name": "text",
-    "invoice.party.company_name": "text",
-    "invoice.party.display_name": "text",
-    "invoice.party.legal_name": "text",
-    "invoice.party.address": "text",
-    "invoice.party.address_line1": "text",
-    "invoice.party.address_line2": "text",
-    "invoice.party.street_name": "text",
-    "invoice.party.street_number": "text",
-    "invoice.party.postal_code": "text",
-    "invoice.party.city": "text",
-    "invoice.party.region": "text",
-    "invoice.party.country": "text",
-    "invoice.party.vat_number": "text",
-    "invoice.party.tax_id": "text",
-    "invoice.party.email": "text",
-    "invoice.party.phone": "text",
-    "invoice.party.bank_account_number": "text",
-    "invoice.party.chamber_of_commerce_number": "text",
-    "company.name": "text",
-    "company.company_name": "text",
-    "company.display_name": "text",
-    "company.legal_name": "text",
-    "company.address": "text",
-    "company.address_line1": "text",
-    "company.address_line2": "text",
-    "company.street_name": "text",
-    "company.street_number": "text",
-    "company.postal_code": "text",
-    "company.city": "text",
-    "company.region": "text",
-    "company.country": "text",
-    "company.vat_number": "text",
-    "company.email": "text",
-    "company.phone": "text",
-    "company.payment_details": "text",
-    "company.chamber_of_commerce_number": "text",
-    "credit_note.number": "text",
-    "credit_note.reason": "text",
-    "credit_note.original_invoice_number": "text",
-    "royalty.statement_number": "text",
-    "royalty.payee_name": "text",
-    "royalty.contract_title": "text",
-    "royalty.period_start": "date",
-    "royalty.period_end": "date",
-    "royalty.gross_royalty": "money",
-    "royalty.deductions": "money",
-    "royalty.advance_recouped": "money",
-    "royalty.net_payable": "money",
-    "royalty.payment_status": "text",
-    "royalty.calculation_id": "text",
-    "royalty.statement_id": "text",
-    "track.track_title": "text",
-    "track.title": "text",
-    "track.isrc": "text",
-    "track.track_length_sec": "text",
-    "track.duration": "text",
-    "track.composer": "text",
-    "track.artist_name": "text",
-    "track.additional_artists": "text",
-}
-_INVOICE_TEMPLATE_PARTY_FIELDS = {
-    "invoice.party.name",
-    "invoice.party.company_name",
-    "invoice.party.display_name",
-    "invoice.party.legal_name",
-    "invoice.party.address",
-    "invoice.party.address_line1",
-    "invoice.party.address_line2",
-    "invoice.party.street_name",
-    "invoice.party.street_number",
-    "invoice.party.postal_code",
-    "invoice.party.city",
-    "invoice.party.region",
-    "invoice.party.country",
-    "invoice.party.vat_number",
-    "invoice.party.tax_id",
-    "invoice.party.email",
-    "invoice.party.phone",
-    "invoice.party.bank_account_number",
-    "invoice.party.chamber_of_commerce_number",
-}
-_INVOICE_TEMPLATE_OWNER_FIELDS = {
-    "company.name",
-    "company.company_name",
-    "company.display_name",
-    "company.legal_name",
-    "company.address",
-    "company.address_line1",
-    "company.address_line2",
-    "company.street_name",
-    "company.street_number",
-    "company.postal_code",
-    "company.city",
-    "company.region",
-    "company.country",
-    "company.vat_number",
-    "company.email",
-    "company.phone",
-    "company.payment_details",
-    "company.chamber_of_commerce_number",
-}
-_INVOICE_TEMPLATE_TRACK_FIELDS = {
-    "track.track_title",
-    "track.title",
-    "track.isrc",
-    "track.track_length_sec",
-    "track.duration",
-    "track.composer",
-    "track.artist_name",
-    "track.additional_artists",
-}
 
 
 def _clean_text(value: object | None) -> str | None:
@@ -342,46 +128,6 @@ def _display_date(value: object | None) -> str:
 
 def _status_label(value: object | None) -> str:
     return str(value or "").strip().replace("_", " ").title() or "Unknown"
-
-
-def _invoice_template_symbol_key(value: object | None) -> str:
-    text = str(value or "").strip()
-    if text.startswith("{{") and text.endswith("}}"):
-        text = text[2:-2].strip()
-    token = _contract_placeholder_token(text)
-    if token is not None:
-        if token.binding_kind == "manual":
-            return token.canonical_symbol
-        if token.binding_kind == "db":
-            text = f"db.{token.namespace}.{token.key}"
-        elif token.binding_kind == "current":
-            return token.canonical_symbol
-    symbol = text.lower().replace("-", "_")
-    if symbol.startswith("db."):
-        symbol = symbol[3:]
-    if symbol.startswith("manual."):
-        token = _contract_placeholder_token(symbol)
-        if token is not None and token.binding_kind == "manual":
-            return token.canonical_symbol
-        symbol = f"custom.{symbol[7:]}"
-    return _INVOICE_TEMPLATE_SYMBOL_ALIASES.get(symbol, symbol)
-
-
-def _contract_placeholder_token(value: object | None):
-    inner = str(value or "").strip()
-    if inner.startswith("{{") and inner.endswith("}}"):
-        inner = inner[2:-2].strip()
-    if not inner:
-        return None
-    try:
-        return parse_placeholder(f"{{{{{inner}}}}}")
-    except InvalidPlaceholderError:
-        return None
-
-
-def _template_value_preview(value: object | None) -> str:
-    text = html.unescape(re.sub(r"<[^>]+>", " ", str(value or "")))
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def _set_table_rows(
@@ -458,6 +204,7 @@ class InvoiceWorkspacePanel(QWidget):
         self,
         *,
         conn_provider: Callable[[], sqlite3.Connection | None],
+        data_root: str | Path | None = None,
         open_contract_manager: Callable[[int | None], object] | None = None,
         open_work_manager: Callable[[int | None], object] | None = None,
         open_track_editor: Callable[[int | None], object] | None = None,
@@ -467,6 +214,7 @@ class InvoiceWorkspacePanel(QWidget):
     ):
         super().__init__(parent)
         self._conn_provider = conn_provider
+        self._data_root = Path(data_root).resolve() if data_root is not None else None
         self._open_contract_manager = open_contract_manager
         self._open_work_manager = open_work_manager
         self._open_track_editor = open_track_editor
@@ -486,11 +234,13 @@ class InvoiceWorkspacePanel(QWidget):
         self.statement_table = QTableWidget(0, 12, self)
         self.dispute_table = QTableWidget(0, 8, self)
         self.invoice_table = QTableWidget(0, 8, self)
+        self.invoice_final_storage_combo = QComboBox(self)
+        self.invoice_final_status_label = QLabel(self)
         self.royalty_payables_table = QTableWidget(0, 9, self)
         self.einvoice_table = QTableWidget(0, 7, self)
         self.invoice_line_table = QTableWidget(0, 7, self)
         self.draft_line_table = QTableWidget(0, 7, self)
-        self.catalog_table = QTableWidget(0, 8, self)
+        self.catalog_table = QTableWidget(0, 9, self)
         self.catalog_item_combo = QComboBox(self)
         self.royalty_table = QTableWidget(0, 7, self)
         self.journal_table = QTableWidget(0, 10, self)
@@ -527,11 +277,21 @@ class InvoiceWorkspacePanel(QWidget):
         self.catalog_description_field = QLineEdit(self)
         self.catalog_quantity_field = QLineEdit(self)
         self.catalog_unit_price_field = QLineEdit(self)
+        self.catalog_currency_combo = QComboBox(self)
         self.catalog_vat_rate_field = QLineEdit(self)
         self.catalog_vat_country_field = QLineEdit(self)
-        self.catalog_category_field = QLineEdit(self)
-        self.catalog_account_field = QLineEdit(self)
+        self.catalog_category_combo = QComboBox(self)
+        self.catalog_account_combo = QComboBox(self)
         self.catalog_active_check = QCheckBox("Active", self)
+        self.catalog_category_table = QTableWidget(0, 5, self)
+        self.catalog_category_name_field = QLineEdit(self)
+        self.catalog_category_active_check = QCheckBox("Active", self)
+        self.account_admin_table = QTableWidget(0, 7, self)
+        self.account_code_field = QLineEdit(self)
+        self.account_name_field = QLineEdit(self)
+        self.account_type_combo = QComboBox(self)
+        self.account_normal_balance_combo = QComboBox(self)
+        self.account_active_check = QCheckBox("Active", self)
         self.travel_origin_field = QLineEdit(self)
         self.travel_destination_field = QLineEdit(self)
         self.travel_km_field = QLineEdit(self)
@@ -564,33 +324,7 @@ class InvoiceWorkspacePanel(QWidget):
         self.royalty_period_end_field = QLineEdit(self)
         self.royalty_payout_amount_field = QLineEdit(self)
         self.royalty_payment_reference_field = QLineEdit(self)
-        self.template_name_field = QLineEdit(self)
-        self.template_path_field = QLineEdit(self)
-        self.template_status_label = QLabel(self)
-        self.template_html_editor = QTextEdit(self)
-        self.template_fill_tabs = QTabWidget(self)
-        self.template_manual_empty_label = QLabel(self)
-        self.template_database_empty_label = QLabel(self)
-        self.template_owner_empty_label = QLabel(self)
-        self.template_manual_widgets: dict[str, QWidget] = {}
-        self.template_manual_date_format_widgets: dict[str, QLineEdit] = {}
-        self.template_manual_date_format_combo_widgets: dict[str, QComboBox] = {}
-        self.template_selector_widgets: dict[str, QWidget] = {}
-        self.template_indexed_manual_widgets: dict[str, QWidget] = {}
-        self.template_indexed_selector_widgets: dict[str, QWidget] = {}
-        self.template_party_selector_combo = QComboBox(self)
-        self.template_manual_form = QFormLayout()
-        self.template_database_form = QFormLayout()
-        self.template_database_value_combo = QComboBox(self)
-        self.template_database_value_detail_output = QTextEdit(self)
-        self.template_symbol_combo = QComboBox(self)
-        self.template_symbol_detail_output = QTextEdit(self)
         self.manual_footer_field = QLineEdit(self)
-        self._template_rebuilding_fill_fields = False
-        self._template_pending_fill_rebuild = False
-        self.preview_output: Any = QTextBrowser(self)
-        self.invoice_preview_zoom_label = QLabel("100%", self)
-        self._invoice_preview_session_dir: Path | None = None
         self.report_output = QTextEdit(self)
         self.dashboard_detail_output = QTextEdit(self)
         self.company_owner_output = QTextEdit(self)
@@ -641,10 +375,25 @@ class InvoiceWorkspacePanel(QWidget):
             "reports": 4,
             "catalog": 5,
             "items": 5,
-            "templates": 5,
             "settings": 5,
         }
         self.tabs.setCurrentIndex(mapping.get(str(tab_key or "").strip().lower(), 1))
+
+    def _focus_settings_page(self, tab_title: str) -> None:
+        self.focus_tab("settings")
+        tabs = getattr(self, "settings_tabs", None)
+        if not isinstance(tabs, QTabWidget):
+            return
+        for index in range(tabs.count()):
+            if tabs.tabText(index) == tab_title:
+                tabs.setCurrentIndex(index)
+                return
+
+    def open_catalog_category_admin(self) -> None:
+        self._focus_settings_page("Preset Categories")
+
+    def open_ledger_account_admin(self) -> None:
+        self._focus_settings_page("Ledger Accounts")
 
     def refresh_all(self) -> None:
         if self._conn() is None:
@@ -657,6 +406,8 @@ class InvoiceWorkspacePanel(QWidget):
         self._refresh_integrations_settings()
         self._refresh_workflows_settings()
         self._refresh_invoice_catalog()
+        self._refresh_catalog_category_settings()
+        self._refresh_account_admin_settings()
         self._refresh_royalty_parties()
         self._refresh_royalty_contracts()
         self.refresh_dashboard()
@@ -1036,6 +787,12 @@ class InvoiceWorkspacePanel(QWidget):
             table_rows,
             empty_message="No royalty statements generated yet.",
         )
+        for row_index, row in enumerate(rows):
+            item = self.statement_table.item(row_index, 0)
+            if item is None:
+                continue
+            item.setData(Qt.ItemDataRole.UserRole, int(row[11]))
+            item.setData(Qt.ItemDataRole.UserRole + 1, int(row[10]))
         _set_table_rows(
             self.dispute_table,
             (
@@ -1108,6 +865,10 @@ class InvoiceWorkspacePanel(QWidget):
             einvoice_rows,
             empty_message="No e-invoice artifacts have been generated.",
         )
+        if not rows:
+            self.invoice_final_status_label.setText(
+                "No final invoices yet. Create and mark invoices final in Template Workspace."
+            )
 
     def refresh_invoice_lines(self) -> None:
         conn = self._conn()
@@ -1599,10 +1360,12 @@ class InvoiceWorkspacePanel(QWidget):
             lines = tuple(self._draft_invoice_lines)
             if not lines:
                 lines = (self._manual_line_payload(default_description="Invoice item"),)
+            currency = self._draft_invoice_currency(InvoiceService(conn), lines)
             invoice = InvoiceService(conn).create_draft_invoice(
                 InvoiceDraftPayload(
                     party_id=int(party_id),
                     due_date=_clean_text(self.due_date_field.text()),
+                    currency=currency,
                     lines=lines,
                 )
             )
@@ -1631,18 +1394,21 @@ class InvoiceWorkspacePanel(QWidget):
         quantity = format_quantity(
             Quantity(item.default_quantity_value, item.default_quantity_scale)
         )
-        self._append_draft_line(
-            InvoiceLinePayload(
-                description=item.description or item.name,
-                quantity=quantity,
-                unit_price_minor=0,
-                vat_treatment=item.default_vat_treatment,
-                vat_rate_basis_points=0,
-                vat_country_code=item.vat_country_code,
-                ledger_account_code=item.default_account_code,
-                catalog_item_id=item.id,
+        try:
+            self._append_draft_line(
+                InvoiceLinePayload(
+                    description=item.description or item.name,
+                    quantity=quantity,
+                    unit_price_minor=0,
+                    vat_treatment=item.default_vat_treatment,
+                    vat_rate_basis_points=0,
+                    vat_country_code=item.vat_country_code,
+                    ledger_account_code=item.default_account_code,
+                    catalog_item_id=item.id,
+                )
             )
-        )
+        except Exception as exc:
+            QMessageBox.warning(self, "Invoice Line", str(exc))
 
     def add_travel_invoice_line(self) -> None:
         try:
@@ -1709,8 +1475,9 @@ class InvoiceWorkspacePanel(QWidget):
                     _clean_text(self.catalog_vat_rate_field.text()) or "0"
                 ),
                 vat_country_code=_clean_text(self.catalog_vat_country_field.text()),
-                category=_clean_text(self.catalog_category_field.text()),
-                default_account_code=_clean_text(self.catalog_account_field.text()),
+                currency=self.catalog_currency_combo.currentData() or DEFAULT_CURRENCY,
+                category=self._catalog_category_value(),
+                default_account_code=self._catalog_account_code_value(),
                 active=self.catalog_active_check.isChecked(),
             )
             service = InvoiceCatalogService(conn)
@@ -1723,6 +1490,50 @@ class InvoiceWorkspacePanel(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Catalog Preset", str(exc))
 
+    def save_catalog_category(self) -> None:
+        conn = self._conn_or_warn()
+        if conn is None:
+            return
+        try:
+            payload = InvoiceCatalogCategoryPayload(
+                name=_clean_text(self.catalog_category_name_field.text()) or "",
+                active=self.catalog_category_active_check.isChecked(),
+            )
+            service = InvoiceCatalogCategoryService(conn)
+            category_id = self._selected_catalog_category_id()
+            if category_id is None:
+                service.create_category(payload)
+            else:
+                service.update_category(category_id, payload)
+            self._refresh_catalog_category_settings()
+            self._refresh_catalog_category_options()
+        except Exception as exc:
+            QMessageBox.warning(self, "Catalog Category", str(exc))
+
+    def save_ledger_account(self) -> None:
+        conn = self._conn_or_warn()
+        if conn is None:
+            return
+        try:
+            payload = AccountingAccountPayload(
+                code=_clean_text(self.account_code_field.text()) or "",
+                name=_clean_text(self.account_name_field.text()) or "",
+                account_type=str(self.account_type_combo.currentData() or ""),
+                normal_balance=str(self.account_normal_balance_combo.currentData() or ""),
+                active=self.account_active_check.isChecked(),
+            )
+            service = AccountingAccountService(conn)
+            account_id = self._selected_ledger_account_id()
+            if account_id is None:
+                service.create_account(payload)
+            else:
+                service.update_account(account_id, payload)
+            self._refresh_account_admin_settings()
+            self._refresh_catalog_account_options()
+            self.refresh_accounting()
+        except Exception as exc:
+            QMessageBox.warning(self, "Ledger Account", str(exc))
+
     def _manual_line_payload(self, *, default_description: str) -> InvoiceLinePayload:
         return InvoiceLinePayload(
             description=_clean_text(self.description_field.text()) or default_description,
@@ -1733,7 +1544,29 @@ class InvoiceWorkspacePanel(QWidget):
 
     def _append_draft_line(self, payload: InvoiceLinePayload) -> None:
         self._draft_invoice_lines.append(payload)
-        self._refresh_draft_line_table()
+        try:
+            self._refresh_draft_line_table()
+        except Exception:
+            self._draft_invoice_lines.pop()
+            self._refresh_draft_line_table()
+            raise
+
+    @staticmethod
+    def _draft_invoice_currency(
+        invoice_service: InvoiceService,
+        lines: tuple[InvoiceLinePayload, ...],
+    ) -> str:
+        currencies: list[str] = []
+        for payload in lines:
+            if payload.catalog_item_id is None:
+                continue
+            item = invoice_service.catalog_service.fetch_item(int(payload.catalog_item_id))
+            if item is not None and item.currency:
+                currencies.append(item.currency)
+        unique = tuple(dict.fromkeys(currencies))
+        if len(unique) > 1:
+            raise ValueError("All draft invoice preset lines must use one currency.")
+        return unique[0] if unique else DEFAULT_CURRENCY
 
     def _refresh_draft_line_table(self) -> None:
         conn = self._conn()
@@ -1742,16 +1575,23 @@ class InvoiceWorkspacePanel(QWidget):
         vat_total = 0
         gross_total = 0
         invoice_service = InvoiceService(conn) if conn is not None else None
+        currency = DEFAULT_CURRENCY
+        if invoice_service is not None:
+            currency = self._draft_invoice_currency(
+                invoice_service,
+                tuple(self._draft_invoice_lines),
+            )
         for row_index, payload in enumerate(self._draft_invoice_lines):
             if invoice_service is not None:
-                preview = invoice_service.preview_invoice_line(payload)
+                preview = invoice_service.preview_invoice_line(payload, currency=currency)
                 quantity = format_quantity(
                     Quantity(
                         int(preview["quantity_value"]),
                         int(preview["quantity_scale"]),
                     )
                 )
-                unit = format_money(int(preview["unit_price_minor"]))
+                line_currency = str(preview["currency"] or currency)
+                unit = format_money(int(preview["unit_price_minor"]), currency=line_currency)
                 net = int(preview["net_amount_minor"])
                 vat = int(preview["vat_amount_minor"])
                 gross = int(preview["gross_amount_minor"])
@@ -1771,9 +1611,9 @@ class InvoiceWorkspacePanel(QWidget):
                 str(payload.description),
                 quantity,
                 unit,
-                format_money(net),
-                format_money(vat),
-                format_money(gross),
+                format_money(net, currency=currency),
+                format_money(vat, currency=currency),
+                format_money(gross, currency=currency),
             )
             for col_index, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -1783,8 +1623,9 @@ class InvoiceWorkspacePanel(QWidget):
         self.draft_line_table.resizeColumnsToContents()
         self.draft_totals_label.setText(
             "Draft totals: "
-            f"net {format_money(subtotal)}, VAT {format_money(vat_total)}, "
-            f"gross {format_money(gross_total)}"
+            f"net {format_money(subtotal, currency=currency)}, "
+            f"VAT {format_money(vat_total, currency=currency)}, "
+            f"gross {format_money(gross_total, currency=currency)}"
         )
 
     def issue_selected_invoice(self) -> None:
@@ -1793,13 +1634,101 @@ class InvoiceWorkspacePanel(QWidget):
         if conn is None or invoice_id is None:
             return
         try:
-            InvoiceService(conn).issue_invoice(
+            artifact = InvoiceTemplateService(conn, data_root=self._data_root).finalize_invoice(
                 invoice_id,
                 command_key=f"ui-issue-{invoice_id}-{uuid.uuid4().hex}",
+                storage_mode=self._selected_invoice_final_storage_mode(),
             )
             self.refresh_all()
+            self._select_invoice_id(invoice_id)
+            self.invoice_final_status_label.setText(
+                f"Final invoice stored as {self._storage_label(artifact.storage_mode)}."
+            )
         except Exception as exc:
-            QMessageBox.warning(self, "Issue Invoice", str(exc))
+            QMessageBox.warning(self, "Finalize Invoice", str(exc))
+
+    def view_selected_final_invoice(self) -> None:
+        invoice_id = self._selected_invoice_id()
+        conn = self._conn_or_warn()
+        if conn is None:
+            return
+        if invoice_id is None:
+            QMessageBox.warning(
+                self,
+                "Open Invoice",
+                "Select a final invoice row first. Final invoices are created from Template Workspace.",
+            )
+            return
+        try:
+            template_service = InvoiceTemplateService(conn, data_root=self._data_root)
+            artifact = self._latest_final_invoice_artifact(template_service, invoice_id)
+            if artifact is None:
+                QMessageBox.warning(
+                    self,
+                    "Open Invoice",
+                    "The selected ledger invoice has no retained final invoice artifact.",
+                )
+                return
+            path = template_service.materialize_output_artifact(int(artifact.id))
+            opened = open_external_path(
+                path,
+                source="InvoiceWorkspacePanel.view_selected_final_invoice",
+                metadata={
+                    "invoice_id": int(invoice_id),
+                    "artifact_id": int(artifact.id),
+                    "storage_mode": artifact.storage_mode,
+                },
+            )
+            self.invoice_final_status_label.setText(
+                f"{'Opened' if opened else 'Could not open'} final invoice: {path}"
+            )
+            if not opened:
+                QMessageBox.warning(self, "Open Invoice", f"Could not open {path}.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Open Invoice", str(exc))
+
+    def open_selected_final_invoice_location(self) -> None:
+        invoice_id = self._selected_invoice_id()
+        conn = self._conn_or_warn()
+        if conn is None:
+            return
+        if invoice_id is None:
+            QMessageBox.warning(
+                self,
+                "Open File Location",
+                "Select a final invoice row first. Final invoices are created from Template Workspace.",
+            )
+            return
+        try:
+            template_service = InvoiceTemplateService(conn, data_root=self._data_root)
+            artifact = self._latest_final_invoice_artifact(template_service, invoice_id)
+            if artifact is None:
+                QMessageBox.warning(
+                    self,
+                    "Open File Location",
+                    "The selected ledger invoice has no retained final invoice artifact.",
+                )
+                return
+            if artifact.storage_mode != STORAGE_MODE_MANAGED_FILE:
+                self.invoice_final_status_label.setText(
+                    "This final invoice is database embedded and has no managed file location."
+                )
+                return
+            path = template_service.materialize_output_artifact(int(artifact.id))
+            opened = open_external_path(
+                path.parent,
+                source="InvoiceWorkspacePanel.open_selected_final_invoice_location",
+                metadata={
+                    "invoice_id": int(invoice_id),
+                    "artifact_id": int(artifact.id),
+                    "storage_mode": artifact.storage_mode,
+                },
+            )
+            self.invoice_final_status_label.setText(
+                f"{'Opened' if opened else 'Could not open'} final invoice folder: {path.parent}"
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Open File Location", str(exc))
 
     def void_selected_invoice(self) -> None:
         invoice_id = self._selected_invoice_id()
@@ -1814,6 +1743,54 @@ class InvoiceWorkspacePanel(QWidget):
             self.refresh_all()
         except Exception as exc:
             QMessageBox.warning(self, "Void Invoice", str(exc))
+
+    def purge_selected_invoice_for_cleanup(self) -> None:
+        invoice_id = self._selected_invoice_id()
+        conn = self._conn_or_warn()
+        if conn is None:
+            return
+        if invoice_id is None:
+            QMessageBox.warning(
+                self,
+                "Purge Invoice",
+                "Select an invoice ledger row to purge.",
+            )
+            return
+        invoice = InvoiceService(conn).fetch_invoice(invoice_id)
+        if invoice is None:
+            QMessageBox.warning(self, "Purge Invoice", "The selected invoice was not found.")
+            return
+        invoice_label = (
+            invoice.invoice_number or invoice.draft_display_id or f"Invoice {invoice.id}"
+        )
+        accepted = QMessageBox.question(
+            self,
+            "Purge Invoice",
+            (
+                f"Permanently purge {invoice_label} and all linked invoice ledger data?\n\n"
+                "This removes invoice lines, payments, credit notes, final artifacts, "
+                "accounting transactions, and command-log rows for this invoice. "
+                "Use this only for cleanup of accidental or test records."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if accepted != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            summary = InvoiceService(conn, data_root=self._data_root).purge_invoice_for_cleanup(
+                invoice_id
+            )
+            self.refresh_all()
+            self.invoice_final_status_label.setText(
+                "Purged invoice cleanup: "
+                f"{summary['payments']} payment(s), "
+                f"{summary['credit_notes']} credit note(s), "
+                f"{summary['artifacts']} artifact(s), "
+                f"{summary['ledger_transactions']} ledger transaction(s)."
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Purge Invoice", str(exc))
 
     def record_payment_for_selected_invoice(self) -> None:
         invoice_id = self._selected_invoice_id()
@@ -2174,1508 +2151,6 @@ class InvoiceWorkspacePanel(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Royalties", str(exc))
 
-    def upload_template(self) -> None:
-        conn = self._conn_or_warn()
-        if conn is None:
-            return
-        service = InvoiceTemplateService(conn)
-        template_path = _clean_text(self.template_path_field.text())
-        try:
-            if template_path:
-                revision = service.upload_html_template_from_path(
-                    template_path,
-                    name=_clean_text(self.template_name_field.text()) or "Invoice Template",
-                )
-                self.template_html_editor.setPlainText(revision.html_content)
-            else:
-                revision = service.upload_html_template(
-                    name=_clean_text(self.template_name_field.text()) or "Invoice Template",
-                    html_content=self.template_html_editor.toPlainText(),
-                    source_filename="inline-invoice-template.html",
-                )
-            self.template_status_label.setText(
-                f"Active revision #{revision.id}: {revision.source_filename}"
-            )
-            self._refresh_template_symbol_matches()
-            self._render_selected_invoice(export=False, silent=True)
-        except Exception as exc:
-            self._refresh_template_symbol_matches()
-            QMessageBox.warning(self, "Invoice Template", str(exc))
-
-    def browse_template_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Upload Invoice HTML Template",
-            "",
-            "HTML templates (*.html *.htm);;All files (*)",
-        )
-        if not path:
-            return
-        self.template_path_field.setText(str(Path(path)))
-        self.upload_template()
-
-    def preview_selected_invoice(self) -> None:
-        self._render_selected_invoice(export=False)
-
-    def export_selected_invoice_html(self) -> None:
-        self._render_selected_invoice(export=True)
-
-    def _render_selected_invoice(self, *, export: bool, silent: bool = False) -> None:
-        invoice_id = self._selected_invoice_id()
-        conn = self._conn_or_warn()
-        if conn is None:
-            return
-        if invoice_id is None:
-            if self.invoice_table.rowCount() > 0:
-                self.invoice_table.selectRow(0)
-                invoice_id = self._selected_invoice_id()
-            else:
-                sample_values = self._sample_template_replacements()
-                self._refresh_template_symbol_matches(resolved_values=sample_values)
-                self._set_invoice_preview_html(
-                    self._sample_template_preview_html(),
-                    source_path=self._active_template_source_path(),
-                )
-                if export and not silent:
-                    QMessageBox.warning(
-                        self,
-                        "Invoice Preview",
-                        "Create or select an invoice before exporting the rendered template.",
-                    )
-                return
-        if invoice_id is None:
-            return
-        service = InvoiceTemplateService(conn)
-        manual = self._template_manual_values()
-        canonical_overrides = self._template_canonical_overrides()
-        try:
-            result = (
-                service.export_invoice_html(
-                    invoice_id,
-                    manual_symbols=manual,
-                    canonical_overrides=canonical_overrides,
-                )
-                if export
-                else service.preview_invoice(
-                    invoice_id,
-                    manual_symbols=manual,
-                    canonical_overrides=canonical_overrides,
-                )
-            )
-            if export and result.snapshot_id is not None:
-                service.create_html_output_artifact(snapshot_id=result.snapshot_id)
-            rendered_html = result.rendered_html
-            if result.warnings:
-                rendered_html += (
-                    "<hr><section><strong>Preview warnings</strong><ul>"
-                    + "".join(
-                        f"<li>{html.escape(str(warning), quote=True)}</li>"
-                        for warning in result.warnings
-                    )
-                    + "</ul></section>"
-                )
-            self._set_invoice_preview_html(
-                rendered_html,
-                source_path=self._active_template_source_path(),
-            )
-            self._refresh_template_symbol_matches(
-                resolved_values=result.resolved_values,
-                warnings=result.warnings,
-            )
-        except Exception as exc:
-            self._set_invoice_preview_html(
-                f"<p>Unable to render invoice template: {html.escape(str(exc), quote=True)}</p>",
-                source_path=self._active_template_source_path(),
-            )
-            self._refresh_template_symbol_matches(warnings=(str(exc),))
-            if not silent:
-                QMessageBox.warning(self, "Invoice Preview", str(exc))
-
-    def _create_invoice_html_preview_view(self, parent: QWidget) -> QWidget:
-        """Create the same HTML preview surface used by the Contract Template workspace."""
-
-        if _ContractQWebEngineView is not None:
-            view = _ContractInteractiveHtmlPreviewView(parent)
-        else:
-            view = _ContractFallbackHtmlPreviewView(parent)
-        view.setObjectName("invoiceTemplateHtmlPreviewView")
-        view.setProperty("role", "workspaceCanvas")
-        if isinstance(view, QTextBrowser):
-            view.setReadOnly(True)
-            view.setOpenExternalLinks(False)
-        zoom_signal = getattr(view, "zoom_percent_changed", None)
-        if zoom_signal is not None:
-            zoom_signal.connect(self._update_invoice_preview_zoom_label)
-        return view
-
-    def _active_template_source_path(self) -> Path | None:
-        clean_path = _clean_text(self.template_path_field.text())
-        if not clean_path:
-            return None
-        source_path = Path(clean_path).expanduser()
-        if not source_path.exists():
-            return None
-        return source_path
-
-    def _set_invoice_preview_html(
-        self,
-        rendered_html: str,
-        *,
-        source_path: Path | None = None,
-    ) -> None:
-        """Materialize rendered invoice HTML and load it like the contract preview does."""
-
-        html_text = self._inject_invoice_preview_base_href(rendered_html, source_path=source_path)
-        self._cleanup_invoice_preview_session()
-        session_dir = Path(tempfile.mkdtemp(prefix="isrc-invoice-html-preview-"))
-        preview_path = session_dir / "invoice-preview.html"
-        try:
-            preview_path.write_text(html_text, encoding="utf-8")
-        except Exception:
-            shutil.rmtree(session_dir, ignore_errors=True)
-            if hasattr(self.preview_output, "setHtml"):
-                self.preview_output.setHtml(html_text)
-            return
-
-        self._invoice_preview_session_dir = session_dir
-        mark_reload = getattr(self.preview_output, "mark_programmatic_reload", None)
-        if callable(mark_reload):
-            mark_reload()
-        load = getattr(self.preview_output, "load", None)
-        if callable(load):
-            load(QUrl.fromLocalFile(str(preview_path.resolve())))
-        elif hasattr(self.preview_output, "setHtml"):
-            self.preview_output.setHtml(html_text)
-
-    def _inject_invoice_preview_base_href(
-        self,
-        rendered_html: str,
-        *,
-        source_path: Path | None,
-    ) -> str:
-        if source_path is None or re.search(r"<base\b", rendered_html, flags=re.IGNORECASE):
-            return rendered_html
-        source_dir = source_path if source_path.is_dir() else source_path.parent
-        base_url = QUrl.fromLocalFile(str(source_dir.resolve()) + "/").toString()
-        base_tag = f'<base href="{html.escape(base_url, quote=True)}">'
-        if re.search(r"<head\b[^>]*>", rendered_html, flags=re.IGNORECASE):
-            return re.sub(
-                r"(<head\b[^>]*>)",
-                lambda match: f"{match.group(1)}\n{base_tag}",
-                rendered_html,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-        doctype_match = re.match(r"(\s*<!doctype[^>]*>\s*)", rendered_html, flags=re.IGNORECASE)
-        if doctype_match:
-            return (
-                doctype_match.group(1)
-                + f"<head>{base_tag}</head>\n"
-                + rendered_html[doctype_match.end() :]
-            )
-        return f"<head>{base_tag}</head>\n{rendered_html}"
-
-    def _cleanup_invoice_preview_session(self) -> None:
-        if self._invoice_preview_session_dir is None:
-            return
-        shutil.rmtree(self._invoice_preview_session_dir, ignore_errors=True)
-        self._invoice_preview_session_dir = None
-
-    def _clear_invoice_preview_surface(self) -> None:
-        self._cleanup_invoice_preview_session()
-        if hasattr(self.preview_output, "setHtml"):
-            self.preview_output.setHtml("")
-        self._update_invoice_preview_zoom_label(100)
-
-    def _reset_invoice_html_preview_to_fit(self) -> None:
-        reset_to_fit = getattr(self.preview_output, "reset_to_fit", None)
-        if callable(reset_to_fit):
-            reset_to_fit()
-        self._update_invoice_preview_zoom_label(self._current_invoice_preview_zoom_percent())
-
-    def _step_invoice_html_preview_zoom(self, delta_percent: int) -> None:
-        set_zoom_percent = getattr(self.preview_output, "set_zoom_percent", None)
-        if callable(set_zoom_percent):
-            set_zoom_percent(
-                self._current_invoice_preview_zoom_percent() + int(delta_percent),
-                user_initiated=True,
-            )
-        self._update_invoice_preview_zoom_label(self._current_invoice_preview_zoom_percent())
-
-    def _current_invoice_preview_zoom_percent(self) -> int:
-        current_zoom_percent = getattr(self.preview_output, "current_zoom_percent", None)
-        if callable(current_zoom_percent):
-            return int(current_zoom_percent())
-        return 100
-
-    def _update_invoice_preview_zoom_label(self, percent: int | None = None) -> None:
-        value = self._current_invoice_preview_zoom_percent() if percent is None else int(percent)
-        self.invoice_preview_zoom_label.setText(f"{value}%")
-
-    def _sample_template_preview_html(self) -> str:
-        """Render uploaded invoice HTML with safe sample values when no invoice exists yet."""
-        source_html = self.template_html_editor.toPlainText().strip()
-        if not source_html:
-            source_html = (
-                "<html><body><h1>{{ invoice.number }}</h1>{{ invoice.lines }}"
-                "<p>Total: {{ invoice.total }}</p>"
-                "<footer>{{ custom.footer_note }}</footer></body></html>"
-            )
-        replacements = self._sample_template_replacements()
-
-        def replace_token(match: re.Match[str]) -> str:
-            symbol = _invoice_template_symbol_key(match.group(1))
-            value = replacements.get(symbol)
-            if value is None:
-                return match.group(0)
-            if symbol in {"invoice.lines", "invoice.vat_breakdown"}:
-                return value
-            return html.escape(str(value), quote=True)
-
-        rendered = _INVOICE_TEMPLATE_SYMBOL_RE.sub(replace_token, source_html)
-        rendered += (
-            "<hr><p><strong>Sample preview:</strong> select or create an invoice to render "
-            "the same template with real invoice, party, VAT, and ledger-derived values.</p>"
-        )
-        return rendered
-
-    def _sample_template_replacements(self) -> dict[str, object]:
-        replacements = {
-            "invoice.number": "INV-2026-0001",
-            "invoice.issue_date": "29-May-2026",
-            "invoice.due_date": "28-Jun-2026",
-            "invoice.document_status": "Draft preview",
-            "invoice.payment_status": "Unpaid",
-            "invoice.due_status": "Not due",
-            "invoice.currency": "EUR",
-            "invoice.subtotal": "EUR 100.00",
-            "invoice.vat_total": "EUR 21.00",
-            "invoice.total": "EUR 121.00",
-            "invoice.outstanding_balance": "EUR 121.00",
-            "invoice.party.name": "Example Venue BV",
-            "invoice.party.company_name": "Example Venue BV",
-            "invoice.party.display_name": "Example Venue",
-            "invoice.party.legal_name": "Example Venue BV",
-            "invoice.party.address": "Example Street 1, Amsterdam",
-            "invoice.party.address_line1": "",
-            "invoice.party.address_line2": "",
-            "invoice.party.street_name": "Example Street",
-            "invoice.party.street_number": "1",
-            "invoice.party.postal_code": "1000 AA",
-            "invoice.party.city": "Amsterdam",
-            "invoice.party.region": "",
-            "invoice.party.country": "The Netherlands",
-            "invoice.party.vat_number": "NL000000000B01",
-            "invoice.party.tax_id": "NL000000000",
-            "invoice.party.email": "accounts@example-venue.test",
-            "invoice.party.phone": "+31 20 000 0000",
-            "invoice.party.bank_account_number": "NL00 TEST 0000 0000 01",
-            "invoice.party.chamber_of_commerce_number": "00000001",
-            "company.name": "Cosmowyn Records",
-            "company.company_name": "Cosmowyn Records",
-            "company.display_name": "Cosmowyn Records",
-            "company.legal_name": "Cosmowyn Records",
-            "company.address": "Company address",
-            "company.address_line1": "Koelhorst 25",
-            "company.address_line2": "",
-            "company.street_name": "Koelhorst",
-            "company.street_number": "25",
-            "company.postal_code": "6714 KL",
-            "company.city": "Ede",
-            "company.region": "",
-            "company.country": "The Netherlands",
-            "company.vat_number": "NL000000000B01",
-            "company.email": "billing@cosmowyn.test",
-            "company.phone": "+31 647 821 383",
-            "company.payment_details": "IBAN NL00 TEST 0000 0000 00",
-            "company.chamber_of_commerce_number": "91222419",
-            "custom.footer_note": "Thank you.",
-            "custom.payment_instruction": "Please pay within 30 days.",
-            "custom.reference_text": "Sample preview only.",
-            "custom.date": date.today().isoformat(),
-            "royalty.statement_number": "ROY-2026-0001",
-            "royalty.payee_name": "Example Artist",
-            "royalty.contract_title": "Example Royalty Agreement",
-            "royalty.period_start": "01-Jan-2026",
-            "royalty.period_end": "31-Mar-2026",
-            "royalty.gross_royalty": "EUR 250.00",
-            "royalty.deductions": "EUR 25.00",
-            "royalty.advance_recouped": "EUR 50.00",
-            "royalty.net_payable": "EUR 175.00",
-            "royalty.payment_status": "Awaiting approval",
-            "royalty.calculation_id": "CALC-2026-Q1",
-            "royalty.statement_id": "1",
-        }
-        replacements.update(self._template_party_values(self._selected_template_party_id()))
-        replacements.update(self._template_owner_values())
-        replacements.update(self._template_manual_values())
-        replacements["invoice.lines"] = (
-            "<table><thead><tr><th>Description</th><th>Qty</th><th>Net</th>"
-            "<th>VAT</th><th>Total</th></tr></thead><tbody><tr>"
-            "<td>Example billable service</td><td>1</td><td>EUR 100.00</td>"
-            "<td>EUR 21.00</td><td>EUR 121.00</td></tr></tbody></table>"
-        )
-        replacements["invoice.vat_breakdown"] = (
-            "<table><thead><tr><th>VAT treatment</th><th>Rate</th>"
-            "<th>Taxable</th><th>VAT</th></tr></thead><tbody><tr>"
-            "<td>Standard</td><td>21.00%</td><td>EUR 100.00</td>"
-            "<td>EUR 21.00</td></tr></tbody></table>"
-        )
-        return replacements
-
-    def _refresh_template_symbol_matches(
-        self,
-        *,
-        resolved_values: dict[str, object] | None = None,
-        warnings: Sequence[str] = (),
-    ) -> None:
-        symbols = self._detected_invoice_template_symbols()
-        resolved = resolved_values or self._sample_template_replacements()
-        warning_text = "\n".join(str(warning) for warning in warnings)
-        selected_symbol = self._selected_template_symbol_raw()
-        previous_state = self.template_symbol_combo.blockSignals(True)
-        self.template_symbol_combo.clear()
-        self.template_symbol_combo.setProperty("template_resolved_values", resolved)
-        self.template_symbol_combo.setProperty("template_warnings", warning_text)
-        if not symbols:
-            self.template_symbol_combo.addItem("No symbols detected in the uploaded HTML.", None)
-            self.template_symbol_combo.setEnabled(False)
-            self.template_symbol_combo.blockSignals(previous_state)
-            self.template_symbol_detail_output.setPlainText(
-                "Upload an HTML template containing contract-style double-brace symbols such as "
-                "{{db.party.company_name}} and {{manual.date}}."
-            )
-            return
-
-        selected_index = 0
-        for raw_symbol in symbols:
-            matched_key = _invoice_template_symbol_key(raw_symbol)
-            render_mode = _INVOICE_TEMPLATE_RENDER_MODES.get(matched_key) or (
-                "text" if self._is_template_manual_symbol(matched_key) else ""
-            )
-            value = resolved.get(matched_key, "")
-            if self._is_template_manual_symbol(matched_key) and not str(value or "").strip():
-                status = "Manual value needed"
-            elif render_mode and matched_key in resolved:
-                status = "Resolved"
-            elif render_mode:
-                status = "Matched"
-            else:
-                status = "Unsupported"
-            if matched_key in warning_text or raw_symbol in warning_text:
-                status = "Needs attention"
-            label = (
-                f"{raw_symbol} -> {matched_key if render_mode else 'No supported match'}"
-                f" [{status}]"
-            )
-            self.template_symbol_combo.addItem(label, raw_symbol)
-            if raw_symbol == selected_symbol:
-                selected_index = self.template_symbol_combo.count() - 1
-        self.template_symbol_combo.setEnabled(True)
-        self.template_symbol_combo.setCurrentIndex(selected_index)
-        self.template_symbol_combo.blockSignals(previous_state)
-        self._refresh_template_symbol_detail()
-
-    @staticmethod
-    def _is_template_manual_symbol(symbol: str) -> bool:
-        return str(symbol or "").startswith("{{manual.") or str(symbol or "").startswith("custom.")
-
-    def _template_form_definition(self) -> ContractTemplateFormDefinition:
-        manual_fields: list[ContractTemplateFormManualField] = []
-        indexed_manual_fields: list[ContractTemplateFormManualField] = []
-        seen_manual: set[str] = set()
-        party_symbols: list[str] = []
-        indexed_party_symbols: list[str] = []
-        owner_symbols: list[str] = []
-        indexed_track_symbols: list[str] = []
-        for raw_symbol in self._detected_invoice_template_symbols():
-            token = _contract_placeholder_token(raw_symbol)
-            if token is None:
-                continue
-            if token.binding_kind == "manual":
-                if token.indexed:
-                    indexed_manual_fields.append(
-                        self._template_manual_field(token.canonical_symbol)
-                    )
-                else:
-                    manual_fields.append(self._template_manual_field(token.canonical_symbol))
-                seen_manual.add(token.canonical_symbol)
-                continue
-            if token.binding_kind == "duplicate" and token.key == "number":
-                manual_fields.append(self._template_manual_field(token.canonical_symbol))
-                seen_manual.add(token.canonical_symbol)
-                continue
-            if token.binding_kind != "db":
-                continue
-            matched_key = _invoice_template_symbol_key(token.canonical_symbol)
-            if matched_key in _INVOICE_TEMPLATE_PARTY_FIELDS and token.indexed:
-                indexed_party_symbols.append(token.canonical_symbol)
-            elif matched_key in _INVOICE_TEMPLATE_PARTY_FIELDS:
-                party_symbols.append(token.canonical_symbol)
-            elif matched_key in _INVOICE_TEMPLATE_TRACK_FIELDS and token.indexed:
-                indexed_track_symbols.append(token.canonical_symbol)
-            elif matched_key in _INVOICE_TEMPLATE_OWNER_FIELDS:
-                owner_symbols.append(token.canonical_symbol)
-        for raw_symbol in self._detected_invoice_template_symbols():
-            matched_key = _invoice_template_symbol_key(raw_symbol)
-            if matched_key.startswith("custom.") and matched_key not in seen_manual:
-                manual_fields.append(self._legacy_template_manual_field(matched_key))
-                seen_manual.add(matched_key)
-        if (
-            indexed_manual_fields or indexed_party_symbols or indexed_track_symbols
-        ) and "{{duplicate.number}}" not in seen_manual:
-            manual_fields.insert(0, self._template_manual_field("{{duplicate.number}}"))
-            seen_manual.add("{{duplicate.number}}")
-
-        selector_fields: list[ContractTemplateFormSelectorField] = []
-        indexed_selector_fields: list[ContractTemplateFormSelectorField] = []
-        if party_symbols:
-            selector_fields.append(
-                ContractTemplateFormSelectorField(
-                    selector_key=party_symbols[0],
-                    display_label="Party Selection",
-                    scope_entity_type="party",
-                    scope_policy="party_selection_required",
-                    widget_kind="entity_selector",
-                    required=True,
-                    placeholder_symbols=tuple(party_symbols),
-                    choices=self._template_party_choices(),
-                    description=(
-                        "Select the authoritative party record used to resolve "
-                        + ", ".join(
-                            self._template_symbol_label(_invoice_template_symbol_key(symbol))
-                            for symbol in party_symbols
-                        )
-                        + "."
-                    ),
-                )
-            )
-        if indexed_party_symbols:
-            indexed_selector_fields.append(
-                ContractTemplateFormSelectorField(
-                    selector_key="db_scope.party.indexed",
-                    display_label="Indexed Party Selection",
-                    scope_entity_type="party",
-                    scope_policy="indexed_selection_required",
-                    widget_kind="entity_selector",
-                    required=True,
-                    placeholder_symbols=tuple(indexed_party_symbols),
-                    choices=self._template_party_choices(),
-                    description=(
-                        "Select one party per duplicate index for indexed party placeholders."
-                    ),
-                )
-            )
-        if indexed_track_symbols:
-            indexed_selector_fields.append(
-                ContractTemplateFormSelectorField(
-                    selector_key="db_scope.track.indexed",
-                    display_label="Indexed Track Selection",
-                    scope_entity_type="track",
-                    scope_policy="indexed_selection_required",
-                    widget_kind="entity_selector",
-                    required=True,
-                    placeholder_symbols=tuple(indexed_track_symbols),
-                    choices=self._template_track_choices(),
-                    description=(
-                        "Select one catalog track per duplicate index for indexed track placeholders."
-                    ),
-                )
-            )
-        return ContractTemplateFormDefinition(
-            template_id=0,
-            revision_id=0,
-            template_name=_clean_text(self.template_name_field.text()) or "Invoice Template",
-            revision_label=None,
-            scan_status="scan_ready",
-            auto_fields=(),
-            selector_fields=tuple(selector_fields),
-            manual_fields=tuple(manual_fields),
-            indexed_selector_fields=tuple(indexed_selector_fields),
-            indexed_manual_fields=tuple(indexed_manual_fields),
-            unresolved_placeholders=(),
-            warnings=(
-                tuple(
-                    f"{symbol} resolves automatically from the Party Manager owner ledger."
-                    for symbol in owner_symbols
-                )
-            ),
-        )
-
-    def _template_manual_field(self, canonical_symbol: str) -> ContractTemplateFormManualField:
-        token = parse_placeholder(canonical_symbol)
-        field_type = "text"
-        widget_kind = "text_input"
-        options: tuple[str, ...] = token.manual_options
-        if token.binding_kind == "duplicate" and token.key == "number":
-            field_type = "number"
-            widget_kind = "number_input"
-        elif token.manual_type == "bool":
-            field_type = "boolean"
-            widget_kind = "boolean_options"
-        elif token.manual_type == "list":
-            field_type = "list"
-            widget_kind = "list_options"
-        elif any(part in token.key for part in ("date", "day", "deadline", "effective")):
-            field_type = "date"
-            widget_kind = "date_input"
-        elif any(part in token.key for part in ("amount", "number", "count", "rate", "fee")):
-            field_type = "number"
-            widget_kind = "number_input"
-        return ContractTemplateFormManualField(
-            canonical_symbol=canonical_symbol,
-            display_label=self._template_symbol_label(canonical_symbol),
-            field_type=field_type,
-            widget_kind=widget_kind,
-            required=True,
-            placeholder_count=1,
-            description=f"Manual value for {canonical_symbol}.",
-            options=options,
-        )
-
-    def _legacy_template_manual_field(
-        self, canonical_symbol: str
-    ) -> ContractTemplateFormManualField:
-        return ContractTemplateFormManualField(
-            canonical_symbol=canonical_symbol,
-            display_label=self._template_symbol_label(canonical_symbol),
-            field_type="text",
-            widget_kind="text_input",
-            required=True,
-            placeholder_count=1,
-            description=f"Manual value for {canonical_symbol}.",
-            options=(),
-        )
-
-    def _template_party_choices(self) -> tuple[ContractTemplateFormChoice, ...]:
-        conn = self._conn()
-        if conn is None:
-            return ()
-        rows = conn.execute("""
-            SELECT id, COALESCE(display_name, legal_name, company_name, printf('Party %d', id))
-            FROM Parties
-            ORDER BY COALESCE(display_name, legal_name, company_name), id
-            """).fetchall()
-        return tuple(
-            ContractTemplateFormChoice(value=str(int(row[0])), label=f"{row[1]} ({row[0]})")
-            for row in rows
-        )
-
-    def _template_track_choices(self) -> tuple[ContractTemplateFormChoice, ...]:
-        conn = self._conn()
-        if conn is None:
-            return ()
-        try:
-            rows = conn.execute("""
-                SELECT
-                    id,
-                    COALESCE(NULLIF(track_title, ''), printf('Track %d', id)),
-                    COALESCE(NULLIF(isrc, ''), '')
-                FROM Tracks
-                ORDER BY COALESCE(NULLIF(track_title, ''), printf('Track %d', id)), id
-                """).fetchall()
-        except sqlite3.Error:
-            return ()
-        return tuple(
-            ContractTemplateFormChoice(
-                value=str(int(row[0])),
-                label=(
-                    f"{row[1]} ({row[2]}) #{row[0]}"
-                    if str(row[2] or "").strip()
-                    else f"{row[1]} #{row[0]}"
-                ),
-            )
-            for row in rows
-        )
-
-    def _template_database_keys(self) -> tuple[list[str], list[str]]:
-        party_keys: list[str] = []
-        owner_keys: list[str] = []
-        seen_party: set[str] = set()
-        seen_owner: set[str] = set()
-        for raw_symbol in self._detected_invoice_template_symbols():
-            matched_key = _invoice_template_symbol_key(raw_symbol)
-            if matched_key in _INVOICE_TEMPLATE_PARTY_FIELDS and matched_key not in seen_party:
-                party_keys.append(matched_key)
-                seen_party.add(matched_key)
-            if matched_key in _INVOICE_TEMPLATE_OWNER_FIELDS and matched_key not in seen_owner:
-                owner_keys.append(matched_key)
-                seen_owner.add(matched_key)
-        return party_keys, owner_keys
-
-    def _template_database_matches(self) -> list[tuple[str, str, str, str]]:
-        matches: list[tuple[str, str, str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        party_values = self._template_party_values(self._selected_template_party_id())
-        owner_values = self._template_owner_values()
-        sample_values = self._sample_template_replacements()
-        for raw_symbol in self._detected_invoice_template_symbols():
-            token = _contract_placeholder_token(raw_symbol)
-            if token is None or token.binding_kind != "db":
-                continue
-            matched_key = _invoice_template_symbol_key(raw_symbol)
-            if matched_key in _INVOICE_TEMPLATE_PARTY_FIELDS:
-                source_label = "Party selection"
-                value = _template_value_preview(party_values.get(matched_key, ""))
-            elif matched_key in _INVOICE_TEMPLATE_OWNER_FIELDS:
-                source_label = "Owner Party ledger"
-                value = _template_value_preview(owner_values.get(matched_key, ""))
-            elif (
-                matched_key.startswith("royalty.") and matched_key in _INVOICE_TEMPLATE_RENDER_MODES
-            ):
-                source_label = "Royalty context"
-                value = _template_value_preview(sample_values.get(matched_key, ""))
-            elif matched_key in _INVOICE_TEMPLATE_RENDER_MODES:
-                source_label = "Invoice context"
-                value = _template_value_preview(sample_values.get(matched_key, ""))
-            else:
-                source_label = "Unsupported database placeholder"
-                value = ""
-            key = (raw_symbol, matched_key)
-            if key in seen:
-                continue
-            seen.add(key)
-            matches.append((raw_symbol, matched_key, source_label, value))
-        return matches
-
-    def _clear_template_form(self, form: QFormLayout) -> None:
-        while form.rowCount():
-            form.removeRow(0)
-
-    def _rebuild_template_fill_fields(self) -> None:
-        if self._template_rebuilding_fill_fields:
-            return
-        self._template_rebuilding_fill_fields = True
-        previous_manual = self._template_manual_values()
-        previous_selector = {
-            key: self._template_read_widget_value(widget)
-            for key, widget in self.template_selector_widgets.items()
-        }
-        previous_selector.update(
-            {
-                key: self._template_read_widget_value(widget)
-                for key, widget in self.template_indexed_selector_widgets.items()
-            }
-        )
-        try:
-            self._clear_template_form(self.template_manual_form)
-            self._clear_template_form(self.template_database_form)
-            self.template_manual_widgets = {}
-            self.template_indexed_manual_widgets = {}
-            self.template_manual_date_format_widgets = {}
-            self.template_manual_date_format_combo_widgets = {}
-            self.template_selector_widgets = {}
-            self.template_indexed_selector_widgets = {}
-            form_definition = self._template_form_definition()
-            duplicate_count = self._template_duplicate_count(previous_manual)
-
-            has_manual_fields = bool(
-                form_definition.manual_fields or form_definition.indexed_manual_fields
-            )
-            self.template_manual_empty_label.setVisible(not has_manual_fields)
-            for field in form_definition.manual_fields:
-                widget = self._build_template_manual_widget(field)
-                value_widget = widget.property("manual_value_widget")
-                self.template_manual_widgets[field.canonical_symbol] = (
-                    value_widget if isinstance(value_widget, QWidget) else widget
-                )
-                if field.canonical_symbol in previous_manual:
-                    self._write_template_widget_value(
-                        self.template_manual_widgets[field.canonical_symbol],
-                        previous_manual[field.canonical_symbol],
-                        explicit=True,
-                    )
-                self.template_manual_form.addRow(field.display_label, widget)
-
-            for index in range(1, duplicate_count + 1):
-                for field in form_definition.indexed_manual_fields:
-                    indexed_key = build_contract_template_indexed_selection_key(
-                        field.canonical_symbol,
-                        index,
-                    )
-                    widget = self._build_template_manual_widget(field)
-                    value_widget = widget.property("manual_value_widget")
-                    self.template_indexed_manual_widgets[indexed_key] = (
-                        value_widget if isinstance(value_widget, QWidget) else widget
-                    )
-                    format_widget = self.template_manual_date_format_widgets.pop(
-                        field.canonical_symbol,
-                        None,
-                    )
-                    if format_widget is not None:
-                        self.template_manual_date_format_widgets[indexed_key] = format_widget
-                    format_combo = self.template_manual_date_format_combo_widgets.pop(
-                        field.canonical_symbol,
-                        None,
-                    )
-                    if format_combo is not None:
-                        self.template_manual_date_format_combo_widgets[indexed_key] = format_combo
-                    if indexed_key in previous_manual:
-                        self._write_template_widget_value(
-                            self.template_indexed_manual_widgets[indexed_key],
-                            previous_manual[indexed_key],
-                            explicit=True,
-                        )
-                    self.template_manual_form.addRow(f"{field.display_label} {index}", widget)
-
-            _party_keys, owner_keys = self._template_database_keys()
-            database_matches = self._template_database_matches()
-            has_database_fields = bool(
-                form_definition.selector_fields
-                or form_definition.indexed_selector_fields
-                or database_matches
-            )
-            self.template_database_empty_label.setVisible(not has_database_fields)
-            for field in form_definition.selector_fields:
-                widget = self._build_template_selector_widget(field)
-                for placeholder_symbol in field.placeholder_symbols:
-                    self.template_selector_widgets[placeholder_symbol] = widget
-                previous = previous_selector.get(field.selector_key)
-                if previous is not None:
-                    self._write_template_widget_value(widget, previous, explicit=True)
-                elif self._selected_invoice_party_id() is not None:
-                    self._write_template_widget_value(
-                        widget,
-                        str(self._selected_invoice_party_id()),
-                        explicit=True,
-                    )
-                self.template_database_form.addRow(field.display_label, widget)
-
-            for index in range(1, duplicate_count + 1):
-                for field in form_definition.indexed_selector_fields:
-                    widget = self._build_template_selector_widget(field)
-                    widget.setProperty("indexed_selection_index", index)
-                    first_indexed_key: str | None = None
-                    for placeholder_symbol in field.placeholder_symbols:
-                        indexed_key = build_contract_template_indexed_selection_key(
-                            placeholder_symbol,
-                            index,
-                        )
-                        if first_indexed_key is None:
-                            first_indexed_key = indexed_key
-                        self.template_indexed_selector_widgets[indexed_key] = widget
-                    previous = (
-                        previous_selector.get(first_indexed_key)
-                        if first_indexed_key is not None
-                        else None
-                    )
-                    if previous is not None:
-                        self._write_template_widget_value(widget, previous, explicit=True)
-                    self.template_database_form.addRow(f"{field.display_label} {index}", widget)
-
-            if owner_keys:
-                owner_label = QLabel("Owner Party", self)
-                owner_label.setProperty("role", "secondary")
-                owner_label.setWordWrap(True)
-                owner_label.setText("Current Owner Party from Party Manager")
-                self.template_database_form.addRow("Owner ledger", owner_label)
-            self._refresh_template_database_values()
-        finally:
-            self._template_rebuilding_fill_fields = False
-
-    def _template_symbol_label(self, key: str) -> str:
-        text = str(key or "").strip()
-        if text.startswith("{{") and text.endswith("}}"):
-            text = text[2:-2]
-        text = (
-            text.removeprefix("manual.")
-            .removeprefix("custom.")
-            .removeprefix("db.")
-            .removeprefix("invoice.")
-            .removeprefix("royalty.")
-            .removeprefix("credit_note.")
-            .removeprefix("company.")
-        )
-        text = re.sub(r"\$[a-z]+\[[^\]]+\]", "", text)
-        return text.replace("_", " ").replace(".", " / ").title()
-
-    @staticmethod
-    def _template_duplicate_count(values: dict[str, object]) -> int:
-        value = values.get("{{duplicate.number}}")
-        if value is None:
-            return 1
-        try:
-            number = float(str(value).strip())
-        except ValueError:
-            return 1
-        if not number.is_integer():
-            return 1
-        return max(0, min(200, int(number)))
-
-    def _handle_template_manual_number_changed(
-        self,
-        widget: QDoubleSpinBox,
-        canonical_symbol: str,
-    ) -> None:
-        widget.setProperty("has_user_value", True)
-        if canonical_symbol == "{{duplicate.number}}" and not self._template_rebuilding_fill_fields:
-            self._schedule_template_fill_field_rebuild()
-            return
-        self._render_selected_invoice(export=False, silent=True)
-
-    def _schedule_template_fill_field_rebuild(self) -> None:
-        if self._template_pending_fill_rebuild:
-            return
-        self._template_pending_fill_rebuild = True
-        QTimer.singleShot(0, self._run_deferred_template_fill_field_rebuild)
-
-    def _run_deferred_template_fill_field_rebuild(self) -> None:
-        self._template_pending_fill_rebuild = False
-        if self._template_rebuilding_fill_fields:
-            self._schedule_template_fill_field_rebuild()
-            return
-        try:
-            self._rebuild_template_fill_fields()
-            self._render_selected_invoice(export=False, silent=True)
-        except sqlite3.ProgrammingError:
-            return
-
-    def _build_template_selector_widget(self, field: ContractTemplateFormSelectorField) -> QWidget:
-        container = QWidget(self.template_fill_tabs)
-        container.setProperty("selector_key", field.selector_key)
-        container.setProperty("placeholder_symbols", list(field.placeholder_symbols))
-        container.setProperty("scope_entity_type", field.scope_entity_type)
-        container.setProperty("scope_policy", field.scope_policy)
-        container.setProperty("widget_kind", field.widget_kind)
-        row = QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        combo = QComboBox(container)
-        combo.setObjectName("contractTemplateSelectorWidget")
-        combo.setProperty("selector_key", field.selector_key)
-        combo.setProperty("placeholder_symbols", list(field.placeholder_symbols))
-        combo.setProperty("scope_entity_type", field.scope_entity_type)
-        combo.setProperty("scope_policy", field.scope_policy)
-        combo.setProperty("widget_kind", field.widget_kind)
-        if field.description:
-            combo.setToolTip(field.description)
-        combo.addItem(f"Choose {field.display_label}", None)
-        for choice in field.choices:
-            combo.addItem(choice.label, choice.value)
-            if choice.description:
-                combo.setItemData(combo.count() - 1, choice.description, Qt.ToolTipRole)
-        combo.currentIndexChanged.connect(
-            lambda *_args: (
-                self._refresh_template_database_values(),
-                self._render_selected_invoice(export=False, silent=True),
-            )
-        )
-        container.setProperty("selector_combo", combo)
-        row.addWidget(combo, 1)
-        if field.scope_entity_type == "party":
-            self.template_party_selector_combo = combo
-        return container
-
-    def _build_template_manual_widget(self, field: ContractTemplateFormManualField) -> QWidget:
-        if field.field_type == "boolean" and field.widget_kind != "boolean_options":
-            checkbox = QCheckBox("Yes", self.template_fill_tabs)
-            checkbox.setObjectName("contractTemplateManualBooleanWidget")
-            checkbox.setProperty("canonical_symbol", field.canonical_symbol)
-            checkbox.setProperty("field_type", field.field_type)
-            checkbox.setProperty("widget_kind", field.widget_kind)
-            checkbox.setProperty("has_user_value", False)
-            checkbox.toggled.connect(
-                lambda *_args, widget=checkbox: (
-                    widget.setProperty("has_user_value", True),
-                    self._render_selected_invoice(export=False, silent=True),
-                )
-            )
-            return checkbox
-
-        if field.options:
-            combo = QComboBox(self.template_fill_tabs)
-            combo.setObjectName("contractTemplateManualOptionsWidget")
-            combo.setProperty("canonical_symbol", field.canonical_symbol)
-            combo.setProperty("field_type", field.field_type)
-            combo.setProperty("widget_kind", field.widget_kind)
-            combo.addItem(f"Choose {field.display_label}", None)
-            for option in field.options:
-                combo.addItem(option, option)
-            combo.currentIndexChanged.connect(
-                lambda *_args: self._render_selected_invoice(export=False, silent=True)
-            )
-            return combo
-
-        if field.field_type == "number":
-            spin = QDoubleSpinBox(self.template_fill_tabs)
-            spin.setObjectName("contractTemplateManualNumberWidget")
-            spin.setProperty("canonical_symbol", field.canonical_symbol)
-            spin.setProperty("field_type", field.field_type)
-            spin.setProperty("widget_kind", field.widget_kind)
-            spin.setProperty("has_user_value", False)
-            spin.setRange(-999999999.0, 999999999.0)
-            spin.setDecimals(6)
-            if field.canonical_symbol == "{{duplicate.number}}":
-                spin.setRange(0.0, 200.0)
-                spin.setDecimals(0)
-            spin.valueChanged.connect(
-                lambda *_args, widget=spin, symbol=field.canonical_symbol: (
-                    self._handle_template_manual_number_changed(widget, symbol)
-                )
-            )
-            return spin
-
-        if field.field_type == "date":
-            container = QWidget(self.template_fill_tabs)
-            container.setObjectName("contractTemplateManualDateContainer")
-            row = QHBoxLayout(container)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(6)
-            edit = QDateEdit(container)
-            edit.setObjectName("contractTemplateManualDateWidget")
-            edit.setProperty("canonical_symbol", field.canonical_symbol)
-            edit.setProperty("field_type", field.field_type)
-            edit.setProperty("widget_kind", field.widget_kind)
-            edit.setProperty("has_user_value", False)
-            edit.setCalendarPopup(True)
-            edit.setDisplayFormat("yyyy-MM-dd")
-            edit.setDate(QDate.currentDate())
-            format_combo = QComboBox(container)
-            format_combo.setObjectName("contractTemplateManualDateFormatCombo")
-            for preset in MANUAL_DATE_FORMAT_PRESETS:
-                format_combo.addItem(preset, preset)
-            format_combo.addItem("Custom", "__custom__")
-            format_edit = QLineEdit(container)
-            format_edit.setObjectName("contractTemplateManualDateFormatEdit")
-            format_edit.setPlaceholderText("d.mmm.yyyy")
-            format_edit.setText(DEFAULT_MANUAL_DATE_FORMAT)
-            format_edit.setMinimumWidth(110)
-            row.addWidget(edit, 1)
-            row.addWidget(format_combo)
-            row.addWidget(format_edit)
-            container.setProperty("manual_value_widget", edit)
-            self.template_manual_date_format_widgets[field.canonical_symbol] = format_edit
-            self.template_manual_date_format_combo_widgets[field.canonical_symbol] = format_combo
-            edit.dateChanged.connect(
-                lambda *_args, widget=edit: (
-                    widget.setProperty("has_user_value", True),
-                    self._render_selected_invoice(export=False, silent=True),
-                )
-            )
-            format_combo.currentIndexChanged.connect(
-                lambda *_args, combo=format_combo, line=format_edit: (
-                    (
-                        line.setText(str(combo.currentData()))
-                        if combo.currentData() and combo.currentData() != "__custom__"
-                        else None
-                    ),
-                    self._render_selected_invoice(export=False, silent=True),
-                )
-            )
-            format_edit.textChanged.connect(
-                lambda *_args, symbol=field.canonical_symbol: (
-                    self._sync_template_manual_date_format_combo(symbol),
-                    self._render_selected_invoice(export=False, silent=True),
-                )
-            )
-            return container
-
-        line_edit = QLineEdit(self.template_fill_tabs)
-        line_edit.setObjectName("contractTemplateManualTextWidget")
-        line_edit.setProperty("canonical_symbol", field.canonical_symbol)
-        line_edit.setProperty("field_type", field.field_type)
-        line_edit.setProperty("widget_kind", field.widget_kind)
-        line_edit.setPlaceholderText(f"Enter {field.display_label}")
-        line_edit.textChanged.connect(
-            lambda *_args: self._render_selected_invoice(export=False, silent=True)
-        )
-        return line_edit
-
-    def _template_manual_values(self) -> dict[str, object]:
-        values: dict[str, object] = {}
-        for widget_map in (self.template_manual_widgets, self.template_indexed_manual_widgets):
-            for key, widget in tuple(widget_map.items()):
-                try:
-                    value = self._template_read_widget_value(widget)
-                except RuntimeError:
-                    continue
-                if value is None:
-                    continue
-                if isinstance(widget, QDateEdit):
-                    format_widget = self.template_manual_date_format_widgets.get(key)
-                    format_code = (
-                        str(format_widget.text() or "").strip()
-                        if format_widget is not None
-                        else DEFAULT_MANUAL_DATE_FORMAT
-                    )
-                    value = format_manual_date_value(value, format_code)
-                values[key] = value
-        footer = self.manual_footer_field.text().strip()
-        if footer and "custom.footer_note" not in values and "{{manual.footer_note}}" not in values:
-            values["custom.footer_note"] = footer
-        return values
-
-    @staticmethod
-    def _template_selector_combo(widget: QWidget | None) -> QComboBox | None:
-        if isinstance(widget, QComboBox):
-            return widget
-        if widget is None:
-            return None
-        combo = widget.property("selector_combo")
-        if isinstance(combo, QComboBox):
-            return combo
-        found = widget.findChild(QComboBox, "contractTemplateSelectorWidget")
-        return found if isinstance(found, QComboBox) else None
-
-    @classmethod
-    def _template_read_widget_value(cls, widget: QWidget) -> object | None:
-        combo = cls._template_selector_combo(widget)
-        if combo is not None:
-            value = combo.currentData()
-            return value if value is not None else None
-        if isinstance(widget, QCheckBox):
-            if not bool(widget.property("has_user_value")):
-                return None
-            return bool(widget.isChecked())
-        if isinstance(widget, QDoubleSpinBox):
-            if not bool(widget.property("has_user_value")):
-                return None
-            value = float(widget.value())
-            return int(value) if value.is_integer() else value
-        if isinstance(widget, QDateEdit):
-            if not bool(widget.property("has_user_value")):
-                return None
-            return widget.date().toString("yyyy-MM-dd")
-        if isinstance(widget, QLineEdit):
-            return _clean_text(widget.text())
-        return None
-
-    @classmethod
-    def _write_template_widget_value(
-        cls,
-        widget: QWidget,
-        value: object | None,
-        *,
-        explicit: bool,
-    ) -> None:
-        combo = cls._template_selector_combo(widget)
-        if combo is not None:
-            if not explicit or value is None:
-                combo.setCurrentIndex(0)
-                return
-            index = combo.findData(value)
-            if index < 0:
-                index = combo.findData(str(value))
-            if index < 0:
-                index = combo.findText(str(value))
-            combo.setCurrentIndex(index if index >= 0 else 0)
-            return
-        if isinstance(widget, QCheckBox):
-            widget.setChecked(bool(value) if explicit else False)
-            widget.setProperty("has_user_value", bool(explicit))
-            return
-        if isinstance(widget, QDoubleSpinBox):
-            widget.setValue(float(value) if explicit and value is not None else 0.0)
-            widget.setProperty("has_user_value", bool(explicit))
-            return
-        if isinstance(widget, QDateEdit):
-            if explicit and value is not None:
-                date_value = QDate.fromString(str(value), Qt.DateFormat.ISODate)
-                if not date_value.isValid():
-                    date_value = QDate.fromString(str(value), "yyyy-MM-dd")
-                widget.setDate(date_value if date_value.isValid() else QDate.currentDate())
-                widget.setProperty("has_user_value", bool(date_value.isValid()))
-            else:
-                widget.setDate(QDate.currentDate())
-                widget.setProperty("has_user_value", False)
-            return
-        if isinstance(widget, QLineEdit):
-            widget.setText(str(value) if explicit and value is not None else "")
-
-    def _sync_template_manual_date_format_combo(self, canonical_symbol: str) -> None:
-        combo = self.template_manual_date_format_combo_widgets.get(str(canonical_symbol))
-        edit = self.template_manual_date_format_widgets.get(str(canonical_symbol))
-        if combo is None or edit is None:
-            return
-        clean_format = str(edit.text() or "").strip()
-        index = combo.findData(clean_format)
-        if index < 0:
-            index = combo.findData("__custom__")
-        previous_state = combo.blockSignals(True)
-        try:
-            combo.setCurrentIndex(index if index >= 0 else 0)
-        finally:
-            combo.blockSignals(previous_state)
-
-    def _selected_invoice_party_id(self) -> int | None:
-        conn = self._conn()
-        invoice_id = self._selected_invoice_id()
-        if conn is None or invoice_id is None:
-            return None
-        row = conn.execute(
-            "SELECT party_id FROM Invoices WHERE id=?", (int(invoice_id),)
-        ).fetchone()
-        if not row or row[0] is None:
-            return None
-        return int(row[0])
-
-    def _selected_template_party_id(self) -> int | None:
-        value = None
-        for widget in self.template_selector_widgets.values():
-            combo = self._template_selector_combo(widget)
-            if combo is not None and combo.property("scope_entity_type") == "party":
-                value = combo.currentData()
-                break
-        if value is None:
-            try:
-                value = self.template_party_selector_combo.currentData()
-            except RuntimeError:
-                value = None
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except Exception:
-            return None
-
-    def _template_canonical_overrides(self) -> dict[str, object]:
-        overrides: dict[str, object] = {}
-        seen_widgets: set[int] = set()
-        for widget in self.template_selector_widgets.values():
-            widget_id = id(widget)
-            if widget_id in seen_widgets:
-                continue
-            seen_widgets.add(widget_id)
-            combo = self._template_selector_combo(widget)
-            if combo is None or combo.property("scope_entity_type") != "party":
-                continue
-            value = combo.currentData()
-            if value is None:
-                continue
-            party_values = self._template_party_values(int(value))
-            for raw_symbol in widget.property("placeholder_symbols") or []:
-                matched_key = _invoice_template_symbol_key(str(raw_symbol))
-                if matched_key in party_values:
-                    overrides[matched_key] = party_values[matched_key]
-        indexed_seen_widgets: set[int] = set()
-        for widget in self.template_indexed_selector_widgets.values():
-            widget_id = id(widget)
-            if widget_id in indexed_seen_widgets:
-                continue
-            indexed_seen_widgets.add(widget_id)
-            combo = self._template_selector_combo(widget)
-            if combo is None:
-                continue
-            value = combo.currentData()
-            if value is None:
-                continue
-            index = int(widget.property("indexed_selection_index") or 1)
-            scope = str(combo.property("scope_entity_type") or "")
-            if scope == "party":
-                source_values = self._template_party_values(int(value))
-            elif scope == "track":
-                source_values = self._template_track_values(int(value))
-            else:
-                source_values = {}
-            for raw_symbol in widget.property("placeholder_symbols") or []:
-                matched_key = _invoice_template_symbol_key(str(raw_symbol))
-                if matched_key not in source_values:
-                    continue
-                indexed_key = build_contract_template_indexed_selection_key(
-                    str(raw_symbol),
-                    index,
-                )
-                overrides[indexed_key] = source_values[matched_key]
-        if not overrides:
-            overrides.update(self._template_party_values(self._selected_template_party_id()))
-        return overrides
-
-    def _template_party_values(self, party_id: int | None) -> dict[str, str]:
-        conn = self._conn()
-        if conn is None or party_id is None:
-            return {}
-        row = conn.execute(
-            """
-            SELECT
-                legal_name,
-                display_name,
-                company_name,
-                address_line1,
-                address_line2,
-                street_name,
-                street_number,
-                city,
-                region,
-                postal_code,
-                country,
-                vat_number,
-                tax_id,
-                email,
-                phone,
-                bank_account_number,
-                chamber_of_commerce_number
-            FROM Parties
-            WHERE id=?
-            """,
-            (int(party_id),),
-        ).fetchone()
-        if not row:
-            return {}
-        legal_name = str(row[0] or "")
-        display_name = str(row[1] or "")
-        company_name = str(row[2] or "")
-        resolved_name = display_name or company_name or legal_name
-        address_line1 = str(row[3] or "")
-        address_line2 = str(row[4] or "")
-        street_name = str(row[5] or "")
-        street_number = str(row[6] or "")
-        city = str(row[7] or "")
-        region = str(row[8] or "")
-        postal_code = str(row[9] or "")
-        country = str(row[10] or "")
-        street_line = " ".join(
-            part for part in (street_name, street_number) if str(part).strip()
-        ).strip()
-        city_line = " ".join(part for part in (postal_code, city) if str(part).strip()).strip()
-        street_address = "\n".join(
-            str(part or "").strip()
-            for part in (
-                address_line1,
-                address_line2,
-                street_line,
-                city_line,
-                region,
-                country,
-            )
-            if str(part or "").strip()
-        )
-        return {
-            "invoice.party.name": resolved_name,
-            "invoice.party.company_name": company_name,
-            "invoice.party.display_name": display_name,
-            "invoice.party.legal_name": legal_name,
-            "invoice.party.address": street_address,
-            "invoice.party.address_line1": address_line1,
-            "invoice.party.address_line2": address_line2,
-            "invoice.party.street_name": street_name,
-            "invoice.party.street_number": street_number,
-            "invoice.party.postal_code": postal_code,
-            "invoice.party.city": city,
-            "invoice.party.region": region,
-            "invoice.party.country": country,
-            "invoice.party.vat_number": str(row[11] or ""),
-            "invoice.party.tax_id": str(row[12] or ""),
-            "invoice.party.email": str(row[13] or ""),
-            "invoice.party.phone": str(row[14] or ""),
-            "invoice.party.bank_account_number": str(row[15] or ""),
-            "invoice.party.chamber_of_commerce_number": str(row[16] or ""),
-        }
-
-    def _template_track_values(self, track_id: int | None) -> dict[str, str]:
-        conn = self._conn()
-        if conn is None or track_id is None:
-            return {}
-        try:
-            columns = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()
-                if row and row[1]
-            }
-            artist_expr = "artist_name" if "artist_name" in columns else "''"
-            additional_expr = "additional_artists" if "additional_artists" in columns else "''"
-            row = conn.execute(
-                f"""
-                SELECT
-                    track_title,
-                    isrc,
-                    track_length_sec,
-                    composer,
-                    {artist_expr},
-                    {additional_expr}
-                FROM Tracks
-                WHERE id=?
-                """,
-                (int(track_id),),
-            ).fetchone()
-        except sqlite3.Error:
-            return {}
-        if not row:
-            return {}
-        title = str(row[0] or "")
-        duration = str(row[2] or "")
-        return {
-            "track.track_title": title,
-            "track.title": title,
-            "track.isrc": str(row[1] or ""),
-            "track.track_length_sec": duration,
-            "track.duration": duration,
-            "track.composer": str(row[3] or ""),
-            "track.artist_name": str(row[4] or ""),
-            "track.additional_artists": str(row[5] or ""),
-        }
-
-    def _template_owner_values(self) -> dict[str, str]:
-        conn = self._conn()
-        if conn is None:
-            return {}
-        try:
-            owner = SettingsReadService(conn).load_owner_party_settings()
-        except Exception:
-            owner = OwnerPartySettings()
-        if owner.party_id is None:
-            return {}
-        owner_name = (
-            owner.company_name or owner.display_name or owner.legal_name or owner.artist_name
-        )
-        street_line = " ".join(
-            part for part in (owner.street_name, owner.street_number) if str(part).strip()
-        ).strip()
-        address = "\n".join(
-            str(part).strip()
-            for part in (
-                owner.address_line1,
-                owner.address_line2,
-                street_line,
-                " ".join(
-                    part for part in (owner.postal_code, owner.city) if str(part).strip()
-                ).strip(),
-                owner.region,
-                owner.country,
-            )
-            if str(part).strip()
-        )
-        return {
-            "company.name": owner_name,
-            "company.company_name": owner.company_name,
-            "company.display_name": owner.display_name,
-            "company.legal_name": owner.legal_name,
-            "company.address": address,
-            "company.address_line1": owner.address_line1,
-            "company.address_line2": owner.address_line2,
-            "company.street_name": owner.street_name,
-            "company.street_number": owner.street_number,
-            "company.postal_code": owner.postal_code,
-            "company.city": owner.city,
-            "company.region": owner.region,
-            "company.country": owner.country,
-            "company.vat_number": owner.vat_number,
-            "company.email": owner.email,
-            "company.phone": owner.phone,
-            "company.payment_details": owner.bank_account_number,
-            "company.chamber_of_commerce_number": owner.chamber_of_commerce_number,
-        }
-
-    def _refresh_template_database_values(self) -> None:
-        matches = self._template_database_matches()
-        previous_symbol = self.template_database_value_combo.currentData()
-        previous_state = self.template_database_value_combo.blockSignals(True)
-        self.template_database_value_combo.clear()
-        if not matches:
-            self.template_database_value_combo.addItem(
-                "No database-linked placeholders detected.",
-                None,
-            )
-            self.template_database_value_combo.setEnabled(False)
-            self.template_database_value_combo.blockSignals(previous_state)
-            self.template_database_value_detail_output.setPlainText(
-                "Upload HTML containing contract-style database placeholders such as "
-                "{{db.party.company_name}}, {{db.owner.vat_number}}, or {{db.invoice.number}}."
-            )
-            return
-        selected_index = 0
-        for raw_symbol, matched_key, source_label, value in matches:
-            display_value = value or "blank"
-            self.template_database_value_combo.addItem(
-                f"{raw_symbol} -> {matched_key} ({source_label}: {display_value})",
-                raw_symbol,
-            )
-            if raw_symbol == previous_symbol:
-                selected_index = self.template_database_value_combo.count() - 1
-        self.template_database_value_combo.setEnabled(True)
-        self.template_database_value_combo.setCurrentIndex(selected_index)
-        self.template_database_value_combo.blockSignals(previous_state)
-        self._refresh_template_database_detail()
-
-    def _refresh_template_database_detail(self) -> None:
-        raw_symbol_data = self.template_database_value_combo.currentData()
-        raw_symbol = str(raw_symbol_data or "").strip()
-        if not raw_symbol:
-            return
-        for candidate_symbol, matched_key, source_label, value in self._template_database_matches():
-            if candidate_symbol != raw_symbol:
-                continue
-            self.template_database_value_detail_output.setPlainText(
-                "\n".join(
-                    [
-                        "Database-linked placeholder",
-                        f"HTML symbol: {candidate_symbol}",
-                        f"Matched app field: {matched_key}",
-                        f"Source: {source_label}",
-                        "",
-                        "Current selected value",
-                        value or "-",
-                    ]
-                )
-            )
-            return
-
-    def _detected_invoice_template_symbols(self) -> list[str]:
-        source_html = self.template_html_editor.toPlainText()
-        symbols: list[str] = []
-        seen: set[str] = set()
-        for match in _INVOICE_TEMPLATE_SYMBOL_RE.finditer(source_html):
-            raw_symbol = str(match.group(1) or "").strip()
-            token = _contract_placeholder_token(raw_symbol)
-            if token is not None:
-                raw_symbol = token.canonical_symbol
-            if raw_symbol and raw_symbol not in seen:
-                symbols.append(raw_symbol)
-                seen.add(raw_symbol)
-        return symbols
-
-    def _selected_template_symbol_raw(self) -> str | None:
-        data = self.template_symbol_combo.currentData()
-        return str(data or "").strip() or None
-
-    def _refresh_template_symbol_detail(self) -> None:
-        raw_symbol = self._selected_template_symbol_raw()
-        if raw_symbol is None:
-            return
-        matched_key = _invoice_template_symbol_key(raw_symbol)
-        resolved = self.template_symbol_combo.property("template_resolved_values")
-        if not isinstance(resolved, dict):
-            resolved = self._sample_template_replacements()
-        warning_text = str(self.template_symbol_combo.property("template_warnings") or "")
-        value = resolved.get(matched_key, "")
-        render_mode = _INVOICE_TEMPLATE_RENDER_MODES.get(matched_key) or (
-            "text" if matched_key.startswith("custom.") else "-"
-        )
-        if self._is_template_manual_symbol(matched_key) and not str(value or "").strip():
-            status = "Manual value needed"
-        elif render_mode != "-" and matched_key in resolved:
-            status = "Resolved"
-        elif render_mode != "-":
-            status = "Matched"
-        else:
-            status = "Unsupported"
-        if matched_key in warning_text or raw_symbol in warning_text:
-            status = "Needs attention"
-        self.template_symbol_detail_output.setPlainText(
-            "\n".join(
-                [
-                    "Selected template symbol",
-                    f"HTML symbol: {raw_symbol}",
-                    f"Matched app value: {matched_key if render_mode != '-' else 'No supported match'}",
-                    f"Render mode: {render_mode}",
-                    f"Status: {status or '-'}",
-                    "",
-                    "Current resolved value",
-                    _template_value_preview(value) or "-",
-                    "",
-                    "Matching policy",
-                    "Invoice-native symbols resolve directly, for example invoice.number.",
-                    "Contract-style db.party.* symbols are matched to invoice.party.* values where possible.",
-                    "Contract-style db.owner.* symbols are matched to company.* values from the Owner Party ledger where possible.",
-                    "Manual symbols remain escaped text unless they are mapped to a safe canonical value.",
-                ]
-            )
-        )
-
-    def _handle_template_html_changed(self) -> None:
-        self._rebuild_template_fill_fields()
-        self._refresh_template_symbol_matches()
-        self._render_selected_invoice(export=False, silent=True)
-
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 2, 0, 0)
@@ -3907,11 +2382,11 @@ class InvoiceWorkspacePanel(QWidget):
         ledger_actions.setSpacing(8)
         for label, slot in (
             ("Refresh", self.refresh_all),
-            ("Issue", self.issue_selected_invoice),
+            ("Open Invoice", self.view_selected_final_invoice),
+            ("Open File Location", self.open_selected_final_invoice_location),
             ("Payment", self.record_payment_for_selected_invoice),
             ("Void", self.void_selected_invoice),
-            ("Preview", self.preview_selected_invoice),
-            ("Export HTML", self.export_selected_invoice_html),
+            ("Purge Selected", self.purge_selected_invoice_for_cleanup),
         ):
             _add_action_button(ledger_tab, ledger_actions, label, slot)
         ledger_actions.addStretch(1)
@@ -3929,11 +2404,11 @@ class InvoiceWorkspacePanel(QWidget):
         self.invoice_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.invoice_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.invoice_table.itemSelectionChanged.connect(self.refresh_invoice_lines)
-        self.invoice_table.itemSelectionChanged.connect(
-            lambda *_args: self._render_selected_invoice(export=False, silent=True)
-        )
+        self.invoice_table.itemSelectionChanged.connect(self._refresh_selected_invoice_final_status)
         _configure_workspace_table(self.invoice_table, minimum_height=260)
         invoice_layout.addWidget(self.invoice_table)
+        self.invoice_final_status_label.setProperty("role", "statusText")
+        invoice_layout.addWidget(self.invoice_final_status_label)
         ledger_layout.addWidget(invoice_box, 1)
         self.invoice_workflow_tabs.addTab(ledger_tab, "Ledger")
 
@@ -3952,117 +2427,6 @@ class InvoiceWorkspacePanel(QWidget):
         _configure_workspace_table(self.invoice_line_table, minimum_height=150)
         lines_layout.addWidget(self.invoice_line_table)
         self.invoice_workflow_tabs.addTab(lines_tab, "Line Allocation")
-
-        create_tab = QWidget(self.invoice_workflow_tabs)
-        create_layout = QVBoxLayout(create_tab)
-        create_layout.setContentsMargins(8, 8, 8, 8)
-        create_layout.setSpacing(10)
-        create_splitter = QSplitter(Qt.Orientation.Horizontal, create_tab)
-        create_layout.addWidget(create_splitter, 1)
-
-        draft_panel = QWidget(create_splitter)
-        draft_layout = QVBoxLayout(draft_panel)
-        draft_layout.setContentsMargins(0, 0, 0, 0)
-        draft_layout.setSpacing(8)
-        draft_header = QLabel(
-            "Build an invoice from multiple draft lines, then create the draft document.",
-            draft_panel,
-        )
-        draft_header.setProperty("role", "secondary")
-        draft_layout.addWidget(draft_header)
-        self.draft_line_table.setHorizontalHeaderLabels(
-            ("#", "Description", "Qty", "Unit", "Net", "VAT", "Gross")
-        )
-        self.draft_line_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.draft_line_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.draft_line_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        _configure_workspace_table(self.draft_line_table, minimum_height=260)
-        draft_layout.addWidget(self.draft_line_table, 1)
-        self.draft_totals_label.setProperty("role", "statusText")
-        draft_layout.addWidget(self.draft_totals_label)
-        draft_actions = QHBoxLayout()
-        draft_actions.setSpacing(8)
-        _add_action_button(
-            create_tab, draft_actions, "Remove Line", self.remove_selected_draft_line
-        )
-        _add_action_button(create_tab, draft_actions, "Clear Lines", self.clear_draft_lines)
-        draft_actions.addStretch(1)
-        draft_layout.addLayout(draft_actions)
-        composer_tabs = QTabWidget(create_splitter)
-        settings_box = QGroupBox("Invoice settings", composer_tabs)
-        settings_form = QFormLayout(settings_box)
-        _configure_standard_form_layout(settings_form)
-        self.due_date_field.setPlaceholderText("YYYY-MM-DD")
-        settings_form.addRow("Party", self.party_combo)
-        settings_form.addRow("Due date", self.due_date_field)
-        composer_tabs.addTab(settings_box, "Settings")
-
-        manual_box = QGroupBox("Manual line", composer_tabs)
-        manual_form = QFormLayout(manual_box)
-        _configure_standard_form_layout(manual_form)
-        self.unit_price_field.setPlaceholderText("100.00")
-        self.quantity_field.setPlaceholderText("1")
-        self.vat_rate_field.setPlaceholderText("2100")
-        manual_form.addRow("Description", self.description_field)
-        manual_form.addRow("Quantity", self.quantity_field)
-        manual_form.addRow("Unit price", self.unit_price_field)
-        manual_form.addRow("VAT basis points", self.vat_rate_field)
-        add_manual = QPushButton("Add Manual Line", manual_box)
-        add_manual.clicked.connect(self.add_manual_invoice_line)
-        manual_form.addRow("", add_manual)
-        composer_tabs.addTab(manual_box, "Manual")
-
-        catalog_line_box = QGroupBox("Catalog preset line", composer_tabs)
-        catalog_line_form = QFormLayout(catalog_line_box)
-        _configure_standard_form_layout(catalog_line_form)
-        self.catalog_item_combo.currentIndexChanged.connect(
-            lambda *_args: self._populate_line_fields_from_catalog_combo()
-        )
-        catalog_line_form.addRow("Preset", self.catalog_item_combo)
-        add_catalog = QPushButton("Add Preset Line", catalog_line_box)
-        add_catalog.clicked.connect(self.add_catalog_invoice_line)
-        catalog_line_form.addRow("", add_catalog)
-        composer_tabs.addTab(catalog_line_box, "Preset")
-
-        travel_box = QGroupBox("Travel line", composer_tabs)
-        travel_form = QFormLayout(travel_box)
-        _configure_standard_form_layout(travel_form)
-        self.travel_origin_field.setPlaceholderText("From address")
-        self.travel_destination_field.setPlaceholderText("To address")
-        self.travel_km_field.setPlaceholderText("One-way km, e.g. 42.5")
-        self.travel_rate_field.setPlaceholderText("Price per km, e.g. 0.35")
-        self.travel_description_field.setPlaceholderText("Travel costs")
-        self.travel_status_label.setProperty("role", "secondary")
-        travel_form.addRow("From", self.travel_origin_field)
-        travel_form.addRow("To", self.travel_destination_field)
-        travel_form.addRow("One-way km", self.travel_km_field)
-        travel_form.addRow("Rate per km", self.travel_rate_field)
-        travel_form.addRow("Description", self.travel_description_field)
-        travel_form.addRow("", self.travel_round_trip_check)
-        travel_buttons = QHBoxLayout()
-        travel_buttons.setSpacing(8)
-        _add_action_button(travel_box, travel_buttons, "Calculate KM", self.calculate_travel_km)
-        _add_action_button(
-            travel_box, travel_buttons, "Add Travel Line", self.add_travel_invoice_line
-        )
-        travel_form.addRow("", travel_buttons)
-        travel_form.addRow("", self.travel_status_label)
-        composer_tabs.addTab(travel_box, "Travel")
-        create_splitter.addWidget(composer_tabs)
-        create_splitter.addWidget(draft_panel)
-        create_splitter.setSizes([440, 720])
-
-        create_actions = QHBoxLayout()
-        create_actions.setSpacing(8)
-        _add_action_button(
-            create_tab, create_actions, "Create Draft Invoice", self.create_draft_invoice
-        )
-        create_actions.addStretch(1)
-        create_layout.addLayout(create_actions)
-        self._refresh_draft_line_table()
-        self.invoice_workflow_tabs.addTab(create_tab, "Create / Edit")
 
         credit_tab = QWidget(self.invoice_workflow_tabs)
         credit_layout = QVBoxLayout(credit_tab)
@@ -4141,7 +2505,7 @@ class InvoiceWorkspacePanel(QWidget):
             "Maintain reusable services, goods, quantities, prices, VAT defaults, and ledger accounts.",
         )
         self.catalog_table.setHorizontalHeaderLabels(
-            ("ID", "Name", "Category", "Qty", "Price", "VAT", "Account", "State")
+            ("ID", "Name", "Category", "Qty", "Currency", "Price", "VAT", "Account", "State")
         )
         self.catalog_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.catalog_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -4161,19 +2525,51 @@ class InvoiceWorkspacePanel(QWidget):
         self.catalog_description_field.setPlaceholderText("Description copied to invoice lines")
         self.catalog_quantity_field.setPlaceholderText("1")
         self.catalog_unit_price_field.setPlaceholderText("100.00")
+        self._populate_currency_combo(self.catalog_currency_combo)
         self.catalog_vat_rate_field.setPlaceholderText("2100")
         self.catalog_vat_country_field.setPlaceholderText("NL")
-        self.catalog_category_field.setPlaceholderText("Services / Goods / Travel")
-        self.catalog_account_field.setPlaceholderText("4100")
+        self.catalog_vat_country_field.editingFinished.connect(
+            self._apply_catalog_currency_from_country
+        )
+        self.catalog_category_combo.setObjectName("catalogCategoryCombo")
+        self.catalog_category_combo.setEditable(True)
+        if self.catalog_category_combo.lineEdit() is not None:
+            self.catalog_category_combo.lineEdit().setPlaceholderText("Choose category")
+        self.catalog_account_combo.setObjectName("catalogLedgerAccountCombo")
+        self._refresh_catalog_category_options()
+        self._refresh_catalog_account_options()
+        category_selector = QWidget(editor_box)
+        category_selector_layout = QHBoxLayout(category_selector)
+        category_selector_layout.setContentsMargins(0, 0, 0, 0)
+        category_selector_layout.setSpacing(6)
+        category_selector_layout.addWidget(self.catalog_category_combo, 1)
+        _add_action_button(
+            category_selector,
+            category_selector_layout,
+            "Edit Categories",
+            self.open_catalog_category_admin,
+        )
+        account_selector = QWidget(editor_box)
+        account_selector_layout = QHBoxLayout(account_selector)
+        account_selector_layout.setContentsMargins(0, 0, 0, 0)
+        account_selector_layout.setSpacing(6)
+        account_selector_layout.addWidget(self.catalog_account_combo, 1)
+        _add_action_button(
+            account_selector,
+            account_selector_layout,
+            "Edit Accounts",
+            self.open_ledger_account_admin,
+        )
         self.catalog_active_check.setChecked(True)
         form.addRow("Name", self.catalog_name_field)
         form.addRow("Description", self.catalog_description_field)
         form.addRow("Default quantity", self.catalog_quantity_field)
         form.addRow("Unit price", self.catalog_unit_price_field)
+        form.addRow("Currency", self.catalog_currency_combo)
         form.addRow("VAT basis points", self.catalog_vat_rate_field)
         form.addRow("VAT country", self.catalog_vat_country_field)
-        form.addRow("Category", self.catalog_category_field)
-        form.addRow("Ledger account", self.catalog_account_field)
+        form.addRow("Category", category_selector)
+        form.addRow("Ledger account", account_selector)
         form.addRow("", self.catalog_active_check)
         editor_layout.addLayout(form)
         actions = QHBoxLayout()
@@ -4349,7 +2745,7 @@ class InvoiceWorkspacePanel(QWidget):
         return tab
 
     def _build_royalty_statements_tab(self) -> QWidget:
-        return self._build_table_detail_page(
+        tab = self._build_table_detail_page(
             title="Royalty Statements",
             description=(
                 "Generate, review, approve, send, and track statements to royalty payees."
@@ -4379,6 +2775,7 @@ class InvoiceWorkspacePanel(QWidget):
                 ("Record Payout", self.record_artist_payout_for_selected_royalty),
             ),
         )
+        return tab
 
     def _build_disputes_tab(self) -> QWidget:
         return self._build_table_detail_page(
@@ -4745,193 +3142,6 @@ class InvoiceWorkspacePanel(QWidget):
         calculation_splitter.setSizes([420, 760])
         return tab
 
-    def _build_template_tab(self) -> QWidget:
-        tab = QWidget(self)
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-        splitter = QSplitter(Qt.Orientation.Horizontal, tab)
-        layout.addWidget(splitter, 1)
-
-        source_panel = QWidget(splitter)
-        source_layout = QVBoxLayout(source_panel)
-        source_layout.setContentsMargins(0, 0, 0, 0)
-        source_layout.setSpacing(10)
-        source_box, source_box_layout = _create_standard_section(
-            source_panel,
-            "Uploaded HTML template",
-            "Upload the same kind of external HTML source used by the Contract Template workspace. "
-            "Canonical symbols are written in double braces, for example {{ invoice.number }}.",
-        )
-        form = QFormLayout()
-        _configure_standard_form_layout(form)
-        self.template_name_field.setText("Invoice Template")
-        self.template_path_field.setReadOnly(True)
-        self.template_path_field.setPlaceholderText("No uploaded HTML file selected")
-        self.template_status_label.setProperty("role", "secondary")
-        self.template_status_label.setText("No invoice HTML template revision is active yet.")
-        form.addRow("Template name", self.template_name_field)
-        form.addRow("HTML file", self.template_path_field)
-        source_box_layout.addLayout(form)
-        file_actions = QHBoxLayout()
-        file_actions.setSpacing(8)
-        browse = QPushButton("Browse HTML...", source_box)
-        browse.clicked.connect(self.browse_template_file)
-        file_actions.addWidget(browse)
-        upload = QPushButton("Activate Template", source_box)
-        upload.clicked.connect(self.upload_template)
-        file_actions.addWidget(upload)
-        file_actions.addStretch(1)
-        source_box_layout.addLayout(file_actions)
-        source_box_layout.addWidget(self.template_status_label)
-        source_layout.addWidget(source_box)
-
-        self.template_html_editor.setPlainText(
-            "<html><body><h1>{{ invoice.number }}</h1>{{ invoice.lines }}"
-            "<p>Total: {{ invoice.total }}</p><footer>{{ custom.footer_note }}</footer></body></html>"
-        )
-        self.template_html_editor.setVisible(False)
-        self.template_html_editor.textChanged.connect(self._handle_template_html_changed)
-
-        self.template_fill_tabs.setObjectName("invoiceTemplateFillTabs")
-        self.template_fill_tabs.setUsesScrollButtons(True)
-
-        manual_page = QWidget(self.template_fill_tabs)
-        manual_page_layout = QVBoxLayout(manual_page)
-        manual_page_layout.setContentsMargins(0, 0, 0, 0)
-        manual_page_layout.setSpacing(10)
-        manual_box, manual_layout = _create_standard_section(
-            manual_page,
-            "Manual Fields",
-            "Manual placeholders become editable text values. Values are escaped before rendering.",
-        )
-        self.template_manual_empty_label.setText(
-            "No manual placeholders are present in the uploaded HTML."
-        )
-        self.template_manual_empty_label.setWordWrap(True)
-        self.template_manual_empty_label.setProperty("role", "secondary")
-        manual_layout.addWidget(self.template_manual_empty_label)
-        _configure_standard_form_layout(self.template_manual_form)
-        manual_layout.addLayout(self.template_manual_form)
-        manual_page_layout.addWidget(manual_box)
-        manual_page_layout.addStretch(1)
-        self.template_fill_tabs.addTab(manual_page, "Manual Fields")
-
-        database_page = QWidget(self.template_fill_tabs)
-        database_page_layout = QVBoxLayout(database_page)
-        database_page_layout.setContentsMargins(0, 0, 0, 0)
-        database_page_layout.setSpacing(10)
-        database_box, database_layout = _create_standard_section(
-            database_page,
-            "Database-Linked Fields",
-            "Party placeholders use selector-driven authoritative records; owner placeholders resolve from the Party Manager owner ledger.",
-        )
-        self.template_database_empty_label.setText(
-            "No database-linked placeholders are present in the uploaded HTML."
-        )
-        self.template_database_empty_label.setWordWrap(True)
-        self.template_database_empty_label.setProperty("role", "secondary")
-        database_layout.addWidget(self.template_database_empty_label)
-        self.template_party_selector_combo.setObjectName("invoiceTemplatePartySelectorCombo")
-        self.template_party_selector_combo.currentIndexChanged.connect(
-            lambda *_args: (
-                self._refresh_template_database_values(),
-                self._render_selected_invoice(export=False, silent=True),
-            )
-        )
-        _configure_standard_form_layout(self.template_database_form)
-        database_layout.addLayout(self.template_database_form)
-        value_label = QLabel("Matched placeholder values", database_box)
-        value_label.setProperty("role", "secondary")
-        database_layout.addWidget(value_label)
-        self.template_database_value_combo.setObjectName("invoiceTemplateDatabaseValueCombo")
-        self.template_database_value_combo.currentIndexChanged.connect(
-            self._refresh_template_database_detail
-        )
-        database_layout.addWidget(self.template_database_value_combo)
-        _configure_detail_view(self.template_database_value_detail_output)
-        self.template_database_value_detail_output.setMaximumHeight(150)
-        database_layout.addWidget(self.template_database_value_detail_output)
-        database_page_layout.addWidget(database_box, 1)
-        self.template_fill_tabs.addTab(database_page, "Database-Linked Fields")
-
-        symbol_page = QWidget(self.template_fill_tabs)
-        symbol_page_layout = QVBoxLayout(symbol_page)
-        symbol_page_layout.setContentsMargins(0, 0, 0, 0)
-        symbol_page_layout.setSpacing(10)
-        symbol_box, symbol_layout = _create_standard_section(
-            symbol_page,
-            "Resolved Symbols",
-            (
-                "Select placeholders found in the uploaded HTML and inspect the app value "
-                "they resolve to before preview/export."
-            ),
-        )
-        self.template_symbol_combo.setObjectName("invoiceTemplateResolvedSymbolCombo")
-        self.template_symbol_combo.currentIndexChanged.connect(self._refresh_template_symbol_detail)
-        symbol_layout.addWidget(self.template_symbol_combo)
-        detail_label = QLabel(
-            "Selected symbol value",
-            symbol_box,
-        )
-        detail_label.setProperty("role", "secondary")
-        symbol_layout.addWidget(detail_label)
-        _configure_detail_view(self.template_symbol_detail_output)
-        self.template_symbol_detail_output.setMaximumHeight(180)
-        symbol_layout.addWidget(self.template_symbol_detail_output)
-        symbol_page_layout.addWidget(symbol_box, 1)
-        self.template_fill_tabs.addTab(symbol_page, "Resolved Symbols")
-        source_layout.addWidget(self.template_fill_tabs, 1)
-        self._rebuild_template_fill_fields()
-        self._refresh_template_symbol_matches()
-        source_layout.addStretch(1)
-        splitter.addWidget(source_panel)
-
-        preview_box, preview_layout = _create_standard_section(
-            tab,
-            "Live rendered preview",
-            "Preview and export use the same invoice template render service.",
-        )
-        preview_toolbar = QWidget(preview_box)
-        preview_toolbar.setObjectName("invoiceTemplatePreviewToolbar")
-        preview_toolbar.setProperty("role", "compactControlGroup")
-        preview_toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        preview_toolbar.setMaximumHeight(56)
-        preview_toolbar_layout = QHBoxLayout(preview_toolbar)
-        preview_toolbar_layout.setContentsMargins(10, 8, 10, 8)
-        preview_toolbar_layout.setSpacing(8)
-        refresh_preview = QPushButton("Refresh HTML Preview", preview_toolbar)
-        refresh_preview.clicked.connect(
-            lambda *_args: self._render_selected_invoice(export=False, silent=True)
-        )
-        preview_toolbar_layout.addWidget(refresh_preview)
-        clear_preview = QPushButton("Clear Preview", preview_toolbar)
-        clear_preview.clicked.connect(self._clear_invoice_preview_surface)
-        preview_toolbar_layout.addWidget(clear_preview)
-        fit_preview = QPushButton("Fit View", preview_toolbar)
-        fit_preview.clicked.connect(self._reset_invoice_html_preview_to_fit)
-        preview_toolbar_layout.addWidget(fit_preview)
-        zoom_out = QPushButton("-", preview_toolbar)
-        zoom_out.clicked.connect(lambda *_args: self._step_invoice_html_preview_zoom(-10))
-        preview_toolbar_layout.addWidget(zoom_out)
-        zoom_in = QPushButton("+", preview_toolbar)
-        zoom_in.clicked.connect(lambda *_args: self._step_invoice_html_preview_zoom(10))
-        preview_toolbar_layout.addWidget(zoom_in)
-        self.invoice_preview_zoom_label.setParent(preview_toolbar)
-        self.invoice_preview_zoom_label.setProperty("role", "statusText")
-        preview_toolbar_layout.addWidget(self.invoice_preview_zoom_label)
-        preview_toolbar_layout.addStretch(1)
-        preview_layout.addWidget(preview_toolbar, 0)
-        self.preview_output = self._create_invoice_html_preview_view(preview_box)
-        self.preview_output.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
-        )
-        preview_layout.addWidget(self.preview_output, 1)
-        splitter.addWidget(preview_box)
-        splitter.setSizes([460, 760])
-        return tab
-
     def _build_accounting_tab(self) -> QWidget:
         tab = QWidget(self)
         layout = QVBoxLayout(tab)
@@ -5255,13 +3465,14 @@ class InvoiceWorkspacePanel(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         header = QLabel(
-            "Settings extends existing company, numbering, template, VAT, integration, and workflow concepts.",
+            "Settings extends existing company, numbering, VAT, ledger, preset, integration, and workflow concepts.",
             tab,
         )
         header.setProperty("role", "secondary")
         header.setWordWrap(True)
         layout.addWidget(header)
         tabs = QTabWidget(tab)
+        self.settings_tabs = tabs
         layout.addWidget(tabs, 1)
         settings_pages = (
             (
@@ -5324,8 +3535,140 @@ class InvoiceWorkspacePanel(QWidget):
             page_layout.addWidget(box, 1)
             tabs.addTab(page, title)
         tabs.addTab(self._build_catalog_tab(), "Billing Presets")
-        tabs.addTab(self._build_template_tab(), "Templates")
+        tabs.addTab(self._build_catalog_category_settings_page(tabs), "Preset Categories")
+        tabs.addTab(self._build_ledger_account_settings_page(tabs), "Ledger Accounts")
         return tab
+
+    def _build_catalog_category_settings_page(self, parent: QWidget) -> QWidget:
+        page = QWidget(parent)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(8, 8, 8, 8)
+        page_layout.setSpacing(10)
+        box, box_layout = _create_standard_section(
+            page,
+            "Preset Categories",
+            "Maintain the controlled category list used by billing preset dropdowns.",
+        )
+        splitter = QSplitter(Qt.Orientation.Horizontal, box)
+
+        editor = QWidget(splitter)
+        editor_layout = QVBoxLayout(editor)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(8)
+        form = QFormLayout()
+        _configure_standard_form_layout(form)
+        self.catalog_category_name_field.setObjectName("catalogCategoryNameField")
+        self.catalog_category_name_field.setPlaceholderText("Services")
+        self.catalog_category_active_check.setChecked(True)
+        form.addRow("Category", self.catalog_category_name_field)
+        form.addRow("", self.catalog_category_active_check)
+        editor_layout.addLayout(form)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        _add_action_button(editor, actions, "Save Category", self.save_catalog_category)
+        _add_action_button(editor, actions, "New Category", self._clear_catalog_category_form)
+        actions.addStretch(1)
+        editor_layout.addLayout(actions)
+        editor_layout.addStretch(1)
+
+        table_panel = QWidget(splitter)
+        table_layout = QVBoxLayout(table_panel)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(8)
+        self.catalog_category_table.setObjectName("catalogCategoryAdminTable")
+        self.catalog_category_table.setHorizontalHeaderLabels(
+            ("ID", "Category", "State", "Created", "Updated")
+        )
+        self.catalog_category_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.catalog_category_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.catalog_category_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.catalog_category_table.itemSelectionChanged.connect(
+            self._populate_catalog_category_form_from_selection
+        )
+        _configure_workspace_table(self.catalog_category_table, minimum_height=320)
+        table_layout.addWidget(self.catalog_category_table, 1)
+
+        splitter.addWidget(editor)
+        splitter.addWidget(table_panel)
+        splitter.setSizes([420, 760])
+        box_layout.addWidget(splitter, 1)
+        page_layout.addWidget(box, 1)
+        self._refresh_catalog_category_settings()
+        return page
+
+    def _build_ledger_account_settings_page(self, parent: QWidget) -> QWidget:
+        page = QWidget(parent)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(8, 8, 8, 8)
+        page_layout.setSpacing(10)
+        box, box_layout = _create_standard_section(
+            page,
+            "Ledger Accounts",
+            "Maintain the chart-of-accounts values used by billing preset ledger account dropdowns.",
+        )
+        splitter = QSplitter(Qt.Orientation.Horizontal, box)
+
+        editor = QWidget(splitter)
+        editor_layout = QVBoxLayout(editor)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(8)
+        form = QFormLayout()
+        _configure_standard_form_layout(form)
+        self.account_code_field.setObjectName("ledgerAccountCodeField")
+        self.account_name_field.setObjectName("ledgerAccountNameField")
+        self.account_type_combo.setObjectName("ledgerAccountTypeCombo")
+        self.account_normal_balance_combo.setObjectName("ledgerAccountNormalBalanceCombo")
+        self.account_code_field.setPlaceholderText("4100")
+        self.account_name_field.setPlaceholderText("Venue Revenue")
+        self.account_type_combo.clear()
+        for account_type in sorted(ACCOUNT_TYPES):
+            self.account_type_combo.addItem(account_type.title(), account_type)
+        self.account_normal_balance_combo.clear()
+        for normal_balance in sorted(NORMAL_BALANCES):
+            self.account_normal_balance_combo.addItem(normal_balance.title(), normal_balance)
+        self.account_active_check.setChecked(True)
+        form.addRow("Code", self.account_code_field)
+        form.addRow("Name", self.account_name_field)
+        form.addRow("Type", self.account_type_combo)
+        form.addRow("Normal balance", self.account_normal_balance_combo)
+        form.addRow("", self.account_active_check)
+        editor_layout.addLayout(form)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        _add_action_button(editor, actions, "Save Account", self.save_ledger_account)
+        _add_action_button(editor, actions, "New Account", self._clear_ledger_account_form)
+        actions.addStretch(1)
+        editor_layout.addLayout(actions)
+        editor_layout.addStretch(1)
+
+        table_panel = QWidget(splitter)
+        table_layout = QVBoxLayout(table_panel)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(8)
+        self.account_admin_table.setObjectName("ledgerAccountAdminTable")
+        self.account_admin_table.setHorizontalHeaderLabels(
+            ("ID", "Code", "Name", "Type", "Normal", "System", "State")
+        )
+        self.account_admin_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.account_admin_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.account_admin_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.account_admin_table.itemSelectionChanged.connect(
+            self._populate_ledger_account_form_from_selection
+        )
+        _configure_workspace_table(self.account_admin_table, minimum_height=320)
+        table_layout.addWidget(self.account_admin_table, 1)
+
+        splitter.addWidget(editor)
+        splitter.addWidget(table_panel)
+        splitter.setSizes([420, 760])
+        box_layout.addWidget(splitter, 1)
+        page_layout.addWidget(box, 1)
+        self._refresh_account_admin_settings()
+        return page
 
     def _build_company_settings_page(self, parent: QWidget) -> QWidget:
         page = QWidget(parent)
@@ -6378,9 +4721,9 @@ class InvoiceWorkspacePanel(QWidget):
                 ),
                 (
                     "E-invoice delivery",
-                    "Invoice output artifacts",
-                    "InvoiceTemplateService",
-                    "Reuses invoice render snapshots",
+                    "Template Workspace artifacts",
+                    "ContractTemplateExportService",
+                    "Reuses linked template snapshots",
                     "Not configured",
                 ),
                 (
@@ -7373,10 +5716,112 @@ class InvoiceWorkspacePanel(QWidget):
             if index >= 0:
                 self.party_combo.setCurrentIndex(index)
 
+    @staticmethod
+    def _populate_currency_combo(combo: QComboBox) -> None:
+        current = combo.currentData() or DEFAULT_CURRENCY
+        combo.blockSignals(True)
+        combo.clear()
+        for code in ISO_4217_CURRENCY_CODES:
+            combo.addItem(code, code)
+        index = combo.findData(current)
+        combo.setCurrentIndex(index if index >= 0 else combo.findData(DEFAULT_CURRENCY))
+        combo.blockSignals(False)
+
+    @staticmethod
+    def _select_combo_data(combo: QComboBox, value: object | None) -> None:
+        index = combo.findData(value)
+        combo.setCurrentIndex(index if index >= 0 else combo.findData(DEFAULT_CURRENCY))
+
+    @staticmethod
+    def _select_combo_text(combo: QComboBox, value: object | None) -> None:
+        text = str(value or "").strip()
+        index = combo.findData(text)
+        if index < 0:
+            index = combo.findText(text)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        elif combo.isEditable():
+            combo.setEditText(text)
+
+    @staticmethod
+    def _select_required_combo_data(combo: QComboBox, value: object | None) -> None:
+        index = combo.findData(value)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _apply_catalog_currency_from_country(self) -> None:
+        inferred = currency_for_country(self.catalog_vat_country_field.text())
+        if inferred is not None:
+            self._select_combo_data(self.catalog_currency_combo, inferred)
+
+    def _catalog_category_value(self) -> str | None:
+        return _clean_text(self.catalog_category_combo.currentText())
+
+    def _catalog_account_code_value(self) -> str | None:
+        data = self.catalog_account_combo.currentData()
+        if data is not None:
+            return _clean_text(data)
+        text = _clean_text(self.catalog_account_combo.currentText())
+        if text and " - " in text:
+            return _clean_text(text.split(" - ", 1)[0])
+        return text
+
+    def _refresh_catalog_category_options(self) -> None:
+        conn = self._conn()
+        if conn is None:
+            return
+        current = self._catalog_category_value()
+        categories = InvoiceCatalogCategoryService(conn).list_categories(active_only=False)
+        legacy_rows = conn.execute("""
+            SELECT DISTINCT category
+            FROM InvoiceCatalogItems
+            WHERE category IS NOT NULL AND trim(category) != ''
+            ORDER BY category COLLATE NOCASE
+            """).fetchall()
+        seen: set[str] = set()
+        self.catalog_category_combo.blockSignals(True)
+        self.catalog_category_combo.clear()
+        self.catalog_category_combo.addItem("Choose category...", "")
+        for category in categories:
+            seen.add(category.name.casefold())
+            label = category.name if category.active else f"{category.name} (inactive)"
+            self.catalog_category_combo.addItem(label, category.name)
+        for row in legacy_rows:
+            name = str(row[0] or "").strip()
+            if name and name.casefold() not in seen:
+                self.catalog_category_combo.addItem(name, name)
+                seen.add(name.casefold())
+        self.catalog_category_combo.blockSignals(False)
+        if current:
+            self._select_combo_text(self.catalog_category_combo, current)
+        elif self.catalog_category_combo.isEditable():
+            self.catalog_category_combo.setEditText("")
+
+    def _refresh_catalog_account_options(self) -> None:
+        conn = self._conn()
+        if conn is None:
+            return
+        current = self._catalog_account_code_value()
+        accounts = AccountingAccountService(conn).list_accounts(active_only=False)
+        self.catalog_account_combo.blockSignals(True)
+        self.catalog_account_combo.clear()
+        self.catalog_account_combo.addItem("Choose ledger account...", None)
+        for account in accounts:
+            label = f"{account.code} - {account.name}"
+            if not account.active:
+                label = f"{label} (inactive)"
+            self.catalog_account_combo.addItem(label, account.code)
+        self.catalog_account_combo.blockSignals(False)
+        preferred = current or "4100"
+        index = self.catalog_account_combo.findData(preferred)
+        if index >= 0:
+            self.catalog_account_combo.setCurrentIndex(index)
+
     def _refresh_invoice_catalog(self) -> None:
         conn = self._conn()
         if conn is None:
             return
+        self._refresh_catalog_category_options()
+        self._refresh_catalog_account_options()
         current_combo = self.catalog_item_combo.currentData()
         current_row = self._selected_catalog_item_id()
         items = InvoiceCatalogService(conn).list_items(active_only=False)
@@ -7389,7 +5834,8 @@ class InvoiceWorkspacePanel(QWidget):
                 Quantity(item.default_quantity_value, item.default_quantity_scale)
             )
             self.catalog_item_combo.addItem(
-                f"{item.name} - {quantity} x {format_money(item.default_unit_price_minor)}",
+                f"{item.name} - {quantity} x "
+                f"{format_money(item.default_unit_price_minor, currency=item.currency)}",
                 int(item.id),
             )
         self.catalog_item_combo.blockSignals(False)
@@ -7407,6 +5853,7 @@ class InvoiceWorkspacePanel(QWidget):
                 item.name,
                 item.category or "",
                 quantity,
+                item.currency,
                 format_money(item.default_unit_price_minor, currency=item.currency),
                 f"{item.default_vat_rate_basis_points / 100:.2f}%",
                 item.default_account_code or "",
@@ -7425,6 +5872,122 @@ class InvoiceWorkspacePanel(QWidget):
                     self.catalog_table.selectRow(row)
                     break
 
+    def _selected_catalog_category_id(self) -> int | None:
+        selected = self.catalog_category_table.selectedItems()
+        if not selected:
+            return None
+        item = self.catalog_category_table.item(selected[0].row(), 0)
+        if item is None:
+            return None
+        value = item.data(Qt.ItemDataRole.UserRole)
+        return int(value) if value is not None else int(item.text())
+
+    def _selected_ledger_account_id(self) -> int | None:
+        selected = self.account_admin_table.selectedItems()
+        if not selected:
+            return None
+        item = self.account_admin_table.item(selected[0].row(), 0)
+        if item is None:
+            return None
+        value = item.data(Qt.ItemDataRole.UserRole)
+        return int(value) if value is not None else int(item.text())
+
+    def _refresh_catalog_category_settings(self) -> None:
+        conn = self._conn()
+        if conn is None:
+            return
+        selected_id = self._selected_catalog_category_id()
+        categories = InvoiceCatalogCategoryService(conn).list_categories(active_only=False)
+        self.catalog_category_table.setRowCount(len(categories))
+        for row_index, category in enumerate(categories):
+            values = (
+                str(category.id),
+                category.name,
+                "active" if category.active else "inactive",
+                _display_date(category.created_at),
+                _display_date(category.updated_at),
+            )
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setData(Qt.ItemDataRole.UserRole, int(category.id))
+                self.catalog_category_table.setItem(row_index, column, cell)
+        self.catalog_category_table.resizeColumnsToContents()
+        if selected_id is not None:
+            for row in range(self.catalog_category_table.rowCount()):
+                item = self.catalog_category_table.item(row, 0)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == selected_id:
+                    self.catalog_category_table.selectRow(row)
+                    break
+
+    def _refresh_account_admin_settings(self) -> None:
+        conn = self._conn()
+        if conn is None:
+            return
+        selected_id = self._selected_ledger_account_id()
+        accounts = AccountingAccountService(conn).list_accounts(active_only=False)
+        self.account_admin_table.setRowCount(len(accounts))
+        for row_index, account in enumerate(accounts):
+            values = (
+                str(account.id),
+                account.code,
+                account.name,
+                _status_label(account.account_type),
+                _status_label(account.normal_balance),
+                "yes" if account.system_flag else "no",
+                "active" if account.active else "inactive",
+            )
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setData(Qt.ItemDataRole.UserRole, int(account.id))
+                self.account_admin_table.setItem(row_index, column, cell)
+        self.account_admin_table.resizeColumnsToContents()
+        if selected_id is not None:
+            for row in range(self.account_admin_table.rowCount()):
+                item = self.account_admin_table.item(row, 0)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == selected_id:
+                    self.account_admin_table.selectRow(row)
+                    break
+
+    def _populate_catalog_category_form_from_selection(self) -> None:
+        conn = self._conn()
+        category_id = self._selected_catalog_category_id()
+        if conn is None or category_id is None:
+            return
+        category = InvoiceCatalogCategoryService(conn).fetch_category(category_id)
+        if category is None:
+            return
+        self.catalog_category_name_field.setText(category.name)
+        self.catalog_category_active_check.setChecked(bool(category.active))
+
+    def _populate_ledger_account_form_from_selection(self) -> None:
+        conn = self._conn()
+        account_id = self._selected_ledger_account_id()
+        if conn is None or account_id is None:
+            return
+        account = AccountingAccountService(conn).fetch_account(account_id)
+        if account is None:
+            return
+        self.account_code_field.setText(account.code)
+        self.account_name_field.setText(account.name)
+        self._select_required_combo_data(self.account_type_combo, account.account_type)
+        self._select_required_combo_data(self.account_normal_balance_combo, account.normal_balance)
+        self.account_active_check.setChecked(bool(account.active))
+
+    def _clear_catalog_category_form(self) -> None:
+        self.catalog_category_table.clearSelection()
+        self.catalog_category_name_field.clear()
+        self.catalog_category_active_check.setChecked(True)
+
+    def _clear_ledger_account_form(self) -> None:
+        self.account_admin_table.clearSelection()
+        self.account_code_field.clear()
+        self.account_name_field.clear()
+        self._select_required_combo_data(self.account_type_combo, "income")
+        self._select_required_combo_data(self.account_normal_balance_combo, "credit")
+        self.account_active_check.setChecked(True)
+
     def _populate_catalog_form_from_selection(self) -> None:
         conn = self._conn()
         item_id = self._selected_catalog_item_id()
@@ -7441,10 +6004,15 @@ class InvoiceWorkspacePanel(QWidget):
         self.catalog_unit_price_field.setText(
             format_money(item.default_unit_price_minor, currency=item.currency).split(" ", 1)[1]
         )
+        self._select_combo_data(self.catalog_currency_combo, item.currency)
         self.catalog_vat_rate_field.setText(str(item.default_vat_rate_basis_points))
         self.catalog_vat_country_field.setText(item.vat_country_code or "")
-        self.catalog_category_field.setText(item.category or "")
-        self.catalog_account_field.setText(item.default_account_code or "")
+        self._select_combo_text(self.catalog_category_combo, item.category)
+        account_index = self.catalog_account_combo.findData(item.default_account_code)
+        if account_index >= 0:
+            self.catalog_account_combo.setCurrentIndex(account_index)
+        else:
+            self.catalog_account_combo.setCurrentIndex(0)
         self.catalog_active_check.setChecked(bool(item.active))
 
     def _populate_line_fields_from_catalog_combo(self) -> None:
@@ -7473,11 +6041,15 @@ class InvoiceWorkspacePanel(QWidget):
             self.catalog_unit_price_field,
             self.catalog_vat_rate_field,
             self.catalog_vat_country_field,
-            self.catalog_category_field,
-            self.catalog_account_field,
         ):
             field.clear()
+        self.catalog_category_combo.setEditText("")
         self.catalog_quantity_field.setText("1")
+        self._select_combo_data(self.catalog_currency_combo, DEFAULT_CURRENCY)
+        default_account_index = self.catalog_account_combo.findData("4100")
+        self.catalog_account_combo.setCurrentIndex(
+            default_account_index if default_account_index >= 0 else 0
+        )
         self.catalog_vat_rate_field.setText("2100")
         self.catalog_active_check.setChecked(True)
 
@@ -7890,6 +6462,57 @@ class InvoiceWorkspacePanel(QWidget):
         value = item.data(Qt.ItemDataRole.UserRole)
         return int(value) if value is not None else int(item.text())
 
+    def _selected_invoice_final_storage_mode(self) -> str:
+        mode = self.invoice_final_storage_combo.currentData()
+        return str(mode or STORAGE_MODE_DATABASE)
+
+    @staticmethod
+    def _latest_final_invoice_artifact(
+        template_service: InvoiceTemplateService,
+        invoice_id: int,
+    ):
+        for artifact_type in ("final_pdf", "final_html", "html"):
+            artifact = template_service.fetch_latest_invoice_output_artifact(
+                invoice_id,
+                artifact_type=artifact_type,
+            )
+            if artifact is not None:
+                return artifact
+        return None
+
+    def _refresh_selected_invoice_final_status(self) -> None:
+        conn = self._conn()
+        invoice_id = self._selected_invoice_id()
+        if conn is None or invoice_id is None:
+            self.invoice_final_status_label.setText(
+                "Final invoices created from Template Workspace appear here."
+            )
+            return
+        invoice = InvoiceService(conn).fetch_invoice(invoice_id)
+        template_service = InvoiceTemplateService(
+            conn,
+            data_root=self._data_root,
+        )
+        artifact = self._latest_final_invoice_artifact(template_service, invoice_id)
+        if artifact is not None:
+            self.invoice_final_status_label.setText(
+                "Final invoice: "
+                f"{artifact.output_filename} ({self._storage_label(artifact.storage_mode)})."
+            )
+            return
+        if invoice is not None and invoice.document_status == "draft":
+            self.invoice_final_status_label.setText(
+                "Draft invoice selected. Final invoice authoring now happens in Template Workspace."
+            )
+        else:
+            self.invoice_final_status_label.setText(
+                "No final invoice artifact is stored for the selected invoice."
+            )
+
+    @staticmethod
+    def _storage_label(storage_mode: str | None) -> str:
+        return "managed file" if storage_mode == STORAGE_MODE_MANAGED_FILE else "database embedded"
+
     def _selected_invoice_line_id(self) -> int | None:
         selected = self.invoice_line_table.selectedItems()
         if not selected:
@@ -7900,6 +6523,27 @@ class InvoiceWorkspacePanel(QWidget):
             return None
         value = item.data(Qt.ItemDataRole.UserRole)
         return int(value) if value is not None else int(item.text())
+
+    def _selected_royalty_statement_id(self) -> int | None:
+        selected = self.statement_table.selectedItems()
+        if not selected:
+            return None
+        row = selected[0].row()
+        item = self.statement_table.item(row, 0)
+        if item is None:
+            return None
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if value is not None:
+            return int(value)
+        statement_number = _clean_text(item.text())
+        conn = self._conn()
+        if conn is None or not statement_number:
+            return None
+        row_data = conn.execute(
+            "SELECT id FROM RoyaltyStatements WHERE statement_number=?",
+            (statement_number,),
+        ).fetchone()
+        return int(row_data[0]) if row_data else None
 
     def _selected_catalog_item_id(self) -> int | None:
         selected = self.catalog_table.selectedItems()

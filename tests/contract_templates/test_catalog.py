@@ -45,7 +45,9 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
                 "work",
                 "contract",
                 "invoice",
+                "invoice_line",
                 "royalty",
+                "royalty_line",
                 "owner",
                 "page",
                 "current",
@@ -63,7 +65,11 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertIn("{{db.contract.license_number}}", symbols)
         self.assertIn("{{db.contract.registry_sha256_key}}", symbols)
         self.assertIn("{{db.invoice.number}}", symbols)
+        self.assertIn("{{db.invoice.lines}}", symbols)
+        self.assertIn("{{db.invoice_line.description}}", symbols)
         self.assertIn("{{db.royalty.statement_number}}", symbols)
+        self.assertIn("{{db.royalty.lines}}", symbols)
+        self.assertIn("{{db.royalty_line.net_payable}}", symbols)
         self.assertIn("{{db.owner.legal_name}}", symbols)
         self.assertIn("{{page.index}}", symbols)
         self.assertIn("{{page.total}}", symbols)

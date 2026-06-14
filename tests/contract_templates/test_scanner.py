@@ -203,6 +203,14 @@ class ContractTemplateScannerTests(unittest.TestCase):
         self.assertEqual(
             replace_html_placeholders("<p>{{name}}</p>", {"{{name}}": "A&B"}), "<p>A&amp;B</p>"
         )
+        self.assertEqual(
+            replace_html_placeholders(
+                "<section>{{table}}</section>",
+                {"{{table}}": "<table><tbody><tr><td>A&B</td></tr></tbody></table>"},
+                raw_tokens={"{{table}}"},
+            ),
+            "<section><table><tbody><tr><td>A&B</td></tr></tbody></table></section>",
+        )
         self.assertIsNone(normalize_bundle_relative_path(""))
         self.assertIsNone(normalize_bundle_relative_path("folder/"))
         self.assertIsNone(normalize_bundle_relative_path("__MACOSX/file"))

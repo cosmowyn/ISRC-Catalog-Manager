@@ -264,6 +264,30 @@ class ContractTemplateService:
             raise ValueError(f"Contract template {template_id} not found")
         return record
 
+    def update_template_family(
+        self,
+        template_id: int,
+        *,
+        template_family: str,
+    ) -> ContractTemplateRecord:
+        clean_family = str(template_family or "").strip().lower()
+        if not clean_family:
+            raise ValueError("Template family is required")
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplates
+                SET template_family=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (clean_family, int(template_id)),
+            )
+        record = self.fetch_template(template_id)
+        if record is None:
+            raise ValueError(f"Contract template {template_id} not found")
+        return record
+
     def duplicate_template(
         self,
         template_id: int,

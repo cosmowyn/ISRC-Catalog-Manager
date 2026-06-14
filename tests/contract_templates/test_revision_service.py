@@ -61,6 +61,26 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
             )
         )
 
+    def test_update_template_family_reclassifies_existing_template(self):
+        template = self._create_template()
+
+        updated = self.service.update_template_family(
+            template.template_id,
+            template_family="invoice",
+        )
+
+        self.assertEqual(updated.template_family, "invoice")
+        fetched = self.service.fetch_template(template.template_id)
+        self.assertIsNotNone(fetched)
+        assert fetched is not None
+        self.assertEqual(fetched.template_family, "invoice")
+
+    def test_update_template_family_requires_non_empty_family(self):
+        template = self._create_template()
+
+        with self.assertRaisesRegex(ValueError, "Template family is required"):
+            self.service.update_template_family(template.template_id, template_family="")
+
     def test_import_revision_from_docx_path_persists_scan_metadata_and_inventory(self):
         template = self._create_template()
         source_path = self.root / "artist-agreement.docx"

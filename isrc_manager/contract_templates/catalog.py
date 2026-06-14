@@ -12,11 +12,13 @@ from isrc_manager.assets import ASSET_TYPE_CHOICES
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_INVOICE_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
 )
 from isrc_manager.contracts import CONTRACT_STATUS_CHOICES
 from isrc_manager.domain.standard_fields import STANDARD_FIELD_SPECS
+from isrc_manager.invoicing.currencies import ISO_4217_CURRENCY_CODES
 from isrc_manager.parties import PARTY_TYPE_CHOICES
 from isrc_manager.releases import RELEASE_TYPE_CHOICES
 from isrc_manager.rights import RIGHT_TYPE_CHOICES
@@ -36,7 +38,9 @@ _NAMESPACE_ORDER = (
     "work",
     "contract",
     "invoice",
+    "invoice_line",
     "royalty",
+    "royalty_line",
     "owner",
     "page",
     "current",
@@ -58,7 +62,9 @@ _SCOPE_POLICY_BY_NAMESPACE = {
     "work": "work_selection_required",
     "contract": "contract_selection_required",
     "invoice": "invoice_selection_required",
+    "invoice_line": "invoice_catalog_item_selection_required",
     "royalty": "royalty_statement_selection_required",
+    "royalty_line": "royalty_line_selection_required",
     "owner": "owner_settings_context",
     "party": "party_selection_required",
     "right": "right_selection_required",
@@ -71,7 +77,9 @@ _SCOPE_ENTITY_BY_NAMESPACE = {
     "work": "work",
     "contract": "contract",
     "invoice": "invoice",
+    "invoice_line": "invoice_catalog_item",
     "royalty": "royalty_statement",
+    "royalty_line": "royalty_line_item",
     "owner": "owner",
     "party": "party",
     "right": "right",
@@ -85,6 +93,7 @@ _REGISTRY_BINDINGS = {
     ("contract", "contract_number"): (BUILTIN_CATEGORY_CONTRACT_NUMBER, "contract"),
     ("contract", "license_number"): (BUILTIN_CATEGORY_LICENSE_NUMBER, "contract"),
     ("contract", "registry_sha256_key"): (BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "contract"),
+    ("invoice", "number"): (BUILTIN_CATEGORY_INVOICE_NUMBER, "invoice"),
 }
 
 
@@ -321,49 +330,191 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
     ),
     _CatalogSeed("contract", "summary", "Summary", "text", "Contracts", "summary"),
     _CatalogSeed("contract", "notes", "Contract Notes", "text", "Contracts", "notes"),
+    _CatalogSeed("invoice", "id", "Invoice ID", "number", "Invoices", "id"),
+    _CatalogSeed(
+        "invoice",
+        "draft_display_id",
+        "Invoice Draft Display ID",
+        "text",
+        "Invoices",
+        "draft_display_id",
+    ),
     _CatalogSeed("invoice", "number", "Invoice Number", "text", "Invoices", "invoice_number"),
+    _CatalogSeed("invoice", "type", "Invoice Type", "text", "Invoices", "invoice_type"),
     _CatalogSeed("invoice", "issue_date", "Invoice Issue Date", "date", "Invoices", "issue_date"),
     _CatalogSeed("invoice", "due_date", "Invoice Due Date", "date", "Invoices", "due_date"),
     _CatalogSeed(
-        "invoice", "document_status", "Invoice Document Status", "text", "Invoices", "status"
+        "invoice",
+        "document_status",
+        "Invoice Document Status",
+        "text",
+        "Invoices",
+        "document_status",
     ),
     _CatalogSeed(
-        "invoice", "payment_status", "Invoice Payment Status", "text", "Invoices", "status"
+        "invoice", "payment_status", "Invoice Payment Status", "text", "AccountingEntries", None
     ),
     _CatalogSeed("invoice", "due_status", "Invoice Due Status", "text", "Invoices", "due_date"),
-    _CatalogSeed("invoice", "currency", "Invoice Currency", "text", "Invoices", "currency"),
-    _CatalogSeed("invoice", "subtotal", "Invoice Subtotal", "text", "Invoices", "subtotal_minor"),
     _CatalogSeed(
-        "invoice", "vat_total", "Invoice VAT Total", "text", "Invoices", "vat_total_minor"
+        "invoice",
+        "currency",
+        "Invoice Currency",
+        "dropdown",
+        "Invoices",
+        "currency",
+        options=ISO_4217_CURRENCY_CODES,
     ),
-    _CatalogSeed("invoice", "total", "Invoice Total", "text", "Invoices", "total_minor"),
+    _CatalogSeed("invoice", "subtotal", "Invoice Subtotal", "money", "Invoices", "subtotal_minor"),
+    _CatalogSeed(
+        "invoice", "vat_total", "Invoice VAT Total", "money", "Invoices", "vat_total_minor"
+    ),
+    _CatalogSeed("invoice", "total", "Invoice Total", "money", "Invoices", "total_minor"),
     _CatalogSeed(
         "invoice",
         "outstanding_balance",
         "Invoice Outstanding Balance",
-        "text",
+        "money",
         "AccountingEntries",
         None,
     ),
-    _CatalogSeed("invoice", "lines", "Invoice Lines Table", "text", "InvoiceLineItems", None),
+    _CatalogSeed(
+        "invoice", "lines", "Invoice Lines Table", "html_fragment", "InvoiceLineItems", None
+    ),
     _CatalogSeed(
         "invoice",
         "vat_breakdown",
         "Invoice VAT Breakdown Table",
-        "text",
+        "html_fragment",
         "InvoiceVatBreakdown",
         None,
     ),
-    _CatalogSeed("invoice", "party_name", "Invoice Party Name", "text", "Parties", "display_name"),
+    _CatalogSeed("invoice", "party_name", "Invoice Buyer Name", "text", "Parties", "display_name"),
+    _CatalogSeed("invoice", "buyer_name", "Invoice Buyer Name", "text", "Parties", "display_name"),
     _CatalogSeed(
-        "invoice", "party_legal_name", "Invoice Party Legal Name", "text", "Parties", "legal_name"
+        "invoice", "party_legal_name", "Invoice Buyer Legal Name", "text", "Parties", "legal_name"
     ),
-    _CatalogSeed("invoice", "party_address", "Invoice Party Address", "text", "Parties", None),
     _CatalogSeed(
-        "invoice", "party_vat_number", "Invoice Party VAT Number", "text", "Parties", "vat_number"
+        "invoice", "buyer_legal_name", "Invoice Buyer Legal Name", "text", "Parties", "legal_name"
     ),
-    _CatalogSeed("invoice", "party_tax_id", "Invoice Party Tax ID", "text", "Parties", "tax_id"),
-    _CatalogSeed("invoice", "party_email", "Invoice Party Email", "text", "Parties", "email"),
+    _CatalogSeed("invoice", "party_address", "Invoice Buyer Address", "text", "Parties", None),
+    _CatalogSeed("invoice", "buyer_address", "Invoice Buyer Address", "text", "Parties", None),
+    _CatalogSeed(
+        "invoice", "party_vat_number", "Invoice Buyer VAT Number", "text", "Parties", "vat_number"
+    ),
+    _CatalogSeed(
+        "invoice", "buyer_vat_number", "Invoice Buyer VAT Number", "text", "Parties", "vat_number"
+    ),
+    _CatalogSeed("invoice", "party_tax_id", "Invoice Buyer Tax ID", "text", "Parties", "tax_id"),
+    _CatalogSeed("invoice", "buyer_tax_id", "Invoice Buyer Tax ID", "text", "Parties", "tax_id"),
+    _CatalogSeed("invoice", "party_email", "Invoice Buyer Email", "text", "Parties", "email"),
+    _CatalogSeed("invoice", "buyer_email", "Invoice Buyer Email", "text", "Parties", "email"),
+    _CatalogSeed("invoice", "buyer_phone", "Invoice Buyer Phone", "text", "Parties", "phone"),
+    _CatalogSeed("invoice", "seller_name", "Invoice Seller Name", "text", "OwnerParty", None),
+    _CatalogSeed(
+        "invoice",
+        "seller_legal_name",
+        "Invoice Seller Legal Name",
+        "text",
+        "OwnerParty",
+        "legal_name",
+    ),
+    _CatalogSeed("invoice", "seller_address", "Invoice Seller Address", "text", "OwnerParty", None),
+    _CatalogSeed(
+        "invoice",
+        "seller_vat_number",
+        "Invoice Seller VAT Number",
+        "text",
+        "OwnerParty",
+        "vat_number",
+    ),
+    _CatalogSeed(
+        "invoice", "seller_tax_id", "Invoice Seller Tax ID", "text", "OwnerParty", "tax_id"
+    ),
+    _CatalogSeed("invoice", "seller_email", "Invoice Seller Email", "text", "OwnerParty", "email"),
+    _CatalogSeed(
+        "invoice_line",
+        "description",
+        "Invoice Line Description",
+        "text",
+        "InvoiceCatalogItems",
+        "description",
+    ),
+    _CatalogSeed(
+        "invoice_line", "quantity", "Invoice Line Quantity", "number", "InvoiceCatalogItems", None
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "unit_price",
+        "Invoice Line Unit Price",
+        "money",
+        "InvoiceCatalogItems",
+        "default_unit_price_minor",
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "net_amount",
+        "Invoice Line Net Amount",
+        "money",
+        "Invoice Line Calculation",
+        None,
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "vat_amount",
+        "Invoice Line VAT Amount",
+        "money",
+        "Invoice Line Calculation",
+        None,
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "gross_amount",
+        "Invoice Line Gross Amount",
+        "money",
+        "Invoice Line Calculation",
+        None,
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "vat_treatment",
+        "Invoice Line VAT Treatment",
+        "text",
+        "InvoiceCatalogItems",
+        "default_vat_treatment",
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "vat_rate",
+        "Invoice Line VAT Rate",
+        "number",
+        "InvoiceCatalogItems",
+        "default_vat_rate_basis_points",
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "catalog_item_name",
+        "Invoice Line Catalog Item",
+        "text",
+        "InvoiceCatalogItems",
+        "name",
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "ledger_account_code",
+        "Invoice Line Ledger Account",
+        "text",
+        "InvoiceCatalogItems",
+        "default_account_code",
+    ),
+    _CatalogSeed(
+        "invoice_line",
+        "currency",
+        "Invoice Line Currency",
+        "dropdown",
+        "InvoiceCatalogItems",
+        "currency",
+        options=ISO_4217_CURRENCY_CODES,
+    ),
     _CatalogSeed(
         "royalty",
         "statement_number",
@@ -371,6 +522,17 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
         "text",
         "RoyaltyStatements",
         "statement_number",
+    ),
+    _CatalogSeed(
+        "royalty", "status", "Royalty Statement Status", "text", "RoyaltyStatements", "status"
+    ),
+    _CatalogSeed(
+        "royalty",
+        "issue_date",
+        "Royalty Statement Issue Date",
+        "date",
+        "RoyaltyStatements",
+        "issue_date",
     ),
     _CatalogSeed("royalty", "payee_name", "Royalty Payee Name", "text", "Parties", "display_name"),
     _CatalogSeed(
@@ -432,6 +594,67 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
     ),
     _CatalogSeed(
         "royalty", "statement_id", "Royalty Statement ID", "text", "RoyaltyStatements", "id"
+    ),
+    _CatalogSeed(
+        "royalty",
+        "currency",
+        "Royalty Currency",
+        "dropdown",
+        "RoyaltyStatements",
+        "currency",
+        options=ISO_4217_CURRENCY_CODES,
+    ),
+    _CatalogSeed(
+        "royalty",
+        "payable_balance",
+        "Royalty Payable Balance",
+        "money",
+        "AccountingEntries",
+        None,
+    ),
+    _CatalogSeed(
+        "royalty", "lines", "Royalty Lines Table", "html_fragment", "RoyaltyCalculationLines", None
+    ),
+    _CatalogSeed(
+        "royalty_line",
+        "description",
+        "Royalty Line Description",
+        "text",
+        "RoyaltyCalculationLines",
+        "description",
+    ),
+    _CatalogSeed(
+        "royalty_line",
+        "net_payable",
+        "Royalty Line Net Payable",
+        "money",
+        "RoyaltyCalculationLines",
+        "net_payable_minor",
+    ),
+    _CatalogSeed(
+        "royalty_line",
+        "source_type",
+        "Royalty Line Source Type",
+        "text",
+        "RoyaltyCalculationLines",
+        "source_type",
+    ),
+    _CatalogSeed(
+        "royalty_line",
+        "source_id",
+        "Royalty Line Source ID",
+        "text",
+        "RoyaltyCalculationLines",
+        "source_id",
+    ),
+    _CatalogSeed(
+        "royalty_line",
+        "currency",
+        "Royalty Line Currency",
+        "dropdown",
+        "RoyaltyCalculations",
+        "currency",
+        options=ISO_4217_CURRENCY_CODES,
     ),
     _CatalogSeed(
         "owner",
@@ -827,7 +1050,7 @@ _CONTROL_SEEDS: tuple[_CatalogSeed, ...] = (
         "control",
         "Template Engine",
         "duplicate.start",
-        "Marks the beginning of the HTML range to repeat before normal cymbol replacement. If the block contains cymbols suffixed with .indexed, each copy uses its matching DB Index selector.",
+        "Marks the beginning of the HTML range to repeat before normal cymbol replacement. A matching start/end block creates a Duplicate Number row-count control in the fill form. If the block contains cymbols suffixed with .indexed, each copy uses its matching DB Index selector.",
         binding_kind="duplicate",
     ),
     _CatalogSeed(
@@ -847,7 +1070,7 @@ _CONTROL_SEEDS: tuple[_CatalogSeed, ...] = (
         "number",
         "Template Engine",
         "duplicate.number",
-        "Manual count for how many copies of each duplicate block should be rendered. Place it once anywhere outside the {{duplicate.start}} and {{duplicate.end}} block it controls. Indexed database cymbols create one selector set per copy.",
+        "Manual count for how many copies of each duplicate block should be rendered. This control is created automatically when matching {{duplicate.start}} and {{duplicate.end}} cymbols are present; placing {{duplicate.number}} in the template source is optional. Indexed database cymbols create one selector set per copy.",
         binding_kind="duplicate",
     ),
     _CatalogSeed(
@@ -1061,6 +1284,8 @@ class ContractTemplateCatalogService:
             "release": "explicit release scope",
             "work": "explicit work scope",
             "contract": "explicit contract scope",
+            "invoice": "explicit invoice scope",
+            "invoice_line": "explicit invoice catalog item scope",
             "owner": "application owner settings",
             "party": "explicit party scope",
             "right": "explicit right scope",
