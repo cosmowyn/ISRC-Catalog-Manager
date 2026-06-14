@@ -1,5 +1,5 @@
 {
-  "branchPercent": 65.39,
+  "branchPercent": 64.71,
   "coverageWins": [
     {
       "branch": 92.29,
@@ -58,19 +58,19 @@
       "statements": 600
     }
   ],
-  "coveredBranches": 16249,
-  "coveredLines": 65944,
+  "coveredBranches": 16361,
+  "coveredLines": 66519,
   "excludedFiles": [],
   "filesExcluded": 0,
-  "filesMeasured": 279,
-  "linePercent": 75.21,
+  "filesMeasured": 282,
+  "linePercent": 74.87,
   "lowestFiles": [
     {
       "branch": 0.0,
-      "missing": 3378,
+      "missing": 2772,
       "path": "isrc_manager/invoicing/workspace.py",
-      "percent": 5.68,
-      "statements": 3637
+      "percent": 6.08,
+      "statements": 2997
     },
     {
       "branch": 0.0,
@@ -81,10 +81,10 @@
     },
     {
       "branch": 0.0,
-      "missing": 156,
-      "path": "isrc_manager/invoicing/royalty_service.py",
-      "percent": 9.51,
-      "statements": 181
+      "missing": 234,
+      "path": "isrc_manager/contract_templates/accounting_resolver.py",
+      "percent": 9.91,
+      "statements": 276
     },
     {
       "branch": 0.0,
@@ -95,6 +95,13 @@
     },
     {
       "branch": 0.0,
+      "missing": 509,
+      "path": "isrc_manager/invoicing/template_service.py",
+      "percent": 10.21,
+      "statements": 593
+    },
+    {
+      "branch": 0.0,
       "missing": 160,
       "path": "isrc_manager/invoicing/credit_note_service.py",
       "percent": 10.7,
@@ -102,10 +109,10 @@
     },
     {
       "branch": 0.0,
-      "missing": 391,
-      "path": "isrc_manager/invoicing/template_service.py",
-      "percent": 11.27,
-      "statements": 463
+      "missing": 152,
+      "path": "isrc_manager/invoicing/royalty_service.py",
+      "percent": 11.03,
+      "statements": 181
     },
     {
       "branch": 0.0,
@@ -123,10 +130,10 @@
     },
     {
       "branch": 0.0,
-      "missing": 176,
-      "path": "isrc_manager/invoicing/invoice_service.py",
-      "percent": 12.24,
-      "statements": 212
+      "missing": 177,
+      "path": "isrc_manager/invoicing/template_workspace_finalization.py",
+      "percent": 13.23,
+      "statements": 218
     },
     {
       "branch": 0.0,
@@ -136,24 +143,17 @@
       "statements": 115
     },
     {
-      "branch": 3.85,
-      "missing": 96,
-      "path": "isrc_manager/invoicing/ledger_service.py",
-      "percent": 16.57,
-      "statements": 123
-    },
-    {
-      "branch": 0.0,
-      "missing": 186,
-      "path": "isrc_manager/reporting/collectors.py",
-      "percent": 16.61,
-      "statements": 237
+      "branch": 1.43,
+      "missing": 317,
+      "path": "isrc_manager/invoicing/invoice_service.py",
+      "percent": 13.99,
+      "statements": 389
     }
   ],
-  "missingBranches": 8599,
-  "missingLines": 18488,
+  "missingBranches": 8921,
+  "missingLines": 18898,
   "schemaVersion": 1,
-  "statementPercent": 78.1,
-  "statements": 84432,
-  "timestamp": "2026-06-07T20:44:56.283216"
+  "statementPercent": 77.88,
+  "statements": 85417,
+  "timestamp": "2026-06-14T21:43:22.945281"
 }
