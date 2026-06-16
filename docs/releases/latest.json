@@ -1,7 +1,7 @@
 {
-  "version": "6.1.1",
+  "version": "6.1.2",
   "released_at": "2026-06-16",
-  "summary": "Clean up invoice workspace and persist template panes",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.1.1.md",
+  "summary": "Refresh UI PQ artifacts and dependency pins",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.1.2.md",
   "minimum_supported_version": null
 }
