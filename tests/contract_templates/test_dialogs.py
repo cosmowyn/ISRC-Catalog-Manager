@@ -3213,6 +3213,58 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         pump_events(app=self.app, cycles=2)
         self.assertEqual(dock_tab_bar.currentIndex(), next_index)
 
+    def test_fill_workspace_tabified_column_widths_survive_dock_tab_cycles(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        revision_dock = docks["contractTemplateFillRevisionDock"]
+        draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
+        travel_dock = docks["contractTemplateFillTravelHelperDock"]
+        automatic_dock = docks["contractTemplateFillAutomaticFieldsDock"]
+        preview_dock = docks["contractTemplateHtmlPreviewDock"]
+
+        host.set_locked(False)
+        host.main_window.tabifyDockWidget(revision_dock, draft_dock)
+        host.main_window.tabifyDockWidget(revision_dock, travel_dock)
+        revision_dock.raise_()
+        pump_events(app=self.app, cycles=5)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=3)
+
+        host.main_window.resizeDocks(
+            [revision_dock, automatic_dock, preview_dock],
+            [560, 520, 420],
+            Qt.Horizontal,
+        )
+        pump_events(app=self.app, cycles=6)
+        host._cache_stable_layout_state_if_ready()
+
+        dock_tab_bar = next(
+            (tab_bar for tab_bar in host.main_window.findChildren(QTabBar) if tab_bar.count() >= 3),
+            None,
+        )
+        self.assertIsNotNone(dock_tab_bar)
+        left_width = revision_dock.geometry().width()
+        automatic_width = automatic_dock.geometry().width()
+        preview_width = preview_dock.geometry().width()
+        tabified_group = [revision_dock, draft_dock, travel_dock]
+
+        for _round in range(3):
+            for tab_index in range(dock_tab_bar.count()):
+                dock_tab_bar.setCurrentIndex(tab_index)
+                pump_events(app=self.app, cycles=6)
+                active_dock = host._active_tabified_group_dock(tabified_group)
+                self.assertIsNotNone(active_dock)
+                self.assertAlmostEqual(active_dock.geometry().width(), left_width, delta=24)
+                self.assertAlmostEqual(
+                    automatic_dock.geometry().width(),
+                    automatic_width,
+                    delta=24,
+                )
+                self.assertAlmostEqual(preview_dock.geometry().width(), preview_width, delta=24)
+
     def test_fill_workspace_disables_geometry_simulated_stack_reordering(self):
         self._focus_fill()
         host = self.panel._tab_hosts["fill"]

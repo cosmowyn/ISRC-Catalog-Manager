@@ -1,0 +1,61 @@
+{
+  "captures": [],
+  "comparisons": [
+    {
+      "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_report_summary.json",
+      "actual_sha256": "ef9a4d26a70cc7017a407208654f5c64a2873ae9247d9cece0af6ab118cb3324",
+      "baseline_created": true,
+      "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_report_summary.json",
+      "baseline_sha256": "ef9a4d26a70cc7017a407208654f5c64a2873ae9247d9cece0af6ab118cb3324",
+      "comparison_type": "report",
+      "details": {
+        "normalized_bytes": 544
+      },
+      "name": "ui_pq_report_summary",
+      "passed": true,
+      "reason": "Baseline created from current qualified artifact."
+    },
+    {
+      "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_document.html",
+      "actual_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
+      "baseline_created": true,
+      "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_document.html",
+      "baseline_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
+      "comparison_type": "generated_document",
+      "details": {
+        "normalized_bytes": 253
+      },
+      "name": "ui_pq_generated_document",
+      "passed": true,
+      "reason": "Baseline created from current qualified artifact."
+    },
+    {
+      "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_report.csv",
+      "actual_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
+      "baseline_created": true,
+      "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_report.csv",
+      "baseline_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
+      "comparison_type": "report",
+      "details": {
+        "normalized_bytes": 80
+      },
+      "name": "ui_pq_generated_report",
+      "passed": true,
+      "reason": "Baseline created from current qualified artifact."
+    },
+    {
+      "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_pdf_pdf_profile.json",
+      "actual_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+      "baseline_created": true,
+      "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_pdf_pdf_profile.json",
+      "baseline_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+      "comparison_type": "pdf_profile",
+      "details": {
+        "normalized_bytes": 98
+      },
+      "name": "ui_pq_generated_pdf_pdf_profile",
+      "passed": true,
+      "reason": "Baseline created from current qualified artifact."
+    }
+  ]
+}

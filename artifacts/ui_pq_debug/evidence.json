@@ -1,0 +1,3189 @@
+[
+  {
+    "data": {
+      "inventory_count": 413,
+      "inventory_path": "artifacts/ui_pq_debug/ui_inventory.json",
+      "traceability_rows": 413
+    },
+    "message": "Runtime UI inventory and traceability matrix were generated.",
+    "status": "passed",
+    "test_id": "UI-PQ-INV-001",
+    "timestamp": "2026-06-14T19:42:25.148958+00:00"
+  },
+  {
+    "data": {
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/Database/default.db",
+      "menu_count": 38,
+      "window_title": "Music Catalog Manager"
+    },
+    "message": "Main window, menu bar, and QA database are reachable.",
+    "status": "passed",
+    "test_id": "UI-PQ-SMOKE-001",
+    "timestamp": "2026-06-14T19:42:25.149008+00:00"
+  },
+  {
+    "data": {
+      "action_count": 227,
+      "menu_count": 39
+    },
+    "message": "Runtime menu/action inventory was generated.",
+    "status": "passed",
+    "test_id": "UI-PQ-MENU-001",
+    "timestamp": "2026-06-14T19:42:25.149027+00:00"
+  },
+  {
+    "data": {
+      "comparison_count": 33,
+      "dialogs": [
+        {
+          "capture": {
+            "height": 780,
+            "name": "quality_dashboard_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+            "sample_count": 289,
+            "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "unique_sample_colors": 4,
+            "width": 1180
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+            "actual_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/quality_dashboard_dialog.png",
+            "baseline_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "quality_dashboard_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+                "sample_count": 289,
+                "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+                "unique_sample_colors": 4,
+                "width": 1180
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "quality_dashboard_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "qualityDashboardDialog",
+          "surface": "quality_dashboard_dialog",
+          "window_title": "Data Quality Dashboard"
+        },
+        {
+          "capture": {
+            "height": 760,
+            "name": "conversion_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+            "sample_count": 272,
+            "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "unique_sample_colors": 8,
+            "width": 1120
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+            "actual_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/conversion_dialog.png",
+            "baseline_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 760,
+                "name": "conversion_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+                "sample_count": 272,
+                "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+                "unique_sample_colors": 8,
+                "width": 1120
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1088,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "conversion_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "conversionDialog",
+          "surface": "conversion_dialog",
+          "window_title": "Template Conversion"
+        },
+        {
+          "capture": {
+            "height": 909,
+            "name": "settings_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+            "sample_count": 289,
+            "sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "unique_sample_colors": 13,
+            "width": 1233
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+            "actual_sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/settings_dialog.png",
+            "baseline_sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 909,
+                "name": "settings_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+                "sample_count": 289,
+                "sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+                "unique_sample_colors": 13,
+                "width": 1233
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "settings_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationSettingsDialog",
+          "surface": "settings_dialog",
+          "window_title": "Application Settings"
+        },
+        {
+          "capture": {
+            "height": 520,
+            "name": "about_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+            "sample_count": 272,
+            "sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "unique_sample_colors": 22,
+            "width": 720
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+            "actual_sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/about_dialog.png",
+            "baseline_sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 520,
+                "name": "about_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+                "sample_count": 272,
+                "sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+                "unique_sample_colors": 22,
+                "width": 720
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "about_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "aboutDialog",
+          "surface": "about_dialog",
+          "window_title": "About Music Catalog Manager"
+        },
+        {
+          "capture": {
+            "height": 820,
+            "name": "help_contents_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+            "sample_count": 289,
+            "sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "unique_sample_colors": 33,
+            "width": 1180
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+            "actual_sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/help_contents_dialog.png",
+            "baseline_sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 820,
+                "name": "help_contents_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+                "sample_count": 289,
+                "sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+                "unique_sample_colors": 33,
+                "width": 1180
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "help_contents_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "helpContentsDialog",
+          "surface": "help_contents_dialog",
+          "window_title": "Help Contents"
+        },
+        {
+          "capture": {
+            "height": 960,
+            "name": "add_album_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+            "sample_count": 256,
+            "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "unique_sample_colors": 13,
+            "width": 960
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+            "actual_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/add_album_dialog.png",
+            "baseline_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 960,
+                "name": "add_album_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+                "sample_count": 256,
+                "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+                "unique_sample_colors": 13,
+                "width": 960
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1024,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "add_album_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "albumEntryDialog",
+          "surface": "add_album_dialog",
+          "window_title": "Add Album"
+        },
+        {
+          "capture": {
+            "height": 560,
+            "name": "custom_columns_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+            "sample_count": 272,
+            "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "unique_sample_colors": 20,
+            "width": 760
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+            "actual_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/custom_columns_dialog.png",
+            "baseline_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 560,
+                "name": "custom_columns_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+                "sample_count": 272,
+                "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+                "unique_sample_colors": 20,
+                "width": 760
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "custom_columns_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "customColumnsDialog",
+          "surface": "custom_columns_dialog",
+          "window_title": "Manage Custom Columns"
+        },
+        {
+          "capture": {
+            "height": 860,
+            "name": "edit_track_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+            "sample_count": 289,
+            "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "unique_sample_colors": 8,
+            "width": 760
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+            "actual_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/edit_track_dialog.png",
+            "baseline_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 860,
+                "name": "edit_track_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+                "sample_count": 289,
+                "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+                "unique_sample_colors": 8,
+                "width": 760
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1156,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "edit_track_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "editDialog",
+          "surface": "edit_track_dialog",
+          "window_title": "Edit Track"
+        },
+        {
+          "capture": {
+            "height": 720,
+            "name": "bulk_audio_attach_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+            "sample_count": 272,
+            "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "unique_sample_colors": 6,
+            "width": 1080
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+            "actual_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/bulk_audio_attach_dialog.png",
+            "baseline_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 720,
+                "name": "bulk_audio_attach_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+                "sample_count": 272,
+                "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+                "unique_sample_colors": 6,
+                "width": 1080
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "bulk_audio_attach_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "bulkAudioAttachDialog",
+          "surface": "bulk_audio_attach_dialog",
+          "window_title": "Bulk Attach Audio Files"
+        },
+        {
+          "capture": {
+            "height": 780,
+            "name": "diagnostics_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+            "sample_count": 289,
+            "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "unique_sample_colors": 21,
+            "width": 1080
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+            "actual_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/diagnostics_dialog.png",
+            "baseline_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "diagnostics_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+                "sample_count": 289,
+                "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+                "unique_sample_colors": 21,
+                "width": 1080
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "diagnostics_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "diagnosticsDialog",
+          "surface": "diagnostics_dialog",
+          "window_title": "Diagnostics"
+        },
+        {
+          "capture": {
+            "height": 860,
+            "name": "application_storage_admin_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+            "sample_count": 289,
+            "sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "unique_sample_colors": 21,
+            "width": 1220
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+            "actual_sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/application_storage_admin_dialog.png",
+            "baseline_sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 860,
+                "name": "application_storage_admin_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+                "sample_count": 289,
+                "sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+                "unique_sample_colors": 21,
+                "width": 1220
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "application_storage_admin_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationStorageAdminDialog",
+          "surface": "application_storage_admin_dialog",
+          "window_title": "Application Storage Admin"
+        },
+        {
+          "capture": {
+            "height": 700,
+            "name": "application_log_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+            "sample_count": 289,
+            "sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "unique_sample_colors": 30,
+            "width": 860
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+            "actual_sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/application_log_dialog.png",
+            "baseline_sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 700,
+                "name": "application_log_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+                "sample_count": 289,
+                "sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+                "unique_sample_colors": 30,
+                "width": 860
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1156,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "application_log_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationLogDialog",
+          "surface": "application_log_dialog",
+          "window_title": "Application Log"
+        },
+        {
+          "capture": {
+            "height": 720,
+            "name": "history_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+            "sample_count": 256,
+            "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "unique_sample_colors": 14,
+            "width": 1040
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+            "actual_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/history_dialog.png",
+            "baseline_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 720,
+                "name": "history_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+                "sample_count": 256,
+                "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+                "unique_sample_colors": 14,
+                "width": 1040
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "history_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "historyDialog",
+          "surface": "history_dialog",
+          "window_title": "Undo History"
+        },
+        {
+          "capture": {
+            "height": 620,
+            "name": "action_ribbon_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+            "sample_count": 289,
+            "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "unique_sample_colors": 29,
+            "width": 980
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+            "actual_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/action_ribbon_dialog.png",
+            "baseline_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 620,
+                "name": "action_ribbon_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+                "sample_count": 289,
+                "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+                "unique_sample_colors": 29,
+                "width": 980
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "action_ribbon_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "actionRibbonDialog",
+          "surface": "action_ribbon_dialog",
+          "window_title": "Customize Action Ribbon"
+        },
+        {
+          "capture": {
+            "height": 520,
+            "name": "authenticity_verification_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+            "sample_count": 289,
+            "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "unique_sample_colors": 24,
+            "width": 780
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+            "actual_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/authenticity_verification_dialog.png",
+            "baseline_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 520,
+                "name": "authenticity_verification_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+                "sample_count": 289,
+                "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+                "unique_sample_colors": 24,
+                "width": 780
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "authenticity_verification_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "authenticityVerificationDialog",
+          "surface": "authenticity_verification_dialog",
+          "window_title": "Audio Authenticity Verification"
+        },
+        {
+          "capture": {
+            "height": 431,
+            "name": "forensic_export_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+            "sample_count": 289,
+            "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "unique_sample_colors": 34,
+            "width": 481
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+            "actual_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/forensic_export_dialog.png",
+            "baseline_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 431,
+                "name": "forensic_export_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+                "sample_count": 289,
+                "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+                "unique_sample_colors": 34,
+                "width": 481
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "forensic_export_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "forensicExportDialog",
+          "surface": "forensic_export_dialog",
+          "window_title": "Export Forensic Watermarked Audio"
+        },
+        {
+          "capture": {
+            "height": 350,
+            "name": "media_equalizer_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+            "sample_count": 289,
+            "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "unique_sample_colors": 23,
+            "width": 600
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+            "actual_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/media_equalizer_dialog.png",
+            "baseline_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 350,
+                "name": "media_equalizer_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+                "sample_count": 289,
+                "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+                "unique_sample_colors": 23,
+                "width": 600
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1190,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "media_equalizer_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "mediaEqualizerDialog",
+          "surface": "media_equalizer_dialog",
+          "window_title": "Equalizer"
+        },
+        {
+          "capture": {
+            "height": 780,
+            "name": "soundcloud_publish_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+            "sample_count": 289,
+            "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "unique_sample_colors": 13,
+            "width": 1788
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+            "actual_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/soundcloud_publish_dialog.png",
+            "baseline_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "soundcloud_publish_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+                "sample_count": 289,
+                "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+                "unique_sample_colors": 13,
+                "width": 1788
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "soundcloud_publish_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "soundcloudPublishDialog",
+          "surface": "soundcloud_publish_dialog",
+          "window_title": "Publish to SoundCloud"
+        }
+      ],
+      "help_screenshot_surfaces": [
+        {
+          "capture": {
+            "height": 702,
+            "name": "catalog_table_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/catalog_table_workspace.png",
+            "sample_count": 289,
+            "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+            "unique_sample_colors": 7,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/catalog_table_workspace.png",
+            "actual_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/catalog_table_workspace.png",
+            "baseline_sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 702,
+                "name": "catalog_table_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/catalog_table_workspace.png",
+                "sample_count": 289,
+                "sha256": "9b791065d2111e6bcd05ac1186adbef8de2a21b71e61904c59177b5c19645ad9",
+                "unique_sample_colors": 7,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "catalog_table_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "catalogTableDock",
+          "surface": "catalog_table_workspace",
+          "window_title": "Catalog Table"
+        },
+        {
+          "capture": {
+            "height": 702,
+            "name": "add_track_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/add_track_workspace.png",
+            "sample_count": 272,
+            "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+            "unique_sample_colors": 20,
+            "width": 320
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/add_track_workspace.png",
+            "actual_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/add_track_workspace.png",
+            "baseline_sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 702,
+                "name": "add_track_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/add_track_workspace.png",
+                "sample_count": 272,
+                "sha256": "003389e3dc6a71ca4bc9c11e87224a0887091e3a256204a76d00405be6f8cf83",
+                "unique_sample_colors": 20,
+                "width": 320
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1088,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "add_track_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "addDataDock",
+          "surface": "add_track_workspace",
+          "window_title": "Add Track"
+        },
+        {
+          "capture": {
+            "height": 650,
+            "name": "release_browser",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/release_browser.png",
+            "sample_count": 289,
+            "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+            "unique_sample_colors": 11,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/release_browser.png",
+            "actual_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/release_browser.png",
+            "baseline_sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 650,
+                "name": "release_browser",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/release_browser.png",
+                "sample_count": 289,
+                "sha256": "971846c8cd3e6ee4ba1bca7279134417f07d45ac2513e4ee0315b1a273f858fa",
+                "unique_sample_colors": 11,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "release_browser",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "releaseBrowserPanel",
+          "surface": "release_browser",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1163,
+            "name": "code_registry_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/code_registry_workspace.png",
+            "sample_count": 289,
+            "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+            "unique_sample_colors": 12,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/code_registry_workspace.png",
+            "actual_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/code_registry_workspace.png",
+            "baseline_sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1163,
+                "name": "code_registry_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/code_registry_workspace.png",
+                "sample_count": 289,
+                "sha256": "d5c9fb0baffc3e32c33d823a21f3c8edb54ca46992a9e78f8b96fadbc8e55688",
+                "unique_sample_colors": 12,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "code_registry_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "codeRegistryWorkspacePanel",
+          "surface": "code_registry_workspace",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1304,
+            "name": "promo_code_ledger",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/promo_code_ledger.png",
+            "sample_count": 289,
+            "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+            "unique_sample_colors": 7,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/promo_code_ledger.png",
+            "actual_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/promo_code_ledger.png",
+            "baseline_sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1304,
+                "name": "promo_code_ledger",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/promo_code_ledger.png",
+                "sample_count": 289,
+                "sha256": "5d5d0fb3a371b93e25d364280c5ee773c8c178c3831a6132c827aa8e565fb7a2",
+                "unique_sample_colors": 7,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "promo_code_ledger",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "promoCodeLedgerPanel",
+          "surface": "promo_code_ledger",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1304,
+            "name": "global_search_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/global_search_workspace.png",
+            "sample_count": 289,
+            "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+            "unique_sample_colors": 11,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/global_search_workspace.png",
+            "actual_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/global_search_workspace.png",
+            "baseline_sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1304,
+                "name": "global_search_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/global_search_workspace.png",
+                "sample_count": 289,
+                "sha256": "bb75b6105cdb331b7e57f94f6fac5ddf8936f48c7030542fb51165daeb948b5d",
+                "unique_sample_colors": 11,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "global_search_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "globalSearchPanel",
+          "surface": "global_search_workspace",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1304,
+            "name": "contract_template_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/contract_template_workspace.png",
+            "sample_count": 289,
+            "sha256": "968e2499e7d08667c62160eb1bc007b333e810b179808039f7ea404f771dfc47",
+            "unique_sample_colors": 24,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/contract_template_workspace.png",
+            "actual_sha256": "968e2499e7d08667c62160eb1bc007b333e810b179808039f7ea404f771dfc47",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/contract_template_workspace.png",
+            "baseline_sha256": "968e2499e7d08667c62160eb1bc007b333e810b179808039f7ea404f771dfc47",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1304,
+                "name": "contract_template_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/contract_template_workspace.png",
+                "sample_count": 289,
+                "sha256": "968e2499e7d08667c62160eb1bc007b333e810b179808039f7ea404f771dfc47",
+                "unique_sample_colors": 24,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "contract_template_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "contractTemplateWorkspacePanel",
+          "surface": "contract_template_workspace",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1387,
+            "name": "asset_registry",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/asset_registry.png",
+            "sample_count": 289,
+            "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+            "unique_sample_colors": 4,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/asset_registry.png",
+            "actual_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/asset_registry.png",
+            "baseline_sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1387,
+                "name": "asset_registry",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/asset_registry.png",
+                "sample_count": 289,
+                "sha256": "65a7d468bbe3049d0664e05ec3ead7dc033d3c3a79429d158a344d8f117dfb96",
+                "unique_sample_colors": 4,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "asset_registry",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "assetBrowserPanel",
+          "surface": "asset_registry",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1467,
+            "name": "invoice_workspace",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/invoice_workspace.png",
+            "sample_count": 289,
+            "sha256": "da3f639bf89517a42a19f3cc5a847261400bf89e88c1b92ab5b809b512924ff1",
+            "unique_sample_colors": 6,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/invoice_workspace.png",
+            "actual_sha256": "da3f639bf89517a42a19f3cc5a847261400bf89e88c1b92ab5b809b512924ff1",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/invoice_workspace.png",
+            "baseline_sha256": "da3f639bf89517a42a19f3cc5a847261400bf89e88c1b92ab5b809b512924ff1",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1467,
+                "name": "invoice_workspace",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/invoice_workspace.png",
+                "sample_count": 289,
+                "sha256": "da3f639bf89517a42a19f3cc5a847261400bf89e88c1b92ab5b809b512924ff1",
+                "unique_sample_colors": 6,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "invoice_workspace",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "invoiceWorkspacePanel",
+          "surface": "invoice_workspace",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1510,
+            "name": "work_manager",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/work_manager.png",
+            "sample_count": 289,
+            "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+            "unique_sample_colors": 8,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/work_manager.png",
+            "actual_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/work_manager.png",
+            "baseline_sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1510,
+                "name": "work_manager",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/work_manager.png",
+                "sample_count": 289,
+                "sha256": "090e82392268b6ad7c8b1ed47085ff33c12fcb2f44dc8ffdf3f7945e271b5c23",
+                "unique_sample_colors": 8,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "work_manager",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "workBrowserPanel",
+          "surface": "work_manager",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1510,
+            "name": "party_manager",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/party_manager.png",
+            "sample_count": 289,
+            "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+            "unique_sample_colors": 13,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/party_manager.png",
+            "actual_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/party_manager.png",
+            "baseline_sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1510,
+                "name": "party_manager",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/party_manager.png",
+                "sample_count": 289,
+                "sha256": "a71e38cd5fccd4af90ad627550301d505a513d307084dd64dc4babfd3a083f8b",
+                "unique_sample_colors": 13,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "party_manager",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "partyManagerPanel",
+          "surface": "party_manager",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1510,
+            "name": "contract_manager",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/contract_manager.png",
+            "sample_count": 289,
+            "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+            "unique_sample_colors": 3,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/contract_manager.png",
+            "actual_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/contract_manager.png",
+            "baseline_sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1510,
+                "name": "contract_manager",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/contract_manager.png",
+                "sample_count": 289,
+                "sha256": "a1fee273e844994d30ca0bbf0beb2b7629d61ff97eebc7fff2e09dc5b82f2883",
+                "unique_sample_colors": 3,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "contract_manager",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "contractBrowserPanel",
+          "surface": "contract_manager",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 1510,
+            "name": "rights_matrix",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/rights_matrix.png",
+            "sample_count": 289,
+            "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+            "unique_sample_colors": 6,
+            "width": 1174
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/rights_matrix.png",
+            "actual_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/rights_matrix.png",
+            "baseline_sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 1510,
+                "name": "rights_matrix",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/rights_matrix.png",
+                "sample_count": 289,
+                "sha256": "fb5c9ba18451d5925c025d409cf8f3e0383d5801ccf003e3fa48e8c70dbdf31e",
+                "unique_sample_colors": 6,
+                "width": 1174
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "rights_matrix",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "rightsBrowserPanel",
+          "surface": "rights_matrix",
+          "window_title": ""
+        },
+        {
+          "capture": {
+            "height": 780,
+            "name": "quality_dashboard_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+            "sample_count": 289,
+            "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "unique_sample_colors": 4,
+            "width": 1180
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+            "actual_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/quality_dashboard_dialog.png",
+            "baseline_sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "quality_dashboard_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/quality_dashboard_dialog.png",
+                "sample_count": 289,
+                "sha256": "93a68d5d834cb94d248eaad41954a19ef63aebef416bd63637948ce33e38ef24",
+                "unique_sample_colors": 4,
+                "width": 1180
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "quality_dashboard_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "qualityDashboardDialog",
+          "surface": "quality_dashboard_dialog",
+          "window_title": "Data Quality Dashboard"
+        },
+        {
+          "capture": {
+            "height": 760,
+            "name": "conversion_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+            "sample_count": 272,
+            "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "unique_sample_colors": 8,
+            "width": 1120
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+            "actual_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/conversion_dialog.png",
+            "baseline_sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 760,
+                "name": "conversion_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/conversion_dialog.png",
+                "sample_count": 272,
+                "sha256": "d6ee4127f656cbdbf4176219c13c28dc2df9fc124e56776766e017935381e5df",
+                "unique_sample_colors": 8,
+                "width": 1120
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1088,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "conversion_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "conversionDialog",
+          "surface": "conversion_dialog",
+          "window_title": "Template Conversion"
+        },
+        {
+          "capture": {
+            "height": 909,
+            "name": "settings_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+            "sample_count": 289,
+            "sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "unique_sample_colors": 13,
+            "width": 1233
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+            "actual_sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/settings_dialog.png",
+            "baseline_sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 909,
+                "name": "settings_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/settings_dialog.png",
+                "sample_count": 289,
+                "sha256": "7a76e8a821647f7eb3346392d2dc22c7787f67477ebc047a4f763ee4f774bdfc",
+                "unique_sample_colors": 13,
+                "width": 1233
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "settings_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationSettingsDialog",
+          "surface": "settings_dialog",
+          "window_title": "Application Settings"
+        },
+        {
+          "capture": {
+            "height": 520,
+            "name": "about_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+            "sample_count": 272,
+            "sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "unique_sample_colors": 22,
+            "width": 720
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+            "actual_sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/about_dialog.png",
+            "baseline_sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 520,
+                "name": "about_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/about_dialog.png",
+                "sample_count": 272,
+                "sha256": "d8d3ae31f9b900fb0b45ef1cbe6afb1acbab10a9e55adaf02be89409b4c748ad",
+                "unique_sample_colors": 22,
+                "width": 720
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "about_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "aboutDialog",
+          "surface": "about_dialog",
+          "window_title": "About Music Catalog Manager"
+        },
+        {
+          "capture": {
+            "height": 820,
+            "name": "help_contents_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+            "sample_count": 289,
+            "sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "unique_sample_colors": 33,
+            "width": 1180
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+            "actual_sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/help_contents_dialog.png",
+            "baseline_sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 820,
+                "name": "help_contents_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/help_contents_dialog.png",
+                "sample_count": 289,
+                "sha256": "0807f38e3e4a35bcaabb481e7a19e2f53c534f29676422eaf414af5c27a687cb",
+                "unique_sample_colors": 33,
+                "width": 1180
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "help_contents_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "helpContentsDialog",
+          "surface": "help_contents_dialog",
+          "window_title": "Help Contents"
+        },
+        {
+          "capture": {
+            "height": 960,
+            "name": "add_album_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+            "sample_count": 256,
+            "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "unique_sample_colors": 13,
+            "width": 960
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+            "actual_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/add_album_dialog.png",
+            "baseline_sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 960,
+                "name": "add_album_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/add_album_dialog.png",
+                "sample_count": 256,
+                "sha256": "1657642f826aa8954b3c6604e3aff0b36b39fcd2a523af068fc29ebc0d6131da",
+                "unique_sample_colors": 13,
+                "width": 960
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1024,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "add_album_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "albumEntryDialog",
+          "surface": "add_album_dialog",
+          "window_title": "Add Album"
+        },
+        {
+          "capture": {
+            "height": 560,
+            "name": "custom_columns_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+            "sample_count": 272,
+            "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "unique_sample_colors": 20,
+            "width": 760
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+            "actual_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/custom_columns_dialog.png",
+            "baseline_sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 560,
+                "name": "custom_columns_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/custom_columns_dialog.png",
+                "sample_count": 272,
+                "sha256": "9a4a19accc4791b6b342aceb75b2b92ae8791381112c2d39b1999c865698e95b",
+                "unique_sample_colors": 20,
+                "width": 760
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "custom_columns_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "customColumnsDialog",
+          "surface": "custom_columns_dialog",
+          "window_title": "Manage Custom Columns"
+        },
+        {
+          "capture": {
+            "height": 860,
+            "name": "edit_track_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+            "sample_count": 289,
+            "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "unique_sample_colors": 8,
+            "width": 760
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+            "actual_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/edit_track_dialog.png",
+            "baseline_sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 860,
+                "name": "edit_track_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/edit_track_dialog.png",
+                "sample_count": 289,
+                "sha256": "f46bf47960115ef87571c87eb94942aeab2b84965a5d5d1c4b41b31b454135a3",
+                "unique_sample_colors": 8,
+                "width": 760
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1156,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "edit_track_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "editDialog",
+          "surface": "edit_track_dialog",
+          "window_title": "Edit Track"
+        },
+        {
+          "capture": {
+            "height": 720,
+            "name": "bulk_audio_attach_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+            "sample_count": 272,
+            "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "unique_sample_colors": 6,
+            "width": 1080
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+            "actual_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/bulk_audio_attach_dialog.png",
+            "baseline_sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 720,
+                "name": "bulk_audio_attach_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/bulk_audio_attach_dialog.png",
+                "sample_count": 272,
+                "sha256": "de46ce9db06e964bc7793664435b731882b827febc658c81805e25c6e5e5fb3e",
+                "unique_sample_colors": 6,
+                "width": 1080
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "bulk_audio_attach_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "bulkAudioAttachDialog",
+          "surface": "bulk_audio_attach_dialog",
+          "window_title": "Bulk Attach Audio Files"
+        },
+        {
+          "capture": {
+            "height": 780,
+            "name": "diagnostics_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+            "sample_count": 289,
+            "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "unique_sample_colors": 21,
+            "width": 1080
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+            "actual_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/diagnostics_dialog.png",
+            "baseline_sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "diagnostics_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/diagnostics_dialog.png",
+                "sample_count": 289,
+                "sha256": "8e197d10d480798796a946cf07179926c98c28c7903c8f17297637319b0335ac",
+                "unique_sample_colors": 21,
+                "width": 1080
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "diagnostics_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "diagnosticsDialog",
+          "surface": "diagnostics_dialog",
+          "window_title": "Diagnostics"
+        },
+        {
+          "capture": {
+            "height": 860,
+            "name": "application_storage_admin_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+            "sample_count": 289,
+            "sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "unique_sample_colors": 21,
+            "width": 1220
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+            "actual_sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/application_storage_admin_dialog.png",
+            "baseline_sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 860,
+                "name": "application_storage_admin_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/application_storage_admin_dialog.png",
+                "sample_count": 289,
+                "sha256": "df2a349c473fbbf72602948c587035ca378033df1d72d54c80e1706d60455cf0",
+                "unique_sample_colors": 21,
+                "width": 1220
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "application_storage_admin_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationStorageAdminDialog",
+          "surface": "application_storage_admin_dialog",
+          "window_title": "Application Storage Admin"
+        },
+        {
+          "capture": {
+            "height": 700,
+            "name": "application_log_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+            "sample_count": 289,
+            "sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "unique_sample_colors": 30,
+            "width": 860
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+            "actual_sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/application_log_dialog.png",
+            "baseline_sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 700,
+                "name": "application_log_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/application_log_dialog.png",
+                "sample_count": 289,
+                "sha256": "b83faa9ec99917555bc812808474c9c204b3feed45ddb554a8f03bb1d23a3e8d",
+                "unique_sample_colors": 30,
+                "width": 860
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1156,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "application_log_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "applicationLogDialog",
+          "surface": "application_log_dialog",
+          "window_title": "Application Log"
+        },
+        {
+          "capture": {
+            "height": 720,
+            "name": "history_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+            "sample_count": 256,
+            "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "unique_sample_colors": 14,
+            "width": 1040
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+            "actual_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/history_dialog.png",
+            "baseline_sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 720,
+                "name": "history_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/history_dialog.png",
+                "sample_count": 256,
+                "sha256": "f729874e78de16c612e46b928d50db5f73afe3cb2d072d70714ec07719518d07",
+                "unique_sample_colors": 14,
+                "width": 1040
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "history_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "historyDialog",
+          "surface": "history_dialog",
+          "window_title": "Undo History"
+        },
+        {
+          "capture": {
+            "height": 620,
+            "name": "action_ribbon_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+            "sample_count": 289,
+            "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "unique_sample_colors": 29,
+            "width": 980
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+            "actual_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/action_ribbon_dialog.png",
+            "baseline_sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 620,
+                "name": "action_ribbon_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/action_ribbon_dialog.png",
+                "sample_count": 289,
+                "sha256": "00f36e23a964fa9678e5c279a5873c9a734cd859760d51ffe1b422ab6092907b",
+                "unique_sample_colors": 29,
+                "width": 980
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "action_ribbon_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "actionRibbonDialog",
+          "surface": "action_ribbon_dialog",
+          "window_title": "Customize Action Ribbon"
+        },
+        {
+          "capture": {
+            "height": 520,
+            "name": "authenticity_verification_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+            "sample_count": 289,
+            "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "unique_sample_colors": 24,
+            "width": 780
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+            "actual_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/authenticity_verification_dialog.png",
+            "baseline_sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 520,
+                "name": "authenticity_verification_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/authenticity_verification_dialog.png",
+                "sample_count": 289,
+                "sha256": "490747ad07339a01e33bd3f031129359301332328f39f2434f2212bbb05a4dc1",
+                "unique_sample_colors": 24,
+                "width": 780
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "authenticity_verification_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "authenticityVerificationDialog",
+          "surface": "authenticity_verification_dialog",
+          "window_title": "Audio Authenticity Verification"
+        },
+        {
+          "capture": {
+            "height": 431,
+            "name": "forensic_export_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+            "sample_count": 289,
+            "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "unique_sample_colors": 34,
+            "width": 481
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+            "actual_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/forensic_export_dialog.png",
+            "baseline_sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 431,
+                "name": "forensic_export_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/forensic_export_dialog.png",
+                "sample_count": 289,
+                "sha256": "4a08cf111702b61a8b1a29235f0f63163bace61ac04d87ddc1bb834d80996a6b",
+                "unique_sample_colors": 34,
+                "width": 481
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1122,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "forensic_export_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "forensicExportDialog",
+          "surface": "forensic_export_dialog",
+          "window_title": "Export Forensic Watermarked Audio"
+        },
+        {
+          "capture": {
+            "height": 350,
+            "name": "media_equalizer_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+            "sample_count": 289,
+            "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "unique_sample_colors": 23,
+            "width": 600
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+            "actual_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/media_equalizer_dialog.png",
+            "baseline_sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 350,
+                "name": "media_equalizer_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/media_equalizer_dialog.png",
+                "sample_count": 289,
+                "sha256": "df980f7cba436ab5955cc4c6b7b09f0057c9d44cb52e513f8aaf4d937c6f44ed",
+                "unique_sample_colors": 23,
+                "width": 600
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1190,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "media_equalizer_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "mediaEqualizerDialog",
+          "surface": "media_equalizer_dialog",
+          "window_title": "Equalizer"
+        },
+        {
+          "capture": {
+            "height": 780,
+            "name": "soundcloud_publish_dialog",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+            "sample_count": 289,
+            "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "unique_sample_colors": 13,
+            "width": 1788
+          },
+          "comparison": {
+            "actual_path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+            "actual_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "baseline_created": true,
+            "baseline_path": "artifacts/ui_pq_debug/visual/baselines/soundcloud_publish_dialog.png",
+            "baseline_sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+            "comparison_type": "screenshot",
+            "details": {
+              "capture": {
+                "height": 780,
+                "name": "soundcloud_publish_dialog",
+                "non_blank": true,
+                "path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_publish_dialog.png",
+                "sample_count": 289,
+                "sha256": "55c68da68efd7af3d972303a624b682a6179ff182847dbe618860a68c57d9964",
+                "unique_sample_colors": 13,
+                "width": 1788
+              },
+              "comparison_profile": {
+                "changed_sample_ratio": 0.0,
+                "changed_samples": 0,
+                "mean_channel_delta": 0.0,
+                "passed": true,
+                "same_size": true,
+                "sample_count": 1089,
+                "tolerance": {
+                  "max_changed_sample_ratio": 0.35,
+                  "max_mean_channel_delta": 6.0
+                }
+              }
+            },
+            "name": "soundcloud_publish_dialog",
+            "passed": true,
+            "reason": "Baseline created from current qualified screenshot."
+          },
+          "object_name": "soundcloudPublishDialog",
+          "surface": "soundcloud_publish_dialog",
+          "window_title": "Publish to SoundCloud"
+        }
+      ],
+      "main_window_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/screenshots/main_window.png",
+        "actual_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/main_window.png",
+        "baseline_sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+        "comparison_type": "screenshot",
+        "details": {
+          "capture": {
+            "height": 800,
+            "name": "main_window",
+            "non_blank": true,
+            "path": "artifacts/ui_pq_debug/visual/screenshots/main_window.png",
+            "sample_count": 272,
+            "sha256": "b3c2ea3aaaa4f4493600405325bf085176dd66e68e4259c327c97c56a2ee3a42",
+            "unique_sample_colors": 9,
+            "width": 1506
+          },
+          "comparison_profile": {
+            "changed_sample_ratio": 0.0,
+            "changed_samples": 0,
+            "mean_channel_delta": 0.0,
+            "passed": true,
+            "same_size": true,
+            "sample_count": 1056,
+            "tolerance": {
+              "max_changed_sample_ratio": 0.35,
+              "max_mean_channel_delta": 6.0
+            }
+          }
+        },
+        "name": "main_window",
+        "passed": true,
+        "reason": "Baseline created from current qualified screenshot."
+      },
+      "manifest_path": "artifacts/ui_pq_debug/visual/visual_manifest.json",
+      "screenshot_count": 32,
+      "theme_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/actual/theme_payload_summary.json",
+        "actual_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/theme_payload_summary.json",
+        "baseline_sha256": "7478b2e2c750d8e412672eb85c33da5858515ed4e1800be06f12c0c14162cac4",
+        "comparison_type": "theme",
+        "details": {
+          "normalized_bytes": 9777
+        },
+        "name": "theme_payload_summary",
+        "passed": true,
+        "reason": "Baseline created from current qualified artifact."
+      }
+    },
+    "message": "Visual screenshots, baseline comparison, dialog capture, and theme payload verification completed.",
+    "status": "passed",
+    "test_id": "UI-PQ-SET-001",
+    "timestamp": "2026-06-14T19:42:27.641149+00:00"
+  },
+  {
+    "data": {
+      "chapter_count": 41,
+      "chapter_screenshot_count": 38,
+      "chapter_screenshot_exempt_count": 3,
+      "chapter_screenshot_exempt_ids": [
+        "overview",
+        "main-window",
+        "keyboard-shortcuts"
+      ],
+      "chapter_screenshot_required_count": 38,
+      "chapter_screenshot_required_ids": [
+        "workflow-playbooks",
+        "profiles",
+        "background-tasks",
+        "add-data",
+        "album-entry",
+        "catalog-table",
+        "custom-columns",
+        "edit-entry",
+        "audio-tags",
+        "bulk-audio-attach",
+        "releases",
+        "code-registry",
+        "promo-code-ledger",
+        "global-search",
+        "contract-templates",
+        "assets-deliverables",
+        "accounting-royalties",
+        "repertoire-knowledge",
+        "storage-modes",
+        "conversion",
+        "exchange-formats",
+        "import-workflows",
+        "quality-dashboard",
+        "gs1-metadata",
+        "metadata-dates",
+        "catalog-managers",
+        "audio-authenticity",
+        "layout-action-ribbon",
+        "settings",
+        "theme-settings",
+        "history",
+        "diagnostics",
+        "application-log",
+        "application-updates",
+        "media-preview",
+        "soundcloud-publishing",
+        "application-storage-admin",
+        "about"
+      ],
+      "copied_screenshot_count": 70,
+      "coverage_percent": 100.0,
+      "covered_count": 312,
+      "duplicate_screenshot_hash_count": 0,
+      "finding_count": 0,
+      "refreshed_chapter_screenshot_count": 38,
+      "report_path": "artifacts/ui_pq_debug/help/help_coverage.json",
+      "requirement_count": 312,
+      "screenshot_count": 38,
+      "unique_screenshot_hash_count": 38,
+      "validated_help_manual_path": "artifacts/ui_pq_debug/help/validated_help_manual.html",
+      "workflow_example_count": 7
+    },
+    "message": "Help documentation coverage matched runtime inventory, workflow playbooks, chapter-depth checks, and real UI screenshot references.",
+    "status": "passed",
+    "test_id": "UI-PQ-HELP-001",
+    "timestamp": "2026-06-14T19:42:28.405230+00:00"
+  },
+  {
+    "data": {
+      "add_track_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_add_track_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_add_track_dialog_populated.png"
+      },
+      "catalog_row_visible": true,
+      "creation_method": "add_track_panel.save_button.click",
+      "edit_method": "track_editor_dialog.save_changes",
+      "edit_track_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_edit_track_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_edit_track_dialog_populated.png"
+      },
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Create a First Single From Nothing"
+      },
+      "track_id": 2,
+      "work_id_from_add_track": 2
+    },
+    "message": "Track was created through Add Track UI and edited through Edit Track UI.",
+    "status": "passed",
+    "test_id": "UI-PQ-CAT-001",
+    "timestamp": "2026-06-14T19:42:28.711746+00:00"
+  },
+  {
+    "data": {
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Connect Parties, Works, Contracts, Rights, and Accounting"
+      },
+      "party_dialog_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_party_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_party_manager_create_dialog_populated.png"
+      },
+      "party_id": 3,
+      "party_panel_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_party_manager_created_party_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_party_manager_created_party_selected.png"
+      },
+      "party_visible": true,
+      "release_id": 1,
+      "release_panel_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png"
+      },
+      "release_visible": true,
+      "track_id": 2,
+      "work_dialog_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_work_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_work_manager_create_dialog_populated.png"
+      },
+      "work_id": 3,
+      "work_panel_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_work_manager_created_work_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_work_manager_created_work_selected.png"
+      },
+      "work_visible": true
+    },
+    "message": "Party, Work, and Release relationships were created or verified through manager UI.",
+    "status": "passed",
+    "test_id": "UI-PQ-REL-001",
+    "timestamp": "2026-06-14T19:42:29.101063+00:00"
+  },
+  {
+    "data": {
+      "contract_dialog_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_contract_manager_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_contract_manager_create_dialog_populated.png"
+      },
+      "contract_id": 1,
+      "contract_panel_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_contract_manager_created_contract_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_contract_manager_created_contract_selected.png"
+      },
+      "contract_visible": true,
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Connect Parties, Works, Contracts, Rights, and Accounting"
+      },
+      "release_id": 1,
+      "right_dialog_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_rights_matrix_create_dialog_populated.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_rights_matrix_create_dialog_populated.png"
+      },
+      "right_id": 1,
+      "right_visible": true,
+      "rights_panel_visual": {
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_rights_matrix_created_right_selected.png",
+        "comparison_passed": true,
+        "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+        "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_rights_matrix_created_right_selected.png"
+      },
+      "track_id": 2,
+      "work_id": 3
+    },
+    "message": "Contract and Rights Matrix records were created through UI and verified in the database.",
+    "status": "passed",
+    "test_id": "UI-PQ-CON-001",
+    "timestamp": "2026-06-14T19:42:29.378100+00:00"
+  },
+  {
+    "data": {},
+    "message": "accounting workflow failed: AssertionError: Enabled button was not found: Issue",
+    "status": "failed",
+    "test_id": "UI-PQ-ACC-001",
+    "timestamp": "2026-06-14T19:42:29.569857+00:00"
+  },
+  {
+    "data": {
+      "account_id": 1,
+      "account_public_profile": {
+        "avatar_url": "https://images.example.test/ui-pq-avatar.jpg",
+        "id": "ui-pq-soundcloud",
+        "permalink_url": "https://soundcloud.com/ui-pq-profile",
+        "username": "UI PQ SoundCloud Profile"
+      },
+      "artwork_path": "artifacts/ui_pq_debug/soundcloud-ui-pq-artwork.jpg",
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Prepare a SoundCloud Upload With a Forensic Trace"
+      },
+      "mocked_execution_boundary": "The live SoundCloud API call is replaced by a no-network publish runner invoked only by the dialog Publish button.",
+      "publication_id": 1,
+      "remote_url": "https://soundcloud.com/ui-pq-profile/ui-pq-qualification-track",
+      "remote_urn": "soundcloud:tracks:260531",
+      "run_id": 1,
+      "run_item_id": 1,
+      "sharing": "private",
+      "track_id": 2,
+      "ui_control_path": "SoundCloudPublishDialog controls: Use album selection, per-run metadata fields, Refresh preflight, Publish.",
+      "visual_evidence": {
+        "soundcloud_completion_ui": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/soundcloud_completion_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_completion_ui.png"
+        },
+        "soundcloud_preflight_ui": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/soundcloud_preflight_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_preflight_ui.png"
+        },
+        "soundcloud_progress_ui": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/soundcloud_progress_ui.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/soundcloud_progress_ui.png"
+        }
+      },
+      "watermarked_audio_path": "artifacts/ui_pq_debug/soundcloud-ui-pq-watermarked-upload.wav",
+      "workflow_status": "fully_ui_led",
+      "would_upload_audio": true
+    },
+    "message": "SoundCloud publish dialog options, private preflight, watermarked source, artwork, mocked publish action, progress UI, completion UI, run state, and no-secret storage were verified without network.",
+    "status": "passed",
+    "test_id": "UI-PQ-SC-001",
+    "timestamp": "2026-06-14T19:42:29.768972+00:00"
+  },
+  {
+    "data": {
+      "backup_integrity": "ok",
+      "backup_method": "backup_api",
+      "backup_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/backups/default_20260614_214229.db",
+      "database_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/Database/default.db",
+      "diagnostics_check_statuses": {
+        "Audio waveform cache": "ok",
+        "Backup artifacts": "ok",
+        "Custom-value integrity": "ok",
+        "Foreign-key consistency": "ok",
+        "History invariants": "ok",
+        "History snapshots": "ok",
+        "History storage budget": "ok",
+        "Legacy default-column custom fields": "ok",
+        "Managed files": "ok",
+        "SQLite integrity": "ok",
+        "Schema layout": "ok",
+        "Schema version": "ok",
+        "Storage layout": "ok"
+      },
+      "progress_message_count": 40,
+      "restore_integrity": "ok",
+      "restore_target": "artifacts/ui_pq_debug/diagnostics-restore-target.db",
+      "safety_copy_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/backups/pre_restore/diagnostics-restore-target_pre_restore_20260614_214229.db",
+      "status_messages": [
+        "Collecting environment details...",
+        "Collected environment details.",
+        "Inspecting storage layout...",
+        "Inspected storage layout.",
+        "Checking schema version...",
+        "Checked schema version.",
+        "Inspecting schema layout...",
+        "Checking required database tables...",
+        "Checked required database tables.",
+        "Checking required track columns...",
+        "Checked required track columns.",
+        "Running SQLite integrity checks...",
+        "Finished SQLite integrity checks.",
+        "Checking foreign-key consistency...",
+        "Checked foreign-key consistency.",
+        "Checking custom-value integrity...",
+        "Checked custom-value integrity.",
+        "Checking cached waveform previews...",
+        "Checked cached waveform previews.",
+        "Checking legacy default-column custom fields...",
+        "Checked legacy default-column custom fields.",
+        "Checking managed files...",
+        "Checking managed album artwork references...",
+        "Checking managed license files...",
+        "Checked managed files.",
+        "Inspecting history snapshots and backups...",
+        "Collected history recovery-state issues.",
+        "Evaluated history snapshot artifacts.",
+        "Evaluated backup artifacts.",
+        "Evaluated history invariants.",
+        "Evaluated history storage budget.",
+        "Inspecting application-wide storage...",
+        "Discovered active profiles.",
+        "Collected managed-file references from default.db (1/1).",
+        "Audited managed media and document roots.",
+        "Audited history, backup, and session artifacts.",
+        "Audited update backups and installer cache.",
+        "Audited generated exports and log files.",
+        "Application-wide storage summary ready.",
+        "Inspected application-wide storage."
+      ]
+    },
+    "message": "Diagnostics report, SQLite integrity, backup creation, and isolated restore verification completed against the QA profile.",
+    "status": "passed",
+    "test_id": "UI-PQ-DIAG-001",
+    "timestamp": "2026-06-14T19:42:29.841550+00:00"
+  },
+  {
+    "data": {
+      "csv_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_report.csv",
+        "actual_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_report.csv",
+        "baseline_sha256": "c901b9a49adfd40dd9b72d5a9995a1d1639cc1ee1a6a8a8e2443218f8265c4d0",
+        "comparison_type": "report",
+        "details": {
+          "normalized_bytes": 80
+        },
+        "name": "ui_pq_generated_report",
+        "passed": true,
+        "reason": "Baseline created from current qualified artifact."
+      },
+      "html_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_document.html",
+        "actual_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_document.html",
+        "baseline_sha256": "fb7dfa10a7f33ef7dac0a8dd9912a7d15806b740c1dedea813f6330a1986a492",
+        "comparison_type": "generated_document",
+        "details": {
+          "normalized_bytes": 253
+        },
+        "name": "ui_pq_generated_document",
+        "passed": true,
+        "reason": "Baseline created from current qualified artifact."
+      },
+      "manifest_path": "artifacts/ui_pq_debug/visual/generated_output_manifest.json",
+      "pdf_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_pdf_pdf_profile.json",
+        "actual_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_generated_pdf_pdf_profile.json",
+        "baseline_sha256": "e4cb48e8d516ab89d0fbc774872a076c301fbe4eb1f17640439143df3520c980",
+        "comparison_type": "pdf_profile",
+        "details": {
+          "normalized_bytes": 98
+        },
+        "name": "ui_pq_generated_pdf_pdf_profile",
+        "passed": true,
+        "reason": "Baseline created from current qualified artifact."
+      },
+      "pdf_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_generated_pdf.pdf",
+      "pdf_profile": {
+        "ends_with_eof": true,
+        "page_count": 1,
+        "sha256": "ab6e0c7b34a535da99ff86ea3fac9c0bdad5cd85ab31750ce9009840cb5c673e",
+        "size_bytes": 13551,
+        "starts_with_pdf_header": true,
+        "valid": true
+      },
+      "report_comparison": {
+        "actual_path": "artifacts/ui_pq_debug/visual/actual/ui_pq_report_summary.json",
+        "actual_sha256": "ef9a4d26a70cc7017a407208654f5c64a2873ae9247d9cece0af6ab118cb3324",
+        "baseline_created": true,
+        "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_report_summary.json",
+        "baseline_sha256": "ef9a4d26a70cc7017a407208654f5c64a2873ae9247d9cece0af6ab118cb3324",
+        "comparison_type": "report",
+        "details": {
+          "normalized_bytes": 544
+        },
+        "name": "ui_pq_report_summary",
+        "passed": true,
+        "reason": "Baseline created from current qualified artifact."
+      }
+    },
+    "message": "Generated report, document, CSV, and PDF comparison checks completed with stable baselines.",
+    "status": "passed",
+    "test_id": "UI-PQ-IMP-001",
+    "timestamp": "2026-06-14T19:42:29.852323+00:00"
+  },
+  {
+    "data": {
+      "asset_filename": "ui-pq-deliverables-master.wav",
+      "asset_id": 1,
+      "asset_primary_flag": true,
+      "dock_object_name": "assetRegistryDock",
+      "inventory_ids": [
+        "action:deliverables_and_asset_versions",
+        "action:deliverables_asset_versions",
+        "button:qt_dockwidget_closebutton:370",
+        "button:qt_dockwidget_floatbutton:369",
+        "dock:assetregistrydock"
+      ],
+      "panel_object_name": "assetBrowserPanel",
+      "tab_labels": [
+        "Asset Registry",
+        "Derivative Ledger"
+      ],
+      "track_id": 2
+    },
+    "message": "Deliverables and Asset Versions action, dock, asset table, search, and derivative ledger navigation were qualified.",
+    "status": "passed",
+    "test_id": "UI-PQ-ASSET-001",
+    "timestamp": "2026-06-14T19:42:29.880833+00:00"
+  },
+  {
+    "data": {
+      "attachment_meta": {
+        "blob_present": false,
+        "filename": "ui-pq-authenticity-master.wav",
+        "format_id": "wav",
+        "format_label": "WAV",
+        "has_media": true,
+        "is_lossy": false,
+        "mime_type": "audio/x-wav",
+        "owner_id": 2,
+        "owner_scope": "track",
+        "path": "track_media/audio/85189beb021e_ui-pq-authenticity-master.wav",
+        "size_bytes": 7938044,
+        "storage_mode": "managed_file"
+      },
+      "attachment_progress_count": 8,
+      "exported_audio_path": "artifacts/ui_pq_debug/authenticity_exports/UI PQ Release/UI PQ Qualification Track Edited.wav",
+      "extraction_confidence": 0.9753086419753086,
+      "fingerprint_similarity": 0.9999998807907104,
+      "forensic_batch_id": "FEX-20260614T194230Z-2a0e9ae3",
+      "forensic_conversion_calls": [
+        {
+          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/forensic-export-FEX-20260614T194230Z-2a0e9ae3-fl46cjld/UI PQ Qualification Track Edited.wav",
+          "metadata_behavior": "inherit",
+          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/track_media/audio/85189beb021e_ui-pq-authenticity-master.wav",
+          "target_id": "wav"
+        }
+      ],
+      "forensic_exact_hash_match": true,
+      "forensic_export_ids": [
+        "FWX-20260614T194230Z-d73b6780ae"
+      ],
+      "forensic_inspection_status": "forensic_match_found",
+      "forensic_resolution_basis": "exact_output_hash",
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Export and Verify Authenticity Watermarked Audio"
+      },
+      "key_id": "ed25519-f90cdf31e484a5d0",
+      "manifest_ids": [
+        "b6c3bfc318a5c33567bcc69ebd137dab"
+      ],
+      "sidecar_path": "artifacts/ui_pq_debug/authenticity_exports/UI PQ Release/UI PQ Qualification Track Edited.wav.authenticity.json",
+      "signature_valid": true,
+      "source_audio_path": "artifacts/ui_pq_debug/fixtures/ui-pq-authenticity-master.wav",
+      "track_id": 2,
+      "verification_basis": "reference_guided_direct",
+      "verification_status": "verified_authentic",
+      "visual_evidence": {
+        "authenticity_export_preview": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_authenticity_export_preview.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_authenticity_export_preview.png"
+        },
+        "authenticity_verification_dialog": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_authenticity_verification_dialog.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_authenticity_verification_dialog.png"
+        },
+        "forensic_export_dialog": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_forensic_export_dialog.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_forensic_export_dialog.png"
+        },
+        "forensic_inspection_dialog": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_forensic_inspection_dialog.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_forensic_inspection_dialog.png"
+        }
+      },
+      "workflow_status": "fully_automated_local_fixture"
+    },
+    "message": "Authenticity key, direct watermark export, signed sidecar verification, forensic export, forensic inspection, and result dialogs were verified.",
+    "status": "passed",
+    "test_id": "UI-PQ-AUTH-001",
+    "timestamp": "2026-06-14T19:42:30.715254+00:00"
+  },
+  {
+    "data": {
+      "attached_audio_mime": "audio/x-wav",
+      "attached_audio_size": 1587644,
+      "attachment_meta": {
+        "blob_present": false,
+        "filename": "ui-pq-media-attachment.wav",
+        "format_id": "wav",
+        "format_label": "WAV",
+        "has_media": true,
+        "is_lossy": false,
+        "mime_type": "audio/x-wav",
+        "owner_id": 2,
+        "owner_scope": "track",
+        "path": "track_media/audio/27fcbad1778b_ui-pq-media-attachment.wav",
+        "size_bytes": 1587644,
+        "storage_mode": "managed_file"
+      },
+      "attachment_progress_count": 8,
+      "authenticity_basis": "catalog_lineage_only",
+      "conversion_calls": [
+        {
+          "destination_path": "/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/managed-derivative-AEX-20260614T194230Z-8e67263b-ugmbprla/UI PQ Qualification Track Edited.mp3",
+          "metadata_behavior": "inherit",
+          "source_path": "/private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpfglcc9ty/qt-settings/AppLocalDataLocation/track_media/audio/27fcbad1778b_ui-pq-media-attachment.wav",
+          "target_id": "mp3"
+        }
+      ],
+      "derivative_batch_id": "AEX-20260614T194230Z-8e67263b",
+      "derivative_ids": [
+        "2e87d1f4ec4046f88be390d0dd872bac"
+      ],
+      "derivative_kind": "lossy_derivative",
+      "derivative_workflow_kind": "managed_audio_derivative",
+      "derivative_written_paths": [
+        "artifacts/ui_pq_debug/managed_media_derivatives/UI PQ Release/UI PQ Qualification Track Edited.mp3"
+      ],
+      "help_reference": {
+        "chapter_count": 41,
+        "chapter_screenshot_count": 38,
+        "chapter_screenshot_exempt_count": 3,
+        "chapter_screenshot_required_count": 38,
+        "coverage_percent": 100.0,
+        "help_status": "passed",
+        "workflow": "Attach Audio, Preview Playback, and Review Managed Derivatives"
+      },
+      "ledger_batch_count": 1,
+      "ledger_derivative": {
+        "authenticity_basis": "catalog_lineage_only",
+        "derivative_kind": "lossy_derivative",
+        "export_id": "2e87d1f4ec4046f88be390d0dd872bac",
+        "managed_file_path": "artifacts/ui_pq_debug/managed_media_derivatives/UI PQ Release/UI PQ Qualification Track Edited.mp3",
+        "output_filename": "UI PQ Qualification Track Edited.mp3",
+        "output_format": "mp3",
+        "status": "completed",
+        "track_id": 2
+      },
+      "media_player_source_spec": {
+        "kind": "standard",
+        "media_key": "audio_file"
+      },
+      "media_player_track_id": 2,
+      "source_audio_path": "artifacts/ui_pq_debug/fixtures/ui-pq-media-attachment.wav",
+      "track_id": 2,
+      "visual_evidence": {
+        "bulk_audio_attach_dialog": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_bulk_audio_attach_dialog.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_bulk_audio_attach_dialog.png"
+        },
+        "derivative_ledger_panel": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_derivative_ledger_panel.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_derivative_ledger_panel.png"
+        },
+        "media_player_dialog": {
+          "baseline_created": true,
+          "baseline_path": "artifacts/ui_pq_debug/visual/baselines/ui_pq_media_player_dialog.png",
+          "comparison_passed": true,
+          "manifest_path": "artifacts/ui_pq_debug/visual/business_workflow_manifest.json",
+          "screenshot_path": "artifacts/ui_pq_debug/visual/screenshots/ui_pq_media_player_dialog.png"
+        }
+      },
+      "waveform_cache_available": false,
+      "workflow_status": "fully_automated_local_fixture"
+    },
+    "message": "Media audio attachment, media player command routing, no-ffmpeg conversion boundary, managed derivative export, and derivative ledger drill-in were verified.",
+    "status": "passed",
+    "test_id": "UI-PQ-MEDIA-001",
+    "timestamp": "2026-06-14T19:42:31.279983+00:00"
+  }
+]

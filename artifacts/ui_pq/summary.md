@@ -2,7 +2,7 @@
 
 This is an internal engineering UI qualification artifact. It is not a regulatory certification or external compliance claim.
 
-- Generated: 2026-06-15T19:31:42.681920+00:00
+- Generated: 2026-06-16T08:59:03.130996+00:00
 - Inventory items discovered: 413
 - Traceability rows written: 413
 - Automated traceability rows: 386
@@ -11,7 +11,7 @@ This is an internal engineering UI qualification artifact. It is not a regulator
 - Open actionable deviations: 0
 - Pending/manual deviations: 27
 - Object-name gap deviations: 0
-- QA database: /private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmpy050j6eo/qt-settings/AppLocalDataLocation/Database/default.db
+- QA database: /private/var/folders/6n/jmt1mclx4db3_18pj0z9n8l40000gn/T/tmp092h535v/qt-settings/AppLocalDataLocation/Database/default.db
 
 ## Executed Evidence Events
 

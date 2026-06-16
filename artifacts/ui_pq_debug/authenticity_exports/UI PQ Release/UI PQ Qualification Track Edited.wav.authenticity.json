@@ -1,0 +1,97 @@
+{
+  "document_type": "direct_watermark",
+  "key_id": "ed25519-f90cdf31e484a5d0",
+  "payload": {
+    "app_version": "5.1.0",
+    "artist_ref": {
+      "primary_artist_name": "UI PQ Artist"
+    },
+    "authenticity_version": 1,
+    "created_at_utc": "2026-06-14T19:42:29Z",
+    "manifest_id": "b6c3bfc318a5c33567bcc69ebd137dab",
+    "reference_audio": {
+      "bit_depth": 24,
+      "filename": "ui-pq-authenticity-master.wav",
+      "format": "wav",
+      "mime_type": "audio/x-wav",
+      "reference_asset_id": 2,
+      "sample_rate": 44100,
+      "sha256": "85189beb021e3418c6b4720baa5194b5430a4c8be84ef1c82b4e8966d4621ead",
+      "size_bytes": 7938044,
+      "source_kind": "asset",
+      "source_track_id": 2
+    },
+    "reference_fingerprint_b64": "eMeJx43HncfAx/vHNMi/yC/Ivsdnx+bBb8cZyNHHVMdrxnfHx8d0x5DHhMflxIDHTDWZNaQ0gDRXNDQ0dDTlNX00OTPfMgAxlDOEMx4xZS7aMJEt3C66LActMy//MEItAABeGAAAAAAAAAAA6iS2N7Y3jSIAAAAAAABeGAAAAAA=",
+    "release_refs": [
+      {
+        "catalog_number": null,
+        "profile_name": "default.db",
+        "release_date": "2026-06-14",
+        "release_id": 1,
+        "title": "UI PQ Release",
+        "upc": null
+      }
+    ],
+    "rights_summary": {
+      "release_control": [
+        {
+          "master_control": [],
+          "publishing_control": [],
+          "release_id": 1
+        }
+      ],
+      "right_ids": [
+        1
+      ],
+      "track_control": {
+        "exclusive_territories": [],
+        "master_control": [],
+        "publishing_control": []
+      },
+      "work_control": [
+        {
+          "master_control": [],
+          "publishing_control": [],
+          "work_id": 3
+        }
+      ]
+    },
+    "signer": {
+      "key_id": "ed25519-f90cdf31e484a5d0",
+      "signer_label": "UI PQ Authenticity Signer"
+    },
+    "track_ref": {
+      "buma_work_number": null,
+      "catalog_number": null,
+      "isrc": "",
+      "iswc": null,
+      "profile_name": "default.db",
+      "release_date": "2026-06-14",
+      "track_id": 2,
+      "track_title": "UI PQ Qualification Track Edited",
+      "upc": null
+    },
+    "watermark_binding": {
+      "manifest_digest_prefix": "b3b5db5edae6f3d0",
+      "watermark_id": 7751723923619892318,
+      "watermark_nonce": 3061121623,
+      "watermark_version": 1
+    },
+    "watermark_version": 1,
+    "work_refs": [
+      {
+        "iswc": null,
+        "profile_name": "default.db",
+        "registration_number": null,
+        "title": "UI PQ Manager-Created Work",
+        "work_id": 3
+      }
+    ],
+    "workflow_kind": "authenticity_master"
+  },
+  "payload_sha256": "7c5b02d5682af534c6353af4067143d2037bf2691084ad2f9af6ce5d4e9902f8",
+  "public_key_b64": "krP2LCimrjvtmZ0HYLS7LeKY1v+mGiKdUBycn/0YVuk=",
+  "schema_version": 1,
+  "signature_b64": "avyNZMCmfKRytggQAB/TJZyPyyJz4GjN6RlEU81emfrFq2C0jnjb2GQmZgH3oCCNe/TYGk6cfHcQbOF3I4hmAw==",
+  "workflow_kind": "authenticity_master"
+}

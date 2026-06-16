@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
+    QTabBar,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -990,7 +991,9 @@ class _DockableWorkspaceTab(QMainWindow):
         self._layout_normalization_pending = False
         self._applying_layout_normalization = False
         self._restore_stable_layout_on_show = False
+        self._dock_tab_restore_pending = False
         self.main_window = self
+        self._connected_dock_tab_bars: set[int] = set()
         self.setObjectName(host_object_name)
         self.setProperty("role", "workspaceCanvas")
 
@@ -1049,6 +1052,7 @@ class _DockableWorkspaceTab(QMainWindow):
 
     def _capture_live_layout_state(self) -> dict[str, object]:
         dock_object_names = [dock.objectName() for dock in self._docks]
+        self._connect_dock_tab_bars()
         return _normalized_workspace_layout_state(
             {
                 "dock_state_b64": _serialize_dock_state(self.main_window.saveState(1)),
@@ -1058,17 +1062,72 @@ class _DockableWorkspaceTab(QMainWindow):
                 "dock_visibility": {
                     dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
                 },
-                "dock_geometries": {
-                    dock.objectName(): {
-                        "x": int(dock.geometry().x()),
-                        "y": int(dock.geometry().y()),
-                        "width": int(dock.geometry().width()),
-                        "height": int(dock.geometry().height()),
-                    }
-                    for dock in self._docks
-                },
+                "dock_geometries": self._current_dock_geometry_map(),
             }
         )
+
+    @staticmethod
+    def _dock_geometry_payload(dock: QDockWidget) -> dict[str, int]:
+        geometry = dock.geometry()
+        return {
+            "x": int(geometry.x()),
+            "y": int(geometry.y()),
+            "width": int(geometry.width()),
+            "height": int(geometry.height()),
+        }
+
+    def _tabified_group_for_dock(self, dock: QDockWidget) -> list[QDockWidget]:
+        if dock not in self._docks:
+            return []
+        group: list[QDockWidget] = []
+        for candidate in [dock, *list(self.tabifiedDockWidgets(dock))]:
+            if (
+                isinstance(candidate, QDockWidget)
+                and candidate in self._docks
+                and not candidate.isFloating()
+                and candidate not in group
+            ):
+                group.append(candidate)
+        return group
+
+    def _dock_layout_intersection_area(self, dock: QDockWidget) -> int:
+        try:
+            intersection = dock.geometry().intersected(self.rect())
+        except Exception:
+            return 0
+        if intersection.isEmpty():
+            return 0
+        return max(0, int(intersection.width())) * max(0, int(intersection.height()))
+
+    def _active_tabified_group_dock(self, group: list[QDockWidget]) -> QDockWidget | None:
+        if not group:
+            return None
+        return max(
+            group,
+            key=lambda dock: (
+                self._dock_layout_intersection_area(dock),
+                max(0, int(dock.geometry().width())) * max(0, int(dock.geometry().height())),
+                -int(dock.property("dockOrderHint") or 0),
+            ),
+        )
+
+    def _current_dock_geometry_map(self) -> dict[str, dict[str, int]]:
+        geometry_map: dict[str, dict[str, int]] = {}
+        seen: set[QDockWidget] = set()
+        for dock in self._docks:
+            if dock in seen:
+                continue
+            group = self._tabified_group_for_dock(dock)
+            if len(group) > 1:
+                representative = self._active_tabified_group_dock(group) or dock
+                payload = self._dock_geometry_payload(representative)
+                for peer in group:
+                    geometry_map[peer.objectName()] = dict(payload)
+                    seen.add(peer)
+                continue
+            geometry_map[dock.objectName()] = self._dock_geometry_payload(dock)
+            seen.add(dock)
+        return geometry_map
 
     def _cache_stable_layout_state_if_ready(self) -> dict[str, object] | None:
         if (
@@ -1078,6 +1137,7 @@ class _DockableWorkspaceTab(QMainWindow):
             or self._applying_layout_state
             or self._applying_layout_normalization
             or self._compacting_layout
+            or self._dock_tab_restore_pending
         ):
             return None
         state = self._capture_live_layout_state()
@@ -1186,15 +1246,7 @@ class _DockableWorkspaceTab(QMainWindow):
                     "dock_visibility": {
                         dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
                     },
-                    "dock_geometries": {
-                        dock.objectName(): {
-                            "x": int(dock.geometry().x()),
-                            "y": int(dock.geometry().y()),
-                            "width": int(dock.geometry().width()),
-                            "height": int(dock.geometry().height()),
-                        }
-                        for dock in self._docks
-                    },
+                    "dock_geometries": self._current_dock_geometry_map(),
                 }
             )
             state_source = "topology_only"
@@ -1567,7 +1619,7 @@ class _DockableWorkspaceTab(QMainWindow):
         )
         if not geometry_map:
             return False
-        restored = False
+        restored = self._restore_tabified_dock_group_sizes(state)
         for area in (
             Qt.LeftDockWidgetArea,
             Qt.RightDockWidgetArea,
@@ -1626,6 +1678,161 @@ class _DockableWorkspaceTab(QMainWindow):
             "workspace_host.restore_saved_dock_sizes",
             restored=bool(restored),
         )
+        return restored
+
+    def _ordered_resize_area_groups(self, area) -> list[list[QDockWidget]]:
+        candidates = [
+            dock
+            for dock in self._docks
+            if dock.isVisible() and not dock.isFloating() and self.dockWidgetArea(dock) == area
+        ]
+        if not candidates:
+            return []
+        representatives: list[QDockWidget] = []
+        seen: set[QDockWidget] = set()
+        for dock in candidates:
+            if dock in seen:
+                continue
+            tabified_group = [
+                peer for peer in self._tabified_group_for_dock(dock) if peer in candidates
+            ]
+            if len(tabified_group) > 1:
+                representative = self._active_tabified_group_dock(tabified_group) or dock
+                representatives.append(representative)
+                seen.update(tabified_group)
+            else:
+                representatives.append(dock)
+                seen.add(dock)
+        primary_is_x = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
+
+        def primary_coord(dock: QDockWidget) -> int:
+            return dock.geometry().x() if primary_is_x else dock.geometry().y()
+
+        def secondary_coord(dock: QDockWidget) -> int:
+            return dock.geometry().y() if primary_is_x else dock.geometry().x()
+
+        ordered = sorted(
+            representatives,
+            key=lambda dock: (
+                primary_coord(dock),
+                secondary_coord(dock),
+                int(dock.property("dockOrderHint") or 0),
+            ),
+        )
+        groups: list[list[QDockWidget]] = []
+        group_anchors: list[int] = []
+        tolerance = 24
+        for dock in ordered:
+            coord = int(primary_coord(dock))
+            placed = False
+            for index, anchor in enumerate(group_anchors):
+                if abs(coord - anchor) <= tolerance:
+                    groups[index].append(dock)
+                    count = len(groups[index])
+                    group_anchors[index] = int(round(((anchor * (count - 1)) + coord) / count))
+                    placed = True
+                    break
+            if not placed:
+                groups.append([dock])
+                group_anchors.append(coord)
+        for group in groups:
+            group.sort(
+                key=lambda dock: (
+                    secondary_coord(dock),
+                    primary_coord(dock),
+                    int(dock.property("dockOrderHint") or 0),
+                )
+            )
+        groups.sort(
+            key=lambda group: (
+                primary_coord(group[0]),
+                secondary_coord(group[0]),
+                int(group[0].property("dockOrderHint") or 0),
+            )
+        )
+        return groups
+
+    def _resize_group_geometry_members(self, group: list[QDockWidget]) -> list[QDockWidget]:
+        members: list[QDockWidget] = []
+        for dock in group:
+            tabified_group = self._tabified_group_for_dock(dock)
+            for candidate in tabified_group or [dock]:
+                if candidate not in members:
+                    members.append(candidate)
+        return members
+
+    def _restore_tabified_dock_group_sizes(self, state: dict[str, object] | None) -> bool:
+        geometry_map = _normalized_dock_geometry_map(
+            (state or {}).get("dock_geometries"),
+            (state or {}).get("dock_object_names"),
+        )
+        if not geometry_map:
+            return False
+        restored = False
+        for area in (
+            Qt.LeftDockWidgetArea,
+            Qt.RightDockWidgetArea,
+            Qt.TopDockWidgetArea,
+            Qt.BottomDockWidgetArea,
+        ):
+            groups = self._ordered_resize_area_groups(area)
+            if not groups:
+                continue
+            if not any(
+                len(self._tabified_group_for_dock(dock)) > 1 for group in groups for dock in group
+            ):
+                continue
+            primary_is_x = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
+            group_docks = [group[0] for group in groups]
+            group_sizes = [
+                max(
+                    (
+                        int(
+                            geometry_map.get(member.objectName(), {}).get(
+                                "width" if primary_is_x else "height",
+                                0,
+                            )
+                        )
+                        for member in self._resize_group_geometry_members(group)
+                    ),
+                    default=0,
+                )
+                for group in groups
+            ]
+            restored = (
+                self._resize_docks_from_saved_sizes(
+                    group_docks,
+                    group_sizes,
+                    Qt.Horizontal if primary_is_x else Qt.Vertical,
+                )
+                or restored
+            )
+            for group in groups:
+                if len(group) <= 1:
+                    continue
+                group_sizes = [
+                    max(
+                        (
+                            int(
+                                geometry_map.get(member.objectName(), {}).get(
+                                    "height" if primary_is_x else "width",
+                                    0,
+                                )
+                            )
+                            for member in self._resize_group_geometry_members([dock])
+                        ),
+                        default=0,
+                    )
+                    for dock in group
+                ]
+                restored = (
+                    self._resize_docks_from_saved_sizes(
+                        group,
+                        group_sizes,
+                        Qt.Vertical if primary_is_x else Qt.Horizontal,
+                    )
+                    or restored
+                )
         return restored
 
     def _resize_docks_from_saved_sizes(
@@ -1695,10 +1902,55 @@ class _DockableWorkspaceTab(QMainWindow):
         )
         return restored
 
+    def _connect_dock_tab_bars(self) -> None:
+        for tab_bar in self.findChildren(QTabBar):
+            key = id(tab_bar)
+            if key in self._connected_dock_tab_bars:
+                continue
+            try:
+                tab_bar.currentChanged.connect(self._on_dock_tab_current_changed)
+            except Exception:
+                continue
+            self._connected_dock_tab_bars.add(key)
+
+    def _on_dock_tab_current_changed(self, _index: int) -> None:
+        if (
+            self._applying_layout_state
+            or self._applying_layout_normalization
+            or self._compacting_layout
+            or self._transient_restore_churn_active()
+            or not self._stable_layout_state
+            or not self._layout_restore_ready()
+        ):
+            return
+        self._dock_tab_restore_pending = True
+        QTimer.singleShot(0, self._restore_tabified_layout_after_tab_change)
+
+    def _restore_tabified_layout_after_tab_change(self) -> None:
+        if not self._dock_tab_restore_pending:
+            return
+        stable_state = _normalized_workspace_layout_state(self._stable_layout_state)
+        self._applying_layout_state = True
+        restored = False
+        try:
+            restored = self._restore_tabified_dock_group_sizes(stable_state)
+        finally:
+            self._applying_layout_state = False
+            self._dock_tab_restore_pending = False
+        if restored:
+            self._cache_stable_layout_state_if_ready()
+            if callable(self._layout_changed_handler):
+                self._layout_changed_handler()
+        self._debug_layout_log(
+            "workspace_host.restore_tabified_layout_after_tab_change",
+            restored=bool(restored),
+        )
+
     def showEvent(self, event):  # pragma: no cover - Qt callback
         super().showEvent(event)
         if self._transient_restore_churn_active():
             return
+        self._connect_dock_tab_bars()
         self._apply_pending_state_if_ready()
         if self._restore_stable_layout_on_show:
             self._restore_stable_layout_after_tab_show()
@@ -1723,12 +1975,14 @@ class _DockableWorkspaceTab(QMainWindow):
 
     def eventFilter(self, watched, event):  # pragma: no cover - Qt callback
         if watched in self._docks and event.type() == QEvent.Resize:
+            self._connect_dock_tab_bars()
             if (
                 not self._restore_stable_layout_on_show
                 and not self._applying_layout_state
                 and not self._applying_layout_normalization
                 and not self._compacting_layout
                 and not self._transient_restore_churn_active()
+                and not self._dock_tab_restore_pending
             ):
                 self._cache_stable_layout_state_if_ready()
         return super().eventFilter(watched, event)
@@ -1790,6 +2044,7 @@ class _DockableWorkspaceTab(QMainWindow):
         self._notify_layout_changed()
 
     def _on_dock_layout_event(self, dock: QDockWidget) -> None:
+        self._connect_dock_tab_bars()
         if dock in self._docks and not dock.isFloating():
             try:
                 dock.setProperty("lastDockArea", _dock_area_value(self.dockWidgetArea(dock)))
