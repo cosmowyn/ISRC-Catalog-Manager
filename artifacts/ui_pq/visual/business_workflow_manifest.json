@@ -66,7 +66,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
       "sample_count": 272,
-      "sha256": "461bb04325e370d731d807955b874ee862dc1823c468c33cf3001c9e5d9f0bc2",
+      "sha256": "aa41fccf7e1dfa60e11d6278173f40d93f595d9adc620e0fe6388eee80e92f00",
       "unique_sample_colors": 11,
       "width": 1174
     },
@@ -116,8 +116,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
       "sample_count": 272,
-      "sha256": "e4936af424a5ca172e1cd3eb520695a1de1d3a37ec4d8f41f4a3afa53ed2e7d7",
-      "unique_sample_colors": 24,
+      "sha256": "6bb3aee94262b98b42ea7f68ef7e192593964b695eca41ecfd535a17ed6bb91f",
+      "unique_sample_colors": 16,
       "width": 1174
     },
     {
@@ -126,7 +126,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
       "sample_count": 272,
-      "sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+      "sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -136,7 +136,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
       "sample_count": 272,
-      "sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+      "sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -146,7 +146,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
       "sample_count": 272,
-      "sha256": "40a658ba2fa402cb6b704bbfb2b9a0f53369099c8e0f515cf6146fbed3e6eb88",
+      "sha256": "9b9259415edc1c76c3722bdee20bc84d16b72bd097c7cba823185cba63453759",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -156,8 +156,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
       "sample_count": 272,
-      "sha256": "6bb6ed4d348d9f7b79ed68cd726b574b6ac43e7075cfddeb15b71d0126011f0c",
-      "unique_sample_colors": 24,
+      "sha256": "29f9724b0f39255713882c56276de8b0f0aa2fb66c1ad9bd12adf0ae2679cba9",
+      "unique_sample_colors": 16,
       "width": 1174
     },
     {
@@ -166,7 +166,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
       "sample_count": 272,
-      "sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+      "sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -176,7 +176,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
       "sample_count": 272,
-      "sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+      "sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
       "unique_sample_colors": 4,
       "width": 1174
     },
@@ -186,7 +186,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
       "sample_count": 272,
-      "sha256": "c0247e69aa20fe5b014d14f73607290931ce20e43e05d49a3e06c715a7acb248",
+      "sha256": "5d43c0bc63b66bcf59a4913880ac93791cb1df707446bb984063c5067ea46b6b",
       "unique_sample_colors": 10,
       "width": 1174
     },
@@ -276,7 +276,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_export_preview.png",
       "sample_count": 289,
-      "sha256": "249167bbd6888fa89963665eab93ec7fb915239412c3bb20b04a831d2fd75f12",
+      "sha256": "323fcb21211dfebfa4fc3f5eee70cc53e38fabe188163b3265c06ded6f125fdc",
       "unique_sample_colors": 7,
       "width": 920
     },
@@ -286,7 +286,7 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_verification_dialog.png",
       "sample_count": 289,
-      "sha256": "5537e46f844d79ded25cbb79e4d0f9a167d601b4932ced5bebce321524f6951d",
+      "sha256": "52064253b2a8ef9666f9bf563db20831528ed7f73cf1306dda409b678e2f45b0",
       "unique_sample_colors": 29,
       "width": 780
     },
@@ -306,8 +306,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_forensic_inspection_dialog.png",
       "sample_count": 289,
-      "sha256": "0f9b0ca64daaad58fb2a7de0a1ff6e48feddb81e5b632cc151b1689a13827539",
-      "unique_sample_colors": 36,
+      "sha256": "6ad6aec5e89e857a8d107b7d57b1000e4bb26b57b80ef5575e190170c044a522",
+      "unique_sample_colors": 34,
       "width": 780
     },
     {
@@ -336,8 +336,8 @@
       "non_blank": true,
       "path": "artifacts/ui_pq/visual/screenshots/ui_pq_derivative_ledger_panel.png",
       "sample_count": 272,
-      "sha256": "429f6e119ba23485b9f16981f77b8185de13d99c0bf2025cf4302f535435654f",
-      "unique_sample_colors": 20,
+      "sha256": "c4e9b718401598620d94e3ae7794c9b425860c91bd91c601a48a83e392601a7e",
+      "unique_sample_colors": 19,
       "width": 1174
     }
   ],
@@ -554,7 +554,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
-      "actual_sha256": "461bb04325e370d731d807955b874ee862dc1823c468c33cf3001c9e5d9f0bc2",
+      "actual_sha256": "aa41fccf7e1dfa60e11d6278173f40d93f595d9adc620e0fe6388eee80e92f00",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_release_browser_ui_created_release_selected.png",
       "baseline_sha256": "20a16c7c3796fe5d3c85bd84176612615e8a4fcc85fc296e3ecfd24b691004c5",
@@ -566,7 +566,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_release_browser_ui_created_release_selected.png",
           "sample_count": 272,
-          "sha256": "461bb04325e370d731d807955b874ee862dc1823c468c33cf3001c9e5d9f0bc2",
+          "sha256": "aa41fccf7e1dfa60e11d6278173f40d93f595d9adc620e0fe6388eee80e92f00",
           "unique_sample_colors": 11,
           "width": 1174
         },
@@ -729,7 +729,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
-      "actual_sha256": "e4936af424a5ca172e1cd3eb520695a1de1d3a37ec4d8f41f4a3afa53ed2e7d7",
+      "actual_sha256": "6bb3aee94262b98b42ea7f68ef7e192593964b695eca41ecfd535a17ed6bb91f",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_line_entry.png",
       "baseline_sha256": "e4936af424a5ca172e1cd3eb520695a1de1d3a37ec4d8f41f4a3afa53ed2e7d7",
@@ -741,14 +741,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_line_entry.png",
           "sample_count": 272,
-          "sha256": "e4936af424a5ca172e1cd3eb520695a1de1d3a37ec4d8f41f4a3afa53ed2e7d7",
-          "unique_sample_colors": 24,
+          "sha256": "6bb3aee94262b98b42ea7f68ef7e192593964b695eca41ecfd535a17ed6bb91f",
+          "unique_sample_colors": 16,
           "width": 1174
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.0,
-          "changed_samples": 0,
-          "mean_channel_delta": 0.0,
+          "changed_sample_ratio": 0.1414141414141414,
+          "changed_samples": 154,
+          "mean_channel_delta": 4.984159779614325,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -764,7 +764,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
-      "actual_sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+      "actual_sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_paid_invoice_draft_created.png",
       "baseline_sha256": "03b0748467421a88618ffa9bd533c36fc76f115130130344afa723578b316024",
@@ -776,7 +776,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_paid_invoice_draft_created.png",
           "sample_count": 272,
-          "sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+          "sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -799,7 +799,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
-      "actual_sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+      "actual_sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_invoice_posted.png",
       "baseline_sha256": "113f6f133159b6038530b3e7609e9cf877bdcd63c777521a7bc4a356f5bb0b6e",
@@ -811,7 +811,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_invoice_posted.png",
           "sample_count": 272,
-          "sha256": "a77518e6b51d307fa6f727e7469133a666f854992689dacb0190e9330a00164d",
+          "sha256": "c9186ace91026035fe2471ab58c7b8e54244db89599cf88c6078c5c2cd1bb56e",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -834,7 +834,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
-      "actual_sha256": "40a658ba2fa402cb6b704bbfb2b9a0f53369099c8e0f515cf6146fbed3e6eb88",
+      "actual_sha256": "9b9259415edc1c76c3722bdee20bc84d16b72bd097c7cba823185cba63453759",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_payment_entered.png",
       "baseline_sha256": "8bcd6758295b0cbab4a3fda771790e1fc8e3689721e53c8eb8bfbc7fc26a1359",
@@ -846,7 +846,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_payment_entered.png",
           "sample_count": 272,
-          "sha256": "40a658ba2fa402cb6b704bbfb2b9a0f53369099c8e0f515cf6146fbed3e6eb88",
+          "sha256": "9b9259415edc1c76c3722bdee20bc84d16b72bd097c7cba823185cba63453759",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -869,7 +869,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
-      "actual_sha256": "6bb6ed4d348d9f7b79ed68cd726b574b6ac43e7075cfddeb15b71d0126011f0c",
+      "actual_sha256": "29f9724b0f39255713882c56276de8b0f0aa2fb66c1ad9bd12adf0ae2679cba9",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_line_entry.png",
       "baseline_sha256": "6bb6ed4d348d9f7b79ed68cd726b574b6ac43e7075cfddeb15b71d0126011f0c",
@@ -881,14 +881,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_line_entry.png",
           "sample_count": 272,
-          "sha256": "6bb6ed4d348d9f7b79ed68cd726b574b6ac43e7075cfddeb15b71d0126011f0c",
-          "unique_sample_colors": 24,
+          "sha256": "29f9724b0f39255713882c56276de8b0f0aa2fb66c1ad9bd12adf0ae2679cba9",
+          "unique_sample_colors": 16,
           "width": 1174
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.0,
-          "changed_samples": 0,
-          "mean_channel_delta": 0.0,
+          "changed_sample_ratio": 0.1414141414141414,
+          "changed_samples": 154,
+          "mean_channel_delta": 4.984159779614325,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -904,7 +904,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
-      "actual_sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+      "actual_sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_draft_created.png",
       "baseline_sha256": "fffba42972e80baf72d69d9357526ebe4e2c17c19f8acc3195c94c9ce5fed328",
@@ -916,7 +916,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_draft_created.png",
           "sample_count": 272,
-          "sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+          "sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -939,7 +939,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
-      "actual_sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+      "actual_sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_invoice_posted.png",
       "baseline_sha256": "ca66119e92bc679647c3cbeede1c75bd9d2a8d28012cd1b92454899c6c3cd3fe",
@@ -951,7 +951,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_invoice_posted.png",
           "sample_count": 272,
-          "sha256": "5dd61b1f7c6dc4cc80c3d83173828049c518577c2f80a7c7ced232d9d9fead72",
+          "sha256": "e4cbfd187929457c9aa6f37c1da1e32b7de972865afe50bf4cee26baadcaf4cc",
           "unique_sample_colors": 4,
           "width": 1174
         },
@@ -974,7 +974,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
-      "actual_sha256": "c0247e69aa20fe5b014d14f73607290931ce20e43e05d49a3e06c715a7acb248",
+      "actual_sha256": "5d43c0bc63b66bcf59a4913880ac93791cb1df707446bb984063c5067ea46b6b",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/accounting_credit_note_created.png",
       "baseline_sha256": "c0247e69aa20fe5b014d14f73607290931ce20e43e05d49a3e06c715a7acb248",
@@ -986,7 +986,7 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/accounting_credit_note_created.png",
           "sample_count": 272,
-          "sha256": "c0247e69aa20fe5b014d14f73607290931ce20e43e05d49a3e06c715a7acb248",
+          "sha256": "5d43c0bc63b66bcf59a4913880ac93791cb1df707446bb984063c5067ea46b6b",
           "unique_sample_colors": 10,
           "width": 1174
         },
@@ -1289,7 +1289,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_export_preview.png",
-      "actual_sha256": "249167bbd6888fa89963665eab93ec7fb915239412c3bb20b04a831d2fd75f12",
+      "actual_sha256": "323fcb21211dfebfa4fc3f5eee70cc53e38fabe188163b3265c06ded6f125fdc",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_authenticity_export_preview.png",
       "baseline_sha256": "4e15543eeb3228a702934dff1c2f1372926609ba35ef870ae8f9f414c04d4616",
@@ -1301,14 +1301,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_export_preview.png",
           "sample_count": 289,
-          "sha256": "249167bbd6888fa89963665eab93ec7fb915239412c3bb20b04a831d2fd75f12",
+          "sha256": "323fcb21211dfebfa4fc3f5eee70cc53e38fabe188163b3265c06ded6f125fdc",
           "unique_sample_colors": 7,
           "width": 920
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.005509641873278237,
-          "changed_samples": 6,
-          "mean_channel_delta": 0.59366391184573,
+          "changed_sample_ratio": 0.006427915518824609,
+          "changed_samples": 7,
+          "mean_channel_delta": 0.5571625344352618,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1324,7 +1324,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_verification_dialog.png",
-      "actual_sha256": "5537e46f844d79ded25cbb79e4d0f9a167d601b4932ced5bebce321524f6951d",
+      "actual_sha256": "52064253b2a8ef9666f9bf563db20831528ed7f73cf1306dda409b678e2f45b0",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_authenticity_verification_dialog.png",
       "baseline_sha256": "e2505f857df0868064314765f6436acc37e9330a5b9be2a7496b68bb57ee3d36",
@@ -1336,14 +1336,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_authenticity_verification_dialog.png",
           "sample_count": 289,
-          "sha256": "5537e46f844d79ded25cbb79e4d0f9a167d601b4932ced5bebce321524f6951d",
+          "sha256": "52064253b2a8ef9666f9bf563db20831528ed7f73cf1306dda409b678e2f45b0",
           "unique_sample_colors": 29,
           "width": 780
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.021120293847566574,
-          "changed_samples": 23,
-          "mean_channel_delta": 1.6322314049586777,
+          "changed_sample_ratio": 0.02295684113865932,
+          "changed_samples": 25,
+          "mean_channel_delta": 1.9318181818181819,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1394,7 +1394,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_forensic_inspection_dialog.png",
-      "actual_sha256": "0f9b0ca64daaad58fb2a7de0a1ff6e48feddb81e5b632cc151b1689a13827539",
+      "actual_sha256": "6ad6aec5e89e857a8d107b7d57b1000e4bb26b57b80ef5575e190170c044a522",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_forensic_inspection_dialog.png",
       "baseline_sha256": "a2b0e8f64ecd862f809e745496ba5c9e5a40e06cd70e38c2e028708c696a0b6c",
@@ -1406,14 +1406,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_forensic_inspection_dialog.png",
           "sample_count": 289,
-          "sha256": "0f9b0ca64daaad58fb2a7de0a1ff6e48feddb81e5b632cc151b1689a13827539",
-          "unique_sample_colors": 36,
+          "sha256": "6ad6aec5e89e857a8d107b7d57b1000e4bb26b57b80ef5575e190170c044a522",
+          "unique_sample_colors": 34,
           "width": 780
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.01928374655647383,
-          "changed_samples": 21,
-          "mean_channel_delta": 1.3911845730027548,
+          "changed_sample_ratio": 0.014692378328741965,
+          "changed_samples": 16,
+          "mean_channel_delta": 1.4600550964187329,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,
@@ -1499,7 +1499,7 @@
     },
     {
       "actual_path": "artifacts/ui_pq/visual/screenshots/ui_pq_derivative_ledger_panel.png",
-      "actual_sha256": "429f6e119ba23485b9f16981f77b8185de13d99c0bf2025cf4302f535435654f",
+      "actual_sha256": "c4e9b718401598620d94e3ae7794c9b425860c91bd91c601a48a83e392601a7e",
       "baseline_created": false,
       "baseline_path": "artifacts/ui_pq/visual/baselines/ui_pq_derivative_ledger_panel.png",
       "baseline_sha256": "8a36f49f74b5543939b738af680cbb0b205f54d0c504627b21a5adcd0ffc3e06",
@@ -1511,14 +1511,14 @@
           "non_blank": true,
           "path": "artifacts/ui_pq/visual/screenshots/ui_pq_derivative_ledger_panel.png",
           "sample_count": 272,
-          "sha256": "429f6e119ba23485b9f16981f77b8185de13d99c0bf2025cf4302f535435654f",
-          "unique_sample_colors": 20,
+          "sha256": "c4e9b718401598620d94e3ae7794c9b425860c91bd91c601a48a83e392601a7e",
+          "unique_sample_colors": 19,
           "width": 1174
         },
         "comparison_profile": {
-          "changed_sample_ratio": 0.014692378328741965,
-          "changed_samples": 16,
-          "mean_channel_delta": 1.0961891643709825,
+          "changed_sample_ratio": 0.009182736455463728,
+          "changed_samples": 10,
+          "mean_channel_delta": 0.21763085399449036,
           "passed": true,
           "same_size": true,
           "sample_count": 1089,

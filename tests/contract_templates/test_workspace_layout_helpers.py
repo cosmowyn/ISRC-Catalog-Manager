@@ -17,6 +17,7 @@ from isrc_manager.contract_templates.dialogs import (
     _FillHtmlPreviewController,
     _invoke_dock_floating_transition_hook,
     _layout_state_has_saved_dock_topology,
+    _normalized_dock_geometry_map,
     _normalized_dock_object_names,
     _normalized_dock_visibility_map,
     _normalized_workspace_layout_state,
@@ -335,6 +336,17 @@ def test_layout_state_normalization_serialization_and_dock_hook_edges() -> None:
         {"left": True, "right": 0, "missing": True, "": True},
         ["left", "right"],
     ) == {"left": True, "right": False}
+    assert _normalized_dock_geometry_map(
+        {
+            "left": {"x": "10", "y": 20, "width": "300", "height": 200},
+            "right": {"x": 0, "y": 0, "width": -1, "height": None},
+            "missing": {"width": 1},
+        },
+        ["left", "right"],
+    ) == {
+        "left": {"x": 10, "y": 20, "width": 300, "height": 200},
+        "right": {"x": 0, "y": 0, "width": 0, "height": 0},
+    }
     assert _layout_state_has_saved_dock_topology(None) is False
     assert _layout_state_has_saved_dock_topology({"dock_state_b64": " abc "}) is True
     assert _layout_state_has_saved_dock_topology({"dock_object_names": ["left"]}) is True
@@ -346,6 +358,7 @@ def test_layout_state_normalization_serialization_and_dock_hook_edges() -> None:
             "layout_version": "2",
             "dock_object_names": ["left", "right"],
             "dock_visibility": {"left": True, "orphan": True},
+            "dock_geometries": {"left": {"x": 1, "y": 2, "width": 3, "height": 4}},
         }
     )
     assert normalized == {
@@ -354,6 +367,7 @@ def test_layout_state_normalization_serialization_and_dock_hook_edges() -> None:
         "layout_version": 2,
         "dock_object_names": ["left", "right"],
         "dock_visibility": {"left": True},
+        "dock_geometries": {"left": {"x": 1, "y": 2, "width": 3, "height": 4}},
     }
 
     assert _dock_logically_visible(object()) is False

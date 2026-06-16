@@ -291,7 +291,6 @@ def test_invoice_workspace_panel_exposes_royalties_accounting_navigation():
         "Line Allocation",
         "Credit Notes",
         "Royalty Payables",
-        "E-Invoices",
     ]
     group_titles = {group.title() for group in panel.findChildren(QGroupBox)}
     assert {

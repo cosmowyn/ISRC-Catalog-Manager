@@ -278,6 +278,7 @@ def summarize_panel_layout_state(state: dict[str, object] | None) -> dict[str, o
                 ),
                 "dock_object_names": list((entry or {}).get("dock_object_names") or []),
                 "dock_visibility": dict((entry or {}).get("dock_visibility") or {}),
+                "dock_geometries": dict((entry or {}).get("dock_geometries") or {}),
             }
             for key, entry in tabs.items()
             if isinstance(entry, dict)
@@ -369,6 +370,7 @@ def summarize_workspace_host(host: QWidget) -> dict[str, object]:
                     ),
                     "dock_object_names": list(pending_state.get("dock_object_names") or []),
                     "dock_visibility": dict(pending_state.get("dock_visibility") or {}),
+                    "dock_geometries": dict(pending_state.get("dock_geometries") or {}),
                 }
                 if pending_state
                 else None
@@ -383,6 +385,7 @@ def summarize_workspace_host(host: QWidget) -> dict[str, object]:
                     ),
                     "dock_object_names": list(stable_state.get("dock_object_names") or []),
                     "dock_visibility": dict(stable_state.get("dock_visibility") or {}),
+                    "dock_geometries": dict(stable_state.get("dock_geometries") or {}),
                 }
                 if stable_state
                 else None

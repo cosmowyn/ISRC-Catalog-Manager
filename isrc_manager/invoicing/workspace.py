@@ -237,7 +237,6 @@ class InvoiceWorkspacePanel(QWidget):
         self.invoice_final_storage_combo = QComboBox(self)
         self.invoice_final_status_label = QLabel(self)
         self.royalty_payables_table = QTableWidget(0, 9, self)
-        self.einvoice_table = QTableWidget(0, 7, self)
         self.invoice_line_table = QTableWidget(0, 7, self)
         self.draft_line_table = QTableWidget(0, 7, self)
         self.catalog_table = QTableWidget(0, 9, self)
@@ -829,7 +828,6 @@ class InvoiceWorkspacePanel(QWidget):
             ORDER BY created_at DESC, id DESC
             """).fetchall()
         self.invoice_table.setRowCount(len(rows))
-        einvoice_rows = []
         for row_index, row in enumerate(rows):
             settlement = reports.invoice_settlement(int(row[0]))
             values = (
@@ -847,24 +845,7 @@ class InvoiceWorkspacePanel(QWidget):
                 if col_index == 0:
                     item.setData(Qt.ItemDataRole.UserRole, int(row[0]))
                 self.invoice_table.setItem(row_index, col_index, item)
-            einvoice_rows.append(
-                (
-                    str(row[1] or row[0]),
-                    _status_label(row[3]),
-                    f"Party {row[2]}",
-                    "HTML",
-                    _status_label(row[4]),
-                    "Ready after template validation",
-                    "Preview / Export",
-                )
-            )
         self.invoice_table.resizeColumnsToContents()
-        _set_table_rows(
-            self.einvoice_table,
-            ("Invoice", "Type", "Party", "Format", "Status", "Validation", "Action"),
-            einvoice_rows,
-            empty_message="No e-invoice artifacts have been generated.",
-        )
         if not rows:
             self.invoice_final_status_label.setText(
                 "No final invoices yet. Create and mark invoices final in Template Workspace."
@@ -2478,17 +2459,6 @@ class InvoiceWorkspacePanel(QWidget):
             ),
             "Royalty Payables",
         )
-        self.invoice_workflow_tabs.addTab(
-            self._build_table_detail_page(
-                title="E-Invoices",
-                description="E-invoice previews and delivery state for supported invoice types.",
-                table=self.einvoice_table,
-                detail=QTextEdit(self),
-                headers=("Invoice", "Type", "Party", "Format", "Status", "Validation", "Action"),
-                empty_hint="No e-invoice artifacts have been generated.",
-            ),
-            "E-Invoices",
-        )
         return tab
 
     def _build_catalog_tab(self) -> QWidget:
@@ -3493,7 +3463,7 @@ class InvoiceWorkspacePanel(QWidget):
             ),
             (
                 "Integrations",
-                "DSP imports, accounting export targets, e-invoice routes, and email delivery.",
+                "DSP imports, accounting export targets, and email delivery.",
             ),
             (
                 "Workflows",

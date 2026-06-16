@@ -185,6 +185,28 @@ def _normalized_dock_visibility_map(
     return normalized
 
 
+def _normalized_dock_geometry_map(
+    value,
+    dock_object_names: list[str] | None = None,
+) -> dict[str, dict[str, int]]:
+    allowed_names = set(_normalized_dock_object_names(dock_object_names))
+    normalized: dict[str, dict[str, int]] = {}
+    for name, geometry in dict(value or {}).items():
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            continue
+        if allowed_names and clean_name not in allowed_names:
+            continue
+        raw_geometry = dict(geometry or {})
+        normalized[clean_name] = {
+            "x": int(raw_geometry.get("x") or 0),
+            "y": int(raw_geometry.get("y") or 0),
+            "width": max(0, int(raw_geometry.get("width") or 0)),
+            "height": max(0, int(raw_geometry.get("height") or 0)),
+        }
+    return normalized
+
+
 def _dock_logically_visible(dock: QDockWidget) -> bool:
     if not isinstance(dock, QDockWidget):
         return False
@@ -228,6 +250,10 @@ def _normalized_workspace_layout_state(state: dict[str, object] | None) -> dict[
         "dock_object_names": dock_object_names,
         "dock_visibility": _normalized_dock_visibility_map(
             payload.get("dock_visibility"),
+            dock_object_names,
+        ),
+        "dock_geometries": _normalized_dock_geometry_map(
+            payload.get("dock_geometries"),
             dock_object_names,
         ),
     }
@@ -963,6 +989,7 @@ class _DockableWorkspaceTab(QMainWindow):
         self._layout_normalizer = None
         self._layout_normalization_pending = False
         self._applying_layout_normalization = False
+        self._restore_stable_layout_on_show = False
         self.main_window = self
         self.setObjectName(host_object_name)
         self.setProperty("role", "workspaceCanvas")
@@ -1031,6 +1058,15 @@ class _DockableWorkspaceTab(QMainWindow):
                 "dock_visibility": {
                     dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
                 },
+                "dock_geometries": {
+                    dock.objectName(): {
+                        "x": int(dock.geometry().x()),
+                        "y": int(dock.geometry().y()),
+                        "width": int(dock.geometry().width()),
+                        "height": int(dock.geometry().height()),
+                    }
+                    for dock in self._docks
+                },
             }
         )
 
@@ -1079,6 +1115,7 @@ class _DockableWorkspaceTab(QMainWindow):
                     checked=bool(checked),
                 )
             )
+            dock.installEventFilter(self)
         self._refresh_dock_order_hints()
         self._apply_lock_state(notify=False)
         self._debug_layout_log(
@@ -1148,6 +1185,15 @@ class _DockableWorkspaceTab(QMainWindow):
                     "dock_object_names": [dock.objectName() for dock in self._docks],
                     "dock_visibility": {
                         dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
+                    },
+                    "dock_geometries": {
+                        dock.objectName(): {
+                            "x": int(dock.geometry().x()),
+                            "y": int(dock.geometry().y()),
+                            "width": int(dock.geometry().width()),
+                            "height": int(dock.geometry().height()),
+                        }
+                        for dock in self._docks
                     },
                 }
             )
@@ -1313,6 +1359,7 @@ class _DockableWorkspaceTab(QMainWindow):
             )
             if has_dock_state and compatible_state and restored_state:
                 self._repair_unrecoverable_restore_state(visibility_snapshot)
+                self._restore_saved_dock_sizes(self._pending_state)
                 self._debug_layout_log(
                     "workspace_host.apply_pending_state.after_repair",
                     visibility_snapshot=dict(visibility_snapshot),
@@ -1513,12 +1560,159 @@ class _DockableWorkspaceTab(QMainWindow):
         )
         return result
 
+    def _restore_saved_dock_sizes(self, state: dict[str, object] | None) -> bool:
+        geometry_map = _normalized_dock_geometry_map(
+            (state or {}).get("dock_geometries"),
+            (state or {}).get("dock_object_names"),
+        )
+        if not geometry_map:
+            return False
+        restored = False
+        for area in (
+            Qt.LeftDockWidgetArea,
+            Qt.RightDockWidgetArea,
+            Qt.TopDockWidgetArea,
+            Qt.BottomDockWidgetArea,
+        ):
+            groups = self._ordered_visible_area_groups(area)
+            if not groups:
+                continue
+            primary_is_x = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
+            if len(groups) > 1:
+                group_docks = [group[0] for group in groups]
+                group_sizes = [
+                    max(
+                        (
+                            int(
+                                geometry_map.get(dock.objectName(), {}).get(
+                                    "width" if primary_is_x else "height",
+                                    0,
+                                )
+                            )
+                            for dock in group
+                        ),
+                        default=0,
+                    )
+                    for group in groups
+                ]
+                restored = (
+                    self._resize_docks_from_saved_sizes(
+                        group_docks,
+                        group_sizes,
+                        Qt.Horizontal if primary_is_x else Qt.Vertical,
+                    )
+                    or restored
+                )
+            for group in groups:
+                if len(group) <= 1:
+                    continue
+                restored = (
+                    self._resize_docks_from_saved_sizes(
+                        group,
+                        [
+                            int(
+                                geometry_map.get(dock.objectName(), {}).get(
+                                    "height" if primary_is_x else "width",
+                                    0,
+                                )
+                            )
+                            for dock in group
+                        ],
+                        Qt.Vertical if primary_is_x else Qt.Horizontal,
+                    )
+                    or restored
+                )
+        self._debug_layout_log(
+            "workspace_host.restore_saved_dock_sizes",
+            restored=bool(restored),
+        )
+        return restored
+
+    def _resize_docks_from_saved_sizes(
+        self,
+        docks: list[QDockWidget],
+        sizes: list[int],
+        orientation,
+    ) -> bool:
+        visible_docks: list[QDockWidget] = []
+        visible_sizes: list[int] = []
+        for dock, size in zip(list(docks or []), list(sizes or [])):
+            if not isinstance(dock, QDockWidget):
+                continue
+            if not dock.isVisible() or dock.isFloating():
+                continue
+            if dock not in self._docks or self.dockWidgetArea(dock) == Qt.NoDockWidgetArea:
+                continue
+            clean_size = max(1, int(size or 0))
+            visible_docks.append(dock)
+            visible_sizes.append(clean_size)
+        if not visible_docks:
+            return False
+        try:
+            self.main_window.resizeDocks(visible_docks, visible_sizes, orientation)
+        except Exception:
+            return False
+        return True
+
+    def _restore_stable_layout_after_tab_show(self) -> bool:
+        if (
+            self._applying_layout_state
+            or self._applying_layout_normalization
+            or self._transient_restore_churn_active()
+            or self._pending_state
+            or not self._stable_layout_state
+            or not self._layout_restore_ready()
+        ):
+            return False
+        stable_state = _normalized_workspace_layout_state(self._stable_layout_state)
+        current_names = [dock.objectName() for dock in self._docks]
+        stable_names = _normalized_dock_object_names(stable_state.get("dock_object_names"))
+        if stable_names and stable_names != current_names:
+            return False
+        dock_state = _deserialize_dock_state(stable_state.get("dock_state_b64"))
+        if dock_state is None or not hasattr(dock_state, "isEmpty") or dock_state.isEmpty():
+            return False
+        visibility_snapshot = _normalized_dock_visibility_map(
+            stable_state.get("dock_visibility"),
+            stable_state.get("dock_object_names"),
+        )
+        self._applying_layout_state = True
+        restored = False
+        try:
+            restored = bool(self.main_window.restoreState(dock_state, 1))
+            if restored:
+                self._restore_saved_dock_visibility(visibility_snapshot)
+                self._restore_saved_dock_sizes(stable_state)
+                self._ensure_panels_menu_matches_live_docks()
+                self._apply_lock_state(notify=False)
+        except Exception:
+            restored = False
+        finally:
+            self._applying_layout_state = False
+        self._debug_layout_log(
+            "workspace_host.restore_stable_layout_after_tab_show",
+            restored=bool(restored),
+        )
+        return restored
+
     def showEvent(self, event):  # pragma: no cover - Qt callback
         super().showEvent(event)
         if self._transient_restore_churn_active():
             return
         self._apply_pending_state_if_ready()
+        if self._restore_stable_layout_on_show:
+            self._restore_stable_layout_after_tab_show()
+            self._restore_stable_layout_on_show = False
         self.apply_layout_normalization_if_ready()
+
+    def hideEvent(self, event):  # pragma: no cover - Qt callback
+        if not self._transient_restore_churn_active() and not self._applying_layout_state:
+            try:
+                self._stable_layout_state = self._capture_live_layout_state()
+            except Exception:
+                pass
+            self._restore_stable_layout_on_show = bool(self._stable_layout_state)
+        super().hideEvent(event)
 
     def resizeEvent(self, event):  # pragma: no cover - Qt callback
         super().resizeEvent(event)
@@ -1526,6 +1720,18 @@ class _DockableWorkspaceTab(QMainWindow):
             return
         self._apply_pending_state_if_ready()
         self.apply_layout_normalization_if_ready()
+
+    def eventFilter(self, watched, event):  # pragma: no cover - Qt callback
+        if watched in self._docks and event.type() == QEvent.Resize:
+            if (
+                not self._restore_stable_layout_on_show
+                and not self._applying_layout_state
+                and not self._applying_layout_normalization
+                and not self._compacting_layout
+                and not self._transient_restore_churn_active()
+            ):
+                self._cache_stable_layout_state_if_ready()
+        return super().eventFilter(watched, event)
 
     def _notify_layout_changed(self) -> None:
         if self._transient_restore_churn_active() or self._applying_layout_state:
@@ -1598,6 +1804,8 @@ class _DockableWorkspaceTab(QMainWindow):
             ignore_reason = "layout_normalization"
         elif self._compacting_layout:
             ignore_reason = "layout_compaction"
+        elif not self.isVisible():
+            ignore_reason = "host_hidden"
         self._debug_layout_log(
             "workspace_host.dock_layout_event",
             dock_object_name=str(dock.objectName() or ""),
@@ -3786,10 +3994,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         else:
             self.refresh_admin_workspace()
         host = self._tab_hosts.get(key)
-        if host is not None:
-            host.schedule_layout_normalization()
-            if validate:
-                host.validate_layout_integrity_after_restore()
+        if host is not None and validate:
+            host.validate_layout_integrity_after_restore()
 
     def _on_workspace_tab_changed(self, index: int) -> None:
         page = self.workspace_tabs.widget(index)
@@ -3922,6 +4128,10 @@ class ContractTemplateWorkspacePanel(QWidget):
                         ),
                         "dock_visibility": _normalized_dock_visibility_map(
                             (entry or {}).get("dock_visibility"),
+                            (entry or {}).get("dock_object_names"),
+                        ),
+                        "dock_geometries": _normalized_dock_geometry_map(
+                            (entry or {}).get("dock_geometries"),
                             (entry or {}).get("dock_object_names"),
                         ),
                     }

@@ -3146,6 +3146,40 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             host.contentsRect().right() - 12,
         )
 
+    def test_fill_workspace_manual_column_widths_survive_tab_round_trips(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        revision_dock = docks["contractTemplateFillRevisionDock"]
+        automatic_dock = docks["contractTemplateFillAutomaticFieldsDock"]
+        preview_dock = docks["contractTemplateHtmlPreviewDock"]
+
+        host.main_window.resizeDocks(
+            [revision_dock, automatic_dock, preview_dock],
+            [520, 520, 420],
+            Qt.Horizontal,
+        )
+        pump_events(app=self.app, cycles=4)
+        manual_widths = [
+            revision_dock.geometry().width(),
+            automatic_dock.geometry().width(),
+            preview_dock.geometry().width(),
+        ]
+
+        for tab_key in ("symbols", "import", "fill", "symbols", "fill"):
+            self.panel.focus_tab(tab_key)
+            pump_events(app=self.app, cycles=4)
+
+        round_tripped_widths = [
+            revision_dock.geometry().width(),
+            automatic_dock.geometry().width(),
+            preview_dock.geometry().width(),
+        ]
+        for before, after in zip(manual_widths, round_tripped_widths):
+            self.assertAlmostEqual(after, before, delta=24)
+
     def test_locked_layout_preserves_tabified_dock_switching(self):
         self._focus_fill()
         host = self.panel._tab_hosts["fill"]
