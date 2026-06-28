@@ -21,9 +21,9 @@ dependencies = [
   "pillow==12.2.0",
   "openpyxl==3.1.5",
   "mutagen==1.47.0",
-  "numpy==2.4.6",
+  "numpy==2.5.0",
   "soundfile==0.14.0",
-  "scipy==1.17.1",
+  "scipy==1.18.0",
   "cryptography==49.0.0",
   "keyring==25.7.0",
   "sqlcipher3==0.6.2",
@@ -35,8 +35,8 @@ build = [
 ]
 dev = [
   "black==26.5.1",
-  "coverage[toml]==7.14.1",
-  "pytest==9.1.0",
+  "coverage[toml]==7.14.2",
+  "pytest==9.1.1",
   "pytest-cov==7.1.0",
   "mypy==2.1.0",
   "ruff==0.15.17",
