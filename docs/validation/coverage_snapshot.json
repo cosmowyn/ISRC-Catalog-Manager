@@ -1,5 +1,5 @@
 {
-  "branchPercent": 64.71,
+  "branchPercent": 64.78,
   "coverageWins": [
     {
       "branch": 92.29,
@@ -58,19 +58,19 @@
       "statements": 600
     }
   ],
-  "coveredBranches": 16361,
-  "coveredLines": 66519,
+  "coveredBranches": 16444,
+  "coveredLines": 66717,
   "excludedFiles": [],
   "filesExcluded": 0,
   "filesMeasured": 282,
-  "linePercent": 74.87,
+  "linePercent": 74.9,
   "lowestFiles": [
     {
       "branch": 0.0,
-      "missing": 2772,
+      "missing": 2767,
       "path": "isrc_manager/invoicing/workspace.py",
-      "percent": 6.08,
-      "statements": 2997
+      "percent": 6.09,
+      "statements": 2992
     },
     {
       "branch": 0.0,
@@ -150,10 +150,10 @@
       "statements": 389
     }
   ],
-  "missingBranches": 8921,
-  "missingLines": 18898,
+  "missingBranches": 8940,
+  "missingLines": 18922,
   "schemaVersion": 1,
-  "statementPercent": 77.88,
-  "statements": 85417,
-  "timestamp": "2026-06-14T21:43:22.945281"
+  "statementPercent": 77.9,
+  "statements": 85639,
+  "timestamp": "2026-06-28T07:54:56.226698"
 }
