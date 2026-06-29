@@ -1,12 +1,12 @@
 pyinstaller==6.21.0
-coverage[toml]==7.14.2
+coverage[toml]==7.14.3
 pytest==9.1.1
 pytest-cov==7.1.0
 PySide6==6.11.1
 audioread==3.1.0
 pillow==12.2.0
 openpyxl==3.1.5
-mutagen==1.47.0
+mutagen==1.48.1
 numpy==2.5.0
 soundfile==0.14.0
 scipy==1.18.0
