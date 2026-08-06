@@ -895,11 +895,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "bulk edit",
             "gs1 metadata",
             "release sync",
+            "shared metadata",
+            "generate isrc",
         ),
         content_html="""
         <p>The Edit Track dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
         <ul>
-          <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
+          <li><strong>ISRC controls</strong>: copy ISO or compact forms of ISRC and ISWC values. In single-track edit, <strong>Generate ISRC</strong> requests the next canonical code from the configured application registry; if the field already contains a code, the editor asks before replacing it. Bulk edit never generates identifiers.</li>
           <li><strong>Media replacement</strong>: browse for new audio or album art files, choose database or managed-file storage for replacements, or clear the currently stored media.</li>
           <li><strong>Catalog Identifier</strong>: single-record edit supports the same internal-registry versus external-catalog modes as Add Track, including selection, manual external entry, and <strong>Generate</strong> for app-managed catalog numbers.</li>
           <li><strong>Bulk edit safeguards</strong>: only fields you actually change are written back to every selected row.</li>
@@ -909,8 +911,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Audio-derived track length</strong>: choosing a new audio file in Edit Track updates Track Length from the attached file immediately, but you can still make a manual correction before saving.</li>
           <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
           <li><strong>Validation</strong>: duplicate ISRCs, invalid ISWC values, and invalid UPC/EAN values are blocked before save.</li>
+          <li><strong>Shared-metadata confirmation</strong>: changing album-level values such as Album Title, Artist, Release Date, UPC/EAN, Genre, Catalog Number, or shared album art opens a review dialog before any database write. The source track is identified as the record being edited; linked peer tracks have checkboxes so you can exclude any row that must keep its existing values.</li>
         </ul>
-        <p>Saving changes updates the relevant rows, records the action in history, and keeps related catalog structures synchronized where shared release-level data is affected.</p>
+        <p>Confirming a shared-metadata change rechecks the album membership and record revisions inside the same database transaction, then writes only the source and checked peers. A release is synchronized only when its existing membership matches the confirmed scope; mismatched curated membership is left unchanged for explicit review instead of being split or duplicated silently. Cancelling the review writes nothing. This review boundary also lets older profiles safely separate tracks that were grouped together only because they used the same album title.</p>
+        <p><strong>Troubleshooting</strong>: if <strong>Generate ISRC</strong> is unavailable, configure a valid ISRC prefix and artist code in Application Settings. If the shared-metadata list contains a track from another release, leave that row unchecked; the saved selection is separated into its own album group without rewriting the excluded record.</p>
         """,
     ),
     HelpChapter(
@@ -964,10 +968,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Attach Album Art File…</strong>: inspect one image file against existing tracks, review the proposed target, choose the storage mode, and confirm the attachment before any write is made.</li>
           <li><strong>No silent attach</strong>: even when the app finds one confident match, it still opens the review dialog so you can confirm the target record or cancel safely.</li>
           <li><strong>Manual resolution</strong>: unmatched or ambiguous files stay in the same review surface, where they can be skipped, reassigned to a different existing track, or sent into <strong>Add Track</strong> with the chosen source file prefilled.</li>
-          <li><strong>Catalog drag-and-drop</strong>: dropping files from the OS shell onto the catalog workspace reuses the exact same review workflow. Multi-file drops are accepted only for audio; album art is single-image only.</li>
+          <li><strong>Catalog drag-and-drop</strong>: dropping files from the OS shell onto the catalog workspace opens a metadata review before it attaches media or creates governed Works and Tracks. Multi-file drops are accepted only for audio; album art is single-image only.</li>
+          <li><strong>ISRCs for newly dropped tracks</strong>: a valid ISRC embedded in the audio is preserved. When it is blank and ISRC generation is configured, the app allocates and reserves a different canonical ISRC for every new track in the drop batch before any database write. If generation is not configured, the import remains compatible with blank ISRCs so the codes can be completed later.</li>
           <li><strong>Recoverable apply</strong>: the final attach step is recorded as a history-backed mutation instead of as a chain of silent one-off writes.</li>
         </ul>
-        <p>This workflow is separate from exchange import and from audio-tag import. Use it when the catalog rows already exist and you mainly need to connect the right audio or artwork files quickly, explicitly, and safely.</p>
+        <p>This workflow is separate from exchange import and from audio-tag import. Use it to connect media to existing rows or to create governed tracks from reviewed dropped audio. If a generated code cannot be reserved safely, the new-track batch is not queued and no partial track rows are written.</p>
         """,
     ),
     HelpChapter(

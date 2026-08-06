@@ -31,6 +31,11 @@ from isrc_manager.tags import (
     write_catalog_export_tags,
 )
 from isrc_manager.tags.dialogs import DroppedAudioImportDialog, TagPreviewDialog
+from isrc_manager.tags.dropped_audio_isrc import (
+    assign_generated_isrc_candidates,
+    release_dropped_audio_isrcs,
+    reserve_dropped_audio_isrcs,
+)
 from isrc_manager.tasks.history_helpers import run_snapshot_history_action
 
 
@@ -366,6 +371,17 @@ def _build_dropped_audio_import_payloads(
     if errors:
         return [], errors, []
 
+    errors.extend(
+        assign_generated_isrc_candidates(
+            app,
+            normalized_rows,
+            supplied_compacts=seen_isrc,
+        )
+    )
+
+    if errors:
+        return [], errors, []
+
     payloads: list[TrackCreatePayload] = []
     temp_artwork_paths: list[str] = []
     for row in normalized_rows:
@@ -511,6 +527,27 @@ def _create_tracks_from_dropped_audio_files(
             _message_box().information(app, title, "No audio files were queued for import.")
             return
 
+        reservation = reserve_dropped_audio_isrcs(
+            app,
+            payloads,
+            selected_rows,
+            parent_widget=app,
+        )
+        reserved_isrcs = list(reservation.isrcs)
+
+        def _release_reserved_isrcs() -> None:
+            release_dropped_audio_isrcs(app, reserved_isrcs)
+
+        def _cleanup_temp_artwork_paths() -> None:
+            for temp_path in temp_artwork_paths:
+                Path(temp_path).unlink(missing_ok=True)
+
+        if not reservation.succeeded:
+            _cleanup_temp_artwork_paths()
+            if reservation.error_message:
+                _message_box().warning(app, title, reservation.error_message)
+            return
+
         profile_name = app._current_profile_name()
         artwork_payload_count = sum(1 for payload in payloads if payload.album_art_source_path)
 
@@ -575,8 +612,7 @@ def _create_tracks_from_dropped_audio_files(
                     logger=app.logger,
                 )
             finally:
-                for temp_path in temp_artwork_paths:
-                    Path(temp_path).unlink(missing_ok=True)
+                _cleanup_temp_artwork_paths()
 
         def _apply_success(apply_result: dict[str, object]) -> None:
             created_track_ids = list(apply_result.get("track_ids") or [])
@@ -586,6 +622,15 @@ def _create_tracks_from_dropped_audio_files(
                 app.conn.commit()
             except Exception:
                 pass
+            activate_claim = getattr(app, "_activate_isrc_claim_for_track", None)
+            if callable(activate_claim):
+                for track_id, payload in zip(created_track_ids, payloads):
+                    activate_claim(
+                        payload.isrc,
+                        track_id=int(track_id),
+                        track_title=payload.track_title,
+                        claim_kind="audio_drop_import",
+                    )
             app._sync_application_isrc_registry()
             app._refresh_history_actions()
             app._log_event(
@@ -630,20 +675,34 @@ def _create_tracks_from_dropped_audio_files(
                 + ("\n\nWarnings:\n- " + "\n- ".join(plan_warnings[:12]) if plan_warnings else ""),
             )
 
-        app._submit_background_bundle_task(
-            title=title,
-            description="Creating catalog tracks from dropped audio files...",
-            task_fn=_apply_worker,
-            kind="write",
-            unique_key="track.audio_drop_import",
-            cancellable=False,
-            on_success=_apply_success,
-            on_error=lambda failure: app._show_background_task_error(
+        def _apply_error(failure) -> None:
+            _release_reserved_isrcs()
+            _cleanup_temp_artwork_paths()
+            app._show_background_task_error(
                 title,
                 failure,
                 user_message="Could not create tracks from the dropped audio files:",
-            ),
-        )
+            )
+
+        try:
+            app._submit_background_bundle_task(
+                title=title,
+                description="Creating catalog tracks from dropped audio files...",
+                task_fn=_apply_worker,
+                kind="write",
+                unique_key="track.audio_drop_import",
+                cancellable=False,
+                on_success=_apply_success,
+                on_error=_apply_error,
+            )
+        except Exception as exc:
+            _release_reserved_isrcs()
+            _cleanup_temp_artwork_paths()
+            app._show_background_task_error(
+                title,
+                exc,
+                user_message="Could not create tracks from the dropped audio files:",
+            )
 
     app._submit_background_bundle_task(
         title=title,

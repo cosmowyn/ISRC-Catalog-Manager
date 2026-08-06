@@ -119,7 +119,12 @@ class _FakeTrackService:
         self.snapshot = snapshot
         self.updated_payloads: list[TrackUpdatePayload] = []
         self.album_updates: list[tuple[list[int], dict[str, object]]] = []
+        self.album_update_options: list[dict[str, object]] = []
         self.album_group_track_ids = [1]
+        self.album_group_id: int | None = 10
+        self.created_album_group_ids: list[tuple[str | None, int | None]] = []
+        self.deleted_album_group_ids: list[int] = []
+        self.peer_snapshot_overrides: dict[int, dict[str, object]] = {}
         self.album_art_messages: dict[int, str] = {}
         self.resolve_media_exc: Exception | None = None
         self.materialize_exc: Exception | None = None
@@ -130,7 +135,7 @@ class _FakeTrackService:
         )
         self.edit_states: dict[int, object] = {}
 
-    def fetch_track_snapshot(self, track_id: int):
+    def fetch_track_snapshot(self, track_id: int, **_kwargs):
         return (
             self.snapshot
             if self.snapshot is not None and track_id == self.snapshot.track_id
@@ -151,8 +156,35 @@ class _FakeTrackService:
     def resolve_media_path(self, stored_path):
         return str(stored_path or "")
 
-    def list_album_group_track_ids(self, _track_id: int):
+    def list_album_group_track_ids(self, _track_id: int, *, cursor=None):
         return list(self.album_group_track_ids)
+
+    def fetch_album_group_id(self, _track_id: int, *, cursor=None):
+        return self.album_group_id
+
+    def list_album_group_snapshots(self, _track_id: int, *, cursor=None):
+        snapshots = []
+        for track_id in self.album_group_track_ids:
+            if track_id == self.snapshot.track_id:
+                snapshots.append(self.snapshot)
+            else:
+                values = {
+                    **vars(self.snapshot),
+                    "track_id": track_id,
+                    "track_title": f"Peer Track {track_id}",
+                }
+                values.update(self.peer_snapshot_overrides.get(track_id, {}))
+                snapshots.append(SimpleNamespace(**values))
+        return snapshots
+
+    def create_album_group(self, title, *, copy_from_track_id=None, cursor=None):
+        self.created_album_group_ids.append((title, copy_from_track_id))
+        self.album_group_id = 100 + len(self.created_album_group_ids)
+        return self.album_group_id
+
+    def delete_album_group_if_unused(self, album_group_id, *, cursor=None):
+        self.deleted_album_group_ids.append(int(album_group_id))
+        return True
 
     def album_art_replacement_message(self, track_id: int) -> str:
         return self.album_art_messages.get(track_id, "")
@@ -160,8 +192,28 @@ class _FakeTrackService:
     def update_track(self, payload: TrackUpdatePayload, cursor=None) -> None:
         self.updated_payloads.append(payload)
 
-    def apply_album_metadata_to_tracks(self, track_ids, *, field_updates, cursor=None) -> None:
+    def apply_album_metadata_to_tracks(
+        self,
+        track_ids,
+        *,
+        field_updates,
+        album_group_id=None,
+        catalog_number_mode=None,
+        catalog_registry_entry_id=None,
+        catalog_external_code_identifier_id=None,
+        external_catalog_identifier_id=None,
+        cursor=None,
+    ) -> None:
         self.album_updates.append((list(track_ids), dict(field_updates)))
+        self.album_update_options.append(
+            {
+                "album_group_id": album_group_id,
+                "catalog_number_mode": catalog_number_mode,
+                "catalog_registry_entry_id": catalog_registry_entry_id,
+                "catalog_external_code_identifier_id": catalog_external_code_identifier_id,
+                "external_catalog_identifier_id": external_catalog_identifier_id,
+            }
+        )
 
     def resolve_media_source(self, _track_id: int, _media_key: str):
         if self.resolve_media_exc is not None:
@@ -203,6 +255,9 @@ class _FakeParent:
         self.synced_tracks: list[list[int]] = []
         self.length_sets: list[int] = []
         self.status_messages: list[tuple[str, int]] = []
+        self.reserved_isrcs: list[tuple[str, dict[str, object]]] = []
+        self.released_isrcs: list[str] = []
+        self.next_generated_isrc = "NL-ABC-26-00099"
 
     def _parse_additional_artists(self, value: str) -> list[str]:
         return [part.strip() for part in value.split(",") if part.strip()]
@@ -221,6 +276,16 @@ class _FakeParent:
 
     def is_isrc_taken_normalized(self, _isrc: str, *, exclude_track_id: int) -> bool:
         return self.duplicate_isrc
+
+    def _next_generated_isrc(self, **_kwargs) -> str:
+        return self.next_generated_isrc
+
+    def _reserve_isrc_claim_for_profile(self, isrc: str, **kwargs) -> bool:
+        self.reserved_isrcs.append((isrc, kwargs))
+        return True
+
+    def _release_reserved_isrc_claim(self, isrc: str) -> None:
+        self.released_isrcs.append(isrc)
 
     def _warn_duplicate_track_numbers(self, **_kwargs) -> None:
         return None
@@ -774,6 +839,229 @@ def test_single_edit_album_update_helpers_report_only_changed_values() -> None:
     assert dialog._single_edit_album_art_changed("/covers/new.jpg") is True
     dialog._clear_album_art = True
     assert dialog._single_edit_album_art_changed(None) is True
+
+
+def test_shared_metadata_propagation_chooser_lists_context_and_checked_peers(monkeypatch) -> None:
+    dialog, _parent = _single_save_dialog()
+    snapshots = [_snapshot(1), _snapshot(2, track_title="Peer", upc="123456789012")]
+    captured: dict[str, object] = {}
+
+    class FakeChooser:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def selected_track_ids(self):
+            return [2]
+
+    monkeypatch.setattr(edit_dialog_module, "TrackSelectionChooserDialog", FakeChooser)
+
+    assert dialog._choose_album_metadata_propagation_targets(
+        snapshots,
+        changed_field_labels=["Album Title", "UPC/EAN"],
+        changed_field_values={"album_title": "Updated Album", "upc": "123456789012"},
+    ) == [2]
+    assert captured["title"] == "Review Shared Metadata Update"
+    assert captured["confirm_label"] == "Update Selected Tracks"
+    assert captured["initial_track_ids"] == [2]
+    choice = captured["track_choices"][0]
+    assert choice.track_id == 2
+    assert "ISRC:" in choice.subtitle
+    assert "Album: Album" in choice.subtitle
+    assert "UPC/EAN: 123456789012" in choice.subtitle
+    assert "New values: Album Title: Updated Album" in captured["subtitle"]
+
+
+def test_shared_metadata_confirmation_cancellation_and_selected_peer_write(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edit_dialog_module,
+        "run_snapshot_history_action",
+        lambda **kwargs: {**kwargs["mutation"](), "history": kwargs["action_type"]},
+    )
+    cancelled_dialog, cancelled_parent = _single_save_dialog()
+    cancelled_parent.track_service.album_group_track_ids = [1, 2]
+    cancelled_dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: None
+    cancelled_dialog._save_single_changes()
+    assert cancelled_parent.submitted_tasks == []
+
+    dialog, parent = _single_save_dialog()
+    parent.execute_tasks = True
+    parent.track_service.album_group_track_ids = [1, 2, 3]
+    parent.track_service.snapshot.composer = "Stored Composer"
+    parent.track_service.snapshot.publisher = "Stored Publisher"
+    parent.track_service.snapshot.comments = "Stored Comment"
+    parent.track_service.snapshot.lyrics = "Stored Lyrics"
+    dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: [2]
+    dialog._save_single_changes()
+
+    assert parent.accepted is True
+    assert parent.track_service.created_album_group_ids == [("Updated Album", 1)]
+    assert parent.track_service.deleted_album_group_ids == [10]
+    source_payload = parent.track_service.updated_payloads[0]
+    assert source_payload.composer == "Stored Composer"
+    assert source_payload.publisher == "Stored Publisher"
+    assert source_payload.comments == "Stored Comment"
+    assert source_payload.lyrics == "Stored Lyrics"
+    assert parent.track_service.album_updates == [
+        (
+            [2],
+            {
+                "artist_name": "Updated Artist",
+                "album_title": "Updated Album",
+                "release_date": "2026-05-26",
+                "catalog_number": "CAT-2",
+            },
+        )
+    ]
+    assert parent.track_service.album_update_options == [
+        {
+            "album_group_id": 101,
+            "catalog_number_mode": "manual",
+            "catalog_registry_entry_id": 101,
+            "catalog_external_code_identifier_id": 202,
+            "external_catalog_identifier_id": 303,
+        }
+    ]
+    assert parent.synced_tracks == [[1, 2]]
+
+
+def test_shared_metadata_edit_isolates_single_album_title(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edit_dialog_module,
+        "run_snapshot_history_action",
+        lambda **kwargs: {**kwargs["mutation"](), "history": kwargs["action_type"]},
+    )
+    dialog, parent = _single_save_dialog()
+    parent.execute_tasks = True
+    dialog.album_title.setCurrentText("Single")
+    dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: []
+
+    dialog._save_single_changes()
+
+    assert parent.track_service.created_album_group_ids == [("Single", 1)]
+    assert parent.track_service.updated_payloads[0].album_group_id == 101
+    assert parent.track_service.deleted_album_group_ids == [10]
+
+
+def test_shared_metadata_write_rejects_membership_drift_before_mutating(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edit_dialog_module,
+        "run_snapshot_history_action",
+        lambda **kwargs: kwargs["mutation"](),
+    )
+    dialog, parent = _single_save_dialog()
+    parent.track_service.album_group_track_ids = [1, 2]
+    dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: [2]
+    dialog._save_single_changes()
+    task = parent.submitted_tasks[-1]
+    parent.track_service.album_group_id = 11
+    parent.track_service.album_group_track_ids = [1, 2, 3]
+    bundle = SimpleNamespace(
+        conn=parent.conn,
+        track_service=parent.track_service,
+        release_service=parent.release_service,
+        history_manager=parent.history_manager,
+    )
+
+    with pytest.raises(RuntimeError, match="linked album tracks changed"):
+        task["task_fn"](bundle, _FakeTaskContext())
+
+    assert parent.track_service.updated_payloads == []
+    assert parent.track_service.album_updates == []
+
+
+def test_shared_metadata_write_rejects_selected_peer_metadata_drift(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edit_dialog_module,
+        "run_snapshot_history_action",
+        lambda **kwargs: kwargs["mutation"](),
+    )
+    dialog, parent = _single_save_dialog()
+    parent.track_service.album_group_track_ids = [1, 2]
+    dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: [2]
+    dialog._save_single_changes()
+    task = parent.submitted_tasks[-1]
+    parent.track_service.peer_snapshot_overrides[2] = {"upc": "123456789012"}
+    bundle = SimpleNamespace(
+        conn=parent.conn,
+        track_service=parent.track_service,
+        release_service=parent.release_service,
+        history_manager=parent.history_manager,
+    )
+
+    with pytest.raises(RuntimeError, match="Track 2 changed"):
+        task["task_fn"](bundle, _FakeTaskContext())
+
+    assert parent.track_service.updated_payloads == []
+    assert parent.track_service.album_updates == []
+
+
+def test_single_save_rejects_source_changed_while_editor_was_open(monkeypatch) -> None:
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        edit_dialog_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    dialog, parent = _single_save_dialog()
+    dialog.snapshot = _snapshot(track_title="Original Track")
+    parent.track_service.snapshot = _snapshot(track_title="Changed Elsewhere")
+
+    dialog._save_single_changes()
+
+    assert warnings[-1][0] == "Track Changed"
+    assert parent.submitted_tasks == []
+
+
+def test_manual_isrc_generation_confirms_replace_and_save_reserves_changed_code(
+    monkeypatch,
+) -> None:
+    questions: list[tuple] = []
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        edit_dialog_module.QMessageBox,
+        "question",
+        lambda *args: questions.append(args) or edit_dialog_module.QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        edit_dialog_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    monkeypatch.setattr(edit_dialog_module.QMessageBox, "critical", lambda *_args: None)
+
+    dialog, parent = _single_save_dialog()
+    dialog.isrc_field.setText("NL-ABC-26-00001")
+    dialog._generate_new_isrc()
+    assert questions
+    assert dialog.isrc_field.text() == "NL-ABC-26-00099"
+
+    parent.next_generated_isrc = ""
+    dialog._generate_new_isrc()
+    assert warnings[-1][0] == "ISRC Generation"
+
+    dialog, parent = _single_save_dialog()
+    dialog.isrc_field.setText("NL-ABC-26-00099")
+    dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: []
+    dialog._save_single_changes()
+    assert parent.reserved_isrcs[0][0] == "NL-ABC-26-00099"
+    assert parent.reserved_isrcs[0][1]["exclude_track_id"] == 1
+
+    failed_dialog, failed_parent = _single_save_dialog()
+    failed_dialog.isrc_field.setText("NL-ABC-26-00099")
+    failed_dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: []
+    failed_parent.submit_exception = RuntimeError("submit failed")
+    failed_dialog._save_single_changes()
+    assert failed_parent.released_isrcs == ["NL-ABC-26-00099"]
+
+    background_dialog, background_parent = _single_save_dialog()
+    background_dialog.isrc_field.setText("NL-ABC-26-00099")
+    background_dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: []
+    background_dialog._save_single_changes()
+    background_parent.submitted_tasks[-1]["on_error"](RuntimeError("worker failed"))
+    assert background_parent.released_isrcs == ["NL-ABC-26-00099"]
 
 
 def test_dialog_routing_gs1_and_album_art_helpers_cover_workflow_edges(monkeypatch) -> None:
@@ -1533,6 +1821,7 @@ def test_single_save_validation_cancellation_success_and_rollback_paths(monkeypa
     success_parent.execute_tasks = True
     success_parent.track_service.album_group_track_ids = [1, 2, 3]
     success_dialog.album_art.setText("/cover.jpg")
+    success_dialog._choose_album_metadata_propagation_targets = lambda *_args, **_kwargs: [2, 3]
     monkeypatch.setattr(
         edit_dialog_module,
         "run_snapshot_history_action",

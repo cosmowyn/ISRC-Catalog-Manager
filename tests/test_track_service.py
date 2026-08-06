@@ -702,6 +702,269 @@ class TrackServiceTests(unittest.TestCase):
         self.assertEqual(peer_snapshot.iswc, "T-123.456.780-0")
         self.assertEqual(peer_snapshot.buma_work_number, "BUMA-88")
 
+    def test_explicit_album_group_forks_confirmed_subset_and_copies_shared_artwork(self):
+        source_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91001",
+                track_title="Confirmed Source",
+                album_title="Legacy Shared Title",
+                upc="111111111111",
+            )
+        )
+        confirmed_peer = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91002",
+                track_title="Confirmed Peer",
+                album_title="Legacy Shared Title",
+                upc="111111111111",
+            )
+        )
+        excluded_peer = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91003",
+                track_title="Excluded Peer",
+                album_title="Legacy Shared Title",
+                upc="111111111111",
+            )
+        )
+        original_group_id = self.service.fetch_album_group_id(source_track)
+        assert original_group_id is not None
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET album_art_path=?, album_art_storage_mode=?, album_art_blob=?,
+                album_art_filename=?, album_art_mime_type=?, album_art_size_bytes=?
+            WHERE id=?
+            """,
+            (
+                "shared-cover.png",
+                STORAGE_MODE_DATABASE,
+                sqlite3.Binary(b"shared-cover"),
+                "shared-cover.png",
+                "image/png",
+                len(b"shared-cover"),
+                source_track,
+            ),
+        )
+        source_snapshot = self.service.fetch_track_snapshot(source_track)
+        assert source_snapshot is not None
+
+        with self.conn:
+            cursor = self.conn.cursor()
+            new_group_id = self.service.create_album_group(
+                "Confirmed Release",
+                copy_from_track_id=source_track,
+                cursor=cursor,
+            )
+            self.service.update_track(
+                TrackUpdatePayload(
+                    track_id=source_track,
+                    isrc=source_snapshot.isrc,
+                    track_title=source_snapshot.track_title,
+                    artist_name=source_snapshot.artist_name,
+                    additional_artists=list(source_snapshot.additional_artists),
+                    album_title="Confirmed Release",
+                    release_date=source_snapshot.release_date,
+                    track_length_sec=source_snapshot.track_length_sec,
+                    iswc=source_snapshot.iswc,
+                    upc="999999999999",
+                    genre=source_snapshot.genre,
+                    catalog_number=source_snapshot.catalog_number,
+                    buma_work_number=source_snapshot.buma_work_number,
+                    composer=source_snapshot.composer,
+                    publisher=source_snapshot.publisher,
+                    comments=source_snapshot.comments,
+                    lyrics=source_snapshot.lyrics,
+                    album_group_id=new_group_id,
+                ),
+                cursor=cursor,
+            )
+            self.service.apply_album_metadata_to_tracks(
+                [confirmed_peer],
+                field_updates={"album_title": "Confirmed Release", "upc": "999999999999"},
+                album_group_id=new_group_id,
+                cursor=cursor,
+            )
+
+        self.assertEqual(self.service.fetch_album_group_id(source_track), new_group_id)
+        self.assertEqual(self.service.fetch_album_group_id(confirmed_peer), new_group_id)
+        self.assertEqual(self.service.fetch_album_group_id(excluded_peer), original_group_id)
+        self.assertFalse(self.service.delete_album_group_if_unused(original_group_id))
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT album_art_path, album_art_blob FROM Albums WHERE id=?",
+                (original_group_id,),
+            ).fetchone(),
+            ("shared-cover.png", b"shared-cover"),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT album_art_path, album_art_storage_mode, album_art_blob,
+                       album_art_filename, album_art_mime_type, album_art_size_bytes
+                FROM Albums WHERE id=?
+                """,
+                (new_group_id,),
+            ).fetchone(),
+            (
+                "shared-cover.png",
+                STORAGE_MODE_DATABASE,
+                b"shared-cover",
+                "shared-cover.png",
+                "image/png",
+                len(b"shared-cover"),
+            ),
+        )
+
+        excluded_snapshot = self.service.fetch_track_snapshot(excluded_peer)
+        assert excluded_snapshot is not None
+        with self.conn:
+            cursor = self.conn.cursor()
+            self.service.update_track(
+                TrackUpdatePayload(
+                    track_id=excluded_snapshot.track_id,
+                    isrc=excluded_snapshot.isrc,
+                    track_title=excluded_snapshot.track_title,
+                    artist_name=excluded_snapshot.artist_name,
+                    additional_artists=list(excluded_snapshot.additional_artists),
+                    album_title="Confirmed Release",
+                    release_date=excluded_snapshot.release_date,
+                    track_length_sec=excluded_snapshot.track_length_sec,
+                    iswc=excluded_snapshot.iswc,
+                    upc="999999999999",
+                    genre=excluded_snapshot.genre,
+                    catalog_number=excluded_snapshot.catalog_number,
+                    buma_work_number=excluded_snapshot.buma_work_number,
+                    composer=excluded_snapshot.composer,
+                    publisher=excluded_snapshot.publisher,
+                    comments=excluded_snapshot.comments,
+                    lyrics=excluded_snapshot.lyrics,
+                    album_group_id=new_group_id,
+                ),
+                cursor=cursor,
+            )
+            self.assertTrue(
+                self.service.delete_album_group_if_unused(original_group_id, cursor=cursor)
+            )
+        self.assertIsNone(
+            self.conn.execute("SELECT id FROM Albums WHERE id=?", (original_group_id,)).fetchone()
+        )
+
+    def test_nonshared_update_preserves_current_same_title_album_group(self):
+        first_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91010",
+                track_title="First Group Track",
+                album_title="Duplicate Title",
+            )
+        )
+        second_track = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91011",
+                track_title="Second Group Track",
+                album_title="Duplicate Title",
+            )
+        )
+        original_group_id = self.service.fetch_album_group_id(first_track)
+        second_snapshot = self.service.fetch_track_snapshot(second_track)
+        assert original_group_id is not None
+        assert second_snapshot is not None
+        isolated_group_id = self.service.create_album_group(
+            "Duplicate Title",
+            copy_from_track_id=second_track,
+        )
+        self.service.update_track(
+            TrackUpdatePayload(
+                track_id=second_snapshot.track_id,
+                isrc=second_snapshot.isrc,
+                track_title=second_snapshot.track_title,
+                artist_name=second_snapshot.artist_name,
+                additional_artists=list(second_snapshot.additional_artists),
+                album_title=second_snapshot.album_title,
+                release_date=second_snapshot.release_date,
+                track_length_sec=second_snapshot.track_length_sec,
+                iswc=second_snapshot.iswc,
+                upc=second_snapshot.upc,
+                genre=second_snapshot.genre,
+                catalog_number=second_snapshot.catalog_number,
+                buma_work_number=second_snapshot.buma_work_number,
+                composer=second_snapshot.composer,
+                publisher=second_snapshot.publisher,
+                comments=second_snapshot.comments,
+                lyrics=second_snapshot.lyrics,
+                album_group_id=isolated_group_id,
+            )
+        )
+        isolated_snapshot = self.service.fetch_track_snapshot(second_track)
+        assert isolated_snapshot is not None
+
+        self.service.update_track(
+            TrackUpdatePayload(
+                track_id=isolated_snapshot.track_id,
+                isrc=isolated_snapshot.isrc,
+                track_title="Renamed Track Only",
+                artist_name=isolated_snapshot.artist_name,
+                additional_artists=list(isolated_snapshot.additional_artists),
+                album_title=isolated_snapshot.album_title,
+                release_date=isolated_snapshot.release_date,
+                track_length_sec=isolated_snapshot.track_length_sec,
+                iswc=isolated_snapshot.iswc,
+                upc=isolated_snapshot.upc,
+                genre=isolated_snapshot.genre,
+                catalog_number=isolated_snapshot.catalog_number,
+                buma_work_number=isolated_snapshot.buma_work_number,
+                composer=isolated_snapshot.composer,
+                publisher=isolated_snapshot.publisher,
+                comments=isolated_snapshot.comments,
+                lyrics=isolated_snapshot.lyrics,
+            )
+        )
+
+        self.assertNotEqual(isolated_group_id, original_group_id)
+        self.assertEqual(self.service.fetch_album_group_id(second_track), isolated_group_id)
+
+    def test_explicit_album_group_validation_rejects_missing_or_mismatched_groups(self):
+        track_id = self.service.create_track(
+            self._track_payload(
+                isrc="NL-ABC-26-91004",
+                track_title="Validated Group Track",
+                album_title="Original Group",
+                genre="Original",
+            )
+        )
+        group_id = self.service.create_album_group(
+            "Validated Group",
+            copy_from_track_id=track_id,
+        )
+
+        with self.assertRaisesRegex(ValueError, "title does not match"):
+            self.service.apply_album_metadata_to_tracks(
+                [track_id],
+                field_updates={"album_title": "Other Group", "genre": "Changed"},
+                album_group_id=group_id,
+            )
+        with self.assertRaisesRegex(ValueError, "Album group 999999 not found"):
+            self.service.apply_album_metadata_to_tracks(
+                [track_id],
+                field_updates={"album_title": "Validated Group", "genre": "Changed"},
+                album_group_id=999999,
+            )
+
+        snapshot = self.service.fetch_track_snapshot(track_id)
+        assert snapshot is not None
+        self.assertEqual(snapshot.album_title, "Original Group")
+        self.assertEqual(snapshot.genre, "Original")
+        self.assertEqual(
+            self.service.fetch_album_group_id(track_id),
+            self.service.get_or_create_album("Original Group"),
+        )
+
+    def test_album_group_helpers_reject_missing_source_track(self):
+        with self.assertRaisesRegex(ValueError, "Track 999999 not found"):
+            self.service.fetch_album_group_id(999999)
+        with self.assertRaisesRegex(ValueError, "Track 999999 not found"):
+            self.service.create_album_group("New Group", copy_from_track_id=999999)
+
     def test_album_art_is_shared_across_real_album_tracks(self):
         lead_track = self.service.create_track(
             TrackCreatePayload(

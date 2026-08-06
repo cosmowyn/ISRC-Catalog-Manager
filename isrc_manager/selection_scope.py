@@ -208,6 +208,7 @@ class TrackSelectionChooserDialog(QDialog):
         initial_track_ids: list[int] | tuple[int, ...] | None = None,
         title: str = "Choose Tracks",
         subtitle: str | None = None,
+        confirm_label: str = "Use Chosen Tracks",
         parent=None,
     ):
         super().__init__(parent)
@@ -260,14 +261,14 @@ class TrackSelectionChooserDialog(QDialog):
         controls_layout.addWidget(self.selection_table, 1)
         root.addWidget(controls_box, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        ok_button = buttons.button(QDialogButtonBox.Ok)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        ok_button = self.button_box.button(QDialogButtonBox.Ok)
         if ok_button is not None:
-            ok_button.setText("Use Chosen Tracks")
+            ok_button.setText(str(confirm_label or "Use Chosen Tracks"))
             ok_button.setDefault(True)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        root.addWidget(self.button_box)
 
         self._populate_rows()
         _apply_compact_dialog_control_heights(self)

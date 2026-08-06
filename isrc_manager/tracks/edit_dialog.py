@@ -39,6 +39,7 @@ from isrc_manager.domain.timecode import hms_to_seconds, seconds_to_hms
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, normalize_storage_mode
 from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.parties import party_authority_notifier
+from isrc_manager.selection_scope import TrackChoice, TrackSelectionChooserDialog
 from isrc_manager.services import TrackSnapshot, TrackUpdatePayload
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.tasks.history_helpers import run_snapshot_history_action
@@ -309,13 +310,21 @@ class EditDialog(QDialog):
         row_isrc_btns = QHBoxLayout()
         self.btn_isrc_copy_iso = QPushButton("Copy ISO")
         self.btn_isrc_copy_compact = QPushButton("Copy compact")
+        self.btn_isrc_generate = QPushButton("Generate New ISRC")
+        self.btn_isrc_generate.setObjectName("generateTrackIsrcButton")
+        self.btn_isrc_generate.setAutoDefault(False)
+        self.btn_isrc_generate.setToolTip(
+            "Generate the next available canonical ISRC for this track. Save Changes to apply it."
+        )
         row_isrc_btns.addWidget(self.btn_isrc_copy_iso)
         row_isrc_btns.addWidget(self.btn_isrc_copy_compact)
+        row_isrc_btns.addWidget(self.btn_isrc_generate)
         row_isrc_btns.addStretch(1)
         identifiers_layout.addLayout(row_isrc_btns)
         self.btn_isrc_copy_iso.clicked.connect(self._copy_isrc_iso)
         self.btn_isrc_copy_iso.setDefault(False)
         self.btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
+        self.btn_isrc_generate.clicked.connect(self._generate_new_isrc)
 
         self.entry_date_field = QLineEdit()
         self._configure_text_field(
@@ -715,6 +724,10 @@ class EditDialog(QDialog):
         if self._is_bulk_edit:
             self.btn_isrc_copy_iso.setEnabled(False)
             self.btn_isrc_copy_compact.setEnabled(False)
+            self.btn_isrc_generate.setEnabled(False)
+            self.btn_isrc_generate.setToolTip(
+                "Generate a new ISRC when editing one track at a time."
+            )
             self.btn_iswc_copy_iso.setEnabled(False)
             self.btn_iswc_copy_compact.setEnabled(False)
 
@@ -1332,6 +1345,36 @@ class EditDialog(QDialog):
         compact = to_compact_isrc(txt)
         QApplication.clipboard().setText(compact or normalize_isrc(txt))
 
+    def _generate_new_isrc(self) -> None:
+        """Fill the editor with the next available canonical ISRC before save."""
+        if self._is_bulk_edit:
+            return
+        current_isrc = (self.isrc_field.text() or "").strip()
+        if current_isrc:
+            replace = QMessageBox.question(
+                self,
+                "Generate New ISRC",
+                "Replace the current ISRC with a newly generated code? The change is applied only after you save this track.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if replace != QMessageBox.Yes:
+                return
+
+        release_date = self.release_date.selectedDate()
+        generated_isrc = self.parent._next_generated_isrc(
+            release_date=release_date,
+            use_release_year=True,
+        )
+        if not generated_isrc or not is_valid_isrc_compact_or_iso(generated_isrc):
+            QMessageBox.warning(
+                self,
+                "ISRC Generation",
+                "No valid ISRC is available. Check the ISRC prefix, artist-code settings, and available sequence.",
+            )
+            return
+        self.isrc_field.setText(to_iso_isrc(generated_isrc))
+
     def _copy_iswc_iso(self):
         txt = (self.iswc.text() or "").strip()
         iso = to_iso_iswc(txt) or txt
@@ -1439,6 +1482,75 @@ class EditDialog(QDialog):
             if label and label not in labels:
                 labels.append(label)
         return labels
+
+    @staticmethod
+    def _album_metadata_track_choice(snapshot: TrackSnapshot) -> TrackChoice:
+        isrc = str(snapshot.isrc or "—").strip() or "—"
+        artist = str(snapshot.artist_name or "—").strip() or "—"
+        release_date = str(snapshot.release_date or "—").strip() or "—"
+        upc = str(snapshot.upc or "—").strip() or "—"
+        catalog_number = str(snapshot.catalog_number or "—").strip() or "—"
+        album_title = str(snapshot.album_title or "—").strip() or "—"
+        return TrackChoice(
+            track_id=int(snapshot.track_id),
+            title=f'#{int(snapshot.track_id)} — {str(snapshot.track_title or "Untitled Track").strip() or "Untitled Track"}',
+            subtitle=(
+                f"ISRC: {isrc} | Artist: {artist}\n"
+                f"Album: {album_title} | Release: {release_date}\n"
+                f"UPC/EAN: {upc} | Catalog#: {catalog_number}"
+            ),
+        )
+
+    def _shared_metadata_change_summary(self, field_updates: dict[str, object]) -> str:
+        changes: list[str] = []
+        for field_name, value in field_updates.items():
+            label = self.SINGLE_EDIT_ALBUM_SHARED_FIELDS.get(field_name, field_name)
+            if field_name == "album_art":
+                display_value = str(value)
+            else:
+                display_value = str(value or "(cleared)")
+            changes.append(f"{label}: {display_value}")
+        return "; ".join(changes)
+
+    @staticmethod
+    def _track_snapshot_revision(snapshot: TrackSnapshot) -> dict[str, object]:
+        """Return a comparable snapshot without potentially large media payloads."""
+        if hasattr(snapshot, "to_dict"):
+            revision = dict(snapshot.to_dict())
+        else:
+            revision = dict(vars(snapshot))
+        revision.pop("audio_file_blob_b64", None)
+        revision.pop("album_art_blob_b64", None)
+        return revision
+
+    def _choose_album_metadata_propagation_targets(
+        self,
+        snapshots: list[TrackSnapshot],
+        *,
+        changed_field_labels: list[str],
+        changed_field_values: dict[str, object],
+    ) -> list[int] | None:
+        """Return chosen sibling IDs, or ``None`` when the user cancels the save."""
+        peers = [snapshot for snapshot in snapshots if int(snapshot.track_id) != int(self.track_id)]
+        if not peers:
+            return []
+        fields = ", ".join(changed_field_labels) or "shared album metadata"
+        change_summary = self._shared_metadata_change_summary(changed_field_values)
+        dialog = TrackSelectionChooserDialog(
+            track_choices=[self._album_metadata_track_choice(snapshot) for snapshot in peers],
+            initial_track_ids=[int(snapshot.track_id) for snapshot in peers],
+            title="Review Shared Metadata Update",
+            subtitle=(
+                f"The current track will always be updated. {fields} will be written only to the checked linked tracks. "
+                f"New values: {change_summary}. "
+                "Uncheck any track you do not want to change."
+            ),
+            confirm_label="Update Selected Tracks",
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.selected_track_ids()
 
     @staticmethod
     def _album_art_update_group_key(payload: TrackUpdatePayload) -> tuple[str, object]:
@@ -1560,6 +1672,16 @@ class EditDialog(QDialog):
             if before_snapshot is None:
                 QMessageBox.warning(self, "Update Error", "Could not load the selected track.")
                 return
+            if self._track_snapshot_revision(before_snapshot) != self._track_snapshot_revision(
+                self.snapshot
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Track Changed",
+                    "This track changed in the database while the editor was open. "
+                    "Close and reopen it before saving so newer data is not overwritten.",
+                )
+                return
 
             if iso_isrc and parent.is_isrc_taken_normalized(iso_isrc, exclude_track_id=row_id):
                 QMessageBox.critical(
@@ -1643,6 +1765,10 @@ class EditDialog(QDialog):
                     else None
                 ),
                 buma_work_number=new_buma_work_number,
+                composer=before_snapshot.composer,
+                publisher=before_snapshot.publisher,
+                comments=before_snapshot.comments,
+                lyrics=before_snapshot.lyrics,
                 audio_file_source_path=audio_source_path,
                 audio_file_storage_mode=audio_storage_mode,
                 album_art_source_path=album_art_source_path,
@@ -1661,21 +1787,53 @@ class EditDialog(QDialog):
                 catalog_number=new_catalog_number,
             )
             album_art_changed = self._single_edit_album_art_changed(album_art_source_path)
-            album_group_track_ids = parent.track_service.list_album_group_track_ids(row_id)
-            propagated_track_ids = [
-                track_id for track_id in album_group_track_ids if track_id != row_id
-            ]
             album_shared_fields_changed = list(album_field_updates.keys())
             propagated_field_labels: list[str] = []
             if album_art_changed:
                 album_shared_fields_changed.append("album_art")
-            propagated_mode = bool(propagated_track_ids and album_shared_fields_changed)
-            needs_peer_album_metadata_update = bool(propagated_track_ids and album_field_updates)
-
-            if propagated_mode:
+            captured_album_group_id = parent.track_service.fetch_album_group_id(row_id)
+            album_group_snapshots = parent.track_service.list_album_group_snapshots(row_id)
+            captured_snapshot_revisions = {
+                int(snapshot.track_id): self._track_snapshot_revision(snapshot)
+                for snapshot in album_group_snapshots
+            }
+            captured_snapshot_revisions[row_id] = self._track_snapshot_revision(before_snapshot)
+            captured_group_track_ids = tuple(
+                sorted(int(snapshot.track_id) for snapshot in album_group_snapshots)
+            )
+            propagated_track_ids: list[int] = []
+            shared_edit_mode = bool(album_shared_fields_changed)
+            requires_fresh_album_group = bool(shared_edit_mode and new_album_title)
+            if shared_edit_mode:
                 propagated_field_labels = self._display_album_shared_field_names(
                     album_shared_fields_changed
                 )
+                chosen_peer_track_ids = self._choose_album_metadata_propagation_targets(
+                    album_group_snapshots,
+                    changed_field_labels=propagated_field_labels,
+                    changed_field_values={
+                        **album_field_updates,
+                        **(
+                            {
+                                "album_art": (
+                                    "cleared"
+                                    if self._clear_album_art and not album_art_source_path
+                                    else "replaced"
+                                )
+                            }
+                            if album_art_changed
+                            else {}
+                        ),
+                    },
+                )
+                if chosen_peer_track_ids is None:
+                    return
+                candidate_peer_ids = set(captured_group_track_ids) - {row_id}
+                propagated_track_ids = [
+                    track_id for track_id in chosen_peer_track_ids if track_id in candidate_peer_ids
+                ]
+            propagated_mode = bool(propagated_track_ids and album_shared_fields_changed)
+            needs_peer_shared_update = bool(propagated_track_ids and album_shared_fields_changed)
 
             cleanup_artist_names, cleanup_album_titles = parent._collect_catalog_cleanup_targets(
                 artist_name=new_artist_name,
@@ -1707,23 +1865,87 @@ class EditDialog(QDialog):
             )
 
             def _worker(bundle, ctx):
-                total_steps = 3 if needs_peer_album_metadata_update else 2
+                total_steps = 3 if needs_peer_shared_update else 2
 
                 def _mutation():
                     with bundle.conn:
                         cur = bundle.conn.cursor()
                         ctx.report_progress(0, total_steps, message="Saving track changes...")
-                        bundle.track_service.update_track(source_payload, cursor=cur)
                         sync_track_ids = [row_id]
-                        if propagated_mode:
+                        target_album_group_id: int | None = None
+                        if shared_edit_mode:
+                            live_album_group_id = bundle.track_service.fetch_album_group_id(
+                                row_id,
+                                cursor=cur,
+                            )
+                            live_group_snapshots = bundle.track_service.list_album_group_snapshots(
+                                row_id,
+                                cursor=cur,
+                            )
+                            live_group_track_ids = tuple(
+                                sorted(int(snapshot.track_id) for snapshot in live_group_snapshots)
+                            )
+                            if (
+                                live_album_group_id != captured_album_group_id
+                                or live_group_track_ids != captured_group_track_ids
+                            ):
+                                raise RuntimeError(
+                                    "The linked album tracks changed while this edit was open. "
+                                    "Review the shared metadata update again."
+                                )
+                            live_snapshots_by_id = {
+                                int(snapshot.track_id): snapshot
+                                for snapshot in live_group_snapshots
+                            }
+                            if row_id not in live_snapshots_by_id:
+                                live_source_snapshot = bundle.track_service.fetch_track_snapshot(
+                                    row_id,
+                                    cursor=cur,
+                                    include_media_blobs=False,
+                                )
+                                if live_source_snapshot is not None:
+                                    live_snapshots_by_id[row_id] = live_source_snapshot
+                            for target_track_id in [row_id, *propagated_track_ids]:
+                                live_snapshot = live_snapshots_by_id.get(target_track_id)
+                                if live_snapshot is None or self._track_snapshot_revision(
+                                    live_snapshot
+                                ) != captured_snapshot_revisions.get(target_track_id):
+                                    raise RuntimeError(
+                                        f"Track {target_track_id} changed after the shared metadata preview. "
+                                        "Review the linked tracks again before saving."
+                                    )
+                            if requires_fresh_album_group:
+                                fresh_album_group_id = bundle.track_service.create_album_group(
+                                    new_album_title,
+                                    copy_from_track_id=row_id,
+                                    cursor=cur,
+                                )
+                                if fresh_album_group_id is None:
+                                    raise RuntimeError(
+                                        "Could not create an isolated album group for this shared metadata update."
+                                    )
+                                target_album_group_id = int(fresh_album_group_id)
+                            source_payload.album_group_id = target_album_group_id
+                        bundle.track_service.update_track(source_payload, cursor=cur)
+                        if needs_peer_shared_update:
                             sync_track_ids = [row_id, *propagated_track_ids]
-                        if needs_peer_album_metadata_update:
                             ctx.report_progress(
                                 1, total_steps, message="Propagating shared album fields..."
                             )
                             bundle.track_service.apply_album_metadata_to_tracks(
                                 propagated_track_ids,
                                 field_updates=album_field_updates,
+                                album_group_id=target_album_group_id,
+                                catalog_number_mode=source_payload.catalog_number_mode,
+                                catalog_registry_entry_id=(
+                                    source_payload.catalog_registry_entry_id
+                                ),
+                                catalog_external_code_identifier_id=(
+                                    source_payload.catalog_external_code_identifier_id
+                                ),
+                                external_catalog_identifier_id=(
+                                    source_payload.external_catalog_identifier_id
+                                ),
                                 cursor=cur,
                             )
                         ctx.report_progress(
@@ -1735,7 +1957,13 @@ class EditDialog(QDialog):
                             track_service=bundle.track_service,
                             release_service=bundle.release_service,
                             profile_name=profile_name,
+                            restrict_to_track_ids=True,
                         )
+                        if shared_edit_mode and captured_album_group_id is not None:
+                            bundle.track_service.delete_album_group_if_unused(
+                                captured_album_group_id,
+                                cursor=cur,
+                            )
                     ctx.report_progress(total_steps, total_steps, message="Track update complete.")
                     return {
                         "focus_id": row_id,
@@ -1824,6 +2052,27 @@ class EditDialog(QDialog):
                 parent._audit_commit()
                 self.accept()
 
+            reserved_isrc = ""
+            previous_isrc = to_iso_isrc(before_snapshot.isrc) or str(before_snapshot.isrc or "")
+            if iso_isrc and iso_isrc != previous_isrc:
+                if not parent._reserve_isrc_claim_for_profile(
+                    iso_isrc,
+                    track_title=new_track_title,
+                    exclude_track_id=row_id,
+                    parent_widget=self,
+                ):
+                    return
+                reserved_isrc = iso_isrc
+
+            def _release_reserved_isrc_on_error(failure) -> None:
+                if reserved_isrc:
+                    parent._release_reserved_isrc_claim(reserved_isrc)
+                parent._show_background_task_error(
+                    "Update Error",
+                    failure,
+                    user_message="Failed to update record:",
+                )
+
             parent._submit_background_bundle_task(
                 title="Update Track",
                 description="Saving track changes...",
@@ -1834,11 +2083,7 @@ class EditDialog(QDialog):
                 worker_completion_progress=(89, "Finalizing background track update..."),
                 on_success_before_cleanup=_before_cleanup,
                 on_success_after_cleanup=_after_cleanup,
-                on_error=lambda failure: parent._show_background_task_error(
-                    "Update Error",
-                    failure,
-                    user_message="Failed to update record:",
-                ),
+                on_error=_release_reserved_isrc_on_error,
             )
 
         except Exception as e:
@@ -1846,6 +2091,8 @@ class EditDialog(QDialog):
             if parent and hasattr(parent, "conn"):
                 parent.conn.rollback()
                 parent.logger.exception(f"Update failed: {e}")
+                if "reserved_isrc" in locals() and reserved_isrc:
+                    parent._release_reserved_isrc_claim(reserved_isrc)
             QMessageBox.critical(self, "Update Error", f"Failed to update record:\n{e}")
 
     def _save_bulk_changes(self):

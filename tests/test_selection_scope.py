@@ -3,6 +3,7 @@ from unittest import mock
 
 try:
     from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QDialogButtonBox
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
     QT_IMPORT_ERROR = exc
@@ -140,6 +141,20 @@ class TrackSelectionChooserDialogTests(unittest.TestCase):
 
             selected = dialog.selected_track_ids()
             self.assertEqual(selected, [101])
+        finally:
+            dialog.close()
+
+    def test_custom_confirm_label_is_used_for_write_confirmation(self):
+        dialog = TrackSelectionChooserDialog(
+            track_choices=self._create_choices(),
+            confirm_label="Update Selected Tracks",
+            parent=None,
+        )
+        try:
+            self.assertEqual(
+                dialog.button_box.button(QDialogButtonBox.Ok).text(),
+                "Update Selected Tracks",
+            )
         finally:
             dialog.close()
 

@@ -626,10 +626,16 @@ def run_catalog_workflow(harness: Any) -> int:
     from isrc_manager.tracks.edit_dialog import EditDialog
 
     edit_visual: dict[str, object] = {}
+    manual_isrc_generate_available = False
 
     def _exec_edit_track_dialog(dialog: EditDialog) -> int:
         dialog.show()
         harness.process_events(cycles=8)
+        generate_button = getattr(dialog, "btn_isrc_generate", None)
+        if generate_button is None or not generate_button.isEnabled():
+            raise AssertionError("Single-track Edit Track did not expose manual ISRC generation.")
+        nonlocal manual_isrc_generate_available
+        manual_isrc_generate_available = True
         dialog.track_title.setText(CATALOG_TRACK_EDITED_TITLE)
         _set_combo_text(dialog.genre, "UI PQ Edited Genre")
         nonlocal edit_visual
@@ -671,6 +677,7 @@ def run_catalog_workflow(harness: Any) -> int:
             "catalog_row_visible": visible,
             "creation_method": "add_track_panel.save_button.click",
             "edit_method": "track_editor_dialog.save_changes",
+            "manual_isrc_generate_available": manual_isrc_generate_available,
             "add_track_visual": add_track_visual,
             "edit_track_visual": edit_visual,
             "help_reference": _require_help_reference(

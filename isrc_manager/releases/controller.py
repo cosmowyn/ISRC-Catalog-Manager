@@ -246,6 +246,7 @@ def _sync_releases_for_tracks(
     track_service: TrackService | None = None,
     release_service: ReleaseService | None = None,
     profile_name: str | None = None,
+    restrict_to_track_ids: bool = False,
 ) -> list[int]:
     active_track_service = track_service or app.track_service
     active_release_service = release_service or app.release_service
@@ -260,38 +261,90 @@ def _sync_releases_for_tracks(
                 track_service=active_track_service,
                 release_service=active_release_service,
                 profile_name=profile_name,
+                restrict_to_track_ids=restrict_to_track_ids,
             )
 
     cur = cursor
     created_or_updated: list[int] = []
     processed_group_keys: set[tuple[int, ...]] = set()
+    normalized_track_ids = app._normalize_track_ids(track_ids)
+    allowed_track_ids = set(normalized_track_ids) if restrict_to_track_ids else None
 
-    for track_id in app._normalize_track_ids(track_ids):
+    for track_id in normalized_track_ids:
         group_track_ids = active_track_service.list_album_group_track_ids(track_id, cursor=cur)
         if not group_track_ids:
             group_track_ids = [track_id]
+        inferred_group_key = tuple(app._normalize_track_ids(group_track_ids))
+        if allowed_track_ids is not None:
+            group_track_ids = [
+                group_track_id
+                for group_track_id in group_track_ids
+                if group_track_id in allowed_track_ids
+            ]
         group_key = tuple(app._normalize_track_ids(group_track_ids))
         if not group_key or group_key in processed_group_keys:
             continue
         processed_group_keys.add(group_key)
 
-        existing_release = active_release_service.find_primary_release_for_track(track_id)
-        existing_summary = (
-            active_release_service.fetch_release_summary(existing_release.id)
-            if existing_release is not None
-            else None
-        )
-        existing_track_ids = {
-            placement.track_id
-            for placement in (existing_summary.tracks if existing_summary is not None else [])
-        }
-        if (
-            existing_summary is not None
-            and len(existing_track_ids) > 1
-            and existing_track_ids != set(group_key)
-        ):
-            existing_release = None
-            existing_summary = None
+        existing_release = None
+        existing_summary = None
+        if restrict_to_track_ids:
+            inferred_scope_was_narrowed = set(inferred_group_key) != set(group_key)
+            # Inspect every confirmed track. The first track may have no release while a
+            # selected peer belongs to a curated one, so first-track-only inference is unsafe.
+            existing_release_ids: set[int] = set()
+            unsafe_existing_membership = False
+            for group_track_id in group_key:
+                candidate_release = active_release_service.find_primary_release_for_track(
+                    group_track_id
+                )
+                if candidate_release is None:
+                    continue
+                candidate_summary = active_release_service.fetch_release_summary(
+                    candidate_release.id
+                )
+                candidate_track_ids = {
+                    placement.track_id
+                    for placement in (
+                        candidate_summary.tracks if candidate_summary is not None else []
+                    )
+                }
+                if candidate_summary is None or candidate_track_ids != set(group_key):
+                    unsafe_existing_membership = True
+                    break
+                existing_release_ids.add(int(candidate_release.id))
+                if len(existing_release_ids) > 1:
+                    unsafe_existing_membership = True
+                    break
+                existing_release = candidate_release
+                existing_summary = candidate_summary
+            if unsafe_existing_membership:
+                # Never split, expand, or duplicate a curated release from a checkbox-
+                # limited metadata edit. Leave membership unchanged for explicit review.
+                continue
+            if existing_release is None and inferred_scope_was_narrowed:
+                # An ordinary edit may restrict a larger album group to one track. Do
+                # not manufacture a partial release unless the tracks were first split
+                # into the confirmed album group by the shared-metadata transaction.
+                continue
+        else:
+            existing_release = active_release_service.find_primary_release_for_track(track_id)
+            existing_summary = (
+                active_release_service.fetch_release_summary(existing_release.id)
+                if existing_release is not None
+                else None
+            )
+            existing_track_ids = {
+                placement.track_id
+                for placement in (existing_summary.tracks if existing_summary is not None else [])
+            }
+            if (
+                existing_summary is not None
+                and len(existing_track_ids) > 1
+                and existing_track_ids != set(group_key)
+            ):
+                existing_release = None
+                existing_summary = None
 
         payload = app._release_payload_for_track_ids(
             list(group_key),

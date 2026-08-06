@@ -307,6 +307,102 @@ def test_build_dropped_audio_import_payloads_materializes_artwork_and_normalizes
     assert payload.album_art_storage_mode == STORAGE_MODE_MANAGED_FILE
 
 
+def test_build_dropped_audio_import_payloads_generates_unique_blank_isrcs_when_ready():
+    generated_calls: list[dict[str, object]] = []
+    generated_values = iter(["NL-ABC-26-00002", "NL-ABC-26-00003"])
+    app = SimpleNamespace(
+        _isrc_generation_state=mock.Mock(return_value=("ready", "")),
+        _next_generated_isrc=mock.Mock(
+            side_effect=lambda **kwargs: (
+                generated_calls.append(
+                    {
+                        **kwargs,
+                        "reserved_compacts": set(kwargs["reserved_compacts"]),
+                    }
+                ),
+                next(generated_values),
+            )[1]
+        ),
+        is_isrc_taken_normalized=mock.Mock(return_value=False),
+        _normalize_track_number_value=mock.Mock(return_value=None),
+        _materialize_artwork_payload=mock.Mock(),
+    )
+
+    payloads, errors, _temp_paths = metadata_controller._build_dropped_audio_import_payloads(
+        app,
+        [
+            {
+                "title": "Tagged",
+                "artist": "Artist",
+                "source_path": "/audio/tagged.wav",
+                "isrc": "NLABC2600001",
+            },
+            {
+                "title": "Generated One",
+                "artist": "Artist",
+                "source_path": "/audio/one.wav",
+                "release_date": "2026-05-25",
+            },
+            {
+                "title": "Generated Two",
+                "artist": "Artist",
+                "source_path": "/audio/two.wav",
+            },
+        ],
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+
+    assert errors == []
+    assert [payload.isrc for payload in payloads] == [
+        "NL-ABC-26-00001",
+        "NL-ABC-26-00002",
+        "NL-ABC-26-00003",
+    ]
+    assert generated_calls[0]["use_release_year"] is False
+    assert generated_calls[0]["reserved_compacts"] == {"NLABC2600001"}
+    assert generated_calls[1]["reserved_compacts"] == {"NLABC2600001", "NLABC2600002"}
+
+
+def test_build_dropped_audio_import_payloads_keeps_blanks_when_generation_is_disabled():
+    app = SimpleNamespace(
+        _isrc_generation_state=mock.Mock(return_value=("disabled", "No prefix")),
+        _next_generated_isrc=mock.Mock(),
+        is_isrc_taken_normalized=mock.Mock(return_value=False),
+        _normalize_track_number_value=mock.Mock(return_value=None),
+        _materialize_artwork_payload=mock.Mock(),
+    )
+
+    payloads, errors, _temp_paths = metadata_controller._build_dropped_audio_import_payloads(
+        app,
+        [{"title": "Untitled Code", "artist": "Artist", "source_path": "/audio/song.wav"}],
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+
+    assert errors == []
+    assert payloads[0].isrc == ""
+    app._next_generated_isrc.assert_not_called()
+
+
+def test_build_dropped_audio_import_payloads_blocks_ready_but_exhausted_generation():
+    app = SimpleNamespace(
+        _isrc_generation_state=mock.Mock(return_value=("ready", "")),
+        _next_generated_isrc=mock.Mock(return_value=""),
+        is_isrc_taken_normalized=mock.Mock(return_value=False),
+        _normalize_track_number_value=mock.Mock(return_value=None),
+        _materialize_artwork_payload=mock.Mock(),
+    )
+
+    payloads, errors, temp_paths = metadata_controller._build_dropped_audio_import_payloads(
+        app,
+        [{"title": "No Sequence", "artist": "Artist", "source_path": "/audio/song.wav"}],
+        storage_mode=STORAGE_MODE_MANAGED_FILE,
+    )
+
+    assert payloads == []
+    assert temp_paths == []
+    assert errors == ["Row 1: no free ISRC sequence is currently available for this import."]
+
+
 def test_materialize_artwork_payload_writes_bytes_with_mime_suffix():
     path = Path(
         metadata_controller._materialize_artwork_payload(
@@ -648,7 +744,9 @@ def test_create_tracks_from_dropped_audio_files_queues_apply_worker_on_valid_pay
     monkeypatch.setattr(metadata_controller, "_root_attr", fake_root_attr)
 
     file_path = tmp_path / "audio.wav"
+    temp_artwork_path = tmp_path / "temp-cover.jpg"
     file_path.write_bytes(b"RIFF")
+    temp_artwork_path.write_bytes(b"cover")
     app = SimpleNamespace(
         audio_tag_service=object(),
         track_service=object(),
@@ -663,14 +761,21 @@ def test_create_tracks_from_dropped_audio_files_queues_apply_worker_on_valid_pay
             return_value=(
                 [
                     SimpleNamespace(
-                        album_art_source_path=None, audio_file_source_path=str(file_path)
+                        isrc="NL-ABC-26-00001",
+                        track_title="Dropped Track",
+                        album_art_source_path=None,
+                        audio_file_source_path=str(file_path),
                     )
                 ],
                 [],
-                [],
+                [str(temp_artwork_path)],
             )
         ),
         _current_profile_name=mock.Mock(return_value="drop-test.db"),
+        _claim_next_generated_isrc=mock.Mock(return_value="NL-ABC-26-00002"),
+        _reserve_isrc_claim_for_profile=mock.Mock(return_value=True),
+        _release_reserved_isrc_claim=mock.Mock(),
+        _show_background_task_error=mock.Mock(),
     )
 
     metadata_controller._create_tracks_from_dropped_audio_files(app, [str(file_path)])
@@ -691,6 +796,172 @@ def test_create_tracks_from_dropped_audio_files_queues_apply_worker_on_valid_pay
 
     assert len(planned_calls) == 2
     assert planned_calls[1]["kind"] == "write"
+    app._claim_next_generated_isrc.assert_called_once_with(
+        release_date=None,
+        use_release_year=False,
+        reserved_compacts=set(),
+        track_title="Dropped Track",
+        parent_widget=app,
+    )
+    app._reserve_isrc_claim_for_profile.assert_not_called()
+    assert app._build_dropped_audio_import_payloads.return_value[0][0].isrc == ("NL-ABC-26-00002")
+    planned_calls[1]["on_error"](RuntimeError("write failed"))
+    app._release_reserved_isrc_claim.assert_called_once_with("NL-ABC-26-00002")
+    assert not temp_artwork_path.exists()
+
+
+def test_create_tracks_from_dropped_audio_files_releases_partial_reservations(
+    monkeypatch, tmp_path
+):
+    planned_calls: list[dict[str, object]] = []
+
+    class FakeDialog:
+        def __init__(self, **kwargs):
+            self._items = kwargs.get("items", [])
+
+        def exec(self):
+            return metadata_controller.QDialog.Accepted
+
+        def selected_imports(self):
+            return self._items
+
+        def selected_storage_mode(self):
+            return STORAGE_MODE_MANAGED_FILE
+
+    monkeypatch.setattr(
+        metadata_controller,
+        "_root_attr",
+        lambda name, fallback: FakeDialog if name == "DroppedAudioImportDialog" else fallback,
+    )
+    file_path = tmp_path / "audio.wav"
+    temp_artwork_path = tmp_path / "cover.jpg"
+    file_path.write_bytes(b"RIFF")
+    temp_artwork_path.write_bytes(b"cover")
+    app = SimpleNamespace(
+        audio_tag_service=object(),
+        track_service=object(),
+        party_service=object(),
+        work_service=object(),
+        _is_supported_media_attach_path=mock.Mock(return_value=True),
+        _lossy_primary_audio_warning_text=mock.Mock(return_value=None),
+        _dropped_audio_import_dialog_row=metadata_controller._dropped_audio_import_dialog_row,
+        _submit_background_bundle_task=lambda **kwargs: planned_calls.append(kwargs),
+        _confirm_lossy_primary_audio_selection=mock.Mock(return_value=True),
+        _build_dropped_audio_import_payloads=mock.Mock(
+            return_value=(
+                [
+                    SimpleNamespace(
+                        isrc="NL-ABC-26-00001",
+                        track_title="First",
+                        album_art_source_path=None,
+                        audio_file_source_path=str(file_path),
+                    ),
+                    SimpleNamespace(
+                        isrc="NL-ABC-26-00002",
+                        track_title="Second",
+                        album_art_source_path=None,
+                        audio_file_source_path=str(file_path),
+                    ),
+                ],
+                [],
+                [str(temp_artwork_path)],
+            )
+        ),
+        _current_profile_name=mock.Mock(return_value="drop-test.db"),
+        _reserve_isrc_claim_for_profile=mock.Mock(side_effect=[True, False]),
+        _release_reserved_isrc_claim=mock.Mock(),
+    )
+
+    metadata_controller._create_tracks_from_dropped_audio_files(app, [str(file_path)])
+    planned_calls[0]["on_success"](
+        {
+            "plan": SimpleNamespace(
+                items=[DroppedAudioImportItem(source_path=str(file_path), source_name="audio.wav")],
+                warnings=[],
+            )
+        }
+    )
+
+    assert len(planned_calls) == 1
+    assert app._release_reserved_isrc_claim.call_args_list == [mock.call("NL-ABC-26-00001")]
+    assert not temp_artwork_path.exists()
+
+
+def test_create_tracks_from_dropped_audio_files_releases_reservation_when_submission_fails(
+    monkeypatch, tmp_path
+):
+    planned_calls: list[dict[str, object]] = []
+
+    class FakeDialog:
+        def __init__(self, **kwargs):
+            self._items = kwargs.get("items", [])
+
+        def exec(self):
+            return metadata_controller.QDialog.Accepted
+
+        def selected_imports(self):
+            return self._items
+
+        def selected_storage_mode(self):
+            return STORAGE_MODE_MANAGED_FILE
+
+    monkeypatch.setattr(
+        metadata_controller,
+        "_root_attr",
+        lambda name, fallback: FakeDialog if name == "DroppedAudioImportDialog" else fallback,
+    )
+    file_path = tmp_path / "audio.wav"
+    file_path.write_bytes(b"RIFF")
+    submit_error = RuntimeError("queue unavailable")
+    app = SimpleNamespace(
+        audio_tag_service=object(),
+        track_service=object(),
+        party_service=object(),
+        work_service=object(),
+        _is_supported_media_attach_path=mock.Mock(return_value=True),
+        _lossy_primary_audio_warning_text=mock.Mock(return_value=None),
+        _dropped_audio_import_dialog_row=metadata_controller._dropped_audio_import_dialog_row,
+        _submit_background_bundle_task=lambda **kwargs: (
+            planned_calls.append(kwargs),
+            (_ for _ in ()).throw(submit_error) if kwargs["kind"] == "write" else None,
+        )[1],
+        _confirm_lossy_primary_audio_selection=mock.Mock(return_value=True),
+        _build_dropped_audio_import_payloads=mock.Mock(
+            return_value=(
+                [
+                    SimpleNamespace(
+                        isrc="NL-ABC-26-00001",
+                        track_title="Dropped Track",
+                        album_art_source_path=None,
+                        audio_file_source_path=str(file_path),
+                    )
+                ],
+                [],
+                [],
+            )
+        ),
+        _current_profile_name=mock.Mock(return_value="drop-test.db"),
+        _reserve_isrc_claim_for_profile=mock.Mock(return_value=True),
+        _release_reserved_isrc_claim=mock.Mock(),
+        _show_background_task_error=mock.Mock(),
+    )
+
+    metadata_controller._create_tracks_from_dropped_audio_files(app, [str(file_path)])
+    planned_calls[0]["on_success"](
+        {
+            "plan": SimpleNamespace(
+                items=[DroppedAudioImportItem(source_path=str(file_path), source_name="audio.wav")],
+                warnings=[],
+            )
+        }
+    )
+
+    app._release_reserved_isrc_claim.assert_called_once_with("NL-ABC-26-00001")
+    app._show_background_task_error.assert_called_once_with(
+        "Create Tracks from Audio Files",
+        submit_error,
+        user_message="Could not create tracks from the dropped audio files:",
+    )
 
 
 def test_import_tags_from_audio_reports_prepared_empty(monkeypatch):

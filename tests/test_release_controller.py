@@ -403,6 +403,155 @@ def test_sync_releases_for_tracks_deduplicates_groups_and_splits_stale_release_s
     assert release_controller._sync_releases_for_tracks(app, [1], cursor=object()) == []
 
 
+def test_sync_releases_for_tracks_can_restrict_inferred_groups_to_confirmed_scope() -> None:
+    app = _app()
+    app.track_service = _TrackService(
+        {
+            1: _snapshot(1, title="Selected One", album="Shared", track_number=1),
+            2: _snapshot(2, title="Selected Two", album="Shared", track_number=2),
+            3: _snapshot(3, title="Excluded", album="Shared", track_number=3),
+        }
+    )
+    app.track_service.groups = {1: [1, 2], 2: [1, 2], 3: [3]}
+
+    release_ids = release_controller._sync_releases_for_tracks(
+        app,
+        [1, 2],
+        cursor=object(),
+        restrict_to_track_ids=True,
+    )
+
+    assert release_ids == [701]
+    assert len(app.release_service.created_payloads) == 1
+    assert [
+        placement.track_id for placement in app.release_service.created_payloads[0].placements
+    ] == [
+        1,
+        2,
+    ]
+
+
+def test_restricted_release_sync_does_not_create_release_for_unsplit_partial_group() -> None:
+    app = _app()
+    app.track_service = _TrackService(
+        {
+            1: _snapshot(1, title="Edited Track", album="Shared", track_number=1),
+            2: _snapshot(2, title="Untouched Peer", album="Shared", track_number=2),
+        }
+    )
+    app.track_service.groups = {1: [1, 2], 2: [1, 2]}
+
+    assert (
+        release_controller._sync_releases_for_tracks(
+            app,
+            [1],
+            cursor=object(),
+            restrict_to_track_ids=True,
+        )
+        == []
+    )
+    assert app.release_service.created_payloads == []
+
+
+def test_restricted_release_sync_preserves_mismatched_existing_membership() -> None:
+    app = _app()
+    existing = _release_record(40, "Existing Curated Release")
+    existing_summary = ReleaseSummary(
+        release=existing,
+        tracks=[
+            ReleaseTrackPlacement(track_id=1, track_number=1),
+            ReleaseTrackPlacement(track_id=2, track_number=2),
+            ReleaseTrackPlacement(track_id=3, track_number=3),
+        ],
+    )
+    app.track_service = _TrackService(
+        {
+            1: _snapshot(1, title="Selected One", album="Forked", track_number=1),
+            2: _snapshot(2, title="Selected Two", album="Forked", track_number=2),
+            3: _snapshot(3, title="Excluded", album="Original", track_number=3),
+        }
+    )
+    app.track_service.groups = {1: [1, 2], 2: [1, 2], 3: [3]}
+    app.release_service.primary_by_track = {1: existing, 2: existing}
+    app.release_service.summaries = {40: existing_summary}
+
+    for _attempt in range(2):
+        assert (
+            release_controller._sync_releases_for_tracks(
+                app,
+                [1, 2],
+                cursor=object(),
+                restrict_to_track_ids=True,
+            )
+            == []
+        )
+
+    assert app.release_service.created_payloads == []
+    assert app.release_service.updated_payloads == []
+
+
+def test_restricted_release_sync_does_not_expand_single_track_release() -> None:
+    app = _app()
+    existing = _release_record(41, "Curated Single")
+    app.track_service = _TrackService(
+        {
+            1: _snapshot(1, title="Existing Single", album="New Group", track_number=1),
+            2: _snapshot(2, title="Confirmed Peer", album="New Group", track_number=2),
+        }
+    )
+    app.track_service.groups = {1: [1, 2], 2: [1, 2]}
+    app.release_service.primary_by_track = {1: existing}
+    app.release_service.summaries = {
+        41: ReleaseSummary(
+            release=existing,
+            tracks=[ReleaseTrackPlacement(track_id=1, track_number=1)],
+        )
+    }
+
+    assert (
+        release_controller._sync_releases_for_tracks(
+            app,
+            [1, 2],
+            cursor=object(),
+            restrict_to_track_ids=True,
+        )
+        == []
+    )
+    assert app.release_service.created_payloads == []
+    assert app.release_service.updated_payloads == []
+
+
+def test_restricted_release_sync_checks_selected_peer_memberships() -> None:
+    app = _app()
+    peer_release = _release_record(42, "Peer Curated Release")
+    app.track_service = _TrackService(
+        {
+            1: _snapshot(1, title="No Existing Release", album="New Group", track_number=1),
+            2: _snapshot(2, title="Curated Peer", album="New Group", track_number=2),
+        }
+    )
+    app.track_service.groups = {1: [1, 2], 2: [1, 2]}
+    app.release_service.primary_by_track = {1: None, 2: peer_release}
+    app.release_service.summaries = {
+        42: ReleaseSummary(
+            release=peer_release,
+            tracks=[ReleaseTrackPlacement(track_id=2, track_number=1)],
+        )
+    }
+
+    assert (
+        release_controller._sync_releases_for_tracks(
+            app,
+            [1, 2],
+            cursor=object(),
+            restrict_to_track_ids=True,
+        )
+        == []
+    )
+    assert app.release_service.created_payloads == []
+    assert app.release_service.updated_payloads == []
+
+
 def test_release_prompt_and_selection_paths_handle_cancel_missing_and_success(monkeypatch) -> None:
     messages = _Messages()
     monkeypatch.setattr(

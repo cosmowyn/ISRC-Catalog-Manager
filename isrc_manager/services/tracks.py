@@ -152,6 +152,7 @@ class TrackUpdatePayload:
     album_art_storage_mode: str | None = None
     clear_audio_file: bool = False
     clear_album_art: bool = False
+    album_group_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -632,6 +633,105 @@ class TrackService:
             return int(row[0])
         cur.execute("INSERT INTO Albums (title) VALUES (?)", (title,))
         return int(cur.lastrowid)
+
+    def fetch_album_group_id(
+        self, track_id: int, *, cursor: sqlite3.Cursor | None = None
+    ) -> int | None:
+        """Return a track's current album-group ID without inferring one from its title."""
+        cur = cursor or self.conn.cursor()
+        row = cur.execute("SELECT album_id FROM Tracks WHERE id=?", (int(track_id),)).fetchone()
+        if row is None:
+            raise ValueError(f"Track {int(track_id)} not found")
+        return int(row[0]) if row[0] is not None else None
+
+    def create_album_group(
+        self,
+        title: str,
+        *,
+        copy_from_track_id: int,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int:
+        """Create a distinct album group, retaining the source group's shared artwork."""
+        clean_title = str(title or "").strip()
+        if is_blank(clean_title):
+            raise ValueError("Album group title is required")
+
+        def _create(cur: sqlite3.Cursor) -> int:
+            source_row = cur.execute(
+                "SELECT album_id FROM Tracks WHERE id=?",
+                (int(copy_from_track_id),),
+            ).fetchone()
+            if source_row is None:
+                raise ValueError(f"Track {int(copy_from_track_id)} not found")
+            source_album_id = int(source_row[0]) if source_row[0] is not None else None
+            effective_art = self.get_media_meta(
+                int(copy_from_track_id),
+                "album_art",
+                cursor=cur,
+            )
+            effective_blob = self._fetch_media_blob_for_meta(
+                "album_art",
+                effective_art,
+                cursor=cur,
+            )
+            has_effective_art = bool(effective_art.get("has_media"))
+            art_path = str(effective_art.get("path") or "") or None
+            art_storage_mode = str(effective_art.get("storage_mode") or "") or None
+            art_filename = str(effective_art.get("filename") or "") or None
+            art_mime_type = str(effective_art.get("mime_type") or "") or None
+            art_size_bytes = int(effective_art.get("size_bytes") or 0)
+
+            # Older databases can hold an album's effective cover on one member track.
+            # Promote that fallback before moving the owner so excluded peers retain it.
+            if (
+                has_effective_art
+                and source_album_id is not None
+                and str(effective_art.get("owner_scope") or "") == "album_track"
+            ):
+                self._update_album_art_reference(
+                    source_album_id,
+                    stored_path=art_path,
+                    storage_mode=art_storage_mode,
+                    blob_data=effective_blob,
+                    filename=art_filename,
+                    mime_type=art_mime_type,
+                    size_bytes=art_size_bytes,
+                    cursor=cur,
+                )
+
+            target_uses_shared_art = clean_title.casefold() != "single"
+            cur.execute(
+                """
+                INSERT INTO Albums (
+                    title,
+                    album_art_path,
+                    album_art_storage_mode,
+                    album_art_blob,
+                    album_art_filename,
+                    album_art_mime_type,
+                    album_art_size_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_title,
+                    art_path if has_effective_art and target_uses_shared_art else None,
+                    art_storage_mode if has_effective_art and target_uses_shared_art else None,
+                    (
+                        sqlite3.Binary(effective_blob)
+                        if effective_blob is not None and target_uses_shared_art
+                        else None
+                    ),
+                    art_filename if has_effective_art and target_uses_shared_art else None,
+                    art_mime_type if has_effective_art and target_uses_shared_art else None,
+                    art_size_bytes if has_effective_art and target_uses_shared_art else 0,
+                ),
+            )
+            return int(cur.lastrowid)
+
+        if cursor is not None:
+            return _create(cursor)
+        with self.conn:
+            return _create(self.conn.cursor())
 
     def artist_exists(self, name: str, *, cursor: sqlite3.Cursor | None = None) -> bool:
         clean_name = (name or "").strip()
@@ -2603,6 +2703,36 @@ class TrackService:
             )
             self._delete_unreferenced_media_files(stale_paths, cursor=cur)
 
+    def delete_album_group_if_unused(
+        self,
+        album_group_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bool:
+        """Delete one exact album group only when no track still references it."""
+        cur = cursor or self.conn.cursor()
+        normalized_group_id = int(album_group_id)
+        row = cur.execute(
+            "SELECT album_art_path FROM Albums WHERE id=?",
+            (normalized_group_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        cur.execute(
+            """
+            DELETE FROM Albums
+            WHERE id=?
+              AND NOT EXISTS (
+                  SELECT 1 FROM Tracks WHERE album_id=?
+              )
+            """,
+            (normalized_group_id, normalized_group_id),
+        )
+        if cur.rowcount <= 0:
+            return False
+        self._delete_unreferenced_media_files([row[0]], cursor=cur)
+        return True
+
     def _create_track_row(self, payload: TrackCreatePayload, *, cursor: sqlite3.Cursor) -> int:
         cur = cursor
         self._validate_track_creation_governance(payload, cursor=cur)
@@ -2751,7 +2881,42 @@ class TrackService:
             raise ValueError("Track artist authority columns are unavailable.")
         main_artist_column, _additional_artist_column = artist_columns
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cursor)
-        album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
+        if payload.album_group_id is None:
+            current_album_row = cursor.execute(
+                """
+                SELECT t.album_id, COALESCE(al.title, '')
+                FROM Tracks t
+                LEFT JOIN Albums al ON al.id = t.album_id
+                WHERE t.id=?
+                """,
+                (int(payload.track_id),),
+            ).fetchone()
+            clean_album_title = str(payload.album_title or "").strip()
+            current_album_id = (
+                int(current_album_row[0])
+                if current_album_row is not None and current_album_row[0] is not None
+                else None
+            )
+            current_album_title = (
+                str(current_album_row[1] or "").strip() if current_album_row is not None else ""
+            )
+            if (
+                current_album_id is not None
+                and clean_album_title
+                and current_album_title == clean_album_title
+            ):
+                album_id = current_album_id
+            else:
+                album_id = self.get_or_create_album(clean_album_title, cursor=cursor)
+        else:
+            album_id = int(payload.album_group_id)
+            album_row = cursor.execute(
+                "SELECT title FROM Albums WHERE id=?", (album_id,)
+            ).fetchone()
+            if album_row is None:
+                raise ValueError(f"Album group {album_id} not found")
+            if str(album_row[0] or "").strip() != str(payload.album_title or "").strip():
+                raise ValueError("Album group title does not match track album title")
         clean_isrc = str(payload.isrc or "").strip()
         compact_isrc = to_compact_isrc(clean_isrc)
         current_work_id, current_parent_track_id, current_relationship_type = (
@@ -2979,6 +3144,11 @@ class TrackService:
         track_ids: Iterable[int],
         *,
         field_updates: dict[str, object],
+        album_group_id: int | None = None,
+        catalog_number_mode: str | None = None,
+        catalog_registry_entry_id: int | None = None,
+        catalog_external_code_identifier_id: int | None = None,
+        external_catalog_identifier_id: int | None = None,
         album_art_source_path: str | None = None,
         clear_album_art: bool = False,
         cursor: sqlite3.Cursor | None = None,
@@ -3039,6 +3209,26 @@ class TrackService:
                             if "catalog_number" in field_updates
                             else snapshot.catalog_number
                         ),
+                        catalog_number_mode=(
+                            catalog_number_mode
+                            if "catalog_number" in field_updates
+                            else snapshot.catalog_number_mode
+                        ),
+                        catalog_registry_entry_id=(
+                            catalog_registry_entry_id
+                            if "catalog_number" in field_updates
+                            else snapshot.catalog_registry_entry_id
+                        ),
+                        catalog_external_code_identifier_id=(
+                            catalog_external_code_identifier_id
+                            if "catalog_number" in field_updates
+                            else snapshot.catalog_external_code_identifier_id
+                        ),
+                        external_catalog_identifier_id=(
+                            external_catalog_identifier_id
+                            if "catalog_number" in field_updates
+                            else snapshot.external_catalog_identifier_id
+                        ),
                         buma_work_number=snapshot.buma_work_number,
                         composer=snapshot.composer,
                         publisher=snapshot.publisher,
@@ -3055,6 +3245,7 @@ class TrackService:
                         clear_album_art=bool(
                             apply_album_art and clear_album_art and not album_art_source_path
                         ),
+                        album_group_id=album_group_id,
                     ),
                     cursor=cur,
                 )

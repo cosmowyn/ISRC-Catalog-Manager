@@ -205,6 +205,19 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("local numbering defaults", album_entry.content_html.lower())
         self.assertIn("stored track number", releases.content_html.lower())
 
+    def test_help_documents_shared_metadata_confirmation_and_isrc_recovery(self):
+        edit_track = HELP_CHAPTERS_BY_ID["edit-entry"]
+        media_attach = HELP_CHAPTERS_BY_ID["bulk-audio-attach"]
+
+        self.assertIn("Generate ISRC", edit_track.content_html)
+        self.assertIn("Shared-metadata confirmation", edit_track.content_html)
+        self.assertIn("linked peer tracks have checkboxes", edit_track.content_html)
+        self.assertIn("mismatched curated membership is left unchanged", edit_track.content_html)
+        self.assertIn("Cancelling the review writes nothing", edit_track.content_html)
+        self.assertIn("ISRCs for newly dropped tracks", media_attach.content_html)
+        self.assertIn("allocates and reserves", media_attach.content_html)
+        self.assertIn("no partial track rows are written", media_attach.content_html)
+
     def test_help_chapters_describe_diagnostics_cleanup_and_window_title_defaults(self):
         cleanup = HELP_CHAPTERS_BY_ID["catalog-managers"]
         diagnostics = HELP_CHAPTERS_BY_ID["diagnostics"]
