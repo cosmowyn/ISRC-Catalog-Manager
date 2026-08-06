@@ -6729,6 +6729,104 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertTrue(preview_dock.isVisible())
 
+    def case_contract_template_workspace_symbol_generator_named_layout_survives_tab_cycles(
+        self,
+    ):
+        self.window.resize(1800, 1100)
+        self._drain_events(cycles=8)
+        panel = self.window.open_contract_template_workspace(initial_tab="symbols")
+        self._drain_events(cycles=12)
+        panel.focus_tab("symbols")
+        self._drain_events(cycles=8)
+        host = panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+
+        host.set_locked(False)
+        self._drain_events(cycles=4)
+        host.main_window.splitDockWidget(selected_dock, manual_dock, Qt.Horizontal)
+        self._drain_events(cycles=6)
+        host.main_window.resizeDocks(
+            [controls_dock, selected_dock, manual_dock],
+            [720, 430, 390],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [controls_dock, known_symbols_dock],
+            [340, 420],
+            Qt.Vertical,
+        )
+        self._drain_events(cycles=10)
+        self.assertFalse(host._locked)
+        host._cache_stable_layout_state_if_ready(allow_tabified_active_change=True)
+        saved_geometry = dict(host.capture_layout_state()["dock_geometries"])
+
+        snapshot = self.window._capture_current_main_window_layout_snapshot()
+        self.window._write_saved_main_window_layouts({"Templates": snapshot})
+        self.assertTrue(self.window._apply_named_main_window_layout("Templates"))
+        self._drain_events(cycles=16)
+        panel = self.window.contract_template_workspace_dock.show_panel()
+        panel.focus_tab("symbols")
+        self._drain_events(cycles=8)
+        wait_for(
+            lambda: not panel._tab_hosts["symbols"]._stable_layout_cache_suspended,
+            timeout_ms=1000,
+            interval_ms=20,
+            app=self.app,
+            description="symbol workspace saved-layout settle",
+        )
+        host = panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+
+        original_capture = host._capture_live_layout_state
+        poison_calls: list[str] = []
+
+        def poisoned_live_layout_state():
+            poison_calls.append("capture")
+            state = original_capture()
+            degraded_geometry = {
+                name: dict(payload)
+                for name, payload in dict(state.get("dock_geometries") or {}).items()
+            }
+            degraded_geometry[controls_dock.objectName()]["width"] = max(
+                1,
+                int(degraded_geometry[controls_dock.objectName()]["width"]) - 160,
+            )
+            degraded_geometry[selected_dock.objectName()]["width"] += 80
+            degraded_geometry[manual_dock.objectName()]["width"] += 80
+            return {**state, "dock_geometries": degraded_geometry}
+
+        host._capture_live_layout_state = poisoned_live_layout_state
+        try:
+            for _cycle in range(6):
+                panel.focus_tab("import")
+                self._drain_events(cycles=4)
+                panel.focus_tab("symbols")
+                self._drain_events(cycles=4)
+                wait_for(
+                    lambda: not host._stable_layout_cache_suspended,
+                    timeout_ms=1000,
+                    interval_ms=20,
+                    app=self.app,
+                    description="symbol workspace tab-cycle settle",
+                )
+        finally:
+            host._capture_live_layout_state = original_capture
+
+        self.assertEqual([], poison_calls)
+        for dock in (controls_dock, known_symbols_dock, selected_dock, manual_dock):
+            saved = saved_geometry[dock.objectName()]
+            with self.subTest(dock=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=32)
+                self.assertAlmostEqual(dock.geometry().height(), saved["height"], delta=32)
+
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")
         asset_id = self.window.asset_service.create_asset(

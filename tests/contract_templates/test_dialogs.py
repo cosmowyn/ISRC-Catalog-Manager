@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDockWidget,
     QDoubleSpinBox,
+    QHeaderView,
     QLineEdit,
     QMainWindow,
     QScrollArea,
+    QSizePolicy,
     QTabBar,
     QTableWidget,
     QTableWidgetItem,
@@ -280,6 +282,36 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
     def _fill_dock(self, object_name: str):
         host = self.panel._tab_hosts["fill"]
         return next(dock for dock in host._docks if dock.objectName() == object_name)
+
+    def test_fill_workspace_lock_button_uses_full_visible_hitbox(self):
+        self.panel.resize(900, 700)
+        pump_events(app=self.app, cycles=3)
+        host = self._fill_host()
+        pump_events(app=self.app, cycles=5)
+
+        button = host.lock_layout_button
+        controller = self.panel._fill_preview_controller
+        self.assertIsNotNone(controller)
+        assert controller is not None
+        self.assertFalse(controller.isVisible())
+
+        sample_points = [
+            QPoint(button.width() // 2, 2),
+            QPoint(button.width() // 2, max(1, button.height() // 3)),
+            button.rect().center(),
+            QPoint(3, button.height() // 2),
+            QPoint(max(0, button.width() - 3), button.height() // 2),
+            QPoint(button.width() // 2, max(0, button.height() - 3)),
+        ]
+        for point in sample_points:
+            with self.subTest(point=(point.x(), point.y())):
+                self.assertTrue(button.rect().contains(point))
+                self.assertIs(
+                    host.chrome_row.childAt(button.mapTo(host.chrome_row, point)),
+                    button,
+                )
+                self.assertIs(host.childAt(button.mapTo(host, point)), button)
+                self.assertIs(QApplication.widgetAt(button.mapToGlobal(point)), button)
 
     @staticmethod
     def _visible_nonfloating_docks(host):
@@ -2573,6 +2605,26 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.panel.workspace_tabs.tabText(self.panel.workspace_tabs.currentIndex()).lower(),
         )
 
+    def test_workspace_header_has_no_origin_orphan_placeholder_controls(self):
+        self.panel.resize(900, 700)
+        self.panel.show()
+        pump_events(app=self.app, cycles=3)
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=3)
+
+        self.assertIsNone(self.panel.childAt(QPoint(5, 5)))
+        origin_orphans = [
+            type(widget).__name__
+            for widget in self.panel.findChildren(QWidget)
+            if widget.parentWidget() is self.panel
+            and widget.isVisible()
+            and widget.geometry().x() == 0
+            and widget.geometry().y() == 0
+            and not widget.objectName()
+            and not widget.property("role")
+        ]
+        self.assertEqual([], origin_orphans)
+
     def test_import_workspace_exposes_expected_docks_and_primary_title(self):
         self._focus_import()
         host = self.panel._tab_hosts["import"]
@@ -3162,6 +3214,8 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             Qt.Horizontal,
         )
         pump_events(app=self.app, cycles=4)
+        host._layout_dirty_since_stable_cache = True
+        host.commit_stable_layout_state(force_live=True)
         manual_widths = [
             revision_dock.geometry().width(),
             automatic_dock.geometry().width(),
@@ -3179,6 +3233,624 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         ]
         for before, after in zip(manual_widths, round_tripped_widths):
             self.assertAlmostEqual(after, before, delta=24)
+
+    def test_symbol_workspace_manual_layout_survives_parent_tab_round_trip(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_symbols()
+        host = self.panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+        minimum_widths = {
+            controls_dock.objectName(): 360,
+            known_symbols_dock.objectName(): 360,
+            selected_dock.objectName(): 300,
+            manual_dock.objectName(): 360,
+        }
+        for dock in (controls_dock, known_symbols_dock, selected_dock, manual_dock):
+            with self.subTest(shrinkable_dock=dock.objectName()):
+                self.assertGreaterEqual(
+                    dock.minimumWidth(),
+                    minimum_widths[dock.objectName()],
+                )
+                self.assertEqual(QSizePolicy.Ignored, dock.sizePolicy().horizontalPolicy())
+                scroll_widget = dock.widget()
+                self.assertIsInstance(scroll_widget, QScrollArea)
+                assert isinstance(scroll_widget, QScrollArea)
+                self.assertEqual(
+                    QSizePolicy.Ignored,
+                    scroll_widget.sizePolicy().horizontalPolicy(),
+                )
+                title_bar = dock.titleBarWidget()
+                self.assertIsInstance(title_bar, QWidget)
+                assert isinstance(title_bar, QWidget)
+                self.assertEqual(0, title_bar.minimumWidth())
+                self.assertEqual(
+                    QSizePolicy.Ignored,
+                    title_bar.sizePolicy().horizontalPolicy(),
+                )
+
+        host.set_locked(False)
+        host.main_window.splitDockWidget(selected_dock, manual_dock, Qt.Horizontal)
+        pump_events(app=self.app, cycles=4)
+        host.main_window.resizeDocks(
+            [controls_dock, selected_dock, manual_dock],
+            [760, 380, 360],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [controls_dock, known_symbols_dock],
+            [320, 430],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=3)
+        stable_state = host.capture_layout_state()
+        stable_geometry = stable_state["dock_geometries"]
+        self.assertTrue(host._stable_layout_state)
+
+        host._applying_layout_state = True
+        try:
+            host.main_window.resizeDocks(
+                [controls_dock, selected_dock, manual_dock],
+                [1080, 220, 200],
+                Qt.Horizontal,
+            )
+            host.main_window.resizeDocks(
+                [controls_dock, known_symbols_dock],
+                [540, 210],
+                Qt.Vertical,
+            )
+            pump_events(app=self.app, cycles=4)
+        finally:
+            host._applying_layout_state = False
+
+        drift_deltas = [
+            abs(dock.geometry().width() - stable_geometry[dock.objectName()]["width"])
+            for dock in (controls_dock, selected_dock, manual_dock)
+        ]
+        self.assertGreater(max(drift_deltas), 48)
+
+        self.panel.hide()
+        pump_events(app=self.app, cycles=2)
+        self.panel.show()
+        wait_for(
+            lambda: host.isVisible() and not host._restore_stable_layout_on_show,
+            timeout_ms=1000,
+            interval_ms=20,
+            app=self.app,
+            description="symbol workspace stable layout restore after parent tab round trip",
+        )
+        pump_events(app=self.app, cycles=6)
+
+        for dock in (controls_dock, known_symbols_dock, selected_dock, manual_dock):
+            saved = stable_geometry[dock.objectName()]
+            with self.subTest(dock=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=32)
+                self.assertAlmostEqual(dock.geometry().height(), saved["height"], delta=32)
+
+    def test_workspace_tab_bar_interaction_commits_current_layout_before_switch(self):
+        self._focus_symbols()
+        host = self.panel._tab_hosts["symbols"]
+        commit_calls: list[dict[str, object]] = []
+
+        def tracking_commit(**kwargs):
+            commit_calls.append(dict(kwargs))
+            return {}
+
+        with mock.patch.object(host, "commit_stable_layout_state", side_effect=tracking_commit):
+            self.panel.eventFilter(
+                self.panel.workspace_tabs.tabBar(),
+                QEvent(QEvent.MouseButtonPress),
+            )
+
+        self.assertEqual([{"force_live": True}], commit_calls)
+
+    def test_symbol_workspace_docks_keep_usable_minimum_widths(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_symbols()
+        host = self.panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+
+        host.set_locked(False)
+        host.main_window.splitDockWidget(selected_dock, manual_dock, Qt.Horizontal)
+        pump_events(app=self.app, cycles=4)
+        host.main_window.resizeDocks(
+            [controls_dock, selected_dock, manual_dock],
+            [1, 1, 1498],
+            Qt.Horizontal,
+        )
+        pump_events(app=self.app, cycles=4)
+
+        for dock in (controls_dock, selected_dock, manual_dock):
+            with self.subTest(dock=dock.objectName()):
+                self.assertGreaterEqual(
+                    dock.geometry().width(),
+                    dock.minimumWidth() - 8,
+                )
+
+    def test_symbol_workspace_saved_manual_layout_survives_template_tab_cycles(self):
+        self.custom_fields.ensure_fields(
+            [
+                {
+                    "name": f"Very Long Custom Symbol Field Name {index:03d} For Layout Width",
+                    "field_type": "text",
+                    "options": "",
+                }
+                for index in range(160)
+            ]
+        )
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_symbols()
+        host = self.panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+
+        host.set_locked(False)
+        host.main_window.splitDockWidget(selected_dock, manual_dock, Qt.Horizontal)
+        pump_events(app=self.app, cycles=4)
+        host.main_window.resizeDocks(
+            [controls_dock, selected_dock, manual_dock],
+            [620, 470, 390],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [controls_dock, known_symbols_dock],
+            [330, 390],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        self.assertFalse(host._locked)
+        host._cache_stable_layout_state_if_ready(allow_tabified_active_change=True)
+
+        host._layout_normalization_pending = True
+        saved_state = self.panel.capture_layout_state()
+        saved_symbols = saved_state["tabs"]["symbols"]
+        saved_geometry = saved_symbols["dock_geometries"]
+        self.assertEqual(saved_state["current_tab"], "symbols")
+        self.assertLessEqual(self.panel.table.columnWidth(0), 140)
+        self.assertLessEqual(self.panel.table.columnWidth(1), 260)
+        self.assertLessEqual(self.panel.table.columnWidth(3), 260)
+        self.assertEqual(
+            QHeaderView.Stretch,
+            self.panel.table.horizontalHeader().sectionResizeMode(4),
+        )
+
+        original_capture = host._capture_live_layout_state
+        passive_capture_calls: list[str] = []
+
+        def passive_drift_live_layout_state():
+            passive_capture_calls.append("capture")
+            state = original_capture()
+            degraded_geometry = {
+                name: dict(payload)
+                for name, payload in dict(state.get("dock_geometries") or {}).items()
+            }
+            degraded_geometry[controls_dock.objectName()]["width"] = max(
+                1,
+                int(degraded_geometry[controls_dock.objectName()]["width"]) - 220,
+            )
+            degraded_geometry[selected_dock.objectName()]["width"] = max(
+                1,
+                int(degraded_geometry[selected_dock.objectName()]["width"]) - 160,
+            )
+            degraded_geometry[manual_dock.objectName()]["width"] += 380
+            return {**state, "dock_geometries": degraded_geometry}
+
+        host._capture_live_layout_state = passive_drift_live_layout_state
+        try:
+            self.panel._commit_current_workspace_layout(force_live=True)
+        finally:
+            host._capture_live_layout_state = original_capture
+
+        self.assertEqual([], passive_capture_calls)
+        self.assertEqual(saved_geometry, host._stable_layout_state["dock_geometries"])
+
+        host._applying_layout_state = True
+        try:
+            host.main_window.resizeDocks(
+                [controls_dock, selected_dock, manual_dock],
+                [360, 300, 820],
+                Qt.Horizontal,
+            )
+            pump_events(app=self.app, cycles=4)
+        finally:
+            host._applying_layout_state = False
+        self.assertGreater(
+            manual_dock.geometry().width(),
+            saved_geometry[manual_dock.objectName()]["width"] + 80,
+        )
+        host.validate_layout_integrity_after_restore()
+        pump_events(app=self.app, cycles=4)
+        for dock in (controls_dock, selected_dock, manual_dock):
+            saved = saved_geometry[dock.objectName()]
+            with self.subTest(restored_after_refresh=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=16)
+
+        hidden_capture_calls: list[str] = []
+
+        def tracking_capture_live_layout_state():
+            state = original_capture()
+            if self.panel.workspace_tabs.currentWidget() is host and host.isVisible():
+                return state
+            hidden_capture_calls.append("capture")
+            degraded_geometry = {
+                name: dict(payload)
+                for name, payload in dict(state.get("dock_geometries") or {}).items()
+            }
+            degraded_geometry[controls_dock.objectName()]["width"] += 240
+            degraded_geometry[selected_dock.objectName()]["width"] = 90
+            degraded_geometry[manual_dock.objectName()]["width"] = 180
+            return {**state, "dock_geometries": degraded_geometry}
+
+        host._capture_live_layout_state = tracking_capture_live_layout_state
+        self.panel.focus_tab("import")
+        pump_events(app=self.app, cycles=8)
+        self.assertFalse(host.isVisible())
+        self.assertFalse(host._layout_dirty_since_stable_cache)
+        host.eventFilter(
+            selected_dock,
+            QResizeEvent(selected_dock.size(), selected_dock.size()),
+        )
+        self.assertFalse(host._layout_dirty_since_stable_cache)
+        self.assertEqual([], hidden_capture_calls)
+        host._capture_live_layout_state = original_capture
+
+        self.panel.focus_tab("symbols")
+        pump_events(app=self.app, cycles=4)
+        wait_for(
+            lambda: not host._stable_layout_cache_suspended,
+            timeout_ms=1000,
+            interval_ms=20,
+            app=self.app,
+            description="symbol workspace stable-cache suspension before user resize",
+        )
+        host._layout_dirty_since_stable_cache = False
+        with mock.patch.object(
+            host,
+            "_resize_event_is_user_layout_interaction",
+            return_value=True,
+        ):
+            host.eventFilter(
+                selected_dock,
+                QResizeEvent(selected_dock.size(), selected_dock.size()),
+            )
+        self.assertTrue(host._layout_dirty_since_stable_cache)
+        host._layout_dirty_since_stable_cache = False
+
+        normalization_calls: list[str] = []
+        original_normalizer = host._layout_normalizer
+
+        def tracking_normalizer():
+            normalization_calls.append("normalize")
+            if callable(original_normalizer):
+                original_normalizer()
+
+        original_integrity_check = host._layout_integrity_ok
+
+        def needs_geometry_repair_during_refresh() -> bool:
+            if (
+                host.isVisible()
+                and bool(host._stable_layout_state)
+                and not host._applying_layout_state
+            ):
+                return False
+            return original_integrity_check()
+
+        host.set_layout_normalizer(tracking_normalizer)
+        host._layout_integrity_ok = needs_geometry_repair_during_refresh
+
+        for _cycle in range(10):
+            for tab_key in ("symbols", "import"):
+                self.panel.focus_tab(tab_key)
+                pump_events(app=self.app, cycles=8)
+                if tab_key == "symbols":
+                    wait_for(
+                        lambda: host.isVisible() and not host._restore_stable_layout_on_show,
+                        timeout_ms=1000,
+                        interval_ms=20,
+                        app=self.app,
+                        description="saved symbol layout restore after template tab cycle",
+                    )
+        self.panel.focus_tab("symbols")
+        pump_events(app=self.app, cycles=8)
+
+        self.assertEqual([], normalization_calls)
+        for dock in (controls_dock, known_symbols_dock, selected_dock, manual_dock):
+            saved = saved_geometry[dock.objectName()]
+            with self.subTest(dock=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=16)
+                self.assertAlmostEqual(dock.geometry().height(), saved["height"], delta=16)
+
+    def test_symbol_workspace_tab_show_ignores_transient_resize_cache(self):
+        self.custom_fields.ensure_fields(
+            [
+                {
+                    "name": f"Extremely Long Custom Field Name {index:03d} Used To Stress Symbol Width",
+                    "field_type": "text",
+                    "options": "",
+                }
+                for index in range(120)
+            ]
+        )
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_symbols()
+        host = self.panel._tab_hosts["symbols"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+
+        host.set_locked(False)
+        host.main_window.splitDockWidget(selected_dock, manual_dock, Qt.Horizontal)
+        pump_events(app=self.app, cycles=4)
+        host.main_window.resizeDocks(
+            [controls_dock, selected_dock, manual_dock],
+            [640, 470, 390],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [controls_dock, known_symbols_dock],
+            [330, 390],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        self.assertFalse(host._locked)
+        host._cache_stable_layout_state_if_ready(allow_tabified_active_change=True)
+
+        saved_state = host.capture_layout_state()
+        saved_geometry = dict(saved_state["dock_geometries"])
+
+        self.panel.focus_tab("import")
+        pump_events(app=self.app, cycles=4)
+
+        original_capture = host._capture_live_layout_state
+        poison_calls: list[str] = []
+
+        def poisoned_live_layout_state():
+            poison_calls.append("capture")
+            state = original_capture()
+            degraded_geometry = {
+                name: dict(payload)
+                for name, payload in dict(state.get("dock_geometries") or {}).items()
+            }
+            degraded_geometry[controls_dock.objectName()]["width"] = max(
+                1,
+                int(degraded_geometry[controls_dock.objectName()]["width"]) - 180,
+            )
+            degraded_geometry[selected_dock.objectName()]["width"] += 90
+            degraded_geometry[manual_dock.objectName()]["width"] += 90
+            return {**state, "dock_geometries": degraded_geometry}
+
+        host._capture_live_layout_state = poisoned_live_layout_state
+        try:
+            self.panel.focus_tab("symbols")
+            pump_events(app=self.app, cycles=2)
+            host.eventFilter(
+                selected_dock,
+                QResizeEvent(selected_dock.size(), selected_dock.size()),
+            )
+            suspended_capture = host.capture_layout_state()
+            self.assertEqual(saved_geometry, suspended_capture["dock_geometries"])
+            wait_for(
+                lambda: not host._stable_layout_cache_suspended,
+                timeout_ms=1000,
+                interval_ms=20,
+                app=self.app,
+                description="symbol workspace stable-cache suspension to settle",
+            )
+            pump_events(app=self.app, cycles=4)
+        finally:
+            host._capture_live_layout_state = original_capture
+
+        self.assertEqual([], poison_calls)
+        self.assertEqual(saved_geometry, host._stable_layout_state["dock_geometries"])
+
+    def test_import_workspace_manual_layout_survives_parent_tab_round_trip(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_import()
+        host = self.panel._tab_hosts["import"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        import_dock = docks["contractTemplateImportAdminDock"]
+        revision_dock = docks["contractTemplateRevisionInventoryDock"]
+        placeholder_dock = docks["contractTemplatePlaceholderInventoryDock"]
+        draft_dock = docks["contractTemplateDraftArchiveDock"]
+        snapshots_dock = docks["contractTemplateSnapshotsArtifactsDock"]
+
+        host.set_locked(False)
+        host.main_window.resizeDocks(
+            [import_dock, revision_dock],
+            [620, 880],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [import_dock, draft_dock],
+            [480, 260],
+            Qt.Vertical,
+        )
+        host.main_window.resizeDocks(
+            [revision_dock, placeholder_dock, snapshots_dock],
+            [180, 380, 220],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=3)
+        stable_state = host.capture_layout_state()
+        stable_geometry = stable_state["dock_geometries"]
+        self.assertTrue(host._stable_layout_state)
+
+        host._applying_layout_state = True
+        try:
+            host.main_window.resizeDocks(
+                [import_dock, revision_dock],
+                [1040, 460],
+                Qt.Horizontal,
+            )
+            host.main_window.resizeDocks(
+                [revision_dock, placeholder_dock, snapshots_dock],
+                [420, 140, 220],
+                Qt.Vertical,
+            )
+            pump_events(app=self.app, cycles=4)
+        finally:
+            host._applying_layout_state = False
+
+        self.assertGreater(
+            abs(
+                import_dock.geometry().width() - stable_geometry[import_dock.objectName()]["width"]
+            ),
+            80,
+        )
+
+        self.panel.hide()
+        pump_events(app=self.app, cycles=2)
+        self.panel.show()
+        wait_for(
+            lambda: host.isVisible() and not host._restore_stable_layout_on_show,
+            timeout_ms=1000,
+            interval_ms=20,
+            app=self.app,
+            description="import workspace stable layout restore after parent tab round trip",
+        )
+        pump_events(app=self.app, cycles=6)
+
+        for dock in (
+            import_dock,
+            revision_dock,
+            placeholder_dock,
+            draft_dock,
+            snapshots_dock,
+        ):
+            saved = stable_geometry[dock.objectName()]
+            with self.subTest(dock=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=32)
+                self.assertAlmostEqual(dock.geometry().height(), saved["height"], delta=32)
+
+    def test_import_workspace_saved_manual_layout_survives_template_tab_cycles(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_import()
+        host = self.panel._tab_hosts["import"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        import_dock = docks["contractTemplateImportAdminDock"]
+        revision_dock = docks["contractTemplateRevisionInventoryDock"]
+        placeholder_dock = docks["contractTemplatePlaceholderInventoryDock"]
+        draft_dock = docks["contractTemplateDraftArchiveDock"]
+        snapshots_dock = docks["contractTemplateSnapshotsArtifactsDock"]
+
+        host.set_locked(False)
+        host.main_window.resizeDocks(
+            [import_dock, revision_dock],
+            [560, 940],
+            Qt.Horizontal,
+        )
+        host.main_window.resizeDocks(
+            [import_dock, draft_dock],
+            [520, 220],
+            Qt.Vertical,
+        )
+        host.main_window.resizeDocks(
+            [revision_dock, placeholder_dock, snapshots_dock],
+            [160, 420, 180],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=3)
+
+        saved_state = self.panel.capture_layout_state()
+        saved_import = saved_state["tabs"]["import"]
+        saved_geometry = saved_import["dock_geometries"]
+        self.assertEqual(saved_state["current_tab"], "import")
+
+        original_capture = host._capture_live_layout_state
+        hidden_capture_calls: list[str] = []
+
+        def tracking_capture_live_layout_state():
+            state = original_capture()
+            if self.panel.workspace_tabs.currentWidget() is host and host.isVisible():
+                return state
+            hidden_capture_calls.append("capture")
+            degraded_geometry = {
+                name: dict(payload)
+                for name, payload in dict(state.get("dock_geometries") or {}).items()
+            }
+            degraded_geometry[import_dock.objectName()]["width"] += 260
+            degraded_geometry[revision_dock.objectName()]["width"] = 180
+            degraded_geometry[placeholder_dock.objectName()]["height"] = 90
+            return {**state, "dock_geometries": degraded_geometry}
+
+        host._capture_live_layout_state = tracking_capture_live_layout_state
+        self.panel.focus_tab("symbols")
+        pump_events(app=self.app, cycles=8)
+        self.assertEqual([], hidden_capture_calls)
+        host._capture_live_layout_state = original_capture
+
+        normalization_calls: list[str] = []
+        original_normalizer = host._layout_normalizer
+
+        def tracking_normalizer():
+            normalization_calls.append("normalize")
+            if callable(original_normalizer):
+                original_normalizer()
+
+        original_integrity_check = host._layout_integrity_ok
+
+        def needs_geometry_repair_during_refresh() -> bool:
+            if (
+                host.isVisible()
+                and bool(host._stable_layout_state)
+                and not host._applying_layout_state
+            ):
+                return False
+            return original_integrity_check()
+
+        host.set_layout_normalizer(tracking_normalizer)
+        host._layout_integrity_ok = needs_geometry_repair_during_refresh
+
+        for _cycle in range(10):
+            for tab_key in ("import", "symbols"):
+                self.panel.focus_tab(tab_key)
+                pump_events(app=self.app, cycles=8)
+                if tab_key == "import":
+                    wait_for(
+                        lambda: host.isVisible() and not host._restore_stable_layout_on_show,
+                        timeout_ms=1000,
+                        interval_ms=20,
+                        app=self.app,
+                        description="saved import layout restore after template tab cycle",
+                    )
+        self.panel.focus_tab("import")
+        pump_events(app=self.app, cycles=8)
+
+        self.assertEqual([], normalization_calls)
+        for dock in (
+            import_dock,
+            revision_dock,
+            placeholder_dock,
+            draft_dock,
+            snapshots_dock,
+        ):
+            saved = saved_geometry[dock.objectName()]
+            with self.subTest(dock=dock.objectName()):
+                self.assertAlmostEqual(dock.geometry().width(), saved["width"], delta=16)
+                self.assertAlmostEqual(dock.geometry().height(), saved["height"], delta=16)
 
     def test_locked_layout_preserves_tabified_dock_switching(self):
         self._focus_fill()
@@ -3222,6 +3894,8 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         revision_dock = docks["contractTemplateFillRevisionDock"]
         draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
         travel_dock = docks["contractTemplateFillTravelHelperDock"]
+        export_dock = docks["contractTemplateFillResolvedExportDock"]
+        notes_dock = docks["contractTemplateFillDraftNotesDock"]
         automatic_dock = docks["contractTemplateFillAutomaticFieldsDock"]
         preview_dock = docks["contractTemplateHtmlPreviewDock"]
 
@@ -3240,6 +3914,13 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         )
         pump_events(app=self.app, cycles=6)
         host._cache_stable_layout_state_if_ready()
+        wait_for(
+            lambda: not host._dock_tab_restore_pending,
+            timeout_ms=1000,
+            interval_ms=20,
+            app=self.app,
+            description="initial tabified dock geometry restore",
+        )
 
         dock_tab_bar = next(
             (tab_bar for tab_bar in host.main_window.findChildren(QTabBar) if tab_bar.count() >= 3),
@@ -3247,6 +3928,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         )
         self.assertIsNotNone(dock_tab_bar)
         left_width = revision_dock.geometry().width()
+        left_height = revision_dock.geometry().height()
+        export_height = export_dock.geometry().height()
+        notes_height = notes_dock.geometry().height()
         automatic_width = automatic_dock.geometry().width()
         preview_width = preview_dock.geometry().width()
         tabified_group = [revision_dock, draft_dock, travel_dock]
@@ -3255,9 +3939,19 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             for tab_index in range(dock_tab_bar.count()):
                 dock_tab_bar.setCurrentIndex(tab_index)
                 pump_events(app=self.app, cycles=6)
+                wait_for(
+                    lambda: not host._dock_tab_restore_pending,
+                    timeout_ms=1000,
+                    interval_ms=20,
+                    app=self.app,
+                    description="tabified dock geometry restore",
+                )
                 active_dock = host._active_tabified_group_dock(tabified_group)
                 self.assertIsNotNone(active_dock)
                 self.assertAlmostEqual(active_dock.geometry().width(), left_width, delta=24)
+                self.assertAlmostEqual(active_dock.geometry().height(), left_height, delta=24)
+                self.assertAlmostEqual(export_dock.geometry().height(), export_height, delta=24)
+                self.assertAlmostEqual(notes_dock.geometry().height(), notes_height, delta=24)
                 self.assertAlmostEqual(
                     automatic_dock.geometry().width(),
                     automatic_width,
@@ -3405,6 +4099,159 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             restored_host = restored_panel._tab_hosts["fill"]
             self.assertFalse(restored_host._has_exposed_central_canvas())
             self.assertTrue(all(dock.isVisible() for dock in restored_host._docks))
+        finally:
+            restored_panel.close()
+            restored_panel.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
+    def test_restore_layout_state_preserves_saved_fill_dock_heights_after_normalizer_settles(
+        self,
+    ):
+        self.panel.resize(1400, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        auto_dock = docks["contractTemplateFillAutomaticFieldsDock"]
+        selector_dock = docks["contractTemplateFillDatabaseFieldsDock"]
+        manual_dock = docks["contractTemplateFillManualFieldsDock"]
+
+        host.set_locked(False)
+        host.main_window.resizeDocks(
+            [auto_dock, selector_dock, manual_dock],
+            [120, 500, 120],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=4)
+
+        saved_state = self.panel.capture_layout_state()
+        saved_fill_state = saved_state["tabs"]["fill"]
+        saved_geometries = saved_fill_state["dock_geometries"]
+        saved_heights = {
+            name: int(saved_geometries[name]["height"])
+            for name in (
+                "contractTemplateFillAutomaticFieldsDock",
+                "contractTemplateFillDatabaseFieldsDock",
+                "contractTemplateFillManualFieldsDock",
+            )
+        }
+
+        restored_panel = ContractTemplateWorkspacePanel(**self._panel_constructor_kwargs())
+        try:
+            restored_panel.resize(1400, 900)
+            restored_panel.show()
+            pump_events(app=self.app, cycles=3)
+            restored_panel.restore_layout_state(saved_state)
+            pump_events(app=self.app, cycles=8)
+            restored_panel.focus_tab("fill")
+            pump_events(app=self.app, cycles=8)
+
+            restored_host = restored_panel._tab_hosts["fill"]
+            restored_docks = {dock.objectName(): dock for dock in restored_host._docks}
+            restored_heights = {
+                name: restored_docks[name].geometry().height() for name in saved_heights
+            }
+
+            self.assertFalse(restored_host._layout_normalization_pending)
+            for name, saved_height in saved_heights.items():
+                self.assertAlmostEqual(
+                    restored_heights[name],
+                    saved_height,
+                    delta=32,
+                    msg=f"{name} should restore its saved height",
+                )
+
+            restored_host.apply_layout_normalization_if_ready()
+            pump_events(app=self.app, cycles=3)
+            for name, restored_height in restored_heights.items():
+                self.assertAlmostEqual(
+                    restored_docks[name].geometry().height(),
+                    restored_height,
+                    delta=12,
+                    msg=f"{name} should not be reset to default height after restore",
+                )
+        finally:
+            restored_panel.close()
+            restored_panel.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
+    def test_restore_layout_state_releases_tabified_fill_height_constraints(self):
+        self.panel.resize(1500, 900)
+        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        auto_dock = docks["contractTemplateFillAutomaticFieldsDock"]
+        selector_dock = docks["contractTemplateFillDatabaseFieldsDock"]
+        manual_dock = docks["contractTemplateFillManualFieldsDock"]
+
+        host.set_locked(False)
+        host.main_window.tabifyDockWidget(selector_dock, manual_dock)
+        selector_dock.raise_()
+        pump_events(app=self.app, cycles=5)
+        self.assertIn(manual_dock, host.main_window.tabifiedDockWidgets(selector_dock))
+
+        host.main_window.resizeDocks(
+            [auto_dock, selector_dock],
+            [160, 520],
+            Qt.Vertical,
+        )
+        pump_events(app=self.app, cycles=6)
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=4)
+
+        saved_state = self.panel.capture_layout_state()
+        restored_panel = ContractTemplateWorkspacePanel(**self._panel_constructor_kwargs())
+        try:
+            restored_panel.resize(1500, 900)
+            restored_panel.show()
+            pump_events(app=self.app, cycles=3)
+            restored_panel.restore_layout_state(saved_state)
+            pump_events(app=self.app, cycles=4)
+            restored_panel.focus_tab("fill")
+            pump_events(app=self.app, cycles=4)
+
+            restored_host = restored_panel._tab_hosts["fill"]
+            restored_docks = {dock.objectName(): dock for dock in restored_host._docks}
+            restored_auto = restored_docks["contractTemplateFillAutomaticFieldsDock"]
+            restored_selector = restored_docks["contractTemplateFillDatabaseFieldsDock"]
+            restored_manual = restored_docks["contractTemplateFillManualFieldsDock"]
+            self.assertIn(
+                restored_manual,
+                restored_host.main_window.tabifiedDockWidgets(restored_selector),
+            )
+            self.assertTrue(restored_host._tabified_restore_constraints)
+            wait_for(
+                lambda: not restored_host._tabified_restore_constraints,
+                timeout_ms=1000,
+                interval_ms=20,
+                app=self.app,
+                description="tabified fill dock restore constraints to release",
+            )
+
+            active_dock = (
+                restored_host._active_tabified_group_dock([restored_selector, restored_manual])
+                or restored_selector
+            )
+            before_height = active_dock.geometry().height()
+            self.assertLess(active_dock.minimumHeight(), max(1, before_height - 24))
+            self.assertGreater(active_dock.maximumHeight(), before_height + 120)
+
+            restored_host.set_locked(False)
+            pump_events(app=self.app, cycles=2)
+            restored_host.main_window.resizeDocks(
+                [restored_auto, active_dock],
+                [520, 120],
+                Qt.Vertical,
+            )
+            pump_events(app=self.app, cycles=8)
+            self.assertLess(
+                active_dock.geometry().height(),
+                before_height - 40,
+                msg="restored tabified fill dock should remain vertically resizable",
+            )
         finally:
             restored_panel.close()
             restored_panel.deleteLater()

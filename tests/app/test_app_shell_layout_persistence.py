@@ -50,6 +50,9 @@ class AppShellLayoutPersistenceTests(AppShellTestCase):
     test_contract_template_workspace_named_layout_restore_can_reopen_hidden_fill_dock_while_locked = (
         AppShellTestCase.case_contract_template_workspace_named_layout_restore_can_reopen_hidden_fill_dock_while_locked
     )
+    test_contract_template_workspace_symbol_generator_named_layout_survives_tab_cycles = (
+        AppShellTestCase.case_contract_template_workspace_symbol_generator_named_layout_survives_tab_cycles
+    )
 
 
 del AppShellTestCase

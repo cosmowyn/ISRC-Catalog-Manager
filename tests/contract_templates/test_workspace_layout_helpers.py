@@ -691,7 +691,11 @@ def test_workspace_host_repair_visibility_integrity_and_command_paths(monkeypatc
         queued: list[str] = []
         notified: list[str] = []
         monkeypatch.setattr(host, "_queue_layout_compaction", lambda: queued.append("queue"))
-        monkeypatch.setattr(host, "_notify_layout_changed", lambda: notified.append("notify"))
+        monkeypatch.setattr(
+            host,
+            "_notify_layout_changed",
+            lambda **_kwargs: notified.append("notify"),
+        )
         host._locked = False
         command_dock.setFloating(True)
         host.move_dock_to_area(command_dock, Qt.BottomDockWidgetArea)
@@ -769,7 +773,11 @@ def test_workspace_host_layout_events_compaction_and_title_bar_edges(monkeypatch
         notified: list[str] = []
         refreshed: list[str] = []
         monkeypatch.setattr(host, "_queue_layout_compaction", lambda: queued.append("queue"))
-        monkeypatch.setattr(host, "_notify_layout_changed", lambda: notified.append("notify"))
+        monkeypatch.setattr(
+            host,
+            "_notify_layout_changed",
+            lambda **_kwargs: notified.append("notify"),
+        )
         monkeypatch.setattr(
             host, "_refresh_dock_order_hints", lambda *args: refreshed.append("refresh")
         )

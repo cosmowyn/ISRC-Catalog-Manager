@@ -10,9 +10,10 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QEvent, QPoint, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractScrollArea,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTabBar,
     QTableWidget,
@@ -822,6 +824,8 @@ class _WorkspaceDockTitleBar(QWidget):
         self.dock = dock
         self.setObjectName(f"{dock.objectName()}TitleBar")
         self.setProperty("role", "dockTitleBar")
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -831,6 +835,8 @@ class _WorkspaceDockTitleBar(QWidget):
         self.title_label.setObjectName(f"{dock.objectName()}TitleLabel")
         self.title_label.setProperty("role", "dockTitle")
         self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.title_label.setMinimumWidth(0)
+        self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         layout.addWidget(self.title_label, 1)
 
         self.options_button = QToolButton(self)
@@ -994,6 +1000,13 @@ class _DockableWorkspaceTab(QMainWindow):
         self._dock_tab_restore_pending = False
         self.main_window = self
         self._connected_dock_tab_bars: set[int] = set()
+        self._last_tabified_active_map: dict[tuple[str, ...], str] = {}
+        self._tabified_restore_constraints: dict[QDockWidget, tuple[int, int, int, int]] = {}
+        self._tabified_restore_release_generation = 0
+        self._stable_layout_cache_generation = 0
+        self._stable_layout_cache_suspend_generation = 0
+        self._stable_layout_cache_suspended = False
+        self._layout_dirty_since_stable_cache = False
         self.setObjectName(host_object_name)
         self.setProperty("role", "workspaceCanvas")
 
@@ -1129,10 +1142,34 @@ class _DockableWorkspaceTab(QMainWindow):
             seen.add(dock)
         return geometry_map
 
-    def _cache_stable_layout_state_if_ready(self) -> dict[str, object] | None:
+    def _tabified_active_map(self) -> dict[tuple[str, ...], str]:
+        active_map: dict[tuple[str, ...], str] = {}
+        seen: set[QDockWidget] = set()
+        for dock in self._docks:
+            if dock in seen:
+                continue
+            group = self._tabified_group_for_dock(dock)
+            if len(group) <= 1:
+                seen.update(group or [dock])
+                continue
+            key = tuple(sorted(str(peer.objectName() or "") for peer in group))
+            active = self._active_tabified_group_dock(group)
+            if active is not None:
+                active_map[key] = str(active.objectName() or "")
+            seen.update(group)
+        return active_map
+
+    def _cache_stable_layout_state_if_ready(
+        self,
+        *,
+        allow_tabified_active_change: bool = False,
+    ) -> dict[str, object] | None:
         if (
-            not self._docks
+            not _qt_object_is_valid(self)
+            or not self._docks
             or not self._layout_restore_ready()
+            or self._stable_layout_cache_suspended
+            or self._restore_stable_layout_on_show
             or self._transient_restore_churn_active()
             or self._applying_layout_state
             or self._applying_layout_normalization
@@ -1140,8 +1177,21 @@ class _DockableWorkspaceTab(QMainWindow):
             or self._dock_tab_restore_pending
         ):
             return None
+        active_map = self._tabified_active_map()
+        if (
+            active_map
+            and self._last_tabified_active_map
+            and active_map != self._last_tabified_active_map
+            and not allow_tabified_active_change
+        ):
+            self._dock_tab_restore_pending = True
+            self._restore_tabified_layout_after_tab_change()
+            return None
         state = self._capture_live_layout_state()
         self._stable_layout_state = dict(state)
+        self._last_tabified_active_map = active_map
+        self._layout_dirty_since_stable_cache = False
+        self._stable_layout_cache_generation += 1
         return dict(state)
 
     def register_docks(self, docks: list[QDockWidget]) -> None:
@@ -1194,6 +1244,8 @@ class _DockableWorkspaceTab(QMainWindow):
             return False
         if not callable(self._layout_normalizer):
             return False
+        if self._restore_stable_layout_on_show and not force:
+            return False
         if not force and not self._layout_normalization_pending:
             return False
         if not self._layout_ready_for_normalization():
@@ -1211,6 +1263,61 @@ class _DockableWorkspaceTab(QMainWindow):
         if succeeded and not self._layout_normalization_pending:
             self._cache_stable_layout_state_if_ready()
         return succeeded
+
+    def _schedule_stable_layout_cache(self) -> None:
+        if self._stable_layout_cache_suspended:
+            return
+        self._stable_layout_cache_generation += 1
+        generation = int(self._stable_layout_cache_generation)
+        QTimer.singleShot(
+            120,
+            lambda generation=generation: self._cache_stable_layout_state_after_idle(generation),
+        )
+
+    def _cache_stable_layout_state_after_idle(self, generation: int) -> None:
+        if not _qt_object_is_valid(self):
+            return
+        if generation != self._stable_layout_cache_generation:
+            return
+        if (
+            self._stable_layout_cache_suspended
+            or self._restore_stable_layout_on_show
+            or self._applying_layout_state
+            or self._applying_layout_normalization
+            or self._compacting_layout
+            or self._transient_restore_churn_active()
+            or self._dock_tab_restore_pending
+            or not self._layout_restore_ready()
+        ):
+            return
+        self._cache_stable_layout_state_if_ready()
+
+    def _suspend_stable_layout_cache(self, *, delay_ms: int = 350) -> None:
+        self._stable_layout_cache_suspended = True
+        self._stable_layout_cache_suspend_generation += 1
+        self._stable_layout_cache_generation += 1
+        generation = int(self._stable_layout_cache_suspend_generation)
+        self._debug_layout_log(
+            "workspace_host.stable_layout_cache.suspended",
+            delay_ms=int(delay_ms),
+            generation=int(generation),
+        )
+        QTimer.singleShot(
+            max(0, int(delay_ms)),
+            lambda generation=generation: self._resume_stable_layout_cache(generation),
+        )
+
+    def _resume_stable_layout_cache(self, generation: int) -> None:
+        if not _qt_object_is_valid(self):
+            return
+        if generation != self._stable_layout_cache_suspend_generation:
+            return
+        self._stable_layout_cache_suspended = False
+        self._stable_layout_cache_generation += 1
+        self._debug_layout_log(
+            "workspace_host.stable_layout_cache.resumed",
+            generation=int(generation),
+        )
 
     def schedule_layout_normalization(self) -> None:
         if not callable(self._layout_normalizer):
@@ -1230,9 +1337,17 @@ class _DockableWorkspaceTab(QMainWindow):
             return state
         state_source = "empty"
         state = {}
-        if self._layout_restore_ready() and self._docks:
-            state = self._cache_stable_layout_state_if_ready() or {}
-            state_source = "live"
+        if self._stable_layout_state and not self._layout_dirty_since_stable_cache:
+            state = _normalized_workspace_layout_state(self._stable_layout_state)
+            state_source = "stable_reused"
+        elif self._layout_restore_ready() and self._docks:
+            cached_state = self._cache_stable_layout_state_if_ready()
+            if cached_state is not None:
+                state = cached_state
+                state_source = "live"
+            elif self._stable_layout_state:
+                state = _normalized_workspace_layout_state(self._stable_layout_state)
+                state_source = "stable_reused"
         elif self._stable_layout_state:
             state = _normalized_workspace_layout_state(self._stable_layout_state)
             state_source = "stable_reused"
@@ -1256,6 +1371,12 @@ class _DockableWorkspaceTab(QMainWindow):
             source=state_source,
         )
         return state
+
+    def commit_stable_layout_state(self, *, force_live: bool = False) -> dict[str, object] | None:
+        _ = force_live
+        if self._stable_layout_state and not self._layout_dirty_since_stable_cache:
+            return _normalized_workspace_layout_state(self._stable_layout_state)
+        return self._cache_stable_layout_state_if_ready(allow_tabified_active_change=True)
 
     def restore_layout_state(self, state: dict[str, object] | None) -> None:
         normalized = _normalized_workspace_layout_state(state)
@@ -1412,6 +1533,8 @@ class _DockableWorkspaceTab(QMainWindow):
             if has_dock_state and compatible_state and restored_state:
                 self._repair_unrecoverable_restore_state(visibility_snapshot)
                 self._restore_saved_dock_sizes(self._pending_state)
+                if self._layout_integrity_ok():
+                    self._layout_normalization_pending = False
                 self._debug_layout_log(
                     "workspace_host.apply_pending_state.after_repair",
                     visibility_snapshot=dict(visibility_snapshot),
@@ -1424,6 +1547,7 @@ class _DockableWorkspaceTab(QMainWindow):
             if self._pending_state == pending_state:
                 self._pending_state = None
         self._cache_stable_layout_state_if_ready()
+        self._suspend_stable_layout_cache()
         self._refresh_dock_order_hints()
         self._debug_layout_log("workspace_host.apply_pending_state.completed")
 
@@ -1570,10 +1694,16 @@ class _DockableWorkspaceTab(QMainWindow):
     def _repair_unrecoverable_restore_state(
         self,
         visibility_snapshot: dict[str, bool],
+        *,
+        allow_layout_normalization: bool = True,
     ) -> None:
         if self._layout_integrity_ok():
             return
-        if self.apply_layout_normalization_if_ready(force=True) and self._layout_integrity_ok():
+        if (
+            allow_layout_normalization
+            and self.apply_layout_normalization_if_ready(force=True)
+            and self._layout_integrity_ok()
+        ):
             return
         repaired_scroll_content = self._repair_visible_scroll_area_contents()
         if repaired_scroll_content and self._layout_integrity_ok():
@@ -1588,6 +1718,8 @@ class _DockableWorkspaceTab(QMainWindow):
                 dock.setProperty("lastDockArea", _dock_area_value(target_area))
         self._restore_saved_dock_visibility(visibility_snapshot)
         self._repair_visible_scroll_area_contents()
+        if not allow_layout_normalization:
+            return
         self.apply_layout_normalization_if_ready(force=True)
         if self._layout_integrity_ok():
             return
@@ -1597,14 +1729,28 @@ class _DockableWorkspaceTab(QMainWindow):
             self._repair_visible_scroll_area_contents()
             self.apply_layout_normalization_if_ready(force=True)
 
-    def validate_layout_integrity_after_restore(self) -> bool:
+    def validate_layout_integrity_after_restore(
+        self,
+        *,
+        allow_layout_normalization: bool = True,
+    ) -> bool:
         self._apply_pending_state_if_ready()
         visibility_snapshot = {dock.objectName(): bool(dock.isVisible()) for dock in self._docks}
         self._ensure_panels_menu_matches_live_docks()
-        self._repair_unrecoverable_restore_state(visibility_snapshot)
+        self._repair_unrecoverable_restore_state(
+            visibility_snapshot,
+            allow_layout_normalization=allow_layout_normalization,
+        )
         self._ensure_panels_menu_matches_live_docks()
         self._apply_lock_state(notify=False)
-        self._cache_stable_layout_state_if_ready()
+        if self._stable_layout_state and not self._layout_dirty_since_stable_cache:
+            self._applying_layout_state = True
+            try:
+                self._restore_saved_dock_sizes(self._stable_layout_state)
+            finally:
+                self._applying_layout_state = False
+        else:
+            self._cache_stable_layout_state_if_ready()
         result = self._layout_integrity_ok()
         self._debug_layout_log(
             "workspace_host.validate_layout_integrity_after_restore",
@@ -1678,7 +1824,86 @@ class _DockableWorkspaceTab(QMainWindow):
             "workspace_host.restore_saved_dock_sizes",
             restored=bool(restored),
         )
+        if self._tabified_restore_constraints:
+            self._schedule_tabified_restore_constraint_release(finish_restore=False)
         return restored
+
+    def _constrain_tabified_dock_for_restore(
+        self,
+        dock: QDockWidget,
+        size: int,
+        orientation,
+    ) -> None:
+        group = self._tabified_group_for_dock(dock)
+        if len(group) <= 1:
+            return
+        clean_size = max(1, int(size or 0))
+        if dock not in self._tabified_restore_constraints:
+            self._tabified_restore_constraints[dock] = (
+                int(dock.minimumWidth()),
+                int(dock.minimumHeight()),
+                int(dock.maximumWidth()),
+                int(dock.maximumHeight()),
+            )
+        if orientation == Qt.Vertical:
+            dock.setMinimumHeight(max(int(dock.minimumHeight()), clean_size))
+            dock.setMaximumHeight(max(int(dock.maximumHeight()), clean_size))
+        else:
+            dock.setMinimumWidth(max(int(dock.minimumWidth()), clean_size))
+            dock.setMaximumWidth(max(int(dock.maximumWidth()), clean_size))
+
+    def _schedule_tabified_restore_constraint_release(
+        self,
+        *,
+        finish_restore: bool = True,
+    ) -> None:
+        if not self._tabified_restore_constraints:
+            if finish_restore:
+                self._finish_tabified_layout_restore()
+            return
+        self._tabified_restore_release_generation += 1
+        generation = int(self._tabified_restore_release_generation)
+        QTimer.singleShot(
+            180,
+            lambda generation=generation, finish_restore=finish_restore: (
+                self._release_tabified_restore_constraints(
+                    generation,
+                    finish_restore=finish_restore,
+                )
+            ),
+        )
+
+    def _release_tabified_restore_constraints(
+        self,
+        generation: int,
+        *,
+        finish_restore: bool = True,
+    ) -> None:
+        if not _qt_object_is_valid(self):
+            return
+        if generation != self._tabified_restore_release_generation:
+            return
+        constraints = dict(self._tabified_restore_constraints)
+        self._tabified_restore_constraints.clear()
+        self._tabified_restore_release_generation += 1
+        for dock, (min_width, min_height, max_width, max_height) in constraints.items():
+            if not _qt_object_is_valid(dock):
+                continue
+            dock.setMinimumWidth(min_width)
+            dock.setMinimumHeight(min_height)
+            dock.setMaximumWidth(max_width)
+            dock.setMaximumHeight(max_height)
+        if finish_restore:
+            self._finish_tabified_layout_restore()
+
+    def _finish_tabified_layout_restore(self) -> None:
+        if not _qt_object_is_valid(self):
+            return
+        self._dock_tab_restore_pending = False
+        if self._stable_layout_state:
+            self._cache_stable_layout_state_if_ready(allow_tabified_active_change=True)
+            if callable(self._layout_changed_handler):
+                self._layout_changed_handler()
 
     def _ordered_resize_area_groups(self, area) -> list[list[QDockWidget]]:
         candidates = [
@@ -1810,6 +2035,7 @@ class _DockableWorkspaceTab(QMainWindow):
             for group in groups:
                 if len(group) <= 1:
                     continue
+                orientation = Qt.Vertical if primary_is_x else Qt.Horizontal
                 group_sizes = [
                     max(
                         (
@@ -1825,11 +2051,13 @@ class _DockableWorkspaceTab(QMainWindow):
                     )
                     for dock in group
                 ]
+                for dock, size in zip(group, group_sizes):
+                    self._constrain_tabified_dock_for_restore(dock, size, orientation)
                 restored = (
                     self._resize_docks_from_saved_sizes(
                         group,
                         group_sizes,
-                        Qt.Vertical if primary_is_x else Qt.Horizontal,
+                        orientation,
                     )
                     or restored
                 )
@@ -1892,6 +2120,8 @@ class _DockableWorkspaceTab(QMainWindow):
                 self._restore_saved_dock_sizes(stable_state)
                 self._ensure_panels_menu_matches_live_docks()
                 self._apply_lock_state(notify=False)
+                if self._layout_integrity_ok():
+                    self._layout_normalization_pending = False
         except Exception:
             restored = False
         finally:
@@ -1924,7 +2154,7 @@ class _DockableWorkspaceTab(QMainWindow):
         ):
             return
         self._dock_tab_restore_pending = True
-        QTimer.singleShot(0, self._restore_tabified_layout_after_tab_change)
+        self._restore_tabified_layout_after_tab_change()
 
     def _restore_tabified_layout_after_tab_change(self) -> None:
         if not self._dock_tab_restore_pending:
@@ -1936,11 +2166,10 @@ class _DockableWorkspaceTab(QMainWindow):
             restored = self._restore_tabified_dock_group_sizes(stable_state)
         finally:
             self._applying_layout_state = False
-            self._dock_tab_restore_pending = False
         if restored:
-            self._cache_stable_layout_state_if_ready()
-            if callable(self._layout_changed_handler):
-                self._layout_changed_handler()
+            self._schedule_tabified_restore_constraint_release()
+        else:
+            self._finish_tabified_layout_restore()
         self._debug_layout_log(
             "workspace_host.restore_tabified_layout_after_tab_change",
             restored=bool(restored),
@@ -1953,16 +2182,33 @@ class _DockableWorkspaceTab(QMainWindow):
         self._connect_dock_tab_bars()
         self._apply_pending_state_if_ready()
         if self._restore_stable_layout_on_show:
+            self._suspend_stable_layout_cache()
             self._restore_stable_layout_after_tab_show()
             self._restore_stable_layout_on_show = False
+            if self._layout_integrity_ok():
+                self._layout_normalization_pending = False
         self.apply_layout_normalization_if_ready()
 
     def hideEvent(self, event):  # pragma: no cover - Qt callback
         if not self._transient_restore_churn_active() and not self._applying_layout_state:
-            try:
-                self._stable_layout_state = self._capture_live_layout_state()
-            except Exception:
-                pass
+            self._stable_layout_cache_generation += 1
+            parent = self.parentWidget()
+            parent_still_visible = not isinstance(parent, QWidget) or parent.isVisible()
+            if not self._stable_layout_state:
+                try:
+                    self._stable_layout_state = self._capture_live_layout_state()
+                except Exception:
+                    pass
+            elif not parent_still_visible:
+                self._debug_layout_log(
+                    "workspace_host.hide_preserved_stable_layout",
+                    reason="parent_hidden",
+                )
+            else:
+                self._debug_layout_log(
+                    "workspace_host.hide_preserved_stable_layout",
+                    reason="workspace_tab_hidden",
+                )
             self._restore_stable_layout_on_show = bool(self._stable_layout_state)
         super().hideEvent(event)
 
@@ -1983,14 +2229,42 @@ class _DockableWorkspaceTab(QMainWindow):
                 and not self._compacting_layout
                 and not self._transient_restore_churn_active()
                 and not self._dock_tab_restore_pending
+                and not self._stable_layout_cache_suspended
+                and self._layout_restore_ready()
+                and self._resize_event_is_user_layout_interaction(watched)
             ):
-                self._cache_stable_layout_state_if_ready()
+                self._layout_dirty_since_stable_cache = True
+                self._schedule_stable_layout_cache()
         return super().eventFilter(watched, event)
 
-    def _notify_layout_changed(self) -> None:
-        if self._transient_restore_churn_active() or self._applying_layout_state:
+    def _resize_event_is_user_layout_interaction(self, dock: QDockWidget) -> bool:
+        if not bool(QApplication.mouseButtons() & Qt.LeftButton):
+            return False
+        try:
+            global_pos = QCursor.pos()
+            widget_at_cursor = QApplication.widgetAt(global_pos)
+        except Exception:
+            return True
+        candidate = widget_at_cursor
+        while isinstance(candidate, QWidget):
+            if isinstance(candidate, QTabBar):
+                return False
+            candidate = candidate.parentWidget()
+        return dock in self._docks
+
+    def _notify_layout_changed(self, *, defer_cache: bool = False) -> None:
+        if (
+            self._transient_restore_churn_active()
+            or self._applying_layout_state
+            or self._restore_stable_layout_on_show
+        ):
             return
-        self._cache_stable_layout_state_if_ready()
+        if not self._stable_layout_cache_suspended:
+            if defer_cache:
+                self._layout_dirty_since_stable_cache = True
+                self._schedule_stable_layout_cache()
+            else:
+                self._cache_stable_layout_state_if_ready()
         if callable(self._layout_changed_handler):
             self._layout_changed_handler()
 
@@ -2074,7 +2348,7 @@ class _DockableWorkspaceTab(QMainWindow):
             return
         self._refresh_dock_order_hints()
         self._queue_layout_compaction()
-        self._notify_layout_changed()
+        self._notify_layout_changed(defer_cache=True)
 
     def _queue_layout_compaction(self) -> None:
         self.schedule_layout_normalization()
@@ -2262,6 +2536,10 @@ class _FillHtmlPreviewController(QWidget):
 
     def __init__(self, panel: "ContractTemplateWorkspacePanel", parent=None):
         super().__init__(parent)
+        self.setObjectName("contractTemplateFillHtmlPreviewController")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setFixedSize(0, 0)
+        self.hide()
         self.panel = panel
         self._latest_generation = 0
         self._inflight_generation: int | None = None
@@ -2663,16 +2941,21 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_html_preview_view = None
         self.fill_preview_stale_label = None
         self.fill_preview_zoom_label = None
-        self.fill_final_storage_combo = QComboBox(self)
-        self.fill_final_status_label = QLabel(self)
-        self.fill_finalize_invoice_button = QPushButton(self)
-        self.fill_open_final_location_button = QPushButton(self)
-        self.travel_origin_field = QLineEdit(self)
-        self.travel_destination_field = QLineEdit(self)
-        self.travel_km_field = QLineEdit(self)
-        self.travel_round_trip_check = QCheckBox("Round trip", self)
-        self.travel_target_index_combo = QComboBox(self)
-        self.travel_status_label = QLabel(self)
+
+        def hidden_placeholder(widget):
+            widget.hide()
+            return widget
+
+        self.fill_final_storage_combo = hidden_placeholder(QComboBox(self))
+        self.fill_final_status_label = hidden_placeholder(QLabel(self))
+        self.fill_finalize_invoice_button = hidden_placeholder(QPushButton(self))
+        self.fill_open_final_location_button = hidden_placeholder(QPushButton(self))
+        self.travel_origin_field = hidden_placeholder(QLineEdit(self))
+        self.travel_destination_field = hidden_placeholder(QLineEdit(self))
+        self.travel_km_field = hidden_placeholder(QLineEdit(self))
+        self.travel_round_trip_check = hidden_placeholder(QCheckBox("Round trip", self))
+        self.travel_target_index_combo = hidden_placeholder(QComboBox(self))
+        self.travel_status_label = hidden_placeholder(QLabel(self))
         self._fill_preview_host: _DockableWorkspaceTab | None = None
         self._fill_preview_surface: QWidget | None = None
         self._fill_preview_layout: QVBoxLayout | None = None
@@ -2709,6 +2992,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.workspace_tabs = QTabWidget(self)
         self.workspace_tabs.setObjectName("contractTemplateWorkspaceTabs")
         self.workspace_tabs.setDocumentMode(True)
+        self.workspace_tabs.tabBar().installEventFilter(self)
         root.addWidget(self.workspace_tabs, 1)
         self.workspace_tabs.currentChanged.connect(self._on_workspace_tab_changed)
 
@@ -2901,6 +3185,15 @@ class ContractTemplateWorkspacePanel(QWidget):
             layout.addWidget(label)
         return widget, layout
 
+    @staticmethod
+    def _allow_horizontal_shrink(*widgets: QWidget) -> None:
+        for widget in widgets:
+            if not isinstance(widget, QWidget):
+                continue
+            widget.setMinimumWidth(0)
+            policy = widget.sizePolicy()
+            widget.setSizePolicy(QSizePolicy.Ignored, policy.verticalPolicy())
+
     def _create_workspace_dock(
         self,
         host: _DockableWorkspaceTab,
@@ -2910,20 +3203,30 @@ class ContractTemplateWorkspacePanel(QWidget):
         content: QWidget,
         scrollable: bool = True,
         allow_floating: bool = True,
+        minimum_width: int = 220,
     ) -> QDockWidget:
         dock = QDockWidget(title, host.main_window)
         dock.setObjectName(object_name)
         dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         dock.setProperty("workspaceAllowFloating", bool(allow_floating))
+        dock.setMinimumWidth(max(0, int(minimum_width or 0)))
+        dock_policy = dock.sizePolicy()
+        dock.setSizePolicy(QSizePolicy.Ignored, dock_policy.verticalPolicy())
         if scrollable:
             scroll = QScrollArea(dock)
             scroll.setObjectName(f"{object_name}ScrollArea")
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
             scroll.setProperty("role", "workspaceCanvas")
+            scroll.setMinimumWidth(0)
+            scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+            scroll_policy = scroll.sizePolicy()
+            scroll.setSizePolicy(QSizePolicy.Ignored, scroll_policy.verticalPolicy())
+            content.setMinimumWidth(0)
             scroll.setWidget(content)
             dock.setWidget(scroll)
         else:
+            content.setMinimumWidth(0)
             dock.setWidget(content)
         return dock
 
@@ -3426,6 +3729,11 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.namespace_combo.currentIndexChanged.connect(self.refresh_symbol_generator)
         search_row.addWidget(self.namespace_combo)
         controls_layout.addLayout(search_row)
+        self._allow_horizontal_shrink(
+            controls_surface,
+            self.search_edit,
+            self.namespace_combo,
+        )
 
         refresh_button = QPushButton("Refresh", controls_surface)
         refresh_button.clicked.connect(self.refresh_symbol_generator)
@@ -3443,6 +3751,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             span_last_row=True,
         )
         self.symbol_actions_cluster.setObjectName("contractTemplateSymbolActionsCluster")
+        self._allow_horizontal_shrink(self.symbol_actions_cluster)
         controls_layout.addWidget(self.symbol_actions_cluster)
         self.status_label = QLabel(
             "Open a profile to browse the contract template symbol catalog.",
@@ -3450,6 +3759,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         self.status_label.setWordWrap(True)
         self.status_label.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(self.status_label)
         controls_layout.addWidget(self.status_label)
 
         known_symbols_surface, known_symbols_layout = self._surface_widget(
@@ -3466,6 +3776,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -3474,6 +3786,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._update_selected_details)
         self.table.doubleClicked.connect(self._copy_symbol_from_index)
+        self._allow_horizontal_shrink(known_symbols_surface, self.table)
         known_symbols_layout.addWidget(self.table, 1)
 
         selected_surface, selected_layout = self._surface_widget(
@@ -3484,17 +3797,30 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "before copying it into your template."
             ),
         )
+        self._allow_horizontal_shrink(selected_surface)
         selected_form = QFormLayout()
         _configure_standard_form_layout(selected_form)
         self.selected_label_value = QLabel("No symbol selected.", selected_surface)
         self.selected_label_value.setWordWrap(True)
         self.selected_namespace_value = QLabel("-", selected_surface)
+        self.selected_namespace_value.setWordWrap(True)
         self.selected_type_value = QLabel("-", selected_surface)
+        self.selected_type_value.setWordWrap(True)
         self.selected_scope_value = QLabel("-", selected_surface)
+        self.selected_scope_value.setWordWrap(True)
         self.selected_source_value = QLabel("-", selected_surface)
+        self.selected_source_value.setWordWrap(True)
         self.selected_symbol_edit = QLineEdit(selected_surface)
         self.selected_symbol_edit.setObjectName("contractTemplateSelectedSymbolEdit")
         self.selected_symbol_edit.setReadOnly(True)
+        self._allow_horizontal_shrink(
+            self.selected_label_value,
+            self.selected_namespace_value,
+            self.selected_type_value,
+            self.selected_scope_value,
+            self.selected_source_value,
+            self.selected_symbol_edit,
+        )
         selected_form.addRow("Label", self.selected_label_value)
         selected_form.addRow("Namespace", self.selected_namespace_value)
         selected_form.addRow("Field Type", self.selected_type_value)
@@ -3507,6 +3833,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.detail_source_label = QLabel("Source Kind: -", selected_surface)
         self.detail_source_label.setWordWrap(True)
         self.detail_source_label.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(self.detail_resolver_label, self.detail_source_label)
         selected_layout.addWidget(self.detail_resolver_label)
         selected_layout.addWidget(self.detail_source_label)
         self.selected_description_value = QLabel(
@@ -3515,6 +3842,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         self.selected_description_value.setWordWrap(True)
         self.selected_description_value.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(self.selected_description_value)
         selected_layout.addWidget(self.selected_description_value)
         guidance = QLabel(
             "Use db symbols for authoritative catalog values. Use manual symbols only when "
@@ -3523,6 +3851,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         guidance.setWordWrap(True)
         guidance.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(guidance)
         selected_layout.addWidget(guidance)
 
         manual_surface, manual_layout = self._surface_widget(
@@ -3533,6 +3862,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "database. The helper keeps the token parser-safe and copy-ready."
             ),
         )
+        self._allow_horizontal_shrink(manual_surface)
         manual_form = QFormLayout()
         _configure_standard_form_layout(manual_form)
         self.manual_key_edit = QLineEdit(manual_surface)
@@ -3555,6 +3885,13 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.manual_symbol_edit = QLineEdit(manual_surface)
         self.manual_symbol_edit.setObjectName("contractTemplateManualSymbolEdit")
         self.manual_symbol_edit.setReadOnly(True)
+        self._allow_horizontal_shrink(
+            self.manual_key_edit,
+            self.manual_type_combo,
+            self.manual_options_edit,
+            self.manual_indexed_check,
+            self.manual_symbol_edit,
+        )
         manual_form.addRow("Human Label", self.manual_key_edit)
         manual_form.addRow("Manual Type", self.manual_type_combo)
         manual_form.addRow("Options", self.manual_options_edit)
@@ -3570,6 +3907,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         self.manual_feedback_label.setWordWrap(True)
         self.manual_feedback_label.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(self.manual_feedback_label)
         manual_layout.addWidget(self.manual_feedback_label)
         manual_guidance = QLabel(
             "Separate options with semicolons. Every value inside [] becomes an available "
@@ -3579,6 +3917,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         manual_guidance.setWordWrap(True)
         manual_guidance.setProperty("role", "secondary")
+        self._allow_horizontal_shrink(manual_guidance)
         manual_layout.addWidget(manual_guidance)
         copy_manual_button = QPushButton("Copy Manual Symbol", manual_surface)
         copy_manual_button.setObjectName("contractTemplateCopyManualButton")
@@ -3590,24 +3929,28 @@ class ContractTemplateWorkspacePanel(QWidget):
             title="Symbol Generator",
             object_name="contractTemplateGeneratorControlsDock",
             content=controls_surface,
+            minimum_width=360,
         )
         known_symbols_dock = self._create_workspace_dock(
             host,
             title="Known Database Symbols",
             object_name="contractTemplateKnownSymbolsDock",
             content=known_symbols_surface,
+            minimum_width=360,
         )
         selected_dock = self._create_workspace_dock(
             host,
             title="Selected Symbol",
             object_name="contractTemplateSelectedSymbolDock",
             content=selected_surface,
+            minimum_width=300,
         )
         manual_dock = self._create_workspace_dock(
             host,
             title="Manual Symbol Helper",
             object_name="contractTemplateManualSymbolDock",
             content=manual_surface,
+            minimum_width=360,
         )
         host.register_docks([controls_dock, known_symbols_dock, selected_dock, manual_dock])
         host.set_layout_normalizer(self._normalize_symbol_workspace_layout)
@@ -4233,6 +4576,25 @@ class ContractTemplateWorkspacePanel(QWidget):
                 return key
         return self._IMPORT_TAB_KEY
 
+    def _commit_current_workspace_layout(self, *, force_live: bool = False) -> None:
+        if self._restoring_layout_state:
+            return
+        host = self._tab_hosts.get(self._current_tab_key())
+        if host is None or not host.isVisible():
+            return
+        commit = getattr(host, "commit_stable_layout_state", None)
+        if callable(commit):
+            commit(force_live=force_live)
+
+    def eventFilter(self, watched, event):  # pragma: no cover - Qt callback
+        try:
+            tab_bar = self.workspace_tabs.tabBar()
+        except Exception:
+            tab_bar = None
+        if watched is tab_bar and event.type() in (QEvent.MouseButtonPress, QEvent.KeyPress):
+            self._commit_current_workspace_layout(force_live=True)
+        return super().eventFilter(watched, event)
+
     def _ensure_tab_workspace(self, key: str) -> _DockableWorkspaceTab:
         normalized = self._normalize_tab_key(key)
         if normalized == self._SYMBOLS_TAB_KEY:
@@ -4241,7 +4603,13 @@ class ContractTemplateWorkspacePanel(QWidget):
             return self._ensure_fill_workspace()
         return self._ensure_import_workspace()
 
-    def _refresh_workspace_tab(self, key: str, *, validate: bool = True) -> None:
+    def _refresh_workspace_tab(
+        self,
+        key: str,
+        *,
+        validate: bool = True,
+        allow_layout_normalization: bool = False,
+    ) -> None:
         if key == self._SYMBOLS_TAB_KEY:
             self.refresh_symbol_generator()
         elif key == self._FILL_TAB_KEY:
@@ -4250,7 +4618,9 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.refresh_admin_workspace()
         host = self._tab_hosts.get(key)
         if host is not None and validate:
-            host.validate_layout_integrity_after_restore()
+            host.validate_layout_integrity_after_restore(
+                allow_layout_normalization=allow_layout_normalization,
+            )
 
     def _on_workspace_tab_changed(self, index: int) -> None:
         page = self.workspace_tabs.widget(index)
@@ -4290,6 +4660,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._ensure_tab_workspace(key)
         target_page = self._tab_pages[key]
         already_current = self.workspace_tabs.currentWidget() is target_page
+        if not already_current:
+            self._commit_current_workspace_layout()
         self.workspace_tabs.setCurrentWidget(target_page)
         if already_current:
             self._refresh_workspace_tab(key, validate=True)
@@ -4440,7 +4812,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             self._ensure_tab_workspace(current_tab)
         finally:
             self._restoring_layout_state = False
-        self._refresh_workspace_tab(current_tab)
+        self._refresh_workspace_tab(current_tab, allow_layout_normalization=True)
         self._debug_layout_log(
             "workspace_panel.restore_layout_state.after_refresh",
             current_tab=str(current_tab),
@@ -4520,6 +4892,23 @@ class ContractTemplateWorkspacePanel(QWidget):
         header.setStretchLastSection(True)
         return table
 
+    def _resize_symbol_table_columns(self) -> None:
+        table = getattr(self, "table", None)
+        if not isinstance(table, QTableWidget):
+            return
+        table.resizeColumnsToContents()
+        header = table.horizontalHeader()
+        column_limits = {
+            0: (70, 140),
+            1: (120, 260),
+            2: (70, 120),
+            3: (120, 260),
+        }
+        for column, (minimum, maximum) in column_limits.items():
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
+            table.setColumnWidth(column, min(max(table.columnWidth(column), minimum), maximum))
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+
     def refresh_symbol_generator(self) -> None:
         if self._SYMBOLS_TAB_KEY not in self._tab_hosts:
             return
@@ -4558,7 +4947,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 if column == 4:
                     item.setData(Qt.UserRole, entry.canonical_symbol)
                 self.table.setItem(row, column, item)
-        self.table.resizeColumnsToContents()
+        self._resize_symbol_table_columns()
         count = len(self._visible_entries)
         self.status_label.setText(
             f"Showing {count} known symbol{'s' if count != 1 else ''}."
