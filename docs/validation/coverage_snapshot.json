@@ -1,5 +1,5 @@
 {
-  "branchPercent": 64.69,
+  "branchPercent": 64.73,
   "coverageWins": [
     {
       "branch": 92.29,
@@ -58,12 +58,12 @@
       "statements": 600
     }
   ],
-  "coveredBranches": 16568,
-  "coveredLines": 67077,
+  "coveredBranches": 16578,
+  "coveredLines": 67095,
   "excludedFiles": [],
   "filesExcluded": 0,
   "filesMeasured": 283,
-  "linePercent": 74.83,
+  "linePercent": 74.85,
   "lowestFiles": [
     {
       "branch": 0.0,
@@ -150,10 +150,10 @@
       "statements": 389
     }
   ],
-  "missingBranches": 9044,
-  "missingLines": 19092,
+  "missingBranches": 9034,
+  "missingLines": 19074,
   "schemaVersion": 1,
-  "statementPercent": 77.84,
+  "statementPercent": 77.86,
   "statements": 86169,
-  "timestamp": "2026-08-07T19:01:20.428456"
+  "timestamp": "2026-08-07T19:33:33.150344"
 }
