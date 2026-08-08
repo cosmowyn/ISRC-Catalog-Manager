@@ -535,7 +535,7 @@ The current public version block below is maintained by `scripts/sync_version_do
 run by the production version-bump workflow after the canonical version changes.
 
 <!-- version:sync:start -->
-Current source release: `6.2.0` (`v6.2.0`).
+Current source release: `6.2.1` (`v6.2.1`).
 Latest repository metadata: [`docs/releases/latest.json`](docs/releases/latest.json).
 Latest release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 <!-- version:sync:end -->
