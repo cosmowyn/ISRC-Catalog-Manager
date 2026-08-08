@@ -301,6 +301,7 @@ def _workflow_visual_service(harness: Any) -> VisualQualificationService:
     service = VisualQualificationService(
         harness.artifact_dir,
         manifest_name="business_workflow_manifest.json",
+        defer_screenshot_failures=True,
     )
     setattr(harness, "_business_workflow_visual_service", service)
     return service
@@ -343,9 +344,8 @@ def _capture_help_surface(
     capture = service.capture_widget(widget, name)
     shutil.copy2(capture.path, help_screenshot_dir / f"{name}.png")
     if name == "application_log_dialog":
-        # Timestamps, temporary profile roots, and log lines change on every PQ
-        # run. Keep the size/changed-area guard strict while allowing those
-        # expected glyph changes to contribute a larger mean color delta.
+        # Timestamps, temporary profile roots, and log lines change on every PQ run.
+        # Keep size/changed-area strict while allowing expected glyph color deltas.
         comparison = service.compare_capture_to_baseline(
             capture,
             max_mean_channel_delta=12.0,

@@ -27,6 +27,7 @@ from isrc_manager.help_content import (
 from isrc_manager.qa import assertions, commands, fixtures, scenarios
 from isrc_manager.qa.deviations import DeviationRecorder
 from isrc_manager.qa.evidence import EvidenceRecorder
+from isrc_manager.qa.harness import UIQualificationHarness
 from isrc_manager.qa.help_validation import validate_help_coverage
 from isrc_manager.qa.inventory import UIInventoryItem
 from isrc_manager.qa.traceability import (
@@ -1076,6 +1077,24 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
 
     manifest = service.write_manifest()
     assert manifest.exists()
+
+
+def test_business_visual_comparisons_defer_until_qualification_finishes(
+    tmp_path: Path,
+) -> None:
+    harness = UIQualificationHarness(tmp_path)
+    service = scenarios._workflow_visual_service(harness)
+    deferred_failure = mock.Mock(side_effect=AssertionError("deferred screenshot failure"))
+    service.raise_deferred_screenshot_failures = deferred_failure
+
+    with pytest.raises(AssertionError, match="deferred screenshot failure"):
+        harness.run_qualification(())
+
+    assert service.defer_screenshot_failures is True
+    deferred_failure.assert_called_once_with()
+    assert harness.evidence.events[-1].test_id == "UI-PQ-VISUAL-001"
+    assert harness.evidence.events[-1].status == "failed"
+    assert harness.deviations.deviations[-1].test_id == "UI-PQ-VISUAL-001"
 
 
 def test_catalog_workflow_restores_qualified_workspace_geometry(monkeypatch) -> None:

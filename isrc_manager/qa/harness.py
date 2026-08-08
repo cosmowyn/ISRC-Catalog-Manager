@@ -38,6 +38,7 @@ from .scenarios import (
     run_visual_qualification_workflow,
 )
 from .traceability import TraceabilityRow, build_traceability_matrix, write_traceability_matrix
+from .visual import VisualQualificationService
 
 _QUALIFICATION_FONT_FAMILY = "Arial"
 _QUALIFICATION_FONT_POINT_SIZE = 11
@@ -589,6 +590,14 @@ class UIQualificationHarness:
                         label,
                         lambda workflow=workflow: workflow(self, track_id=workflow_track_id),
                     )
+            workflow_visual_service = getattr(self, "_business_workflow_visual_service", None)
+            if isinstance(workflow_visual_service, VisualQualificationService):
+                self._run_step(
+                    "UI-PQ-VISUAL-001",
+                    "business workflow screenshot comparisons",
+                    workflow_visual_service.raise_deferred_screenshot_failures,
+                    propagate_failure=True,
+                )
         finally:
             self.finalize()
 
@@ -645,7 +654,14 @@ class UIQualificationHarness:
             object_name_gap_count=int(deviation_coverages.get("object_name_gap", 0)),
         )
 
-    def _run_step(self, test_id: str, label: str, func: Callable[[], Any]) -> Any:
+    def _run_step(
+        self,
+        test_id: str,
+        label: str,
+        func: Callable[[], Any],
+        *,
+        propagate_failure: bool = False,
+    ) -> Any:
         try:
             return func()
         except Exception as exc:
@@ -665,4 +681,6 @@ class UIQualificationHarness:
                 status="failed",
                 message=f"{label} failed: {type(exc).__name__}: {exc}",
             )
+            if propagate_failure:
+                raise
             return None
