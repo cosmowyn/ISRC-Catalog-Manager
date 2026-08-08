@@ -1063,6 +1063,17 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
     assert relaxed["passed"]
     assert relaxed["tolerance"]["max_mean_channel_delta"] == 255.0
 
+    deferred_service = VisualQualificationService(
+        tmp_path / "deferred",
+        defer_screenshot_failures=True,
+    )
+    deferred_baseline = deferred_service.baseline_dir / image_path.name
+    deferred_baseline.write_bytes(black_path.read_bytes())
+    deferred_comparison = deferred_service.compare_capture_to_baseline(capture)
+    assert deferred_comparison.passed is False
+    with pytest.raises(AssertionError, match="sample"):
+        deferred_service.raise_deferred_screenshot_failures()
+
     manifest = service.write_manifest()
     assert manifest.exists()
 

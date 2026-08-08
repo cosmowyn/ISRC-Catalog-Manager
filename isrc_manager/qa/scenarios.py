@@ -1768,11 +1768,10 @@ def run_visual_qualification_workflow(harness: Any) -> None:
     window = harness.window
     if window is None:
         raise AssertionError("Visual PQ requires an open application window.")
-    service = VisualQualificationService(harness.artifact_dir)
+    service = VisualQualificationService(harness.artifact_dir, defer_screenshot_failures=True)
     help_screenshot_dir = help_screenshot_source_dir()
     help_screenshot_dir.mkdir(parents=True, exist_ok=True)
     surface_results: list[dict[str, object]] = []
-
     main_capture = service.capture_widget(window, "main_window")
     shutil.copy2(main_capture.path, help_screenshot_dir / "main_window.png")
     main_comparison = service.compare_capture_to_baseline(main_capture)
@@ -2104,6 +2103,7 @@ def run_visual_qualification_workflow(harness: Any) -> None:
         comparison_type="theme",
     )
     manifest_path = service.write_manifest()
+    service.raise_deferred_screenshot_failures()
 
     harness.evidence.record(
         "UI-PQ-SET-001",

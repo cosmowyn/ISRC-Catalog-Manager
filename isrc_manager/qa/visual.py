@@ -57,6 +57,7 @@ class VisualQualificationService:
         artifact_dir: Path | str,
         *,
         manifest_name: str = "visual_manifest.json",
+        defer_screenshot_failures: bool = False,
     ) -> None:
         self.artifact_dir = Path(artifact_dir)
         self.visual_dir = self.artifact_dir / "visual"
@@ -64,6 +65,7 @@ class VisualQualificationService:
         self.actual_dir = self.visual_dir / "actual"
         self.baseline_dir = self.visual_dir / "baselines"
         self.manifest_path = self.visual_dir / _safe_name(manifest_name)
+        self.defer_screenshot_failures = bool(defer_screenshot_failures)
         for directory in (
             self.screenshot_dir,
             self.actual_dir,
@@ -133,12 +135,22 @@ class VisualQualificationService:
             },
         )
         self.comparisons.append(comparison)
-        if not comparison.passed:
+        if not comparison.passed and not self.defer_screenshot_failures:
             raise AssertionError(
                 f"screenshot comparison failed for {capture.name!r}: "
                 f"{actual} != {baseline}; profile={image_profile!r}"
             )
         return comparison
+
+    def raise_deferred_screenshot_failures(self) -> None:
+        """Raise once after a deferred run has captured every failing surface."""
+        failed = [
+            comparison.name
+            for comparison in self.comparisons
+            if comparison.comparison_type == "screenshot" and not comparison.passed
+        ]
+        if failed:
+            raise AssertionError("screenshot comparisons failed for: " + ", ".join(sorted(failed)))
 
     def compare_text(
         self,
