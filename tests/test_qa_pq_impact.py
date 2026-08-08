@@ -11,6 +11,12 @@ from isrc_manager.qa.impact import ALL_COMPONENT_NAMES, plan_qa_pq_impact
 from scripts.qa_pq_impact import main
 
 
+@pytest.fixture(autouse=True)
+def _isolate_github_actions_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for variable in ("GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_SHA"):
+        monkeypatch.delenv(variable, raising=False)
+
+
 def plan(*paths: str, **overrides: object) -> dict[str, object]:
     return plan_qa_pq_impact(paths, **overrides)
 
@@ -290,9 +296,7 @@ def test_component_unions_and_hashes_are_deterministic() -> None:
 def test_cli_reads_change_file_and_writes_json_and_github_outputs(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("GITHUB_REF", raising=False)
     changes_path = tmp_path / "changes.txt"
     changes_path.write_text(
         "M\tisrc_manager/media/bookmarks.py\nD\tdocs/obsolete-guide.md\n",
