@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from isrc_manager.conversion import ConversionService
+from isrc_manager.history.snapshot_security import change_profile_password_with_history
 from isrc_manager.isrc_registry import ApplicationISRCRegistryService
 from isrc_manager.paths import resolve_app_storage_layout
 from isrc_manager.services import DatabaseSchemaService
@@ -714,7 +715,16 @@ def change_current_database_password(app) -> bool:
     if new_password is None:
         return False
     try:
-        security_service.change_password(path, current_password, new_password)
+        change_profile_password_with_history(
+            security_service,
+            path,
+            current_password,
+            new_password,
+            history_root=getattr(app, "history_dir", None),
+            history_manager=getattr(app, "history_manager", None),
+            session_history_manager=getattr(app, "session_history_manager", None),
+            live_connection=getattr(app, "conn", None),
+        )
     except Exception as exc:
         QMessageBox.critical(
             app, "Database Password", f"Could not change the database password:\n{exc}"
@@ -813,7 +823,9 @@ class ProfileRemovalDialog(QDialog):
         layout = QVBoxLayout(self)
 
         message = QLabel(
-            "Select the profile database to remove from disk. This cannot be undone.",
+            "Select the profile database to remove from disk. A protected history "
+            "snapshot is created first, so Undo can restore it while that history "
+            "entry is retained.",
             self,
         )
         message.setWordWrap(True)
@@ -875,7 +887,9 @@ def remove_selected_profile(app):
         QMessageBox.question(
             app,
             "Remove Profile",
-            f"Delete this database file from disk?\n\n{path}\n\nThis cannot be undone.",
+            f"Delete this database file from disk?\n\n{path}\n\n"
+            "A protected snapshot will be created first. Use Undo to restore the "
+            "profile while this history entry is retained.",
             QMessageBox.Yes | QMessageBox.No,
         )
         != QMessageBox.Yes
@@ -924,7 +938,11 @@ def remove_selected_profile(app):
             snapshot_path=removed_snapshot_path,
         )
         app._refresh_history_actions()
-        QMessageBox.information(app, "Profile Removed", f"Deleted:\n{path}")
+        QMessageBox.information(
+            app,
+            "Profile Removed",
+            f"Deleted:\n{path}\n\nUse Undo to restore this profile while its history entry is retained.",
+        )
     except Exception as e:
         if hasattr(app, "conn") and app.conn:
             app.conn.rollback()

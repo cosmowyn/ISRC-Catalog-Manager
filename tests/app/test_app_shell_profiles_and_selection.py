@@ -35,6 +35,9 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_track_delete_progress_reaches_100_only_after_final_ui_refresh = (
         AppShellTestCase.case_track_delete_progress_reaches_100_only_after_final_ui_refresh
     )
+    test_profile_history_replay_runs_off_ui_thread_with_truthful_progress = (
+        AppShellTestCase.case_profile_history_replay_runs_off_ui_thread_with_truthful_progress
+    )
     test_programmatic_header_resize_does_not_record_history = (
         AppShellTestCase.case_programmatic_header_resize_does_not_record_history
     )

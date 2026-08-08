@@ -957,6 +957,21 @@ def test_on_auto_snapshot_timer_skips_duplicate_or_unprepared_marker_and_logs_fa
     app.logger.exception.assert_called_once()
 
 
+def test_on_auto_snapshot_timer_defers_while_a_write_task_is_active():
+    history_manager = SimpleNamespace(capture_snapshot=mock.Mock())
+    app = SimpleNamespace(
+        history_manager=history_manager,
+        settings_reads=object(),
+        auto_snapshot_timer=SimpleNamespace(stop=mock.Mock()),
+        background_tasks=SimpleNamespace(has_active_write_task=lambda: True),
+        _current_auto_snapshot_settings=lambda: (True, 15),
+    )
+
+    retention._on_auto_snapshot_timer(app)
+
+    history_manager.capture_snapshot.assert_not_called()
+
+
 def test_schedule_history_storage_budget_enforcement_serializes_deferred_run(monkeypatch):
     callbacks = []
 
@@ -1000,6 +1015,40 @@ def test_schedule_history_storage_budget_enforcement_serializes_deferred_run(mon
     callbacks[-1][1]()
     assert app._enforce_history_storage_budget.call_count == 1
     assert app._history_budget_enforcement_running is True
+
+
+def test_scheduled_history_budget_enforcement_waits_for_active_write_task(monkeypatch):
+    callbacks = []
+
+    class FakeTimer:
+        @staticmethod
+        def singleShot(delay_ms, callback):
+            callbacks.append((delay_ms, callback))
+
+    task_state = {"active": True}
+    app = SimpleNamespace(
+        _history_budget_enforcement_trigger_label="",
+        _history_budget_enforcement_scheduled=False,
+        _history_budget_enforcement_running=False,
+        _enforce_history_storage_budget=mock.Mock(),
+        background_tasks=SimpleNamespace(has_active_write_task=lambda: task_state["active"]),
+    )
+    monkeypatch.setattr(retention, "QTimer", FakeTimer)
+
+    retention._schedule_history_storage_budget_enforcement(app, trigger_label="history replay")
+    callbacks.pop(0)[1]()
+
+    app._enforce_history_storage_budget.assert_not_called()
+    assert app._history_budget_enforcement_scheduled is True
+    assert callbacks[0][0] == 250
+
+    task_state["active"] = False
+    callbacks.pop(0)[1]()
+    app._enforce_history_storage_budget.assert_called_once_with(
+        trigger_label="history replay",
+        interactive=False,
+    )
+    assert app._history_budget_enforcement_scheduled is False
 
 
 def test_estimate_history_snapshot_capture_bytes_includes_managed_directories(

@@ -903,6 +903,49 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertTrue(captured.get("before_dialog_visible"))
         self.assertFalse(captured.get("after_dialog_visible"))
 
+    def test_reentrant_cleanup_waits_for_success_finalization(self):
+        callback_order: list[str] = []
+        progress_values: list[int | None] = []
+        relay_holder: dict[str, _TaskCallbackRelay] = {}
+
+        def _before_cleanup(_result, ui_progress):
+            callback_order.append("before-start")
+            relay_holder["relay"].handle_cleanup()
+            callback_order.append("cleanup-returned")
+            ui_progress.report_progress(100, 100, "Interface refresh complete.")
+            callback_order.append("before-end")
+
+        relay = _TaskCallbackRelay(
+            progress_handler=lambda update: progress_values.append(update.value),
+            status_handler=lambda _message: None,
+            success_before_cleanup_handler=_before_cleanup,
+            success_handler=lambda _result: callback_order.append("success"),
+            success_after_cleanup_handler=lambda _result: callback_order.append("after"),
+            error_handler=None,
+            cancelled_handler=None,
+            finished_handler=lambda: callback_order.append("finished"),
+            cleanup_handler=lambda: callback_order.append("cleanup"),
+        )
+        relay_holder["relay"] = relay
+
+        relay.handle_success("done")
+
+        self.assertEqual(progress_values, [100])
+        self.assertEqual(
+            callback_order,
+            [
+                "before-start",
+                "cleanup-returned",
+                "before-end",
+                "success",
+                "cleanup",
+                "after",
+                "finished",
+            ],
+        )
+        relay.handle_cleanup()
+        self.assertEqual(callback_order.count("cleanup"), 1)
+
     def test_late_progress_updates_after_dialog_cleanup_are_ignored(self):
         finished = threading.Event()
         progress_messages: list[str] = []

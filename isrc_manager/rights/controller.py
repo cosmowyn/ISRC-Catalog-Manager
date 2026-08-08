@@ -26,11 +26,45 @@ def _rights_browser_panel_class():
 
 
 def _create_rights_matrix_panel(self, parent: QWidget) -> RightsBrowserPanel:
-    return _rights_browser_panel_class()(
+    panel = _rights_browser_panel_class()(
         rights_service_provider=lambda: self.rights_service,
         party_service_provider=lambda: self.party_service,
         contract_service_provider=lambda: self.contract_service,
         parent=parent,
+    )
+    panel.delete_right_handler = lambda right_id: _delete_right_with_history(self, right_id)
+    return panel
+
+
+def _delete_right_with_history(self, right_id: int) -> int:
+    if self.rights_service is None:
+        raise ValueError("Rights service is unavailable.")
+    normalized_id = int(right_id)
+    record = self.rights_service.fetch_right(normalized_id)
+    if record is None:
+        raise ValueError(f"Rights record {normalized_id} not found.")
+    right_label = (
+        str(record.title or "").strip()
+        or f"{record.right_type.replace('_', ' ').title()} #{normalized_id}"
+    )
+
+    def mutation() -> int:
+        self.rights_service.delete_right(normalized_id)
+        return normalized_id
+
+    return int(
+        self._run_snapshot_history_action(
+            action_label=f"Delete Rights Record: {right_label}",
+            action_type="right.delete",
+            entity_type="Right",
+            entity_id=normalized_id,
+            payload={
+                "right_id": normalized_id,
+                "title": record.title,
+                "right_type": record.right_type,
+            },
+            mutation=mutation,
+        )
     )
 
 

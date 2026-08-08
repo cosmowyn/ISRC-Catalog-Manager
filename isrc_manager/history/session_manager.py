@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import copy
 import json
-import shutil
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .models import HistoryEntry
+from .session_bundle import (
+    SNAPSHOT_INVENTORY_KEY,
+    ProfileDeletionRollback,
+    SessionProfileBundleStore,
+)
+from .snapshot_replay import profile_database_states_match
 
 
 class SessionHistoryManager:
@@ -17,12 +25,19 @@ class SessionHistoryManager:
     STATUS_UNDONE = "undone"
     STATUS_SUPERSEDED = "superseded"
 
-    def __init__(self, history_root: str | Path):
+    def __init__(
+        self,
+        history_root: str | Path,
+        *,
+        connection_factory: object | None = None,
+    ):
         self.history_root = Path(history_root)
+        self.connection_factory = connection_factory
         self.history_root.mkdir(parents=True, exist_ok=True)
         self.state_path = self.history_root / "session_history.json"
         self.snapshot_dir = self.history_root / "session_profile_snapshots"
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        self._bundle_store = SessionProfileBundleStore(self.snapshot_dir)
 
         self._state = self._load_state()
         self._ensure_invariants()
@@ -79,12 +94,12 @@ class SessionHistoryManager:
     def describe_undo(self) -> str | None:
         entry = self.get_current_entry()
         if entry and entry.reversible:
-            return entry.label
+            return str(entry.label)
         return None
 
     def describe_redo(self) -> str | None:
         entry = self.get_default_redo_entry()
-        return entry.label if entry is not None else None
+        return str(entry.label) if entry is not None else None
 
     def snapshot_references(self) -> list[dict]:
         references: list[dict] = []
@@ -150,8 +165,59 @@ class SessionHistoryManager:
             raise FileNotFoundError(source)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         target = self.snapshot_dir / f"{timestamp}_{kind}_{source.name}"
-        self._copy_profile_bundle(source, target)
+        target = self._bundle_store.validate_snapshot_path(target)
+        self._bundle_store.capture(source, target)
         return str(target)
+
+    def refresh_snapshot_inventories(
+        self,
+        snapshot_paths: Iterable[str | Path],
+    ) -> int:
+        """Refresh integrity metadata after an authorised snapshot-byte rewrite.
+
+        Password rotation is the expected caller. Paths that are not referenced by
+        this session history are ignored so callers may pass a mixed history batch.
+        """
+
+        requested = {self._bundle_store.cache_key(path) for path in snapshot_paths}
+        if not requested:
+            return 0
+
+        matched_payloads: dict[str, list[dict]] = {}
+        for row in self._state["entries"]:
+            for payload_name in ("inverse_payload", "redo_payload"):
+                payload = row.get(payload_name)
+                if not isinstance(payload, dict):
+                    continue
+                raw_path = str(payload.get("snapshot_path") or "").strip()
+                if not raw_path:
+                    continue
+                cache_key = self._bundle_store.cache_key(raw_path)
+                if cache_key in requested:
+                    matched_payloads.setdefault(cache_key, []).append(payload)
+
+        if not matched_payloads:
+            return 0
+
+        refreshed: dict[str, dict[str, Any]] = {}
+        for cache_key, payloads in matched_payloads.items():
+            snapshot = self._bundle_store.validate_snapshot_path(payloads[0]["snapshot_path"])
+            refreshed[cache_key] = self._bundle_store.capture_inventory(
+                snapshot,
+                require_main=True,
+            )
+
+        previous_state = copy.deepcopy(self._state)
+        try:
+            for cache_key, payloads in matched_payloads.items():
+                inventory = refreshed[cache_key]
+                for payload in payloads:
+                    payload[SNAPSHOT_INVENTORY_KEY] = copy.deepcopy(inventory)
+            self._save_state()
+        except Exception:
+            self._state = previous_state
+            raise
+        return len(refreshed)
 
     def record_profile_switch(
         self,
@@ -185,6 +251,7 @@ class SessionHistoryManager:
         created_norm = str(Path(created_path))
         previous_norm = str(Path(previous_path))
         snapshot_path = self.capture_profile_snapshot(created_norm, kind="profile_create")
+        snapshot_inventory = self._inventory_for_record(snapshot_path)
         entry_id = self._insert_entry(
             label=f"Create Profile: {Path(created_norm).name}",
             action_type="profile.create",
@@ -195,11 +262,13 @@ class SessionHistoryManager:
                 "created_path": created_norm,
                 "previous_path": previous_norm,
                 "snapshot_path": snapshot_path,
+                SNAPSHOT_INVENTORY_KEY: copy.deepcopy(snapshot_inventory),
             },
             redo_payload={
                 "created_path": created_norm,
                 "previous_path": previous_norm,
                 "snapshot_path": snapshot_path,
+                SNAPSHOT_INVENTORY_KEY: copy.deepcopy(snapshot_inventory),
             },
         )
         return self.fetch_entry(entry_id)
@@ -216,29 +285,52 @@ class SessionHistoryManager:
         deleted_norm = str(Path(deleted_path))
         current_norm = str(Path(current_path))
         fallback_norm = str(Path(fallback_path)) if fallback_path else None
-        entry_id = self._insert_entry(
-            label=f"Remove Profile: {Path(deleted_norm).name}",
-            action_type="profile.remove",
-            entity_type="Profile",
-            entity_id=deleted_norm,
-            payload={
-                "deleted_path": deleted_norm,
-                "deleting_current": deleting_current,
-                "fallback_path": fallback_norm,
-            },
-            inverse_payload={
-                "deleted_path": deleted_norm,
-                "snapshot_path": snapshot_path,
-                "deleting_current": deleting_current,
-                "restore_open_path": deleted_norm if deleting_current else current_norm,
-            },
-            redo_payload={
-                "deleted_path": deleted_norm,
-                "deleting_current": deleting_current,
-                "fallback_path": fallback_norm,
-                "current_path": current_norm,
-            },
-        )
+        snapshot_inventory = self._inventory_for_record(snapshot_path)
+        deleted_profile = Path(deleted_norm)
+        try:
+            self._bundle_store.finalize_recorded_removal(
+                deleted_profile,
+                snapshot_inventory,
+            )
+            entry_id = self._insert_entry(
+                label=f"Remove Profile: {deleted_profile.name}",
+                action_type="profile.remove",
+                entity_type="Profile",
+                entity_id=deleted_norm,
+                payload={
+                    "deleted_path": deleted_norm,
+                    "deleting_current": deleting_current,
+                    "fallback_path": fallback_norm,
+                },
+                inverse_payload={
+                    "deleted_path": deleted_norm,
+                    "snapshot_path": snapshot_path,
+                    "deleting_current": deleting_current,
+                    "restore_open_path": deleted_norm if deleting_current else current_norm,
+                    SNAPSHOT_INVENTORY_KEY: copy.deepcopy(snapshot_inventory),
+                },
+                redo_payload={
+                    "deleted_path": deleted_norm,
+                    "deleting_current": deleting_current,
+                    "fallback_path": fallback_norm,
+                    "current_path": current_norm,
+                    "snapshot_path": str(Path(snapshot_path)),
+                    SNAPSHOT_INVENTORY_KEY: copy.deepcopy(snapshot_inventory),
+                },
+            )
+        except Exception:
+            try:
+                self._bundle_store.restore_after_failed_removal_record(
+                    deleted_profile,
+                    Path(snapshot_path),
+                    snapshot_inventory,
+                )
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    "Profile removal history could not be recorded, and the deleted profile "
+                    "could not be restored without risking another file."
+                ) from rollback_exc
+            raise
         return self.fetch_entry(entry_id)
 
     def fetch_entry(self, entry_id: int) -> HistoryEntry | None:
@@ -251,21 +343,39 @@ class SessionHistoryManager:
     # ------------------------------------------------------------------
     # Undo / redo
     # ------------------------------------------------------------------
-    def undo(self, app) -> HistoryEntry | None:
+    def undo(self, app: Any) -> HistoryEntry | None:
         self._ensure_invariants()
         entry = self.get_current_entry()
         if entry is None or not entry.reversible:
             return None
-        self._apply_payload(app, entry.action_type, entry.inverse_payload or {}, direction="undo")
+        previous_state = copy.deepcopy(self._state)
+        replay_rollback = self._apply_payload(
+            app,
+            entry.action_type,
+            entry.inverse_payload or {},
+            direction="undo",
+        )
         for row in self._state["entries"]:
             if int(row["entry_id"]) == entry.entry_id:
                 row["status"] = self.STATUS_UNDONE
                 break
         self._state["current_entry_id"] = entry.parent_id
-        self._save_state()
+        try:
+            self._save_replay_state_with_compensation(
+                app,
+                entry,
+                previous_state=previous_state,
+                compensation_payload=entry.redo_payload or {},
+                compensation_direction="redo",
+                operation="Undo",
+                replay_rollback=replay_rollback,
+            )
+        finally:
+            if replay_rollback is not None:
+                replay_rollback.close()
         return entry
 
-    def redo(self, app, entry_id: int | None = None) -> HistoryEntry | None:
+    def redo(self, app: Any, entry_id: int | None = None) -> HistoryEntry | None:
         self._ensure_invariants()
         entry = (
             self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
@@ -274,13 +384,31 @@ class SessionHistoryManager:
             return None
         if not self._is_entry_redoable(entry):
             raise ValueError(f"Session history entry {entry.entry_id} is not redoable right now.")
-        self._apply_payload(app, entry.action_type, entry.redo_payload or {}, direction="redo")
+        previous_state = copy.deepcopy(self._state)
+        replay_rollback = self._apply_payload(
+            app,
+            entry.action_type,
+            entry.redo_payload or {},
+            direction="redo",
+        )
         for row in self._state["entries"]:
             if int(row["entry_id"]) == entry.entry_id:
                 row["status"] = self.STATUS_APPLIED
                 break
         self._state["current_entry_id"] = entry.entry_id
-        self._save_state()
+        try:
+            self._save_replay_state_with_compensation(
+                app,
+                entry,
+                previous_state=previous_state,
+                compensation_payload=entry.inverse_payload or {},
+                compensation_direction="undo",
+                operation="Redo",
+                replay_rollback=replay_rollback,
+            )
+        finally:
+            if replay_rollback is not None:
+                replay_rollback.close()
         return entry
 
     # ------------------------------------------------------------------
@@ -297,79 +425,184 @@ class SessionHistoryManager:
         inverse_payload: dict,
         redo_payload: dict,
     ) -> int:
+        previous_state = copy.deepcopy(self._state)
         entry_id = int(self._state["next_entry_id"])
-        parent_id = self.get_current_entry_id()
-        for row in self._state["entries"]:
-            row_parent_id = row.get("parent_id")
-            if parent_id is None:
-                is_redo_child = row_parent_id is None
-            else:
-                is_redo_child = (
-                    int(row_parent_id) == int(parent_id) if row_parent_id is not None else False
-                )
-            if is_redo_child and str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_UNDONE:
-                row["status"] = self.STATUS_SUPERSEDED
-        self._state["next_entry_id"] = entry_id + 1
-        row = {
-            "entry_id": entry_id,
-            "parent_id": parent_id,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "label": label,
-            "action_type": action_type,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "reversible": True,
-            "strategy": "session",
-            "payload": payload,
-            "inverse_payload": inverse_payload,
-            "redo_payload": redo_payload,
-            "status": self.STATUS_APPLIED,
-            "visible_in_history": True,
-        }
-        self._state["entries"].append(row)
-        self._state["current_entry_id"] = entry_id
-        self._save_state()
+        try:
+            parent_id = self.get_current_entry_id()
+            for row in self._state["entries"]:
+                row_parent_id = row.get("parent_id")
+                if parent_id is None:
+                    is_redo_child = row_parent_id is None
+                else:
+                    is_redo_child = (
+                        int(row_parent_id) == int(parent_id) if row_parent_id is not None else False
+                    )
+                if (
+                    is_redo_child
+                    and str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_UNDONE
+                ):
+                    row["status"] = self.STATUS_SUPERSEDED
+            self._state["next_entry_id"] = entry_id + 1
+            row = {
+                "entry_id": entry_id,
+                "parent_id": parent_id,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "label": label,
+                "action_type": action_type,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "reversible": True,
+                "strategy": "session",
+                "payload": payload,
+                "inverse_payload": inverse_payload,
+                "redo_payload": redo_payload,
+                "status": self.STATUS_APPLIED,
+                "visible_in_history": True,
+            }
+            self._state["entries"].append(row)
+            self._state["current_entry_id"] = entry_id
+            self._save_state()
+        except Exception:
+            self._state = previous_state
+            raise
         return entry_id
 
-    def _apply_payload(self, app, action_type: str, payload: dict, *, direction: str) -> None:
+    def _apply_payload(
+        self,
+        app: Any,
+        action_type: str,
+        payload: dict,
+        *,
+        direction: str,
+    ) -> ProfileDeletionRollback | None:
         if action_type in {"profile.switch", "profile.browse"}:
             app._session_history_open_profile(payload["target_path"])
-            return
+            return None
 
         if action_type == "profile.create":
+            snapshot, snapshot_inventory = self._bundle_store.verified_payload_snapshot(payload)
+            created_path = Path(payload["created_path"])
             if direction == "undo":
-                app._session_history_delete_profile(payload["created_path"])
-                app._session_history_open_profile(payload["previous_path"])
+                self._bundle_store.assert_live_matches(
+                    created_path,
+                    snapshot_inventory,
+                    action="undo profile creation",
+                    logical_matcher=self._logical_profile_matcher(created_path, snapshot),
+                )
+                return self._bundle_store.delete_profile_bundle(
+                    app,
+                    created_path,
+                    after_delete=lambda: app._session_history_open_profile(
+                        payload["previous_path"]
+                    ),
+                    after_rollback=lambda: app._session_history_open_profile(str(created_path)),
+                )
             else:
-                self._restore_profile_bundle(payload["snapshot_path"], payload["created_path"])
-                app._session_history_open_profile(payload["created_path"])
-            return
+                self._bundle_store.assert_live_absent(
+                    created_path,
+                    action="redo profile creation",
+                )
+                self._bundle_store.restore(
+                    snapshot,
+                    created_path,
+                    snapshot_inventory,
+                )
+                try:
+                    app._session_history_open_profile(str(created_path))
+                except Exception:
+                    self._bundle_store.remove_restored_if_unchanged(
+                        created_path,
+                        snapshot_inventory,
+                    )
+                    raise
+            return None
 
         if action_type == "profile.remove":
+            snapshot, snapshot_inventory = self._bundle_store.verified_payload_snapshot(payload)
+            deleted_path = Path(payload["deleted_path"])
             if direction == "undo":
-                self._restore_profile_bundle(payload["snapshot_path"], payload["deleted_path"])
+                self._bundle_store.assert_live_absent(
+                    deleted_path,
+                    action="undo profile removal",
+                )
+                self._bundle_store.restore(
+                    snapshot,
+                    deleted_path,
+                    snapshot_inventory,
+                )
                 restore_open_path = payload.get("restore_open_path")
-                if restore_open_path:
-                    app._session_history_open_profile(restore_open_path)
-                else:
-                    app._session_history_reload_profiles()
+                try:
+                    if restore_open_path:
+                        app._session_history_open_profile(restore_open_path)
+                    else:
+                        app._session_history_reload_profiles()
+                except Exception:
+                    self._bundle_store.remove_restored_if_unchanged(
+                        deleted_path,
+                        snapshot_inventory,
+                    )
+                    raise
             else:
-                app._session_history_delete_profile(payload["deleted_path"])
-                if payload.get("deleting_current"):
-                    fallback_path = payload.get("fallback_path")
-                    if fallback_path:
-                        app._session_history_open_profile(fallback_path)
-                else:
-                    current_path = payload.get("current_path")
-                    app._session_history_reload_profiles(select_path=current_path)
-            return
+                self._bundle_store.assert_live_matches(
+                    deleted_path,
+                    snapshot_inventory,
+                    action="redo profile removal",
+                    logical_matcher=self._logical_profile_matcher(deleted_path, snapshot),
+                )
+                return self._bundle_store.delete_profile_bundle(
+                    app,
+                    deleted_path,
+                    after_delete=lambda: self._navigate_after_profile_removal(
+                        app,
+                        payload,
+                    ),
+                    after_rollback=lambda: self._navigate_after_profile_removal_rollback(
+                        app,
+                        payload,
+                        deleted_path,
+                    ),
+                )
+            return None
 
         raise ValueError(f"Unknown session history action: {action_type}")
 
-    def _load_state(self) -> dict:
+    @staticmethod
+    def _navigate_after_profile_removal(app: Any, payload: dict) -> None:
+        if payload.get("deleting_current"):
+            fallback_path = payload.get("fallback_path")
+            if fallback_path:
+                app._session_history_open_profile(fallback_path)
+            return
+        app._session_history_reload_profiles(select_path=payload.get("current_path"))
+
+    @staticmethod
+    def _navigate_after_profile_removal_rollback(
+        app: Any,
+        payload: dict,
+        deleted_path: Path,
+    ) -> None:
+        if payload.get("deleting_current"):
+            app._session_history_open_profile(str(deleted_path))
+            return
+        app._session_history_reload_profiles(select_path=payload.get("current_path"))
+
+    def _logical_profile_matcher(
+        self,
+        live_path: Path,
+        snapshot_path: Path,
+    ) -> Callable[[], bool] | None:
+        if self.connection_factory is None:
+            return None
+        return lambda: profile_database_states_match(
+            live_path,
+            snapshot_path,
+            connection_factory=self.connection_factory,
+        )
+
+    def _load_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
             return {"next_entry_id": 1, "current_entry_id": None, "entries": []}
-        raw = json.loads(self.state_path.read_text(encoding="utf-8"))
+        raw: dict[str, Any] = json.loads(self.state_path.read_text(encoding="utf-8"))
         raw.setdefault("next_entry_id", 1)
         raw.setdefault("current_entry_id", None)
         raw.setdefault("entries", [])
@@ -424,12 +657,46 @@ class SessionHistoryManager:
         current_id = self.get_current_entry_id()
         if current_id is None:
             return entry.parent_id is None
-        return entry.parent_id == current_id
+        return bool(entry.parent_id == current_id)
 
     def _save_state(self) -> None:
         tmp_path = self.state_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(self._state, indent=2), encoding="utf-8")
         tmp_path.replace(self.state_path)
+
+    def _save_replay_state_with_compensation(
+        self,
+        app: Any,
+        entry: HistoryEntry,
+        *,
+        previous_state: dict[str, Any],
+        compensation_payload: dict,
+        compensation_direction: str,
+        operation: str,
+        replay_rollback: ProfileDeletionRollback | None,
+    ) -> None:
+        try:
+            self._save_state()
+        except Exception as save_exc:
+            self._state = previous_state
+            try:
+                if replay_rollback is not None:
+                    replay_rollback.rollback()
+                else:
+                    self._apply_payload(
+                        app,
+                        entry.action_type,
+                        compensation_payload,
+                        direction=compensation_direction,
+                    )
+            except Exception as compensation_exc:
+                raise RuntimeError(
+                    f"{operation} changed the profile but its history state could not be saved, "
+                    "and the automatic filesystem rollback also failed."
+                ) from compensation_exc
+            raise RuntimeError(
+                f"{operation} could not save its history state; the profile change was rolled back."
+            ) from save_exc
 
     def _entry_from_dict(self, row: dict, *, current_id: int | None) -> HistoryEntry:
         return HistoryEntry(
@@ -452,27 +719,13 @@ class SessionHistoryManager:
             is_current=int(row["entry_id"]) == current_id,
         )
 
-    @staticmethod
-    def _copy_profile_bundle(source: Path, target: Path) -> None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        for suffix in ("-wal", "-shm"):
-            companion = Path(str(source) + suffix)
-            if companion.exists():
-                shutil.copy2(companion, Path(str(target) + suffix))
+    def _inventory_for_record(self, snapshot_path: str | Path) -> dict[str, Any]:
+        return self._bundle_store.inventory_for_record(snapshot_path)
 
-    @staticmethod
-    def _restore_profile_bundle(snapshot_path: str | Path, target_path: str | Path) -> None:
-        snapshot = Path(snapshot_path)
-        target = Path(target_path)
-        if not snapshot.exists():
-            raise FileNotFoundError(snapshot)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(snapshot, target)
-        for suffix in ("-wal", "-shm"):
-            target_companion = Path(str(target) + suffix)
-            if target_companion.exists():
-                target_companion.unlink()
-            snapshot_companion = Path(str(snapshot) + suffix)
-            if snapshot_companion.exists():
-                shutil.copy2(snapshot_companion, target_companion)
+    def _restore_profile_bundle(
+        self,
+        snapshot_path: str | Path,
+        target_path: str | Path,
+        expected_inventory: dict[str, Any] | None = None,
+    ) -> None:
+        self._bundle_store.restore(snapshot_path, target_path, expected_inventory)

@@ -25,10 +25,29 @@ def _asset_browser_panel_class():
     return _root_attr("AssetBrowserPanel", AssetBrowserPanel)
 
 
+def _delete_asset_with_history(self, asset_id: int) -> None:
+    service = self.asset_service
+    asset = service.fetch_asset(int(asset_id)) if service is not None else None
+    if asset is None:
+        raise ValueError("The selected asset could not be loaded.")
+    history_action = getattr(self, "_run_snapshot_history_action", None)
+    if not callable(history_action):
+        raise RuntimeError("Asset history is unavailable; the asset was not deleted.")
+    history_action(
+        action_label=f"Delete Asset: {asset.filename or f'#{int(asset_id)}'}",
+        action_type="asset.delete",
+        entity_type="AssetVersion",
+        entity_id=int(asset_id),
+        payload={"filename": asset.filename, "asset_type": asset.asset_type},
+        mutation=lambda: service.delete_asset(int(asset_id)),
+    )
+
+
 def _create_asset_registry_panel(self, parent: QWidget) -> AssetBrowserPanel:
     return _asset_browser_panel_class()(
         asset_service_provider=lambda: self.asset_service,
         drill_in_host_provider=lambda: self,
+        delete_asset_handler=lambda asset_id: _delete_asset_with_history(self, asset_id),
         parent=parent,
     )
 

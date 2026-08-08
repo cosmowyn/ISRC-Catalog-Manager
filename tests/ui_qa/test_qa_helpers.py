@@ -295,6 +295,40 @@ def test_pq_artifact_recorders_write_deviations_evidence_and_traceability(tmp_pa
     assert any(item.coverage_status == "object_name_gap" for item in deviations.deviations)
 
 
+def test_traceability_maps_only_undo_redo_history_surfaces_to_replay_qualification(
+    tmp_path: Path,
+) -> None:
+    deviations = DeviationRecorder(tmp_path / "deviations.csv")
+
+    def _item(inventory_id: str, text: str) -> UIInventoryItem:
+        return UIInventoryItem(
+            inventory_id=inventory_id,
+            kind="action",
+            ui_area="history_recovery",
+            object_name=inventory_id.replace(":", "_"),
+            text=text,
+            class_name="QAction",
+            parent="History",
+            path=f"History/{text}",
+            visible=True,
+            enabled=True,
+            has_stable_object_name=True,
+        )
+
+    rows = build_traceability_matrix(
+        [
+            _item("action:undo", "Undo Delete Track"),
+            _item("action:redo", "Redo Delete Track"),
+            _item("action:create_snapshot", "Create Snapshot…"),
+        ],
+        deviations=deviations,
+    )
+
+    assert [row.test_id for row in rows[:2]] == ["UI-PQ-HIST-001", "UI-PQ-HIST-001"]
+    assert rows[2].test_id == "UI-PQ-MISC-001"
+    assert rows[2].coverage_status == "pending_manual"
+
+
 def test_fixture_helpers_create_full_repertoire_records() -> None:
     conn = _connection()
 
@@ -1004,6 +1038,19 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
     other.fill(QColor("white"))
     assert other.save(str(other_path), "PNG")
     assert _compare_image_files(image_path, other_path)["reason"] == "image dimensions differ"
+
+    black_path = tmp_path / "black.png"
+    black = QImage(16, 16, QImage.Format.Format_ARGB32)
+    black.fill(QColor("black"))
+    assert black.save(str(black_path), "PNG")
+    relaxed = _compare_image_files(
+        image_path,
+        black_path,
+        max_mean_channel_delta=255.0,
+        max_changed_sample_ratio=1.0,
+    )
+    assert relaxed["passed"]
+    assert relaxed["tolerance"]["max_mean_channel_delta"] == 255.0
 
     manifest = service.write_manifest()
     assert manifest.exists()

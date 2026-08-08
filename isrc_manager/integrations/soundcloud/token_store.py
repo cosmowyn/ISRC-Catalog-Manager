@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from ...credential_namespaces import SOUNDCLOUD_CREDENTIAL_SERVICE
 from .client import redact_text
 from .models import SoundCloudOAuthTokenBundle, SoundCloudTokenKind
 
-DEFAULT_SOUNDCLOUD_KEYCHAIN_SERVICE = "isrc-catalog-manager.soundcloud"
+DEFAULT_SOUNDCLOUD_KEYCHAIN_SERVICE = SOUNDCLOUD_CREDENTIAL_SERVICE
 CLIENT_SECRET_KEY_PREFIX = "soundcloud:client-secret:"
 
 

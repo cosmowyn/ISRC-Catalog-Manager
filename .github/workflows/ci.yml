@@ -2,9 +2,20 @@ name: CI
 
 on:
   push:
-    branches-ignore:
-      - "dependabot/**"
+    branches:
+      - main
+    tags:
+      - "v*"
   pull_request:
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      full_validation:
+        description: Run a clean, complete QA/PQ validation
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -17,13 +28,86 @@ env:
   QT_QPA_PLATFORM: offscreen
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  qa-pq-impact:
+    name: Plan QA/PQ impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full_validation: ${{ steps.plan.outputs.full_validation }}
+      has_pq_work: ${{ steps.plan.outputs.has_pq_work }}
+      mode: ${{ steps.plan.outputs.mode }}
+      plan_hash: ${{ steps.plan.outputs.plan_hash }}
+      selected_components: ${{ steps.plan.outputs.selected_components }}
+      test_targets: ${{ steps.plan.outputs.test_targets }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+
+      - name: Detect changed files conservatively
+        id: changes
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changes_file="$RUNNER_TEMP/qa-pq-changes.txt"
+          : > "$changes_file"
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_sha="$PR_BASE_SHA"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/heads/* ]]; then
+            base_sha="$BEFORE_SHA"
+          else
+            base_sha=""
+          fi
+
+          if [[ -n "$base_sha" && "$base_sha" =~ ^[0-9a-f]{40}$ && ! "$base_sha" =~ ^0+$ ]]; then
+            if git fetch --no-tags --depth=1 origin "$base_sha"; then
+              if ! git diff --name-status --find-renames "$base_sha" "$GITHUB_SHA" > "$changes_file"; then
+                echo "Change detection failed; the planner will force a full run." >&2
+                : > "$changes_file"
+              fi
+            else
+              echo "The comparison commit could not be fetched; the planner will force a full run." >&2
+            fi
+          fi
+          echo "path=$changes_file" >> "$GITHUB_OUTPUT"
+
+      - name: Build QA/PQ impact plan
+        id: plan
+        env:
+          MANUAL_FULL_VALIDATION: ${{ inputs.full_validation || false }}
+        run: |
+          python3 scripts/qa_pq_impact.py \
+            --changed-file "${{ steps.changes.outputs.path }}" \
+            --event-type "$GITHUB_EVENT_NAME" \
+            --ref "$GITHUB_REF" \
+            --full-validation "$MANUAL_FULL_VALIDATION" \
+            --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/qa-pq-plan.json" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload QA/PQ plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-pq-impact-plan
+          path: ${{ runner.temp }}/qa-pq-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
   dependency-audit:
     name: Python dependency audit (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +136,7 @@ jobs:
   compile:
     name: Compile (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -63,27 +148,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            requirements-dev.txt
-
-      - name: Install dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .[dev]
 
       - name: Compile Python sources
-        run: |
-          python -m py_compile ISRC_manager.py build.py icon_factory.py
-          python -m py_compile $(find isrc_manager -name '*.py' | sort)
-          python -m py_compile $(find scripts -name '*.py' | sort)
-          python -m py_compile $(find tests -name '*.py' | sort)
+        run: python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
 
   lint:
     name: Ruff lint (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -112,6 +184,7 @@ jobs:
   format:
     name: Black format check (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -140,6 +213,7 @@ jobs:
   type-check:
     name: mypy (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -217,29 +291,13 @@ jobs:
 
       - name: Install Qt runtime libraries
         if: ${{ matrix.qt-runtime }}
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 \
-            libgl1 \
-            libglib2.0-0 \
-            libopengl0 \
-            libpulse-mainloop-glib0 \
-            libx11-xcb1 \
-            libxcb-cursor0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-shm0 \
-            libxcb-sync1 \
-            libxcb-xfixes0 \
-            libxcb-xinerama0 \
-            libxcb-xkb1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0
+          mapfile -t qt_packages < <(python3 scripts/qa_pq_runtime.py system-packages)
+          test ${#qt_packages[@]} -gt 0
+          sudo apt-get install -y "${qt_packages[@]}"
 
       - name: Install dev dependencies
         run: |
@@ -273,24 +331,260 @@ jobs:
           path: .coverage*
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 1
 
-      - name: Upload UI PQ artifacts
-        if: ${{ matrix.group == 'ui-app-workflows' }}
+  qa-pq:
+    name: QA/PQ validation
+    runs-on: ubuntu-latest
+    needs: qa-pq-impact
+    timeout-minutes: 50
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: qa-pq-impact-plan
+          path: ${{ runner.temp }}/qa-pq-plan
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+
+      - name: Install fingerprinted Qt runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          mapfile -t qt_packages < <(python3 scripts/qa_pq_runtime.py system-packages)
+          if [[ ${#qt_packages[@]} -eq 0 ]]; then
+            echo "QA/PQ runtime declared no Linux renderer packages." >&2
+            exit 1
+          fi
+          sudo apt-get install -y "${qt_packages[@]}"
+
+      - name: Capture the QA/PQ renderer runtime identity
+        run: |
+          python3 scripts/qa_pq_runtime.py capture \
+            --repo-root . \
+            --output "$RUNNER_TEMP/qa-pq-runtime.json"
+
+      - name: Select the latest trusted canonical bundle
+        if: ${{ needs.qa-pq-impact.outputs.mode != 'full' }}
+        id: baseline
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_ID: ${{ github.event.repository.id }}
+        run: |
+          set -euo pipefail
+          inventory="$RUNNER_TEMP/ui-pq-artifacts.json"
+          runs="$RUNNER_TEMP/ui-pq-runs.json"
+
+          if ! gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?name=ui-pq-canonical&per_page=100" > "$inventory"; then
+            echo "Prior QA/PQ artifacts could not be listed; preparation will force a full run." >&2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh api --method GET \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch="$DEFAULT_BRANCH" \
+            -f event=push \
+            -f status=success \
+            -f per_page=100 > "$runs"; then
+            echo "Trusted CI producer runs could not be listed; preparation will force a full run." >&2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! python3 scripts/trusted_ci_artifacts.py latest \
+            --artifacts "$inventory" \
+            --runs "$runs" \
+            --artifact-name ui-pq-canonical \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$REPOSITORY_ID" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --github-output "$GITHUB_OUTPUT"; then
+            echo "Prior QA/PQ producer metadata was not trustworthy; preparation will force a full run." >&2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the attested canonical bundle
+        if: ${{ steps.baseline.outputs.available == 'true' }}
+        id: baseline_download
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.baseline.outputs.artifact_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/ui-pq-baseline.zip"
+          destination="$RUNNER_TEMP/ui-pq-baseline"
+          if [[ ! "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "The selected QA/PQ artifact id is invalid; preparation will force a full run." >&2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$destination"
+          if gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$archive" \
+            && unzip -q "$archive" -d "$destination"; then
+            available=true
+          else
+            echo "The candidate bundle could not be downloaded; preparation will force a full run." >&2
+            available=false
+          fi
+          echo "available=$available" >> "$GITHUB_OUTPUT"
+
+      - name: Validate reuse provenance and select effective work
+        id: prepare
+        shell: bash
+        env:
+          BASELINE_SOURCE_COMMIT: ${{ steps.baseline.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          args=(
+            prepare
+            --plan "$RUNNER_TEMP/qa-pq-plan/qa-pq-plan.json"
+            --repo-root .
+            --output artifacts/ui_pq
+            --state "$RUNNER_TEMP/qa-pq-reuse-state.json"
+            --runtime-fingerprint "$RUNNER_TEMP/qa-pq-runtime.json"
+            --replace-output
+            --github-output "$GITHUB_OUTPUT"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "${{ steps.baseline_download.outputs.available }}" == "true" ]]; then
+            args+=(
+              --baseline "$RUNNER_TEMP/ui-pq-baseline"
+              --baseline-source-commit "$BASELINE_SOURCE_COMMIT"
+            )
+          fi
+          python3 scripts/qa_pq_artifacts.py "${args[@]}"
+
+      - name: Install QA/PQ dependencies
+        if: ${{ steps.prepare.outputs.run_tests == 'true' }}
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e .[dev]
+
+      - name: Verify installed QA/PQ renderer runtime
+        if: ${{ steps.prepare.outputs.run_tests == 'true' }}
+        run: |
+          python3 scripts/qa_pq_runtime.py verify \
+            --repo-root . \
+            --input "$RUNNER_TEMP/qa-pq-runtime.json"
+
+      - name: Validate workflow policy tooling
+        if: ${{ steps.prepare.outputs.run_tests == 'true' }}
+        run: |
+          python3 -m pytest -q --no-cov \
+            tests/test_cleanup_github_builds.py \
+            tests/test_apply_help_screenshots.py \
+            tests/test_qa_pq_artifacts.py \
+            tests/test_qa_pq_execution.py \
+            tests/test_qa_pq_impact.py \
+            tests/test_trusted_ci_artifacts.py
+
+      - name: Run selected UI QA/PQ tests
+        if: ${{ steps.prepare.outputs.run_tests == 'true' }}
+        env:
+          ISRC_UI_PQ_ARTIFACT_DIR: artifacts/ui_pq
+          ISRC_UI_PQ_COMPONENTS: ${{ steps.prepare.outputs.selected_components }}
+          QA_PQ_TEST_TARGETS: ${{ steps.prepare.outputs.test_targets }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          targets = json.loads(os.environ["QA_PQ_TEST_TARGETS"])
+          if not isinstance(targets, list) or not targets:
+              raise SystemExit("QA/PQ preparation selected no pytest targets")
+          subprocess.run(
+              [sys.executable, "-m", "pytest", "-q", "--no-cov", *targets],
+              check=True,
+          )
+          PY
+
+      - name: Finalize canonical QA/PQ bundle
+        run: |
+          python3 scripts/qa_pq_artifacts.py finalize \
+            --state "$RUNNER_TEMP/qa-pq-reuse-state.json" \
+            --output artifacts/ui_pq \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canonical QA/PQ bundle
         uses: actions/upload-artifact@v7
         with:
-          name: ui-pq-artifacts
+          name: ui-pq-canonical
           path: artifacts/ui_pq
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Help refresh inputs
+        if: ${{ steps.prepare.outputs.has_visual_help == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: help-documentation-pq
+          path: |
+            artifacts/ui_pq/help
+            artifacts/ui_pq/evidence.json
+            artifacts/ui_pq/provenance.json
+            artifacts/ui_pq/summary.md
+            docs/help/screenshots
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failure diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-pq-failure-${{ github.run_id }}
+          path: artifacts/ui_pq
+          if-no-files-found: warn
+          retention-days: 14
 
   coverage-report:
     name: Coverage report
     runs-on: ubuntu-latest
-    needs: test-shards
+    if: ${{ always() }}
+    needs:
+      - dependency-audit
+      - compile
+      - lint
+      - format
+      - type-check
+      - test-shards
+      - qa-pq
+      - packaging-smoke
     permissions:
-      contents: write
+      contents: read
     timeout-minutes: 15
 
     steps:
+      - name: Require all governing validation jobs
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = {
+              name: job.get("result")
+              for name, job in json.loads(os.environ["NEEDS_JSON"]).items()
+          }
+          failed = {name: result for name, result in results.items() if result != "success"}
+          if failed:
+              raise SystemExit(f"Governing validation did not pass: {failed}")
+          PY
+
       - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
@@ -301,7 +595,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: ui-pq-artifacts
+          name: ui-pq-canonical
           path: artifacts/ui_pq
 
       - uses: actions/setup-python@v7
@@ -331,12 +625,14 @@ jobs:
         with:
           name: coverage-xml
           path: coverage-artifacts/coverage.xml
+          retention-days: 7
 
       - name: Upload coverage JSON
         uses: actions/upload-artifact@v7
         with:
           name: coverage-json
           path: coverage.json
+          retention-days: 7
 
       - name: Append QA/PQ dashboard history
         run: |
@@ -347,7 +643,8 @@ jobs:
             --coverage-snapshot docs/validation/coverage_snapshot.json \
             --source github-actions \
             --branch "${{ github.ref_name }}" \
-            --commit-sha "${{ github.sha }}"
+            --commit-sha "${{ github.sha }}" \
+            --require-pq-provenance
 
       - name: Upload QA/PQ dashboard data
         uses: actions/upload-artifact@v7
@@ -356,12 +653,15 @@ jobs:
           path: |
             docs/validation/qa_pq_history.csv
             docs/validation/coverage_snapshot.json
+          retention-days: 30
 
       - name: Commit QA/PQ dashboard data on main
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
         run: |
+          set -euo pipefail
           if ! git diff --quiet -- docs/validation/qa_pq_history.csv docs/validation/coverage_snapshot.json; then
             if [ -z "${MAIN_AUTOMATION_DEPLOY_KEY:-}" ]; then
               echo "MAIN_AUTOMATION_DEPLOY_KEY is required to push QA/PQ history through the protected main ruleset." >&2
@@ -374,24 +674,27 @@ jobs:
               exit 0
             fi
 
-            mkdir -p ~/.ssh
-            chmod 700 ~/.ssh
-            printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > ~/.ssh/main_automation_deploy_key
-            chmod 600 ~/.ssh/main_automation_deploy_key
-            ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+            key_file="$RUNNER_TEMP/main_automation_deploy_key"
+            known_hosts="$RUNNER_TEMP/github_known_hosts"
+            trap 'rm -f "$key_file" "$known_hosts"' EXIT
+            printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > "$key_file"
+            chmod 600 "$key_file"
+            gh api /meta --jq '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+            test -s "$known_hosts"
             git remote set-url origin "git@github.com:${{ github.repository }}.git"
-            git config core.sshCommand "ssh -i ~/.ssh/main_automation_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+            git config core.sshCommand "ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
 
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add docs/validation/qa_pq_history.csv docs/validation/coverage_snapshot.json
-            git commit -m "Update QA/PQ dashboard data [skip ci]"
+            git -c core.hooksPath=/dev/null commit -m "Update QA/PQ dashboard data [skip ci]"
             git push origin HEAD:main
           fi
 
   packaging-smoke:
     name: Packaging smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7
@@ -406,29 +709,13 @@ jobs:
             requirements-dev.txt
 
       - name: Install Qt runtime libraries
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 \
-            libgl1 \
-            libglib2.0-0 \
-            libopengl0 \
-            libpulse-mainloop-glib0 \
-            libx11-xcb1 \
-            libxcb-cursor0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-shm0 \
-            libxcb-sync1 \
-            libxcb-xfixes0 \
-            libxcb-xinerama0 \
-            libxcb-xkb1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0
+          mapfile -t qt_packages < <(python3 scripts/qa_pq_runtime.py system-packages)
+          test ${#qt_packages[@]} -gt 0
+          sudo apt-get install -y "${qt_packages[@]}"
 
       - name: Install build dependencies
         run: |

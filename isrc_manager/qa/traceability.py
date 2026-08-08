@@ -110,34 +110,34 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
         TraceabilityEntry(
             "UI-PQ-REL-001",
             "works_releases_parties",
-            "Track to work, release, and party relationship qualification.",
+            "Track-to-work/release/party relationships and reversible Party deletion/merge.",
             "work/release/party managers",
             "Relationship Qualification",
             "automated",
             "QA track exists.",
-            "UI-populated Party Manager, Work Manager, and Release Browser surfaces.",
-            "Create Party and Work records through manager dialogs; verify Add Track-created release in Release Browser and database links.",
-            "Related records exist, link to the QA track/work, appear in their manager tables, and pass screenshot baseline comparison.",
-            "Parties, Works, Releases, ReleaseTracks",
-            "PartyManagerPanel, WorkBrowserPanel, ReleaseBrowserPanel",
+            "UI-populated manager surfaces plus deterministic transient Party and Rights records.",
+            "Create Party and Work records through manager dialogs; verify the release and links; invoke injected Party delete/merge history handlers; verify delete/merge, Undo restoration, relationship restoration, and final Redo state.",
+            "Primary relationship records remain available; Party delete and merge are the latest reversible actions; Undo restores records and dependent links; Redo reapplies each destructive action; screenshot baselines pass.",
+            "Parties, PartyArtistAliases, RightsRecords, Works, Releases, ReleaseTracks, HistoryEntries, HistorySnapshots",
+            "PartyManagerPanel history handlers, HistoryManager, WorkBrowserPanel, ReleaseBrowserPanel",
             "evidence.json, business_workflow_manifest.json",
-            "Missing relationship, broken manager reachability, screenshot drift, or database mismatch.",
+            "Missing relationship, history handler, reversible action, Undo/Redo restoration, manager reachability, screenshot baseline, or database state.",
         ),
         TraceabilityEntry(
             "UI-PQ-CON-001",
             "contracts_rights",
-            "Contract/license and rights relationship qualification.",
+            "Contract/license, rights relationships, and reversible Rights deletion.",
             "contract manager/rights matrix",
             "Relationship Qualification",
             "automated",
             "QA party/work/track/release exist.",
-            "UI-populated Contract Manager and Rights Matrix dialogs.",
-            "Create contract linked to party/work/track/release through Contract Manager; create right through Rights Matrix; verify links.",
-            "Contract detail and rights records reference the expected entities, appear in manager tables, and pass screenshot baseline comparison.",
-            "Contracts, ContractParties, ContractWorkLinks, RightsRecords",
-            "ContractBrowserPanel, ContractEditorDialog, RightsBrowserPanel, RightEditorDialog",
+            "UI-populated Contract/Right dialogs plus a deterministic transient Rights record.",
+            "Create linked contract and right; invoke the injected Rights delete history handler for the transient record; verify deletion, Undo relationship restoration, final Redo deletion, and preservation of the primary QA right.",
+            "Primary contract/right records remain linked and visible; Rights delete is reversible; Undo restores all entity relationships; Redo removes only the transient right; screenshot baselines pass.",
+            "Contracts, ContractParties, ContractWorkLinks, RightsRecords, HistoryEntries, HistorySnapshots",
+            "ContractBrowserPanel, RightsBrowserPanel history handler, RightEditorDialog, HistoryManager",
             "evidence.json, business_workflow_manifest.json",
-            "Contract/right links missing, manager surface not traceable, screenshot drift, or database mismatch.",
+            "Contract/right link, history handler, Undo/Redo restoration, primary record, manager traceability, screenshot baseline, or database state fails.",
         ),
         TraceabilityEntry(
             "UI-PQ-ACC-001",
@@ -220,20 +220,40 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
             "Diagnostics report fails, integrity fails, backup cannot be created, or isolated restore is invalid.",
         ),
         TraceabilityEntry(
+            "UI-PQ-HIST-001",
+            "history_recovery",
+            "Responsive profile-history Undo/Redo with phase-based progress and overlap protection.",
+            "Undo/Redo actions and Undo History dialog",
+            "Performance/Responsiveness Qualification",
+            "automated",
+            "QA profile open with a reversible catalog edit as the latest profile action.",
+            "A deterministic track edit and captured background-task progress events.",
+            "Invoke the production Undo and Redo commands; verify exclusive non-cancellable task submission, monotonic determinate worker progress below 100%, UI-finalization progress to 100%, and the committed catalog state after each direction.",
+            "The UI command returns through the shared task system, overlapping replay is guarded by one stable task key, Undo restores the prior row, Redo restores the edited row, and completion is not claimed before interface refresh.",
+            "Tracks, HistoryEntries, HistoryHead, HistorySnapshots",
+            "HistoryReplayController, BackgroundTaskManager, worker-local HistoryManager",
+            "evidence.json, progress dialog, app-shell responsiveness regression",
+            "Replay runs inline, is cancellable or non-exclusive, progress regresses or reaches 100% before UI refresh, duplicate replay can overlap, or database state does not match the selected direction.",
+        ),
+        TraceabilityEntry(
             "UI-PQ-SET-001",
             "settings_theme_help",
-            "Settings, theme/QSS, help, documentation, about surfaces.",
-            "settings/theme/help actions",
+            "Settings, scoped stored-credential reset reachability, theme/QSS, help, documentation, and about surfaces.",
+            "settings/theme/help actions and resetStoredCredentialsButton",
             "UI Reachability Qualification",
             "automated",
             "QA profile open.",
             "Runtime UI inventory.",
-            "Capture main window screenshot, open/capture/close help and about dialogs, compare visual baselines, and validate prepared theme payload.",
-            "Screenshots are nonblank, visual baselines match, dialogs are reachable, and theme stylesheet generation succeeds.",
-            "QSettings, theme values, help topics",
-            "Settings dialogs, help content, VisualQualificationService, theme controller",
+            "Capture the main window; open and capture Settings, Help, and About; verify resetStoredCredentialsButton is visible with the expected label while recording zero activation attempts; close without invoking credential reset; compare visual baselines; and validate the prepared theme payload.",
+            "Screenshots are nonblank, visual baselines match, dialogs are reachable, the manual credential-reset control is present but never activated, no Keychain operation occurs, and theme stylesheet generation succeeds.",
+            "QSettings, theme values, help topics, fixed app-owned Keychain service names",
+            "Settings dialogs, help content, VisualQualificationService, theme controller; Keychain reset execution intentionally excluded",
             "evidence.json, visual/visual_manifest.json",
-            "Dialog not reachable, screenshot blank, baseline mismatch, or theme payload invalid.",
+            "Dialog or reset control not reachable, reset control activated, Keychain access attempted, screenshot blank, baseline mismatch, or theme payload invalid.",
+            rationale=(
+                "Automated UI PQ qualifies reachability and safe non-invocation only; destructive "
+                "credential deletion is covered by isolated service tests and manual packaged-macOS qualification."
+            ),
         ),
         TraceabilityEntry(
             "UI-PQ-HELP-001",
@@ -270,18 +290,18 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
         TraceabilityEntry(
             "UI-PQ-ASSET-001",
             "assets_deliverables",
-            "Deliverables, asset versions, and derivative ledger workspace.",
+            "Deliverables, asset versions, derivative ledger, and reversible managed Asset deletion.",
             "Deliverables and Asset Versions",
             "Functional Workflow Qualification",
             "automated",
             "QA profile open with a catalog track.",
-            "Synthetic asset registry row created through AssetService.",
-            "Seed a primary master asset, open the Deliverables and Asset Versions dock from the runtime action, verify asset selection/search, switch to the derivative ledger tab, and confirm dock controls are present in inventory.",
-            "Asset registry action opens the dock, the seeded asset is visible and selectable, the derivative ledger tab is reachable, and discovered assets-deliverables controls are covered.",
-            "AssetVersions, derivative ledger UI state",
-            "AssetService, AssetBrowserPanel, catalog workspace dock",
+            "Synthetic seeded and transient Asset records, an app-managed file, and an external source fixture.",
+            "Seed a primary master Asset; open and navigate the Deliverables and Asset Versions dock; invoke the production-injected delete handler for a transient managed Asset; verify row/file deletion, Undo restoration, final Redo deletion, preservation of the external source, and preservation of the seeded registry record.",
+            "The seeded Asset remains visible; derivative navigation and inventory checks pass; deletion removes only the transient row and managed file; Undo restores both; Redo removes both again; the external source is never deleted.",
+            "AssetVersions, asset_registry managed files, derivative ledger UI state, HistoryEntries, HistorySnapshots",
+            "AssetService, AssetBrowserPanel delete history handler, HistoryManager, catalog workspace dock",
             "evidence.json, business_workflow_manifest.json",
-            "Asset registry action fails, seeded asset is not visible, derivative ledger is unreachable, or dock controls are missing from inventory.",
+            "Registry/navigation/inventory fails, the injected handler or history action is absent, Undo/Redo state is wrong, the seeded Asset changes, or an external source is removed.",
         ),
         TraceabilityEntry(
             "UI-PQ-MISC-001",
@@ -306,7 +326,20 @@ def default_traceability_entries() -> list[TraceabilityEntry]:
 def _matching_entry(
     item: UIInventoryItem, entries: list[TraceabilityEntry]
 ) -> TraceabilityEntry | None:
-    exact = [entry for entry in entries if entry.ui_area == item.ui_area]
+    history_replay_entry = next(
+        (entry for entry in entries if entry.test_id == "UI-PQ-HIST-001"),
+        None,
+    )
+    if item.ui_area == "history_recovery" and history_replay_entry is not None:
+        replay_surface = " ".join((str(item.text or ""), str(item.object_name or ""))).lower()
+        if any(term in replay_surface for term in ("undo", "redo", "history")):
+            return history_replay_entry
+
+    exact = [
+        entry
+        for entry in entries
+        if entry.ui_area == item.ui_area and entry.test_id != "UI-PQ-HIST-001"
+    ]
     if exact:
         return exact[0]
     secondary_areas = {

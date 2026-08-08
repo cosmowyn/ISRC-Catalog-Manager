@@ -609,12 +609,9 @@ def test_change_current_database_password_rekeys_encrypted_profile(monkeypatch, 
     db_path = tmp_path / "catalog.db"
     security_service = SQLCipherDatabaseService()
     conn = security_service.open(db_path, "current-secret-123")
-    try:
-        conn.execute("CREATE TABLE demo(value TEXT)")
-        conn.execute("INSERT INTO demo(value) VALUES ('ready')")
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute("CREATE TABLE demo(value TEXT)")
+    conn.execute("INSERT INTO demo(value) VALUES ('ready')")
+    conn.commit()
 
     class FakeInputDialog:
         results = [
@@ -634,18 +631,23 @@ def test_change_current_database_password_rekeys_encrypted_profile(monkeypatch, 
         current_db_path=str(db_path),
         database_security_service=security_service,
         database_passwords=passwords,
+        conn=conn,
     )
 
-    assert profile_session.change_current_database_password(app) is True
-    assert passwords.password_for_database(db_path) == "changed-secret-123"
-    with pytest.raises(InvalidDatabasePasswordError):
-        security_service.open(db_path, "current-secret-123")
-    reopened = security_service.open(db_path, "changed-secret-123")
     try:
-        assert reopened.execute("SELECT value FROM demo").fetchone() == ("ready",)
+        assert profile_session.change_current_database_password(app) is True
+        assert passwords.password_for_database(db_path) == "changed-secret-123"
+        assert conn.execute("SELECT value FROM demo").fetchone() == ("ready",)
+        with pytest.raises(InvalidDatabasePasswordError):
+            security_service.open(db_path, "current-secret-123")
+        reopened = security_service.open(db_path, "changed-secret-123")
+        try:
+            assert reopened.execute("SELECT value FROM demo").fetchone() == ("ready",)
+        finally:
+            reopened.close()
+        assert _MessageBox.messages[-1][0] == "information"
     finally:
-        reopened.close()
-    assert _MessageBox.messages[-1][0] == "information"
+        conn.close()
 
 
 def test_plaintext_profile_warning_can_be_suppressed_when_opened_unencrypted(monkeypatch, tmp_path):
@@ -830,6 +832,11 @@ def test_profile_removal_dialog_requires_explicit_dropdown_choice():
         ],
     )
     try:
+        message_text = " ".join(
+            label.text() for label in dialog.findChildren(profile_session.QLabel)
+        )
+        assert "Undo can restore it" in message_text
+        assert "cannot be undone" not in message_text.lower()
         assert dialog.selected_profile_path() is None
         assert dialog.remove_button is not None
         assert dialog.remove_button.isEnabled() is False
@@ -891,7 +898,10 @@ def test_remove_selected_profile_deletes_current_profile_and_opens_fallback(monk
     app.session_history_manager.record_profile_remove.assert_called_once()
     assert _MessageBox.messages[0][0] == "question"
     assert "/profiles/current.db" in _MessageBox.messages[0][1][2]
+    assert "Use Undo to restore" in _MessageBox.messages[0][1][2]
+    assert "cannot be undone" not in _MessageBox.messages[0][1][2].lower()
     assert _MessageBox.messages[-1][0] == "information"
+    assert "Use Undo to restore" in _MessageBox.messages[-1][1][2]
 
 
 def test_remove_selected_profile_uses_dialog_choice_not_toolbar_selection(monkeypatch):

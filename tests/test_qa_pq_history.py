@@ -269,12 +269,58 @@ class QAPQHistoryTests(unittest.TestCase):
             self.assertEqual(rows[-1]["app_loc"], "5")
             self.assertEqual(rows[-1]["app_loc_delta"], "1")
 
+    def test_dashboard_provenance_rejects_stale_or_incomplete_bundles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifacts = Path(tmpdir)
+            with self.assertRaisesRegex(ValueError, "missing or invalid"):
+                history.validate_pq_provenance(artifacts, expected_commit="current")
+
+            required = {
+                "generated_at": "2026-08-08T00:00:00Z",
+                "relevant_inputs_hash": "sha256:inputs",
+                "renderer_version": "renderer-v1",
+                "source_commit": "current",
+                "test_version": "tests-v1",
+            }
+            _write_json(
+                artifacts / "provenance.json",
+                {
+                    "schema_version": 2,
+                    "bundle": {
+                        **required,
+                        "selected_components": ["core-inventory"],
+                        "reused_components": ["assets"],
+                    },
+                    "components": {
+                        "core-inventory": required,
+                        "assets": {**required, "source_commit": "prior"},
+                    },
+                    "fingerprints": {
+                        "components": {
+                            "core-inventory": "sha256:core",
+                            "assets": "sha256:assets",
+                        },
+                        "runtime": {
+                            "fingerprint": "sha256:runtime",
+                            "inputs": {"runner": {"image_version": "20260808.1"}},
+                        },
+                        "shared": {"qa": "sha256:shared"},
+                    },
+                },
+            )
+
+            provenance = history.validate_pq_provenance(artifacts, expected_commit="current")
+            self.assertEqual(provenance["bundle"]["source_commit"], "current")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                history.validate_pq_provenance(artifacts, expected_commit="different")
+
     def test_ci_workflow_updates_dashboard_history_after_coverage_report(self) -> None:
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-        self.assertIn("Upload UI PQ artifacts", workflow)
+        self.assertIn("Upload canonical QA/PQ bundle", workflow)
         self.assertIn("coverage json -o ../coverage.json", workflow)
         self.assertIn("scripts/update_qa_pq_history.py", workflow)
+        self.assertIn("--require-pq-provenance", workflow)
         self.assertIn("docs/validation/qa_pq_history.csv", workflow)
         self.assertIn("docs/validation/coverage_snapshot.json", workflow)
         self.assertIn("Upload QA/PQ dashboard data", workflow)

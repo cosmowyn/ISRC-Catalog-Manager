@@ -6,6 +6,7 @@ import hashlib
 import math
 import shutil
 import struct
+import sys
 import wave
 from pathlib import Path
 from typing import Any
@@ -49,9 +50,14 @@ from isrc_manager.invoicing.template_workspace_finalization import (
 )
 from isrc_manager.media.conversion import AudioConversionResult
 
+from .asset_history_scenarios import qualify_asset_delete_history
 from .commands import table_contains_text
 from .fixtures import QARepertoireIds
 from .help_validation import validate_help_coverage, write_help_coverage_report
+from .history_scenarios import (
+    qualify_party_delete_merge_history,
+    qualify_right_delete_history,
+)
 from .visual import VisualQualificationService
 
 CATALOG_TRACK_TITLE = "UI PQ Qualification Track"
@@ -332,7 +338,16 @@ def _capture_help_surface(
     harness.process_events(cycles=8)
     capture = service.capture_widget(widget, name)
     shutil.copy2(capture.path, help_screenshot_dir / f"{name}.png")
-    comparison = service.compare_capture_to_baseline(capture)
+    if name == "application_log_dialog":
+        # Timestamps, temporary profile roots, and log lines change on every PQ
+        # run. Keep the size/changed-area guard strict while allowing those
+        # expected glyph changes to contribute a larger mean color delta.
+        comparison = service.compare_capture_to_baseline(
+            capture,
+            max_mean_channel_delta=12.0,
+        )
+    else:
+        comparison = service.compare_capture_to_baseline(capture)
     results.append(
         {
             "surface": name,
@@ -705,6 +720,109 @@ def run_catalog_workflow(harness: Any) -> int:
     return track_id
 
 
+def _numeric_progress_values(updates: list[dict[str, object]]) -> list[int]:
+    return [value for update in updates if isinstance((value := update.get("value")), int)]
+
+
+def run_history_replay_workflow(harness: Any, *, track_id: int) -> None:
+    """Qualify profile Undo/Redo submission, progress, and committed catalog state."""
+
+    window = harness.window
+    conn = harness.connection
+    if window is None:
+        raise AssertionError("QA harness window is not open.")
+    source, entry = window._get_best_history_candidate("undo")
+    if source != "profile" or entry is None:
+        raise AssertionError("Catalog edit was not the current profile-history Undo candidate.")
+
+    record_start = len(harness.background_task_records)
+    window.history_undo(owner=window)
+    harness.process_events(cycles=8)
+    undone_row = conn.execute(
+        "SELECT track_title FROM Tracks WHERE id=?",
+        (int(track_id),),
+    ).fetchone()
+    if undone_row != (CATALOG_TRACK_TITLE,):
+        raise AssertionError(f"Background Undo restored an unexpected track state: {undone_row!r}")
+
+    window.history_redo(owner=window)
+    harness.process_events(cycles=8)
+    redone_row = conn.execute(
+        "SELECT track_title FROM Tracks WHERE id=?",
+        (int(track_id),),
+    ).fetchone()
+    if redone_row != (CATALOG_TRACK_EDITED_TITLE,):
+        raise AssertionError(f"Background Redo restored an unexpected track state: {redone_row!r}")
+
+    records = [
+        record
+        for record in harness.background_task_records[record_start:]
+        if record.get("unique_key") == "history.replay"
+    ]
+    if len(records) != 2:
+        raise AssertionError(
+            f"Expected one background task for Undo and one for Redo, found {len(records)}."
+        )
+
+    worker_sequences: list[list[int]] = []
+    ui_sequences: list[list[int]] = []
+    progress_messages: list[list[str]] = []
+    for record in records:
+        if record.get("kind") != "exclusive":
+            raise AssertionError("Profile history replay was not submitted as an exclusive task.")
+        if record.get("cancellable"):
+            raise AssertionError("Atomic profile history replay unexpectedly allowed cancellation.")
+        if not record.get("show_dialog"):
+            raise AssertionError("Profile history replay did not request its progress dialog.")
+        if record.get("status") != "succeeded":
+            raise AssertionError(f"Profile history replay task did not succeed: {record!r}")
+
+        worker_updates = list(record.get("worker_progress") or [])
+        ui_updates = list(record.get("ui_progress") or [])
+        worker_values = _numeric_progress_values(worker_updates)
+        ui_values = _numeric_progress_values(ui_updates)
+        if not worker_values or worker_values != sorted(worker_values):
+            raise AssertionError("Worker history progress was missing or non-monotonic.")
+        if max(worker_values) >= 100:
+            raise AssertionError("Worker history replay claimed completion before UI refresh.")
+        if not ui_values or ui_values != sorted(ui_values) or ui_values[-1] != 100:
+            raise AssertionError("History UI finalization did not advance monotonically to 100%.")
+        all_updates = [*worker_updates, *ui_updates]
+        if any(update.get("maximum") != 100 for update in all_updates):
+            raise AssertionError("History replay emitted non-determinate progress updates.")
+        messages = [str(update.get("message") or "") for update in all_updates]
+        if not all(message.strip() for message in messages):
+            raise AssertionError("History replay emitted a progress phase without an explanation.")
+        worker_sequences.append(worker_values)
+        ui_sequences.append(ui_values)
+        progress_messages.append(messages)
+
+    harness.evidence.record(
+        "UI-PQ-HIST-001",
+        status="passed",
+        message=(
+            "Profile Undo and Redo used the exclusive background replay contract, reported "
+            "phase-based progress, and restored the expected catalog states."
+        ),
+        data={
+            "history_entry_id": int(entry.entry_id),
+            "history_action_type": str(entry.action_type),
+            "undo_restored_original_title": True,
+            "redo_restored_edited_title": True,
+            "task_count": len(records),
+            "task_kind": "exclusive",
+            "task_unique_key": "history.replay",
+            "tasks_non_cancellable": True,
+            "progress_dialog_requested": True,
+            "worker_progress_values": worker_sequences,
+            "ui_progress_values": ui_sequences,
+            "progress_messages": progress_messages,
+            "worker_progress_stops_before_100": True,
+            "ui_refresh_reaches_100": True,
+        },
+    )
+
+
 def run_relationship_workflow(harness: Any, *, track_id: int) -> QARepertoireIds:
     window = harness.window
     if window is None:
@@ -855,6 +973,13 @@ def run_relationship_workflow(harness: Any, *, track_id: int) -> QARepertoireIds
         release_panel,
         "ui_pq_release_browser_ui_created_release_selected",
     )
+    party_history_evidence = qualify_party_delete_merge_history(
+        window,
+        party_panel,
+        work_id=work_id,
+    )
+    party_panel.refresh()
+    harness.process_events(cycles=4)
 
     ids = QARepertoireIds(
         track_id=track_id,
@@ -886,6 +1011,7 @@ def run_relationship_workflow(harness: Any, *, track_id: int) -> QARepertoireIds
             "work_dialog_visual": work_dialog_visual,
             "work_panel_visual": work_panel_visual,
             "release_panel_visual": release_panel_visual,
+            **party_history_evidence,
             "help_reference": _require_help_reference(
                 harness,
                 "Connect Parties, Works, Contracts, Rights, and Accounting",
@@ -1035,6 +1161,18 @@ def run_contract_workflow(harness: Any, ids: QARepertoireIds) -> QARepertoireIds
         raise AssertionError("QA contract/right relationship was not persisted.")
     if not (contract_visible and right_visible):
         raise AssertionError("Contract or right was not visible in its manager panel.")
+    right_history_evidence = qualify_right_delete_history(
+        window,
+        rights_panel,
+        party_id=ids.party_id,
+        work_id=ids.work_id,
+        track_id=ids.track_id,
+        release_id=ids.release_id,
+        contract_id=ids.contract_id,
+        primary_right_id=ids.right_id,
+    )
+    rights_panel.refresh()
+    harness.process_events(cycles=4)
     harness.evidence.record(
         "UI-PQ-CON-001",
         status="passed",
@@ -1051,6 +1189,7 @@ def run_contract_workflow(harness: Any, ids: QARepertoireIds) -> QARepertoireIds
             "contract_panel_visual": contract_panel_visual,
             "right_dialog_visual": right_dialog_visual,
             "rights_panel_visual": rights_panel_visual,
+            **right_history_evidence,
             "help_reference": _require_help_reference(
                 harness,
                 "Connect Parties, Works, Contracts, Rights, and Accounting",
@@ -1741,10 +1880,63 @@ def run_visual_qualification_workflow(harness: Any) -> None:
     with mock.patch.object(ConversionDialog, "exec", _capture_modal_exec("conversion_dialog")):
         window.open_conversion_dialog()
 
+    credential_reset_control: dict[str, object] = {}
+
+    def _capture_settings_dialog_exec(dialog: QDialog) -> int:
+        reset_button = dialog.findChild(QAbstractButton, "resetStoredCredentialsButton")
+        if reset_button is None:
+            raise AssertionError(
+                "Application Settings did not expose resetStoredCredentialsButton."
+            )
+        if reset_button.text() != "Reset Stored Credentials…":
+            raise AssertionError(
+                "Stored-credential reset button label did not match the qualified UI text."
+            )
+        click_signal_count = 0
+
+        def _record_forbidden_activation() -> None:
+            nonlocal click_signal_count
+            click_signal_count += 1
+
+        reset_button.clicked.connect(_record_forbidden_activation)
+        try:
+            _capture_help_surface(
+                harness,
+                service,
+                help_screenshot_dir,
+                dialog,
+                "settings_dialog",
+                surface_results,
+            )
+            platform_supported = sys.platform == "darwin"
+            if reset_button.isEnabled() != platform_supported:
+                raise AssertionError(
+                    "Stored-credential reset control enabled state did not match platform support."
+                )
+            credential_reset_control.update(
+                {
+                    "present": True,
+                    "object_name": reset_button.objectName(),
+                    "text": reset_button.text(),
+                    "visible": reset_button.isVisible(),
+                    "enabled": reset_button.isEnabled(),
+                    "platform_supported": platform_supported,
+                    "activation_attempted": False,
+                    "click_signal_count": click_signal_count,
+                }
+            )
+            if click_signal_count:
+                raise AssertionError(
+                    "Stored-credential reset control was activated during reachability PQ."
+                )
+        finally:
+            dialog.close()
+        return QDialog.Rejected
+
     with mock.patch.object(
         ApplicationSettingsDialog,
         "exec",
-        _capture_modal_exec("settings_dialog"),
+        _capture_settings_dialog_exec,
     ):
         window.open_settings_dialog()
 
@@ -1917,8 +2109,8 @@ def run_visual_qualification_workflow(harness: Any) -> None:
         "UI-PQ-SET-001",
         status="passed",
         message=(
-            "Visual screenshots, baseline comparison, dialog capture, and theme payload "
-            "verification completed."
+            "Visual screenshots, baseline comparison, dialog capture, credential-reset "
+            "reachability without activation, and theme payload verification completed."
         ),
         data={
             "manifest_path": str(manifest_path),
@@ -1931,6 +2123,7 @@ def run_visual_qualification_workflow(harness: Any) -> None:
                 if str(result.get("surface", "")).endswith("_dialog")
             ],
             "help_screenshot_surfaces": surface_results,
+            "credential_reset_control": credential_reset_control,
             "theme_comparison": theme_comparison.to_dict(),
         },
     )
@@ -2193,13 +2386,22 @@ def run_assets_deliverables_workflow(harness: Any, *, track_id: int) -> None:
             + ", ".join(missing_inventory_ids)
         )
 
+    asset_history_evidence = qualify_asset_delete_history(
+        window,
+        panel,
+        track_id=int(track_id),
+        preserved_asset_id=asset_id,
+    )
+    panel.refresh()
+    harness.process_events(cycles=4)
+
     asset = service.fetch_asset(asset_id)
     harness.evidence.record(
         "UI-PQ-ASSET-001",
         status="passed",
         message=(
             "Deliverables and Asset Versions action, dock, asset table, search, and derivative "
-            "ledger navigation were qualified."
+            "ledger navigation plus reversible managed Asset deletion were qualified."
         ),
         data={
             "track_id": int(track_id),
@@ -2212,6 +2414,7 @@ def run_assets_deliverables_workflow(harness: Any, *, track_id: int) -> None:
                 panel.workspace_tabs.tabText(index) for index in range(panel.workspace_tabs.count())
             ],
             "inventory_ids": inventory_ids,
+            **asset_history_evidence,
         },
     )
 

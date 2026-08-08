@@ -593,6 +593,14 @@ class HistoryManagerTestCase(unittest.TestCase):
         finally:
             snapshot_conn.close()
 
+        legacy_manifest = dict(snapshot.manifest)
+        legacy_manifest.pop(self.history.DATABASE_CONTENT_MANIFEST_KEY, None)
+        with self.conn:
+            self.conn.execute(
+                "UPDATE HistorySnapshots SET manifest_json=? WHERE id=?",
+                (json.dumps(legacy_manifest), snapshot.snapshot_id),
+            )
+
         with self.conn:
             self.conn.execute(
                 "UPDATE CustomFieldValues SET value=? WHERE track_id=? AND field_def_id=901",

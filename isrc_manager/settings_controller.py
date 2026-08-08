@@ -18,6 +18,7 @@ from isrc_manager.app_sounds import (
 from isrc_manager.application_settings_dialog import ApplicationSettingsDialog
 from isrc_manager.blob_icons import describe_blob_icon_spec, normalize_blob_icon_settings
 from isrc_manager.constants import DEFAULT_ICON_PATH, DEFAULT_WINDOW_TITLE
+from isrc_manager.credential_reset_controller import CredentialResetController
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     normalize_storage_mode,
@@ -866,6 +867,7 @@ def _apply_settings_changes(
 
 def open_settings_dialog(app, initial_focus: str | None = None):
     before_values = app._current_settings_values()
+    credential_reset_controller = CredentialResetController(app)
     dlg = ApplicationSettingsDialog(
         window_title=before_values["window_title"],
         effective_window_title=before_values["effective_window_title"],
@@ -910,6 +912,9 @@ def open_settings_dialog(app, initial_focus: str | None = None):
             before_values.get("suppress_unencrypted_profile_warnings", False)
         ),
         database_password_change_callback=getattr(app, "change_database_password", None),
+        credential_reset_callback=(
+            credential_reset_controller.start if credential_reset_controller.available else None
+        ),
         party_service=app.party_service,
         parent=app,
     )

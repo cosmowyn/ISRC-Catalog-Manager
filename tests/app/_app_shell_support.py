@@ -6,6 +6,7 @@ import os
 import shutil
 import struct
 import tempfile
+import threading
 import unittest
 import wave
 from pathlib import Path
@@ -15,6 +16,8 @@ from unittest import mock
 from isrc_manager import history_retention_controller
 from isrc_manager.constants import APP_NAME
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.history import HistoryManager
+from isrc_manager.invoicing import LedgerEntryDraft, LedgerPostingService
 from isrc_manager.media.derivatives import DerivativeLedgerService
 from isrc_manager.paths import AppStorageLayout
 from isrc_manager.services import (
@@ -39,7 +42,7 @@ from tests.contract_templates._support import (
 from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
-    from PySide6.QtCore import QBuffer, QDate, QIODevice, QModelIndex, QPoint, Qt
+    from PySide6.QtCore import QBuffer, QDate, QIODevice, QModelIndex, QPoint, Qt, QTimer
     from PySide6.QtGui import QColor, QFontMetrics, QIcon, QImage, QKeyEvent, QKeySequence
     from PySide6.QtWidgets import QScrollArea, QStyle, QStyleOptionSlider, QTabBar
 
@@ -3272,6 +3275,19 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(set(self._visible_track_ids()), set(track_ids))
 
     def case_delete_entry_history_stays_a_single_visible_user_action(self):
+        ledger = LedgerPostingService(self.window.conn)
+
+        def _post_history_canary(command_key, amount_minor):
+            ledger.post_transaction(
+                command_key=command_key,
+                transaction_type="adjustment",
+                entries=(
+                    LedgerEntryDraft("1000", "EUR", debit_minor=amount_minor),
+                    LedgerEntryDraft("9000", "EUR", credit_minor=amount_minor),
+                ),
+            )
+
+        _post_history_canary("delete-history-before", 100)
         track_id = self._create_track(index=121, title="Delete History Song")
         self.window.refresh_table()
         row = self._table_row_for_track_id(track_id)
@@ -3317,6 +3333,25 @@ class AppShellTestCase(unittest.TestCase):
             [entry.label for entry in all_history], ["Delete Track: Delete History Song"]
         )
 
+        # A financial command posted after the delete is outside that history action. Both
+        # append-only transactions must remain byte-for-byte unchanged across replay.
+        _post_history_canary("delete-history-after", 250)
+        immutable_tables = (
+            "AccountingTransactions",
+            "AccountingEntries",
+            "FinancialCommandLog",
+        )
+
+        def _capture_immutable_rows():
+            return {
+                table: self.window.conn.execute(
+                    f'SELECT * FROM "{table}" ORDER BY rowid'
+                ).fetchall()
+                for table in immutable_tables
+            }
+
+        immutable_rows = _capture_immutable_rows()
+
         dialog = app_module.HistoryDialog(self.window, parent=self.window)
         try:
             self.assertEqual(dialog.history_table.rowCount(), 1)
@@ -3327,21 +3362,173 @@ class AppShellTestCase(unittest.TestCase):
             dialog.close()
             self.app.processEvents()
 
-        self.window.history_undo()
+        with mock.patch.object(app_module.QMessageBox, "critical") as undo_critical:
+            self.window.history_undo()
+            self._wait_for_background_tasks(description="track-delete Undo replay to finish")
+        undo_critical.assert_not_called()
         self.app.processEvents()
         self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
         self.assertEqual(
             self.window.redo_action.text(),
             "Redo Delete Track: Delete History Song",
         )
+        self.assertEqual(_capture_immutable_rows(), immutable_rows)
 
-        self.window.history_redo()
+        with mock.patch.object(app_module.QMessageBox, "critical") as redo_critical:
+            self.window.history_redo()
+            self._wait_for_background_tasks(description="track-delete Redo replay to finish")
+        redo_critical.assert_not_called()
         self.app.processEvents()
         self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(_capture_immutable_rows(), immutable_rows)
         self.assertEqual(
             self.window.history_manager.list_entries(limit=20)[0].label,
             "Delete Track: Delete History Song",
         )
+
+    def case_profile_history_replay_runs_off_ui_thread_with_truthful_progress(self):
+        track_id = self._create_track(index=404, title="Responsive History Replay")
+        self.window._run_snapshot_history_action(
+            action_label="Delete Track: Responsive History Replay",
+            action_type="track.delete",
+            entity_type="Track",
+            entity_id=track_id,
+            mutation=lambda: self.window.track_service.delete_track(track_id),
+        )
+        self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+
+        self.window.history_undo()
+        self._wait_for_background_tasks(description="responsive-history setup Undo to finish")
+        self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
+
+        main_thread_id = threading.get_ident()
+        replay_entered = threading.Event()
+        release_replay = threading.Event()
+        ui_tick = threading.Event()
+        replay_threads: list[int] = []
+        ui_tick_threads: list[int] = []
+        refresh_threads: list[int] = []
+        submitted: list[dict[str, object]] = []
+        progress_updates: list[tuple[int | None, int | None, str, int]] = []
+        timeline: list[tuple[str, int | None]] = []
+        critical_messages: list[tuple[object, ...]] = []
+        original_redo = HistoryManager.redo
+        original_submit = self.window._submit_background_bundle_task
+        original_refresh = self.window._refresh_after_history_change
+
+        def _controlled_redo(manager, *args, **kwargs):
+            replay_threads.append(threading.get_ident())
+            replay_entered.set()
+            if not release_replay.wait(timeout=5):
+                raise RuntimeError("Timed out waiting to release controlled history replay.")
+            return original_redo(manager, *args, **kwargs)
+
+        def _capture_submit(**kwargs):
+            submitted.append(dict(kwargs))
+            downstream_progress = kwargs.get("on_progress")
+
+            def _capture_progress(update):
+                value = update.value
+                maximum = update.maximum
+                progress_updates.append(
+                    (value, maximum, str(update.message or ""), threading.get_ident())
+                )
+                timeline.append(("progress", value))
+                if callable(downstream_progress):
+                    downstream_progress(update)
+
+            kwargs["on_progress"] = _capture_progress
+            return original_submit(**kwargs)
+
+        def _refresh_on_ui_thread():
+            refresh_threads.append(threading.get_ident())
+            timeline.append(("refresh-start", None))
+            try:
+                return original_refresh()
+            finally:
+                timeline.append(("refresh-finished", None))
+
+        def _mark_ui_tick() -> None:
+            ui_tick_threads.append(threading.get_ident())
+            ui_tick.set()
+
+        try:
+            with (
+                mock.patch.object(HistoryManager, "redo", new=_controlled_redo),
+                mock.patch.object(
+                    self.window,
+                    "_submit_background_bundle_task",
+                    side_effect=_capture_submit,
+                ),
+                mock.patch.object(
+                    self.window,
+                    "_refresh_after_history_change",
+                    side_effect=_refresh_on_ui_thread,
+                ),
+                mock.patch.object(
+                    app_module.QMessageBox,
+                    "critical",
+                    side_effect=lambda *args: critical_messages.append(args),
+                ),
+            ):
+                QTimer.singleShot(0, _mark_ui_tick)
+                task_id = self.window.history_redo()
+                self.assertIsNotNone(task_id)
+                wait_for(
+                    replay_entered.is_set,
+                    timeout_ms=2000,
+                    interval_ms=10,
+                    app=self.app,
+                    description="history Redo worker to enter controlled replay",
+                )
+
+                self.assertTrue(self.window.background_tasks.has_running_tasks())
+                self.assertTrue(ui_tick.is_set())
+                self.assertEqual(ui_tick_threads, [main_thread_id])
+                self.assertEqual(len(submitted), 1)
+                self.assertEqual(submitted[0]["kind"], "exclusive")
+                self.assertEqual(submitted[0]["unique_key"], "history.replay")
+                self.assertFalse(submitted[0]["cancellable"])
+                self.assertFalse(self.window.undo_action.isEnabled())
+                self.assertFalse(self.window.redo_action.isEnabled())
+
+                self.assertIsNone(self.window.history_redo())
+                self.assertEqual(len(submitted), 1)
+                self.assertEqual(len(replay_threads), 1)
+                self.assertEqual(critical_messages, [])
+
+                release_replay.set()
+                self._wait_for_background_tasks(
+                    timeout_ms=8000,
+                    description="controlled history Redo replay to finish",
+                )
+        finally:
+            release_replay.set()
+
+        self.assertEqual(len(replay_threads), 1)
+        self.assertNotEqual(replay_threads[0], main_thread_id)
+        self.assertEqual(refresh_threads, [main_thread_id])
+        self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(critical_messages, [])
+        self.assertTrue(progress_updates)
+        self.assertTrue(all(thread_id == main_thread_id for *_, thread_id in progress_updates))
+        self.assertTrue(
+            all(maximum == 100 for _value, maximum, _message, _thread in progress_updates)
+        )
+        progress_values = [
+            int(value)
+            for value, _maximum, _message, _thread in progress_updates
+            if value is not None
+        ]
+        self.assertEqual(progress_values, sorted(progress_values))
+        self.assertEqual(progress_values[-1], 100)
+        refresh_finished_index = timeline.index(("refresh-finished", None))
+        terminal_index = next(
+            index for index, event in enumerate(timeline) if event == ("progress", 100)
+        )
+        self.assertGreater(terminal_index, refresh_finished_index)
+        self.assertTrue(self.window.undo_action.isEnabled())
+        self.assertFalse(self.window.redo_action.isEnabled())
 
     def case_programmatic_header_resize_does_not_record_history(self):
         self._create_track(index=138, title="Programmatic Resize One")

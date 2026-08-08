@@ -234,6 +234,17 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Remember database password", settings.content_html)
         self.assertIn("Do not warn when opening unencrypted profiles", settings.content_html)
         self.assertIn("30 days", settings.content_html)
+        self.assertIn("Reset Stored Credentials", settings.content_html)
+        self.assertIn("isrc-catalog-manager.database", settings.content_html)
+        self.assertIn("isrc-catalog-manager.soundcloud", settings.content_html)
+        self.assertIn("does not change the encryption password", settings.content_html)
+        self.assertIn("unrelated Keychain passwords", settings.content_html)
+        self.assertIn("does not revoke a SoundCloud token", settings.content_html)
+        self.assertIn(
+            "closing Application Settings with <strong>Cancel</strong> cannot undo",
+            settings.content_html,
+        )
+        self.assertNotIn("dump-keychain", settings.content_html)
         self.assertIn("SQLCipher", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn("migration path", HELP_CHAPTERS_BY_ID["profiles"].content_html)
         self.assertIn(
@@ -275,6 +286,33 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("smooth meter and spectrum fade-out", chapter.content_html)
         self.assertIn("forensic watermarked audio", chapter.content_html)
 
+    def test_history_help_documents_safe_destructive_action_replay(self):
+        history = HELP_CHAPTERS_BY_ID["history"]
+        assets = HELP_CHAPTERS_BY_ID["assets-deliverables"]
+        background_tasks = HELP_CHAPTERS_BY_ID["background-tasks"]
+
+        self.assertIn("deletes of tracks, releases, works, contracts", history.content_html)
+        self.assertIn("parties, rights, and assets", history.content_html)
+        self.assertIn("party merges", history.content_html)
+        self.assertIn("Protected financial history", history.content_html)
+        self.assertIn("remain append-only and untouched", history.content_html)
+        self.assertIn("retain the same at-rest encryption", history.content_html)
+        self.assertIn("never written as plaintext databases", history.content_html)
+        self.assertIn("runs outside the UI thread", history.content_html)
+        self.assertIn("determinate progress dialog", history.content_html)
+        self.assertIn("reaches completion only after", history.content_html)
+        self.assertIn("remains available to retry", history.content_html)
+        self.assertIn("worker-thread database connection", background_tasks.content_html)
+        self.assertIn("bar advances only when a real", background_tasks.content_html)
+        self.assertIn("cannot overlap", background_tasks.content_html)
+        settings = HELP_CHAPTERS_BY_ID["settings"]
+        self.assertIn("history snapshots required by Undo and Redo", settings.content_html)
+        self.assertIn("previous password remains in effect", settings.content_html)
+        self.assertIn("manual backups retain the password", settings.content_html)
+        self.assertIn("Recoverable deletion", assets.content_html)
+        self.assertIn("app-managed file", assets.content_html)
+        self.assertIn("external references are never deleted", assets.content_html)
+
     def test_application_updates_help_documents_installer_workflow(self):
         chapter = HELP_CHAPTERS_BY_ID["application-updates"]
         html = render_help_html("Music Catalog Manager", "3.6.5")
@@ -285,6 +323,13 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("App Translocation", chapter.content_html)
         self.assertIn("/Applications", chapter.content_html)
         self.assertIn("updates", chapter.content_html)
+        self.assertIn("ad-hoc-signed replacement", chapter.content_html)
+        self.assertIn("Reset Stored Credentials", chapter.content_html)
+        self.assertIn("reset is never automatic", chapter.content_html)
+        self.assertIn("isrc-catalog-manager.database", chapter.content_html)
+        self.assertIn("isrc-catalog-manager.soundcloud", chapter.content_html)
+        self.assertIn("re-enter existing database encryption passwords", chapter.content_html)
+        self.assertNotIn("dump-keychain", chapter.content_html)
         self.assertIn("Application Updates", html)
 
     def test_soundcloud_publishing_help_documents_secure_publish_workflow(self):

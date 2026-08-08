@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
 RELEASE_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "release-build.yml"
+VERSION_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "version-bump.yml"
 MIN_PYINSTALLER_PYTHON_314_VERSION = (6, 19, 0)
 MIN_BINARY_RUNTIME_WHEEL_VERSIONS = {
     "numpy": (2, 3, 2),
@@ -152,6 +153,28 @@ class Python314CompatibilityTests(unittest.TestCase):
 
         self.assertIn('python-version: "3.14.4"', workflow)
         self.assertIn("sys.version_info[:3] != (3, 14, 4)", workflow)
+
+    def test_release_build_binds_tag_to_project_version(self):
+        workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('tomllib.loads(pathlib.Path("pyproject.toml")', workflow)
+        self.assertIn('"$tag" != "v${project_version}"', workflow)
+        self.assertIn("does not match project version", workflow)
+        self.assertIn(
+            'tag_commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")"', workflow
+        )
+        self.assertIn('"$tag_commit" != "$event_commit"', workflow)
+        self.assertIn('"$tag_commit" != "$checkout_commit"', workflow)
+        self.assertIn('echo "checkout_ref=$tag_commit"', workflow)
+        self.assertNotIn('echo "checkout_ref=$tag"', workflow)
+        self.assertIn("moved after validation; refusing to publish", workflow)
+        self.assertIn("scripts/qa_pq_runtime.py system-packages", workflow)
+
+    def test_version_bump_pushes_release_commit_and_tag_atomically(self):
+        workflow = VERSION_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('git push --atomic origin HEAD:main "refs/tags/v${VERSION}"', workflow)
+        self.assertNotIn("git push origin HEAD:main", workflow)
 
     def test_local_python_3144_environment_when_running_under_314(self):
         self.assertEqual(sys.version_info[:2], (3, 14))

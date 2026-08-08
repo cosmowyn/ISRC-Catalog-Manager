@@ -958,6 +958,8 @@ class PartyManagerPanel(QWidget):
         self.set_owner_party_handler = set_owner_party_handler
         self.import_party_handler = import_party_handler
         self.export_party_handler = export_party_handler
+        self.delete_party_handler: Callable[[list[int]], object] | None = None
+        self.merge_party_handler: Callable[[int, list[int]], object] | None = None
         self.setObjectName("partyManagerPanel")
         _apply_standard_widget_chrome(self, "partyManagerPanel")
 
@@ -1342,8 +1344,11 @@ class PartyManagerPanel(QWidget):
         ):
             return
         try:
-            for party_id in selected_ids:
-                service.delete_party(party_id)
+            if callable(self.delete_party_handler):
+                self.delete_party_handler(selected_ids)
+            else:
+                for party_id in selected_ids:
+                    service.delete_party(party_id)
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return
@@ -1360,7 +1365,10 @@ class PartyManagerPanel(QWidget):
             return
         primary_id = selected_ids[0]
         try:
-            service.merge_parties(primary_id, selected_ids[1:])
+            if callable(self.merge_party_handler):
+                self.merge_party_handler(primary_id, selected_ids[1:])
+            else:
+                service.merge_parties(primary_id, selected_ids[1:])
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return

@@ -29,6 +29,7 @@ from isrc_manager.parties import (
     artist_primary_label,
 )
 from isrc_manager.parties.dialogs import OwnerBootstrapDialog, PartyImportDialog, PartyManagerPanel
+from isrc_manager.parties.history_actions import configure_party_history_handlers
 from isrc_manager.services import OwnerPartySettings
 from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
 
@@ -73,7 +74,7 @@ def _run_file_history_action(*args, **kwargs):
 
 
 def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
-    return _party_manager_panel_class()(
+    panel = _party_manager_panel_class()(
         party_service_provider=lambda: self.party_service,
         current_owner_party_id_provider=self._current_owner_party_id,
         set_owner_party_handler=self._assign_owner_party,
@@ -81,6 +82,12 @@ def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
         export_party_handler=self.export_party_exchange_file,
         parent=parent,
     )
+    configure_party_history_handlers(
+        panel,
+        self,
+        party_label=_party_identity_primary_label,
+    )
+    return panel
 
 
 def _ensure_party_manager_dock(self) -> QDockWidget:

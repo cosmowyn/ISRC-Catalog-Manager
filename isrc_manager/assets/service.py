@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
@@ -119,28 +120,80 @@ class AssetService:
     def resolve_asset_path(self, stored_path: str | None) -> Path | None:
         return self.asset_store.resolve(stored_path)
 
+    def _normalize_managed_stored_path(
+        self,
+        stored_path: str | None,
+        *,
+        reject_unsafe_relative: bool,
+    ) -> str | None:
+        """Canonicalize contained relative paths while preserving absolute references."""
+
+        clean_path = clean_text(stored_path)
+        if not clean_path or Path(clean_path).is_absolute():
+            return clean_path
+        normalized = Path(os.path.normpath(clean_path))
+        try:
+            if self.data_root is None or self.asset_root is None:
+                raise ValueError("Managed Asset storage is not configured.")
+            resolved = (self.data_root / normalized).resolve(strict=False)
+            asset_root = self.asset_root.resolve(strict=False)
+            resolved.relative_to(asset_root)
+            if resolved == asset_root:
+                raise ValueError("A managed Asset path must identify a file.")
+        except (OSError, RuntimeError, ValueError) as exc:
+            if reject_unsafe_relative:
+                raise ValueError(
+                    "Managed Asset paths must stay inside the Asset Registry storage root."
+                ) from exc
+            return clean_path
+        return str(normalized)
+
+    def _remaining_path_aliases(self, candidate: Path, stored_path: object) -> bool | None:
+        """Return None when a stored reference cannot be compared safely."""
+
+        clean_path = clean_text(stored_path)
+        if not clean_path:
+            return False
+        try:
+            reference = self.resolve_asset_path(clean_path)
+            if reference is None:
+                return None
+            if reference.resolve(strict=False) == candidate.resolve(strict=False):
+                return True
+            if reference.exists() and candidate.exists():
+                return candidate.samefile(reference)
+        except OSError, RuntimeError, ValueError:
+            return None
+        return False
+
     def _delete_unreferenced_asset_file(
         self,
         stored_path: str | None,
         *,
         cursor: sqlite3.Cursor,
+        ignore_errors: bool = True,
     ) -> None:
         clean_path = clean_text(stored_path)
         if not clean_path or not self.asset_store.is_managed(clean_path):
             return
-        row = cursor.execute(
-            "SELECT 1 FROM AssetVersions WHERE stored_path=? LIMIT 1",
-            (clean_path,),
-        ).fetchone()
-        if row:
+        candidate = self.resolve_asset_path(clean_path)
+        if (
+            candidate is None
+            or candidate.is_symlink()
+            or (candidate.exists() and not candidate.is_file())
+        ):
             return
-        resolved = self.resolve_asset_path(clean_path)
-        if resolved is None:
-            return
+        for row in cursor.execute(
+            "SELECT stored_path FROM AssetVersions WHERE stored_path IS NOT NULL"
+        ).fetchall():
+            aliases = self._remaining_path_aliases(candidate, row[0])
+            if aliases is not False:
+                return
         try:
-            resolved.unlink(missing_ok=True)
+            candidate.unlink(missing_ok=True)
         except Exception:
-            pass
+            if not ignore_errors:
+                raise
 
     def _hash_file(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -401,6 +454,11 @@ class AssetService:
             blob_value = None
         elif storage_mode is None:
             storage_mode = STORAGE_MODE_MANAGED_FILE if clean_text(existing_path) else None
+        if storage_mode == STORAGE_MODE_MANAGED_FILE and existing_path:
+            existing_path = self._normalize_managed_stored_path(
+                existing_path,
+                reject_unsafe_relative=True,
+            )
         if not filename:
             filename = Path(existing_path or payload.source_path or "asset").name
 
@@ -472,7 +530,8 @@ class AssetService:
         existing = self.fetch_asset(int(asset_id), cursor=cursor)
         if existing is None:
             raise ValueError("Asset not found.")
-        stored_path = clean_text(payload.stored_path) or existing.stored_path
+        requested_stored_path = clean_text(payload.stored_path)
+        stored_path = requested_stored_path or existing.stored_path
         filename = clean_text(payload.filename) or existing.filename
         checksum = clean_text(payload.checksum_sha256) or existing.checksum_sha256
         duration_sec = (
@@ -523,6 +582,11 @@ class AssetService:
                 subdir=self._asset_subdir(filename),
             )
             blob_value = None
+        if storage_mode == STORAGE_MODE_MANAGED_FILE and stored_path:
+            stored_path = self._normalize_managed_stored_path(
+                stored_path,
+                reject_unsafe_relative=bool(requested_stored_path),
+            )
 
         def _update(cur: sqlite3.Cursor) -> None:
             cur.execute(
@@ -778,19 +842,18 @@ class AssetService:
     def delete_asset(self, asset_id: int) -> None:
         asset = self.fetch_asset(int(asset_id))
         with self.conn:
-            self.conn.execute("DELETE FROM AssetVersions WHERE id=?", (int(asset_id),))
-        if asset is not None:
+            cur = self.conn.cursor()
+            cur.execute("DELETE FROM AssetVersions WHERE id=?", (int(asset_id),))
+            if asset is None:
+                return
             if asset.storage_mode == STORAGE_MODE_MANAGED_FILE or (
                 asset.storage_mode is None and asset.stored_path
             ):
-                path = self.resolve_asset_path(asset.stored_path)
-            else:
-                path = None
-            if path is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                self._delete_unreferenced_asset_file(
+                    asset.stored_path,
+                    cursor=cur,
+                    ignore_errors=False,
+                )
 
     def convert_asset_storage_mode(self, asset_id: int, target_mode: str) -> AssetVersionRecord:
         asset = self.fetch_asset(int(asset_id))

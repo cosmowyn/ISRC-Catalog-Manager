@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import isrc_manager.services.database_security as database_security_module
 from isrc_manager.constants import SCHEMA_TARGET
 from isrc_manager.services import DatabaseSchemaService
 from isrc_manager.services.database_security import (
@@ -150,7 +151,8 @@ def test_database_path_ids_session_clear_and_sqlcipher_import_failure(
     assert passwords.password_for_database(db_path) is None
 
     monkeypatch.setattr(
-        "isrc_manager.services.database_security.importlib.import_module",
+        database_security_module.importlib,
+        "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError("sqlcipher missing")),
     )
     with pytest.raises(SQLCipherUnavailableError):
@@ -169,7 +171,8 @@ def test_keyring_backend_detection_covers_unavailable_and_missing_backends(
     assert "unavailable" in unavailable.reason
 
     monkeypatch.setattr(
-        "isrc_manager.services.database_security.importlib.import_module",
+        database_security_module.importlib,
+        "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError("keyring missing")),
     )
     missing_keyring = detect_database_keyring_backend()
@@ -182,7 +185,8 @@ def test_keyring_backend_detection_covers_unavailable_and_missing_backends(
             raise RuntimeError("backend unavailable")
 
     monkeypatch.setattr(
-        "isrc_manager.services.database_security.importlib.import_module",
+        database_security_module.importlib,
+        "import_module",
         lambda _name: FailingKeyringModule,
     )
     failing_keyring = detect_database_keyring_backend()
@@ -678,7 +682,8 @@ def test_keyring_store_initializes_without_importable_or_working_keyring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "isrc_manager.services.database_security.importlib.import_module",
+        database_security_module.importlib,
+        "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError("keyring missing")),
     )
     missing_store = KeyringDatabaseCredentialStore()
@@ -691,7 +696,8 @@ def test_keyring_store_initializes_without_importable_or_working_keyring(
             raise RuntimeError("backend unavailable")
 
     monkeypatch.setattr(
-        "isrc_manager.services.database_security.importlib.import_module",
+        database_security_module.importlib,
+        "import_module",
         lambda _name: FailingKeyringModule,
     )
     failing_store = KeyringDatabaseCredentialStore()

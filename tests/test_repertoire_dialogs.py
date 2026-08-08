@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from tests.qt_test_helpers import require_qapplication
@@ -2002,6 +2003,45 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         self.assertIn("Delete the selected asset record?", question.call_args[0][2])
         self.assertIn("This removes the database record only.", question.call_args[0][2])
         self.assertIn("Files on disk are not deleted.", question.call_args[0][2])
+
+    def test_asset_delete_routes_through_history_handler_and_explains_file_scope(self):
+        asset = SimpleNamespace(
+            id=41,
+            filename="managed-master.wav",
+            asset_type="main_master",
+            track_id=9,
+            release_id=None,
+            approved_for_use=True,
+            primary_flag=True,
+            version_status="approved",
+        )
+        direct_delete = mock.Mock()
+        service = SimpleNamespace(
+            conn=None,
+            list_assets=lambda **_kwargs: [asset],
+            delete_asset=direct_delete,
+        )
+        handled: list[int] = []
+        panel = AssetBrowserPanel(
+            asset_service_provider=lambda: service,
+            delete_asset_handler=handled.append,
+        )
+        try:
+            panel.table.selectRow(0)
+            with mock.patch.object(
+                QMessageBox, "question", return_value=QMessageBox.Yes
+            ) as question:
+                panel.delete_selected()
+
+            self.assertEqual(handled, [41])
+            direct_delete.assert_not_called()
+            question.assert_called_once()
+            confirmation_text = question.call_args[0][2]
+            self.assertIn("app-managed file", confirmation_text)
+            self.assertIn("Undo restores both", confirmation_text)
+            self.assertIn("outside app-managed storage are never deleted", confirmation_text)
+        finally:
+            panel.close()
 
     def test_selection_scope_banner_wraps_action_buttons_more_compactly(self):
         banner = SelectionScopeBanner()

@@ -345,6 +345,7 @@ from isrc_manager.history import (
     HistoryStorageCleanupService,
     SessionHistoryManager,
 )
+from isrc_manager.history import replay_controller as history_replay_controller
 from isrc_manager import history_retention_controller
 from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
 from isrc_manager.import_review_dialog import ImportReviewDialog
@@ -947,7 +948,10 @@ class App(QMainWindow):
         self.conn = None
         self.cursor = None
         self.history_manager = None
-        self.session_history_manager = SessionHistoryManager(self.history_dir)
+        self.session_history_manager = SessionHistoryManager(
+            self.history_dir,
+            connection_factory=self.sqlite_connection_factory,
+        )
         self.history_dialog = None
         self.help_dialog = None
         self.audio_preview_dialog = None
@@ -3308,10 +3312,11 @@ class App(QMainWindow):
         redo_label = redo_entry.label if redo_entry is not None else None
 
         self.undo_action.setText(f"Undo {undo_label}" if undo_label else "Undo")
-        self.undo_action.setEnabled(bool(undo_label))
+        replay_busy = bool(getattr(self, "_history_replay_in_progress", False))
+        self.undo_action.setEnabled(bool(undo_label) and not replay_busy)
 
         self.redo_action.setText(f"Redo {redo_label}" if redo_label else "Redo")
-        self.redo_action.setEnabled(bool(redo_label))
+        self.redo_action.setEnabled(bool(redo_label) and not replay_busy)
 
         if self.history_dialog is not None and self.history_dialog.isVisible():
             self.history_dialog.refresh_data()
@@ -4212,43 +4217,11 @@ class App(QMainWindow):
         self.history_dialog = HistoryDialog(self, parent=self)
         self.history_dialog.exec()
 
-    def history_undo(self):
-        source, _ = self._get_best_history_candidate("undo")
-        if source is None:
-            return
-        try:
-            if source == "session":
-                entry = self.session_history_manager.undo(self)
-                if entry is not None:
-                    self._refresh_history_actions()
-                    if self.history_dialog is not None and self.history_dialog.isVisible():
-                        self.history_dialog.refresh_data()
-            else:
-                entry = self.history_manager.undo()
-                if entry is not None:
-                    self._refresh_after_history_change()
-        except Exception as e:
-            self.logger.exception(f"Undo failed: {e}")
-            QMessageBox.critical(self, "Undo Error", f"Could not undo the last action:\n{e}")
+    def history_undo(self, *, owner=None):
+        return history_replay_controller.undo(self, owner=owner)
 
-    def history_redo(self):
-        source, _ = self._get_best_history_candidate("redo")
-        if source is None:
-            return
-        try:
-            if source == "session":
-                entry = self.session_history_manager.redo(self)
-                if entry is not None:
-                    self._refresh_history_actions()
-                    if self.history_dialog is not None and self.history_dialog.isVisible():
-                        self.history_dialog.refresh_data()
-            else:
-                entry = self.history_manager.redo()
-                if entry is not None:
-                    self._refresh_after_history_change()
-        except Exception as e:
-            self.logger.exception(f"Redo failed: {e}")
-            QMessageBox.critical(self, "Redo Error", f"Could not redo the action:\n{e}")
+    def history_redo(self, *, owner=None):
+        return history_replay_controller.redo(self, owner=owner)
 
     def create_manual_snapshot(self):
         if self.history_manager is None:

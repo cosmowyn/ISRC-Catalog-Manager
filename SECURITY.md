@@ -68,6 +68,33 @@ release packages currently publish SHA256 checksum data; this policy does not
 claim platform code signing, notarization, or detached signature coverage unless
 those artifacts are explicitly present on a release.
 
+## macOS Stored-Credential Reset
+
+Ad-hoc-signed macOS builds may lose access to Keychain items created by an older
+build after the application is replaced. The recovery action in Application
+Settings is deliberately manual and narrowly scoped. It removes generic-password
+items only when their service attribute exactly equals one of these app-owned
+namespaces:
+
+- `isrc-catalog-manager.database`
+- `isrc-catalog-manager.soundcloud`
+
+The reset uses the fixed Apple `/usr/bin/security` executable with an argument
+list and no shell. It never dumps or enumerates the login Keychain, accepts no
+service or account value from the user, and does not target certificates, keys,
+internet-password items, another application's service, profile databases, or
+normal settings. Command output is discarded so Keychain metadata cannot enter
+application logs. Empty namespaces are treated as an already-complete reset;
+authorization cancellation and partial deletion are reported as failures rather
+than success.
+
+This action does not change database encryption passwords or remotely revoke a
+SoundCloud authorization. After a successful reset, quit and reopen the app,
+then enter database passwords and reconnect SoundCloud to establish credentials
+for the new build. Tests must inject a fake command runner or an explicit,
+isolated temporary Keychain and must never run the reset against a developer's
+default/login Keychain.
+
 ## SBOM Plan
 
 The repository does not commit generated SBOM artifacts. For release or audit

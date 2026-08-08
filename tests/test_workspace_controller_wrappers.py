@@ -23,9 +23,17 @@ def setup_function() -> None:
 
 def test_asset_registry_controller_uses_root_overrides_and_workspace_panel() -> None:
     class _FakeAssetPanel:
-        def __init__(self, *, asset_service_provider, drill_in_host_provider, parent) -> None:
+        def __init__(
+            self,
+            *,
+            asset_service_provider,
+            drill_in_host_provider,
+            delete_asset_handler,
+            parent,
+        ) -> None:
             self.asset_service_provider = asset_service_provider
             self.drill_in_host_provider = drill_in_host_provider
+            self.delete_asset_handler = delete_asset_handler
             self.parent = parent
             self.focused: list[int | None] = []
 
@@ -44,6 +52,7 @@ def test_asset_registry_controller_uses_root_overrides_and_workspace_panel() -> 
         panel = _FakeAssetPanel(
             asset_service_provider=lambda: "unused",
             drill_in_host_provider=lambda: "unused",
+            delete_asset_handler=lambda _asset_id: None,
             parent="shown parent",
         )
         kwargs["configure"](panel)
@@ -82,6 +91,7 @@ def test_asset_registry_controller_uses_root_overrides_and_workspace_panel() -> 
     assert isinstance(panel, _FakeAssetPanel)
     assert panel.asset_service_provider() is host.asset_service
     assert panel.drill_in_host_provider() is host
+    assert callable(panel.delete_asset_handler)
     assert panel.parent == "parent"
     assert opened is shown["panel"]
     assert opened.focused == [12]
@@ -99,6 +109,57 @@ def test_asset_registry_controller_uses_root_overrides_and_workspace_panel() -> 
             "retabify_when_shown": True,
         }
     ]
+
+
+def test_asset_registry_controller_records_delete_as_snapshot_history() -> None:
+    deleted: list[int] = []
+    history_calls: list[dict[str, object]] = []
+    asset = SimpleNamespace(filename="approved-master.wav", asset_type="main_master")
+    service = SimpleNamespace(
+        fetch_asset=lambda asset_id: asset if asset_id == 12 else None,
+        delete_asset=deleted.append,
+    )
+
+    def run_history_action(**kwargs) -> None:
+        history_calls.append(kwargs)
+        kwargs["mutation"]()
+
+    host = SimpleNamespace(
+        asset_service=service,
+        _run_snapshot_history_action=run_history_action,
+    )
+
+    asset_controller._delete_asset_with_history(host, 12)
+
+    assert deleted == [12]
+    assert len(history_calls) == 1
+    history_call = history_calls[0]
+    assert history_call["action_label"] == "Delete Asset: approved-master.wav"
+    assert history_call["action_type"] == "asset.delete"
+    assert history_call["entity_type"] == "AssetVersion"
+    assert history_call["entity_id"] == 12
+    assert history_call["payload"] == {
+        "filename": "approved-master.wav",
+        "asset_type": "main_master",
+    }
+
+
+def test_asset_registry_controller_refuses_untracked_delete() -> None:
+    delete_asset = mock.Mock()
+    service = SimpleNamespace(
+        fetch_asset=lambda _asset_id: SimpleNamespace(filename="asset.wav", asset_type="other"),
+        delete_asset=delete_asset,
+    )
+    host = SimpleNamespace(asset_service=service)
+
+    try:
+        asset_controller._delete_asset_with_history(host, 7)
+    except RuntimeError as exc:
+        assert "history is unavailable" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected an unavailable-history failure")
+
+    delete_asset.assert_not_called()
 
 
 def test_asset_registry_controller_warns_without_profile() -> None:

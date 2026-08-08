@@ -3947,7 +3947,7 @@
     "object_name": "qt_calendar_monthbutton",
     "parent": "qt_calendar_navigationbar",
     "path": "mainWindow/addDataDock/left_scroll/qt_scrollarea_viewport/left_widget_container/add_data_column/addDataTabs/qt_tabwidget_stackedwidget/mainWindow_qWidget_14/mainWindow_qGroupBox_4/mainWindow_qWidget_17/release_date_field/qt_calendar_navigationbar/qt_calendar_monthbutton",
-    "text": "June",
+    "text": "August",
     "ui_area": "unknown",
     "visible": false
   },

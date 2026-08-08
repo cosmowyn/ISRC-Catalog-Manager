@@ -6,6 +6,7 @@
     "UI-PQ-CON-001": "passed",
     "UI-PQ-DIAG-001": "passed",
     "UI-PQ-HELP-001": "passed",
+    "UI-PQ-HIST-001": "passed",
     "UI-PQ-INV-001": "passed",
     "UI-PQ-MENU-001": "passed",
     "UI-PQ-REL-001": "passed",
@@ -17,7 +18,7 @@
     "contract_id": 1,
     "party_id": 3,
     "release_id": 1,
-    "right_id": 1,
+    "right_id": 2,
     "track_id": 2,
     "work_id": 3
   }

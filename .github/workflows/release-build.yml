@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -23,6 +23,7 @@ jobs:
   prepare:
     name: Resolve release tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       should_release: ${{ steps.resolve.outputs.should_release }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -32,6 +33,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
 
       - name: Resolve tag to build
         id: resolve
@@ -52,10 +57,65 @@ jobs:
             exit 1
           fi
 
+          tag_commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")"
+          event_commit="$(git rev-parse --verify "${GITHUB_SHA}^{commit}")"
+          checkout_commit="$(git rev-parse --verify "HEAD^{commit}")"
+          if [[ ! "$tag_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release tag did not resolve to a full commit SHA: $tag" >&2
+            exit 1
+          fi
+          if [[ "$tag_commit" != "$event_commit" || "$tag_commit" != "$checkout_commit" ]]; then
+            echo "Release tag $tag moved away from the triggering commit; refusing to build." >&2
+            exit 1
+          fi
+
+          project_version="$(
+            python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])'
+          )"
+          if [[ "$tag" != "v${project_version}" ]]; then
+            echo "Release tag $tag does not match project version v${project_version}." >&2
+            exit 1
+          fi
+
           echo "Resolved release tag: $tag"
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "checkout_ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$tag_commit" >> "$GITHUB_OUTPUT"
+
+  qa:
+    name: Release-neutral QA
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - prepare
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install release QA dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Run release-neutral validation
+        run: |
+          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
+          python -m ruff check build.py isrc_manager scripts tests
+          python -m black --check build.py isrc_manager scripts tests
+          python -m mypy
+          python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release_automation.py tests/test_sync_version_docs.py tests/test_python_314_compatibility.py tests/test_versioning.py
 
   build:
     name: Build ${{ matrix.os }}
@@ -64,6 +124,7 @@ jobs:
     timeout-minutes: 60
     needs:
       - prepare
+      - qa
     strategy:
       fail-fast: false
       matrix:
@@ -97,36 +158,20 @@ jobs:
 
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 \
-            libgl1 \
-            libglib2.0-0 \
-            libopengl0 \
-            libpulse-mainloop-glib0 \
-            libx11-xcb1 \
-            libxcb-cursor0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-shm0 \
-            libxcb-sync1 \
-            libxcb-xfixes0 \
-            libxcb-xinerama0 \
-            libxcb-xkb1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0
+          mapfile -t qt_packages < <(python scripts/qa_pq_runtime.py system-packages)
+          test ${#qt_packages[@]} -gt 0
+          sudo apt-get install -y "${qt_packages[@]}"
 
       - name: Install release build dependencies
         if: runner.os != 'Windows'
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,build]"
+          python -m pip install -e ".[build]"
 
       - name: Install release build dependencies
         if: runner.os == 'Windows'
@@ -134,31 +179,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if errorlevel 1 exit /b %errorlevel%
-          python -m pip install -e .[dev,build]
-
-      - name: Run release QA
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
-          python -m ruff check build.py isrc_manager scripts tests
-          python -m black --check build.py isrc_manager scripts tests
-          python -m mypy
-          python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release_automation.py tests/test_sync_version_docs.py tests/test_python_314_compatibility.py tests/test_versioning.py
-
-      - name: Run release QA
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          python -m compileall -q ISRC_manager.py build.py icon_factory.py isrc_manager scripts tests
-          if errorlevel 1 exit /b %errorlevel%
-          python -m ruff check build.py isrc_manager scripts tests
-          if errorlevel 1 exit /b %errorlevel%
-          python -m black --check build.py isrc_manager scripts tests
-          if errorlevel 1 exit /b %errorlevel%
-          python -m mypy
-          if errorlevel 1 exit /b %errorlevel%
-          python -m pytest -q --no-cov tests/test_build_requirements.py tests/test_release_automation.py tests/test_sync_version_docs.py tests/test_python_314_compatibility.py tests/test_versioning.py
+          python -m pip install -e .[build]
 
       - name: Build packaged application
         if: runner.os != 'Windows'
@@ -219,6 +240,8 @@ jobs:
           name: ${{ steps.package.outputs.asset_name }}
           path: ${{ steps.package.outputs.asset_path }}
           if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   publish:
     name: Publish GitHub Release
@@ -228,6 +251,8 @@ jobs:
     needs:
       - prepare
       - build
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v7
@@ -349,16 +374,29 @@ jobs:
       - name: Create or update GitHub Release
         shell: bash
         env:
+          EXPECTED_COMMIT: ${{ needs.prepare.outputs.checkout_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="${{ steps.release.outputs.tag }}"
           notes_file="${{ steps.release.outputs.notes_file }}"
 
+          verify_release_tag() {
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+            current_commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")"
+            if [[ "$current_commit" != "$EXPECTED_COMMIT" ]]; then
+              echo "Release tag $tag moved after validation; refusing to publish." >&2
+              exit 1
+            fi
+          }
+
           if gh release view "$tag" >/dev/null 2>&1; then
+            verify_release_tag
             gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
           else
+            verify_release_tag
             gh release create "$tag" --title "$tag" --notes-file "$notes_file" --verify-tag
           fi
 
+          verify_release_tag
           gh release upload "$tag" release-assets/* --clobber

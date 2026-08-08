@@ -7,6 +7,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,29 @@ from isrc_manager.services import (
 from isrc_manager.theme_builder import theme_setting_keys
 
 from .models import BackupRecord, HistoryEntry, HistoryIssue, HistoryRepairResult, SnapshotRecord
+from .replay_progress import HistoryReplayProgress, HistoryReplayProgressCallback
+from .snapshot_replay import (
+    HISTORY_REPLAY_EXCLUDED_TABLES,
+    SnapshotConnectionError,
+    SnapshotDatabaseService,
+)
+from .snapshot_scope import (
+    SnapshotReplayScope,
+    capture_managed_file_inventory,
+    changed_managed_files,
+    changed_setting_keys,
+    file_content_signature,
+    restore_managed_files,
+    validate_complete_managed_snapshot,
+    validate_file_state_artifacts,
+    validate_history_artifact_path,
+    validate_managed_files_match,
+    validate_managed_root,
+    validate_managed_snapshot_artifacts,
+    validate_managed_tree,
+    validate_setting_values_match,
+    validate_snapshot_file_effects,
+)
 
 
 class HistoryRecoveryError(RuntimeError):
@@ -60,24 +84,31 @@ class HistoryManager:
     STATUS_UNDONE = "undone"
     STATUS_SUPERSEDED = "superseded"
     STATUS_ARTIFACT_MISSING = "artifact_missing"
-    SNAPSHOT_EXCLUDED_TABLES = frozenset(
-        {
-            "AuditLog",
-            "HistoryBackups",
-            "HistoryEntries",
-            "HistoryHead",
-            "HistorySnapshots",
-            "_MigrationLog",
-        }
-    )
+    SNAPSHOT_EXCLUDED_TABLES = HISTORY_REPLAY_EXCLUDED_TABLES
     SNAPSHOT_INSERT_ONLY_TABLES = frozenset(
         {
+            "AccountingEntries",
+            "AccountingTransactionLinks",
+            "AccountingTransactions",
+            "ArtistPayouts",
             "CodeRegistryCategories",
             "CodeRegistryEntries",
+            "CreditNoteLineAllocations",
+            "CreditNotes",
+            "FinancialCommandLog",
+            "InvoiceOutputArtifacts",
+            "InvoicePayments",
+            "InvoiceTemplateResolvedSnapshots",
+            "RoyaltyStatements",
         }
     )
+    SNAPSHOT_MONOTONIC_TABLES = {
+        "CodeRegistrySequences": frozenset({"last_sequence_number"}),
+    }
     SNAPSHOT_SIDECAR_SUFFIX = ".snapshot.json"
     BACKUP_SIDECAR_SUFFIX = ".backup.json"
+    DATABASE_CONTENT_DIGEST_FORMAT = "sqlite-logical-sha256-v1"
+    DATABASE_CONTENT_MANIFEST_KEY = "database_content"
 
     def __init__(
         self,
@@ -87,6 +118,9 @@ class HistoryManager:
         history_root: str | Path,
         managed_root: str | Path | None = None,
         backups_root: str | Path | None = None,
+        *,
+        connection_factory: object | None = None,
+        snapshot_connection_opener: Callable[[Path], Any] | None = None,
     ):
         self.conn = conn
         self.settings = settings
@@ -98,6 +132,15 @@ class HistoryManager:
         self.settings_mutations = SettingsMutationService(conn, settings)
         self.settings_reads = SettingsReadService(conn)
         self.profile_kv = ProfileKVService(conn)
+        self.snapshot_database = SnapshotDatabaseService(
+            conn,
+            self.db_path,
+            excluded_tables=self.SNAPSHOT_EXCLUDED_TABLES,
+            insert_only_tables=self.SNAPSHOT_INSERT_ONLY_TABLES,
+            monotonic_tables=self.SNAPSHOT_MONOTONIC_TABLES,
+            connection_factory=connection_factory,
+            snapshot_connection_opener=snapshot_connection_opener,
+        )
         if self._history_tables_ready():
             self._ensure_history_invariants()
 
@@ -398,7 +441,15 @@ class HistoryManager:
             bundle_dir.mkdir(parents=True, exist_ok=True)
             artifact = bundle_dir / source.name
             shutil.copy2(source, artifact)
-            files.append({"suffix": suffix, "artifact_path": str(artifact)})
+            size_bytes, digest = file_content_signature(artifact)
+            files.append(
+                {
+                    "suffix": suffix,
+                    "artifact_path": str(artifact),
+                    "size_bytes": size_bytes,
+                    "sha256": digest,
+                }
+            )
 
         return {
             "target_path": str(target),
@@ -413,6 +464,10 @@ class HistoryManager:
             raise ValueError(
                 "File history restore requires a file path, not a directory: " f"{target}"
             )
+        try:
+            validate_file_state_artifacts(state)
+        except SnapshotConnectionError as exc:
+            raise HistoryRecoveryError(str(exc)) from exc
         companion_suffixes = tuple(state.get("companion_suffixes", []))
         for suffix in ("", *companion_suffixes):
             self._remove_path(Path(str(target) + suffix) if suffix else target)
@@ -533,14 +588,28 @@ class HistoryManager:
         snapshot_path = Path(snapshot.db_snapshot_path)
         if not snapshot_path.exists():
             raise FileNotFoundError(snapshot_path)
+        self._validate_owned_snapshot_path(snapshot_path)
+        self._validate_snapshot_database_digest(
+            snapshot_path,
+            snapshot.manifest,
+            allow_legacy_missing=True,
+        )
+        validate_complete_managed_snapshot(
+            snapshot.manifest,
+            allowed_directory_names=self.MANAGED_DIRECTORIES,
+            snapshot_assets_root=self._snapshot_assets_root(snapshot_path),
+        )
         register_kind = kind or snapshot.kind or "registered"
         snapshot_dir = self.history_root / "snapshots" / self.db_path.stem
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         registered_path = snapshot_dir / f"{timestamp}_{register_kind}.db"
+        self._validate_owned_snapshot_path(registered_path, require_file=False)
         shutil.copy2(snapshot_path, registered_path)
         manifest = self._clone_managed_manifest(
-            snapshot.manifest, registered_path.with_suffix(".assets")
+            snapshot.manifest,
+            registered_path.with_suffix(".assets"),
+            source_assets_dir=self._snapshot_assets_root(snapshot_path),
         )
         return self._insert_snapshot_row(
             kind=register_kind,
@@ -705,12 +774,28 @@ class HistoryManager:
     # ------------------------------------------------------------------
     # Undo / redo
     # ------------------------------------------------------------------
-    def undo(self) -> HistoryEntry | None:
+    def undo(
+        self,
+        *,
+        expected_visible_entry_id: int | None = None,
+        progress_callback: HistoryReplayProgressCallback | None = None,
+    ) -> HistoryEntry | None:
         self._ensure_history_invariants()
         plan = self._visible_undo_plan()
         if not plan:
             return None
         visible_entry = plan[-1]
+        if expected_visible_entry_id is not None and visible_entry.entry_id != int(
+            expected_visible_entry_id
+        ):
+            raise HistoryRecoveryError(
+                "The available Undo action changed before background replay started."
+            )
+        progress = HistoryReplayProgress.for_plan(
+            progress_callback,
+            operation="Undo",
+            entries=plan,
+        )
         for entry in plan:
             self._replay_entry(
                 entry,
@@ -718,10 +803,18 @@ class HistoryManager:
                 direction="undo",
                 next_current_entry_id=entry.parent_id,
                 next_entry_status=self.STATUS_UNDONE,
+                progress=progress,
             )
+        progress.finish()
         return visible_entry
 
-    def redo(self, entry_id: int | None = None) -> HistoryEntry | None:
+    def redo(
+        self,
+        entry_id: int | None = None,
+        *,
+        expected_visible_entry_id: int | None = None,
+        progress_callback: HistoryReplayProgressCallback | None = None,
+    ) -> HistoryEntry | None:
         self._ensure_history_invariants()
         if entry_id is not None:
             entry = self.fetch_entry(entry_id)
@@ -734,11 +827,22 @@ class HistoryManager:
             (candidate for candidate in plan if candidate.visible_in_history),
             plan[-1],
         )
+        if expected_visible_entry_id is not None and visible_entry.entry_id != int(
+            expected_visible_entry_id
+        ):
+            raise HistoryRecoveryError(
+                "The available Redo action changed before background replay started."
+            )
         first_entry = plan[0]
         if not self._is_entry_redoable(first_entry):
             raise HistoryRecoveryError(
                 f"History entry {first_entry.entry_id} is not redoable from the current position."
             )
+        progress = HistoryReplayProgress.for_plan(
+            progress_callback,
+            operation="Redo",
+            entries=plan,
+        )
         for entry in plan:
             if not self._is_entry_redoable(entry):
                 raise HistoryRecoveryError(
@@ -750,7 +854,9 @@ class HistoryManager:
                 direction="redo",
                 next_current_entry_id=entry.entry_id,
                 next_entry_status=self.STATUS_APPLIED,
+                progress=progress,
             )
+        progress.finish()
         return visible_entry
 
     def get_default_redo_entry(self) -> HistoryEntry | None:
@@ -857,19 +963,19 @@ class HistoryManager:
         if ref:
             raise ValueError("Snapshot is referenced by history and cannot be deleted")
 
+        snapshot_path = self._validate_owned_snapshot_path(
+            snapshot.db_snapshot_path,
+            require_file=False,
+        )
+
         with self.conn:
             self.conn.execute("DELETE FROM HistorySnapshots WHERE id=?", (int(snapshot_id),))
 
-        snapshot_path = Path(snapshot.db_snapshot_path)
         self._remove_path(snapshot_path)
         self._remove_path(self._snapshot_sidecar_path(snapshot_path))
         for companion_path in self._database_artifact_companion_paths(snapshot_path):
             self._remove_path(companion_path)
         self._remove_path(self._snapshot_assets_root(snapshot_path))
-        for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
-            snapshot_asset_path = state.get("snapshot_path")
-            if snapshot_asset_path:
-                self._remove_path(Path(snapshot_asset_path))
 
     def _delete_snapshot_if_unreferenced(self, snapshot_id: int) -> None:
         try:
@@ -1407,8 +1513,11 @@ class HistoryManager:
         direction: str,
         next_current_entry_id: int | None,
         next_entry_status: str,
+        progress: HistoryReplayProgress | None = None,
     ) -> None:
         if entry.strategy == "snapshot":
+            if progress is not None:
+                progress.report(f"Validating snapshots for {progress.operation}: {entry.label}...")
             target_snapshot_id = (
                 entry.snapshot_before_id if direction == "undo" else entry.snapshot_after_id
             )
@@ -1426,6 +1535,22 @@ class HistoryManager:
                 raise HistoryRecoveryError(
                     f"Snapshot {target_snapshot_id} referenced by history entry {entry.entry_id} was not found."
                 )
+            replay_scope = self._snapshot_replay_scope(entry)
+            if progress is not None:
+                changed_rows = sum(len(delta.changed_keys) for delta in replay_scope.table_deltas)
+                changed_files = sum(len(paths) for _directory, paths in replay_scope.managed_files)
+                progress.advance(
+                    "Validated the recorded snapshot pair "
+                    f"({changed_rows} database row(s), "
+                    f"{len(replay_scope.setting_keys)} setting(s), "
+                    f"{changed_files} managed file(s))."
+                )
+            try:
+                if progress is not None:
+                    progress.report("Checking recorded file effects and rollback data...")
+                validate_snapshot_file_effects(entry.payload, direction=direction)
+            except SnapshotConnectionError as exc:
+                raise HistoryRecoveryError(str(exc)) from exc
 
             rollback_file_states = []
             for effect in (entry.payload or {}).get("file_effects", []):
@@ -1446,16 +1571,26 @@ class HistoryManager:
                         ),
                     )
                 )
+            if progress is not None:
+                progress.advance("Prepared recorded file-effect rollback data.")
 
             try:
                 self._restore_snapshot_state(
                     target_snapshot,
+                    replay_scope=replay_scope,
                     next_current_entry_id=next_current_entry_id,
                     update_current_entry=True,
                     status_updates=[(entry.entry_id, next_entry_status)],
+                    progress=progress,
                 )
+                if progress is not None:
+                    progress.report("Applying recorded file effects...")
                 self._apply_snapshot_side_effects(entry.payload, direction=direction)
+                if progress is not None:
+                    progress.advance("Applied recorded file effects.")
             except Exception:
+                if progress is not None:
+                    progress.report("Replay failed; restoring the previous recorded state...")
                 for target_path, state in rollback_file_states:
                     try:
                         self.restore_file_state(target_path, state)
@@ -1467,6 +1602,7 @@ class HistoryManager:
                         try:
                             self._restore_snapshot_state(
                                 rollback_snapshot,
+                                replay_scope=replay_scope,
                                 next_current_entry_id=rollback_head_id,
                                 update_current_entry=True,
                                 status_updates=[(entry.entry_id, rollback_status)],
@@ -1476,11 +1612,41 @@ class HistoryManager:
                 raise
             return
 
+        if progress is not None:
+            progress.report(f"Applying {progress.operation.lower()} data: {entry.label}...")
         self._apply_entry_payload(entry, payload, direction=direction)
+        if progress is not None:
+            progress.advance("Applied the recorded database change.")
         with self.conn:
             cur = self.conn.cursor()
             self._set_entry_status_in_cursor(entry.entry_id, next_entry_status, cursor=cur)
             self._set_current_entry_id_in_cursor(next_current_entry_id, cursor=cur)
+        if progress is not None:
+            progress.advance("Committed the updated history position.")
+
+    def _snapshot_replay_scope(self, entry: HistoryEntry) -> SnapshotReplayScope:
+        before = self.fetch_snapshot(int(entry.snapshot_before_id or 0))
+        after = self.fetch_snapshot(int(entry.snapshot_after_id or 0))
+        if before is None or after is None:
+            raise HistoryRecoveryError(
+                f"History entry {entry.entry_id} is missing its before/after snapshot pair."
+            )
+        self._validate_snapshot_restore_ready(before)
+        self._validate_snapshot_restore_ready(after)
+        return SnapshotReplayScope(
+            table_deltas=self.snapshot_database.changed_rows_between(
+                before.db_snapshot_path,
+                after.db_snapshot_path,
+            ),
+            setting_keys=changed_setting_keys(before.settings_state, after.settings_state),
+            managed_files=changed_managed_files(before.manifest, after.manifest),
+            before_db_snapshot_path=before.db_snapshot_path,
+            after_db_snapshot_path=after.db_snapshot_path,
+            before_settings_state=before.settings_state,
+            after_settings_state=after.settings_state,
+            before_manifest=before.manifest,
+            after_manifest=after.manifest,
+        )
 
     def _apply_entry_payload(
         self, entry: HistoryEntry, payload: dict | None, *, direction: str
@@ -1680,14 +1846,10 @@ class HistoryManager:
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         snapshot_path = snapshot_dir / f"{timestamp}_{kind}.db"
+        self._validate_owned_snapshot_path(snapshot_path, require_file=False)
 
         self.conn.commit()
-        snapshot_conn = sqlite3.connect(str(snapshot_path))
-        try:
-            self.conn.backup(snapshot_conn)
-            snapshot_conn.commit()
-        finally:
-            snapshot_conn.close()
+        self.snapshot_database.capture(snapshot_path)
 
         settings_state = self._capture_settings_state()
         manifest = self._capture_managed_state(snapshot_path.with_suffix(".assets"))
@@ -1703,12 +1865,44 @@ class HistoryManager:
         self,
         snapshot: SnapshotRecord,
         *,
+        replay_scope: SnapshotReplayScope | None = None,
         next_current_entry_id: int | None | object = _UNSET,
         update_current_entry: bool = False,
         status_updates: list[tuple[int, str]] | None = None,
+        progress: HistoryReplayProgress | None = None,
     ) -> None:
+        if progress is not None:
+            progress.report("Checking snapshot integrity and the current live state...")
         self._validate_snapshot_restore_ready(snapshot)
         snapshot_path = Path(snapshot.db_snapshot_path)
+        expected_snapshot_path = None
+        if replay_scope is not None:
+            if snapshot.db_snapshot_path == replay_scope.before_db_snapshot_path:
+                expected_snapshot_path = replay_scope.after_db_snapshot_path
+                expected_settings_state = replay_scope.after_settings_state
+                expected_manifest = replay_scope.after_manifest
+            elif snapshot.db_snapshot_path == replay_scope.after_db_snapshot_path:
+                expected_snapshot_path = replay_scope.before_db_snapshot_path
+                expected_settings_state = replay_scope.before_settings_state
+                expected_manifest = replay_scope.before_manifest
+            else:
+                raise HistoryRecoveryError(
+                    "History replay target does not belong to its recorded snapshot pair."
+                )
+            validate_setting_values_match(
+                self._capture_settings_state(),
+                expected_settings_state,
+                replay_scope.setting_keys,
+            )
+            validate_managed_snapshot_artifacts(snapshot.manifest, replay_scope.managed_files)
+            if self.managed_root is not None:
+                validate_managed_files_match(
+                    self.managed_root,
+                    expected_manifest,
+                    replay_scope.managed_files,
+                )
+            if progress is not None:
+                progress.advance("Validated snapshot integrity and live-state conflicts.")
         rollback_root = self.history_root / "restore_rollbacks" / self.db_path.stem
         rollback_root.mkdir(parents=True, exist_ok=True)
         rollback_dir = Path(
@@ -1717,38 +1911,33 @@ class HistoryManager:
         rollback_manifest: dict = {}
         previous_settings_state = self._capture_settings_state()
         try:
+            if progress is not None:
+                progress.report("Capturing rollback protection for managed state...")
             rollback_manifest = self._capture_managed_state(rollback_dir / "managed")
-        except Exception:
-            rollback_manifest = {}
-
-        attach_path = snapshot_path.as_posix()
-        external_restore_started = False
-        self.conn.commit()
-        self.conn.execute("PRAGMA foreign_keys = OFF")
-        self.conn.execute("ATTACH DATABASE ? AS snapshot_restore", (attach_path,))
-        try:
+            if progress is not None:
+                progress.advance("Captured rollback protection for managed state.")
+            external_restore_started = False
+            self.conn.commit()
+            baseline_foreign_key_issues = set(
+                self.conn.execute("PRAGMA foreign_key_check").fetchall()
+            )
+            self.conn.execute("PRAGMA foreign_keys = OFF")
             try:
                 self.conn.execute("BEGIN")
-                for table_name in self._snapshot_domain_tables("main"):
-                    if table_name in self.SNAPSHOT_INSERT_ONLY_TABLES:
-                        continue
-                    self.conn.execute(f"DELETE FROM {table_name}")
-                for table_name in self._snapshot_domain_tables("snapshot_restore"):
-                    if not self._table_exists("snapshot_restore", table_name):
-                        continue
-                    columns = self._shared_columns(table_name)
-                    if not columns:
-                        continue
-                    cols_sql = ", ".join(columns)
-                    insert_verb = (
-                        "INSERT OR IGNORE"
-                        if table_name in self.SNAPSHOT_INSERT_ONLY_TABLES
-                        else "INSERT"
-                    )
-                    self.conn.execute(
-                        f"{insert_verb} INTO {table_name} ({cols_sql}) "
-                        f"{self._snapshot_restore_select_sql(table_name, columns)}"
-                    )
+                table_deltas = (
+                    replay_scope.table_deltas
+                    if replay_scope is not None
+                    else self.snapshot_database.changed_rows_from_live(snapshot_path)
+                )
+                if progress is not None:
+                    progress.report("Replaying the action-owned database rows...")
+                self.snapshot_database.restore_rows(
+                    snapshot_path,
+                    table_deltas,
+                    expected_snapshot_path=expected_snapshot_path,
+                )
+                if progress is not None:
+                    progress.advance("Replayed the action-owned database rows.")
                 if update_current_entry:
                     self._set_current_entry_id_in_cursor(
                         (next_current_entry_id if isinstance(next_current_entry_id, int) else None),
@@ -1760,9 +1949,40 @@ class HistoryManager:
                         self._set_entry_status_in_cursor(entry_id, status, cursor=cur)
 
                 external_restore_started = True
-                self._restore_managed_state(snapshot.manifest)
-                self._apply_settings_state(snapshot.settings_state)
+                if progress is not None:
+                    progress.report("Restoring action-owned settings and managed files...")
+                if replay_scope is None:
+                    self._restore_managed_state(
+                        snapshot.manifest,
+                        snapshot_assets_root=self._snapshot_assets_root(snapshot_path),
+                    )
+                    self._apply_settings_state(snapshot.settings_state)
+                else:
+                    if self.managed_root is not None:
+                        restore_managed_files(
+                            self.managed_root,
+                            snapshot.manifest,
+                            replay_scope.managed_files,
+                        )
+                    self._apply_settings_state(
+                        snapshot.settings_state,
+                        keys=replay_scope.setting_keys,
+                    )
+                if progress is not None:
+                    progress.advance("Restored action-owned settings and managed files.")
+                    progress.report("Checking database relationships and committing replay...")
+                foreign_key_issues = set(self.conn.execute("PRAGMA foreign_key_check").fetchall())
+                new_foreign_key_issues = foreign_key_issues - baseline_foreign_key_issues
+                if new_foreign_key_issues:
+                    preview = ", ".join(
+                        str(row) for row in sorted(new_foreign_key_issues, key=repr)[:5]
+                    )
+                    raise HistoryRecoveryError(
+                        f"History restore would create foreign-key violations: {preview}"
+                    )
                 self.conn.commit()
+                if progress is not None:
+                    progress.advance("Verified database relationships and committed replay.")
             except Exception as exc:
                 self.conn.rollback()
                 rollback_error = None
@@ -1770,15 +1990,16 @@ class HistoryManager:
                     rollback_error = self._restore_external_state(
                         rollback_manifest=rollback_manifest,
                         settings_state=previous_settings_state,
+                        rollback_assets_root=rollback_dir / "managed",
                     )
                 if rollback_error is not None:
                     raise HistoryRecoveryError(
                         f"{exc} (external rollback also failed: {rollback_error})"
                     ) from exc
                 raise
+            finally:
+                self.conn.execute("PRAGMA foreign_keys = ON")
         finally:
-            self.conn.execute("DETACH DATABASE snapshot_restore")
-            self.conn.execute("PRAGMA foreign_keys = ON")
             self._remove_path(rollback_dir)
 
     def _insert_snapshot_row(
@@ -1791,6 +2012,8 @@ class HistoryManager:
         manifest: dict,
         snapshot_id: int | None = None,
     ) -> SnapshotRecord:
+        snapshot_path = self._validate_owned_snapshot_path(db_snapshot_path)
+        manifest = self._seal_snapshot_database_digest(snapshot_path, manifest)
         with self.conn:
             cur = self.conn.cursor()
             if snapshot_id is None:
@@ -1880,82 +2103,6 @@ class HistoryManager:
             raise RuntimeError(f"Backup record {backup_id} could not be reloaded")
         self._write_backup_sidecar(record)
         return record
-
-    def _table_exists(self, db_alias: str, table_name: str) -> bool:
-        row = self.conn.execute(
-            f"SELECT 1 FROM {db_alias}.sqlite_master WHERE type='table' AND name=?",
-            (table_name,),
-        ).fetchone()
-        return bool(row)
-
-    def _snapshot_domain_tables(self, db_alias: str) -> list[str]:
-        rows = self.conn.execute(f"""
-            SELECT name
-            FROM {db_alias}.sqlite_master
-            WHERE type='table'
-              AND name NOT LIKE 'sqlite_%'
-            ORDER BY name
-            """).fetchall()
-        return [
-            str(row[0])
-            for row in rows
-            if row and row[0] and str(row[0]) not in self.SNAPSHOT_EXCLUDED_TABLES
-        ]
-
-    def _shared_columns(self, table_name: str) -> list[str]:
-        main_cols = {
-            row[1] for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
-        snapshot_cols = {
-            row[1]
-            for row in self.conn.execute(
-                f"PRAGMA snapshot_restore.table_info({table_name})"
-            ).fetchall()
-        }
-        return [
-            column
-            for column in self._ordered_columns(table_name)
-            if column in main_cols and column in snapshot_cols
-        ]
-
-    def _snapshot_restore_select_sql(self, table_name: str, columns: list[str]) -> str:
-        if table_name != "CustomFieldValues" or not self._table_exists(
-            "snapshot_restore", "CustomFieldDefs"
-        ):
-            cols_sql = ", ".join(columns)
-            return f"SELECT {cols_sql} FROM snapshot_restore.{table_name}"
-
-        blob_types = "('blob_image','blob_audio')"
-
-        def _column_expr(column: str) -> str:
-            if column == "blob_value":
-                return (
-                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
-                    "THEN cfv.blob_value ELSE NULL END AS blob_value"
-                )
-            if column in {"managed_file_path", "storage_mode", "filename", "mime_type"}:
-                return (
-                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
-                    f"THEN cfv.{column} ELSE '' END AS {column}"
-                )
-            if column == "size_bytes":
-                return (
-                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
-                    "THEN COALESCE(cfv.size_bytes, 0) ELSE 0 END AS size_bytes"
-                )
-            return f"cfv.{column}"
-
-        select_parts = ", ".join(_column_expr(column) for column in columns)
-        return (
-            "SELECT "
-            f"{select_parts} "
-            "FROM snapshot_restore.CustomFieldValues cfv "
-            "LEFT JOIN snapshot_restore.CustomFieldDefs cfd ON cfd.id = cfv.field_def_id"
-        )
-
-    def _ordered_columns(self, table_name: str) -> list[str]:
-        rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        return [row[1] for row in rows]
 
     def _history_tables_ready(self) -> bool:
         required = {"HistoryEntries", "HistoryHead", "HistorySnapshots", "HistoryBackups"}
@@ -2329,16 +2476,6 @@ class HistoryManager:
                 entries.append((entry, archived_snapshot))
         return entries
 
-    def _ensure_registry_sidecars(self) -> None:
-        for snapshot in self._all_snapshots():
-            snapshot_path = Path(snapshot.db_snapshot_path)
-            if snapshot_path.exists():
-                self._write_snapshot_sidecar(snapshot)
-        for backup in self._all_backups():
-            backup_path = Path(backup.backup_path)
-            if backup_path.exists():
-                self._write_backup_sidecar(backup)
-
     def _backup_entry_target_path(self, entry: HistoryEntry) -> Path:
         payload = entry.payload or {}
         return Path(str(payload.get("path") or entry.entity_id or ""))
@@ -2470,14 +2607,20 @@ class HistoryManager:
         return missing_paths
 
     def _validate_snapshot_restore_ready(self, snapshot: SnapshotRecord) -> None:
+        snapshot_path = self._validate_owned_snapshot_path(snapshot.db_snapshot_path)
         missing_paths = self._snapshot_missing_paths(snapshot)
-        if not missing_paths:
-            return
-        missing = "\n".join(str(path) for path in missing_paths[:10])
-        raise HistoryRecoveryError(
-            "Snapshot restore could not proceed because required artifacts are missing.\n"
-            f"Snapshot #{snapshot.snapshot_id} '{snapshot.label}' is missing:\n{missing}\n\n"
-            "Run Diagnostics and use the history repair action to reconcile stale references."
+        if missing_paths:
+            missing = "\n".join(str(path) for path in missing_paths[:10])
+            raise HistoryRecoveryError(
+                "Snapshot restore could not proceed because required artifacts are missing.\n"
+                f"Snapshot #{snapshot.snapshot_id} '{snapshot.label}' is missing:\n{missing}\n\n"
+                "Run Diagnostics and use the history repair action to reconcile stale references."
+            )
+        self._validate_or_seal_snapshot_database_digest(snapshot, snapshot_path)
+        validate_complete_managed_snapshot(
+            snapshot.manifest,
+            allowed_directory_names=self.MANAGED_DIRECTORIES,
+            snapshot_assets_root=self._snapshot_assets_root(snapshot_path),
         )
 
     def _orphan_snapshot_files(self, registered_paths: set[str]) -> list[Path]:
@@ -2504,6 +2647,106 @@ class HistoryManager:
     def _snapshot_assets_root(self, snapshot_path: Path) -> Path:
         return snapshot_path.with_suffix(".assets")
 
+    def _snapshot_storage_roots(self) -> tuple[Path, Path]:
+        return (
+            self.history_root / "snapshots" / self.db_path.stem,
+            self.history_root / "snapshot_archives" / self.db_path.stem,
+        )
+
+    def _validate_owned_snapshot_path(
+        self,
+        path: str | Path,
+        *,
+        require_file: bool = True,
+    ) -> Path:
+        candidate = Path(path).absolute()
+        if candidate.suffix.lower() != ".db":
+            raise HistoryRecoveryError("History database snapshot must use a .db file path.")
+        for root in self._snapshot_storage_roots():
+            try:
+                validate_history_artifact_path(
+                    root,
+                    lexical_root=self.history_root,
+                    require_file=False,
+                )
+                return validate_history_artifact_path(
+                    candidate,
+                    lexical_root=root,
+                    require_file=require_file,
+                    direct_child=True,
+                )
+            except SnapshotConnectionError:
+                continue
+        raise HistoryRecoveryError(
+            "History database snapshot is outside this profile's application-owned directories."
+        )
+
+    def _seal_snapshot_database_digest(self, snapshot_path: Path, manifest: dict) -> dict:
+        sealed_manifest = json.loads(json.dumps(manifest or {}))
+        sealed_manifest[self.DATABASE_CONTENT_MANIFEST_KEY] = {
+            "format": self.DATABASE_CONTENT_DIGEST_FORMAT,
+            "sha256": self.snapshot_database.logical_digest(snapshot_path),
+        }
+        return sealed_manifest
+
+    def _validate_snapshot_database_digest(
+        self,
+        snapshot_path: Path,
+        manifest: dict,
+        *,
+        allow_legacy_missing: bool,
+    ) -> bool:
+        raw_digest = manifest.get(self.DATABASE_CONTENT_MANIFEST_KEY)
+        if raw_digest is None and allow_legacy_missing:
+            return False
+        if not isinstance(raw_digest, dict):
+            raise HistoryRecoveryError("History database snapshot integrity metadata is missing.")
+        digest_format = str(raw_digest.get("format") or "")
+        expected_digest = str(raw_digest.get("sha256") or "").lower()
+        if (
+            digest_format != self.DATABASE_CONTENT_DIGEST_FORMAT
+            or len(expected_digest) != 64
+            or any(character not in "0123456789abcdef" for character in expected_digest)
+        ):
+            raise HistoryRecoveryError("History database snapshot integrity metadata is invalid.")
+        actual_digest = self.snapshot_database.logical_digest(snapshot_path)
+        if actual_digest != expected_digest:
+            raise HistoryRecoveryError(
+                "History database snapshot failed its logical integrity check; Undo/Redo was not applied."
+            )
+        return True
+
+    def _validate_or_seal_snapshot_database_digest(
+        self,
+        snapshot: SnapshotRecord,
+        snapshot_path: Path,
+    ) -> None:
+        if self._validate_snapshot_database_digest(
+            snapshot_path,
+            snapshot.manifest,
+            allow_legacy_missing=True,
+        ):
+            return
+        sealed_manifest = self._seal_snapshot_database_digest(
+            snapshot_path,
+            snapshot.manifest,
+        )
+        with self.conn:
+            self.conn.execute(
+                "UPDATE HistorySnapshots SET manifest_json=? WHERE id=? AND db_snapshot_path=?",
+                (
+                    json.dumps(sealed_manifest),
+                    int(snapshot.snapshot_id),
+                    snapshot.db_snapshot_path,
+                ),
+            )
+        refreshed = self.fetch_snapshot(snapshot.snapshot_id)
+        if refreshed is None:
+            raise HistoryRecoveryError(
+                f"Snapshot {snapshot.snapshot_id} could not be sealed for safe replay."
+            )
+        self._write_snapshot_sidecar(refreshed)
+
     def _database_artifact_companion_paths(self, base_path: Path) -> tuple[Path, ...]:
         return tuple(
             Path(f"{base_path}{suffix}") for suffix in self.DATABASE_ARTIFACT_COMPANION_SUFFIXES
@@ -2529,9 +2772,11 @@ class HistoryManager:
             "manifest": snapshot.manifest,
         }
         try:
-            self._write_json_sidecar(
-                self._snapshot_sidecar_path(Path(snapshot.db_snapshot_path)), payload
+            snapshot_path = self._validate_owned_snapshot_path(
+                snapshot.db_snapshot_path,
+                require_file=False,
             )
+            self._write_json_sidecar(self._snapshot_sidecar_path(snapshot_path), payload)
         except Exception:
             pass
 
@@ -2590,8 +2835,16 @@ class HistoryManager:
             return False
         if self._archived_snapshot_missing_paths(archived_snapshot):
             return False
-        archived_path = Path(str(archived_snapshot.get("db_snapshot_path") or ""))
+        archived_path = self._validate_owned_snapshot_path(
+            str(archived_snapshot.get("db_snapshot_path") or "")
+        )
         manifest = archived_snapshot.get("manifest") or self._infer_snapshot_manifest(archived_path)
+        validate_complete_managed_snapshot(
+            manifest,
+            allowed_directory_names=self.MANAGED_DIRECTORIES,
+            snapshot_assets_root=self._snapshot_assets_root(archived_path),
+        )
+        manifest = self._seal_snapshot_database_digest(archived_path, manifest)
         settings_state = archived_snapshot.get("settings_state") or {}
         kind = str(archived_snapshot.get("kind") or snapshot.kind or "recovered_archive")
         label = str(archived_snapshot.get("label") or snapshot.label or archived_path.stem)
@@ -2777,22 +3030,24 @@ class HistoryManager:
         removed_paths: list[str] = []
         snapshot = self.fetch_snapshot(snapshot_id)
         if snapshot is not None:
-            snapshot_path = Path(snapshot.db_snapshot_path)
-            removed_paths.append(str(snapshot_path))
-            removed_paths.append(str(self._snapshot_sidecar_path(snapshot_path)))
-            removed_paths.append(str(self._snapshot_assets_root(snapshot_path)))
-            for companion_path in self._database_artifact_companion_paths(snapshot_path):
-                removed_paths.append(str(companion_path))
-            self._remove_path(snapshot_path)
-            self._remove_path(self._snapshot_sidecar_path(snapshot_path))
-            for companion_path in self._database_artifact_companion_paths(snapshot_path):
-                self._remove_path(companion_path)
-            self._remove_path(self._snapshot_assets_root(snapshot_path))
-            for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
-                asset_path = state.get("snapshot_path")
-                if asset_path:
-                    removed_paths.append(str(asset_path))
-                    self._remove_path(Path(asset_path))
+            try:
+                snapshot_path = self._validate_owned_snapshot_path(
+                    snapshot.db_snapshot_path,
+                    require_file=False,
+                )
+            except HistoryRecoveryError:
+                snapshot_path = None
+            if snapshot_path is not None:
+                removed_paths.append(str(snapshot_path))
+                removed_paths.append(str(self._snapshot_sidecar_path(snapshot_path)))
+                removed_paths.append(str(self._snapshot_assets_root(snapshot_path)))
+                for companion_path in self._database_artifact_companion_paths(snapshot_path):
+                    removed_paths.append(str(companion_path))
+                self._remove_path(snapshot_path)
+                self._remove_path(self._snapshot_sidecar_path(snapshot_path))
+                for companion_path in self._database_artifact_companion_paths(snapshot_path):
+                    self._remove_path(companion_path)
+                self._remove_path(self._snapshot_assets_root(snapshot_path))
         with self.conn:
             self.conn.execute("DELETE FROM HistorySnapshots WHERE id=?", (int(snapshot_id),))
         return list(dict.fromkeys(removed_paths))
@@ -2925,9 +3180,11 @@ class HistoryManager:
         managed_directories = {}
         for dir_name in self.MANAGED_DIRECTORIES:
             asset_dir = assets_root / dir_name
+            exists = asset_dir.exists()
             managed_directories[dir_name] = {
-                "exists": asset_dir.exists(),
-                "snapshot_path": str(asset_dir) if asset_dir.exists() else None,
+                "exists": exists,
+                "snapshot_path": str(asset_dir) if exists else None,
+                "file_inventory": (capture_managed_file_inventory(asset_dir) if exists else {}),
             }
         return {"managed_directories": managed_directories}
 
@@ -2941,11 +3198,18 @@ class HistoryManager:
         return "pre_restore" if "pre_restore" in backup_path.name else "manual"
 
     def _restore_external_state(
-        self, *, rollback_manifest: dict, settings_state: dict
+        self,
+        *,
+        rollback_manifest: dict,
+        settings_state: dict,
+        rollback_assets_root: Path,
     ) -> str | None:
         restore_errors: list[str] = []
         try:
-            self._restore_managed_state(rollback_manifest)
+            self._restore_managed_state(
+                rollback_manifest,
+                snapshot_assets_root=rollback_assets_root,
+            )
         except Exception as exc:
             restore_errors.append(f"managed files: {exc}")
         try:
@@ -2983,10 +3247,12 @@ class HistoryManager:
         if self.managed_root is None:
             return {}
 
+        validate_managed_root(self.managed_root)
         manifest = {"managed_directories": {}}
         for dir_name in self.MANAGED_DIRECTORIES:
             source_dir = self.managed_root / dir_name
             if source_dir.exists():
+                validate_managed_tree(source_dir)
                 assets_dir.mkdir(parents=True, exist_ok=True)
                 snapshot_dir = assets_dir / dir_name
                 if snapshot_dir.exists():
@@ -2995,15 +3261,30 @@ class HistoryManager:
                 manifest["managed_directories"][dir_name] = {
                     "exists": True,
                     "snapshot_path": str(snapshot_dir),
+                    "file_inventory": capture_managed_file_inventory(snapshot_dir),
                 }
             else:
                 manifest["managed_directories"][dir_name] = {
                     "exists": False,
                     "snapshot_path": None,
+                    "file_inventory": {},
                 }
         return manifest
 
-    def _clone_managed_manifest(self, manifest: dict, assets_dir: Path) -> dict:
+    def _clone_managed_manifest(
+        self,
+        manifest: dict,
+        assets_dir: Path,
+        *,
+        source_assets_dir: Path,
+    ) -> dict:
+        validate_complete_managed_snapshot(
+            manifest,
+            allowed_directory_names=self.MANAGED_DIRECTORIES,
+            snapshot_assets_root=source_assets_dir,
+        )
+        if assets_dir.is_symlink() or (assets_dir.exists() and not assets_dir.is_dir()):
+            raise HistoryRecoveryError(f"Managed history clone destination is unsafe: {assets_dir}")
         cloned = json.loads(json.dumps(manifest or {}))
         managed_directories = cloned.get("managed_directories", {})
         for dir_name, state in managed_directories.items():
@@ -3014,6 +3295,7 @@ class HistoryManager:
             src_dir = Path(source_path)
             if not src_dir.exists():
                 raise FileNotFoundError(src_dir)
+            validate_managed_tree(src_dir)
             assets_dir.mkdir(parents=True, exist_ok=True)
             dest_dir = assets_dir / dir_name
             if dest_dir.exists():
@@ -3022,7 +3304,12 @@ class HistoryManager:
             state["snapshot_path"] = str(dest_dir)
         return cloned
 
-    def _restore_managed_state(self, manifest: dict) -> None:
+    def _restore_managed_state(
+        self,
+        manifest: dict,
+        *,
+        snapshot_assets_root: Path,
+    ) -> None:
         if self.managed_root is None:
             return
 
@@ -3030,7 +3317,14 @@ class HistoryManager:
         if not managed_directories:
             return
 
+        validate_complete_managed_snapshot(
+            manifest,
+            allowed_directory_names=self.MANAGED_DIRECTORIES,
+            snapshot_assets_root=snapshot_assets_root,
+        )
+        validate_managed_root(self.managed_root)
         self.managed_root.mkdir(parents=True, exist_ok=True)
+        validate_managed_root(self.managed_root)
         for dir_name, state in managed_directories.items():
             target_dir = self.managed_root / dir_name
             self._remove_path(target_dir)
@@ -3039,17 +3333,24 @@ class HistoryManager:
             snapshot_dir = Path(state.get("snapshot_path") or "")
             if not snapshot_dir.exists():
                 raise FileNotFoundError(snapshot_dir)
+            validate_managed_tree(snapshot_dir)
             shutil.copytree(snapshot_dir, target_dir)
 
     def _archive_snapshot_record(self, snapshot: SnapshotRecord, *, prefix: str) -> dict:
+        self._validate_snapshot_restore_ready(snapshot)
+        source_snapshot_path = self._validate_owned_snapshot_path(snapshot.db_snapshot_path)
         archive_dir = self.history_root / "snapshot_archives" / self.db_path.stem
         archive_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         archive_path = archive_dir / f"{timestamp}_{prefix}.db"
-        shutil.copy2(snapshot.db_snapshot_path, archive_path)
+        self._validate_owned_snapshot_path(archive_path, require_file=False)
+        shutil.copy2(source_snapshot_path, archive_path)
         manifest = self._clone_managed_manifest(
-            snapshot.manifest, archive_path.with_suffix(".assets")
+            snapshot.manifest,
+            archive_path.with_suffix(".assets"),
+            source_assets_dir=self._snapshot_assets_root(source_snapshot_path),
         )
+        manifest = self._seal_snapshot_database_digest(archive_path, manifest)
         return {
             "kind": snapshot.kind,
             "label": snapshot.label,
@@ -3070,10 +3371,27 @@ class HistoryManager:
         )
         return self.register_snapshot(snapshot, kind=snapshot.kind, label=snapshot.label)
 
-    def _apply_settings_state(self, state: dict) -> None:
-        self.settings.clear()
-        for key, serialized in state.items():
-            self.settings.setValue(key, self._deserialize_setting_value(serialized))
+    def _apply_settings_state(
+        self,
+        state: dict,
+        *,
+        keys: Iterable[str] | None = None,
+    ) -> None:
+        if keys is None:
+            self.settings.clear()
+            for key, serialized in state.items():
+                self.settings.setValue(key, self._deserialize_setting_value(serialized))
+        else:
+            selected_keys = tuple(str(key) for key in keys)
+            for key in selected_keys:
+                if key not in state:
+                    self.settings.remove(key)
+            for key in selected_keys:
+                if key in state:
+                    self.settings.setValue(
+                        key,
+                        self._deserialize_setting_value(state[key]),
+                    )
         self.settings.sync()
 
     def _apply_setting_state_entry(self, entry: dict) -> None:

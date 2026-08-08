@@ -188,8 +188,9 @@ class HistoryDialog(QDialog):
 
         undo_source, undo_entry = self.app._get_best_history_candidate("undo")
         redo_source, redo_entry = self.app._get_best_history_candidate("redo")
-        self.undo_btn.setEnabled(bool(undo_source and undo_entry))
-        self.redo_btn.setEnabled(bool(redo_source and redo_entry))
+        replay_busy = bool(getattr(self.app, "_history_replay_in_progress", False))
+        self.undo_btn.setEnabled(bool(undo_source and undo_entry) and not replay_busy)
+        self.redo_btn.setEnabled(bool(redo_source and redo_entry) and not replay_busy)
         self._update_action_state()
 
     @staticmethod
@@ -229,12 +230,10 @@ class HistoryDialog(QDialog):
         self.cleanup_btn.setEnabled(has_history)
 
     def _undo(self):
-        self.app.history_undo()
-        self.refresh_data()
+        self.app.history_undo(owner=self)
 
     def _redo(self):
-        self.app.history_redo()
-        self.refresh_data()
+        self.app.history_redo(owner=self)
 
     def _create_snapshot(self):
         self.app.create_manual_snapshot()

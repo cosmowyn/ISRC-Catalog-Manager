@@ -53,6 +53,13 @@ VISUAL_MANIFESTS = (
     "visual/generated_output_manifest.json",
 )
 DEFAULT_COVERAGE_SNAPSHOT_PATH = Path("docs/validation/coverage_snapshot.json")
+REQUIRED_PQ_PROVENANCE_FIELDS = (
+    "source_commit",
+    "test_version",
+    "renderer_version",
+    "relevant_inputs_hash",
+    "generated_at",
+)
 
 
 def _utc_now() -> str:
@@ -70,6 +77,55 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return []
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
+
+
+def validate_pq_provenance(pq_artifacts: Path, *, expected_commit: str) -> dict[str, Any]:
+    """Reject dashboard input that is stale or lacks canonical per-component provenance."""
+    path = pq_artifacts / "provenance.json"
+    provenance = _read_json(path)
+    if not path.is_file() or not isinstance(provenance, dict):
+        raise ValueError(f"QA/PQ provenance is missing or invalid: {path}")
+    if provenance.get("schema_version") != 2:
+        raise ValueError("QA/PQ provenance schema is unsupported")
+    bundle = provenance.get("bundle")
+    components = provenance.get("components")
+    fingerprints = provenance.get("fingerprints")
+    if not isinstance(bundle, dict) or not isinstance(components, dict) or not components:
+        raise ValueError("QA/PQ provenance has no canonical bundle/component records")
+    if not isinstance(fingerprints, dict) or set(fingerprints) != {
+        "components",
+        "runtime",
+        "shared",
+    }:
+        raise ValueError("QA/PQ provenance fingerprint groups are incomplete")
+    runtime = fingerprints.get("runtime")
+    if (
+        not isinstance(runtime, dict)
+        or not isinstance(runtime.get("fingerprint"), str)
+        or not isinstance(runtime.get("inputs"), dict)
+    ):
+        raise ValueError("QA/PQ provenance has no runtime renderer fingerprint")
+    missing_bundle = [field for field in REQUIRED_PQ_PROVENANCE_FIELDS if not bundle.get(field)]
+    if missing_bundle:
+        raise ValueError("QA/PQ bundle provenance is incomplete: " + ", ".join(missing_bundle))
+    if expected_commit and bundle.get("source_commit") != expected_commit:
+        raise ValueError(
+            "QA/PQ bundle source commit does not match dashboard input: "
+            f"{bundle.get('source_commit')} != {expected_commit}"
+        )
+    for name, component in components.items():
+        if not isinstance(component, dict):
+            raise ValueError(f"QA/PQ component provenance is invalid: {name}")
+        missing = [field for field in REQUIRED_PQ_PROVENANCE_FIELDS if not component.get(field)]
+        if missing:
+            raise ValueError(
+                f"QA/PQ component provenance is incomplete for {name}: " + ", ".join(missing)
+            )
+    selected = {str(name) for name in bundle.get("selected_components", [])}
+    reused = {str(name) for name in bundle.get("reused_components", [])}
+    if selected.intersection(reused) or selected.union(reused) != set(components):
+        raise ValueError("QA/PQ selected/reused component provenance is inconsistent")
+    return provenance
 
 
 def _count_by(rows: Iterable[dict[str, str]], key: str) -> Counter[str]:
@@ -403,6 +459,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", default="local")
     parser.add_argument("--branch")
     parser.add_argument("--commit-sha")
+    parser.add_argument(
+        "--require-pq-provenance",
+        action="store_true",
+        help="Reject missing, incompatible, or stale canonical QA/PQ evidence.",
+    )
     return parser
 
 
@@ -421,6 +482,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     coverage_snapshot_path = args.coverage_snapshot
     if coverage_snapshot_path is not None and not coverage_snapshot_path.is_absolute():
         coverage_snapshot_path = repo_root / coverage_snapshot_path
+
+    if args.require_pq_provenance:
+        validate_pq_provenance(
+            pq_artifacts,
+            expected_commit=args.commit_sha or _git_value(repo_root, ("rev-parse", "HEAD")),
+        )
 
     row = collect_snapshot(
         repo_root=repo_root,

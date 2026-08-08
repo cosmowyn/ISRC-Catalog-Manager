@@ -358,6 +358,7 @@ class BackgroundAppServiceFactory:
                 self.history_dir,
                 self.data_root,
                 self.backups_dir,
+                connection_factory=self.connection_factory,
             ),
             database_maintenance=DatabaseMaintenanceService(self.backups_dir),
             settings_reads=settings_reads,

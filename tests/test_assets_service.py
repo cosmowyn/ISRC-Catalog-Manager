@@ -469,6 +469,317 @@ def test_delete_unreferenced_asset_file_paths(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_delete_asset_removes_only_unreferenced_managed_file(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    stored_path = service.asset_store.write_bytes(
+        b"shared managed asset",
+        filename="shared.wav",
+        subdir="audio",
+    )
+    managed_path = service.resolve_asset_path(stored_path)
+    assert managed_path is not None
+
+    asset_ids = [
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                filename="shared.wav",
+                stored_path=stored_path,
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                track_id=track_id,
+            )
+        )
+        for track_id in (1, 2)
+    ]
+
+    service.delete_asset(asset_ids[0])
+    assert managed_path.exists()
+
+    service.delete_asset(asset_ids[1])
+    assert not managed_path.exists()
+    conn.close()
+
+
+def test_delete_asset_preserves_file_referenced_by_legacy_lexical_alias(
+    tmp_path: Path,
+) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    stored_path = service.asset_store.write_bytes(
+        b"legacy shared managed asset",
+        filename="legacy-shared.wav",
+        subdir="audio",
+    )
+    managed_path = service.resolve_asset_path(stored_path)
+    assert managed_path is not None
+    lexical_alias = f"{Path(stored_path).parent.as_posix()}/./{Path(stored_path).name}"
+
+    first_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename="legacy-shared.wav",
+            stored_path=stored_path,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    second_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="alt_master",
+            filename="legacy-shared.wav",
+            stored_path=lexical_alias,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=2,
+        )
+    )
+    normalized_second = service.fetch_asset(second_id)
+    assert normalized_second is not None
+    assert normalized_second.stored_path == stored_path
+    service.update_asset(
+        second_id,
+        AssetVersionPayload(
+            asset_type="alt_master",
+            filename="legacy-shared.wav",
+            stored_path=lexical_alias,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=2,
+        ),
+    )
+    normalized_second = service.fetch_asset(second_id)
+    assert normalized_second is not None
+    assert normalized_second.stored_path == stored_path
+
+    # Simulate a lexical alias retained by an older profile.
+    with conn:
+        conn.execute(
+            "UPDATE AssetVersions SET stored_path=? WHERE id=?",
+            (lexical_alias, second_id),
+        )
+
+    service.delete_asset(first_id)
+
+    remaining = service.fetch_asset(second_id)
+    assert remaining is not None
+    assert remaining.stored_path == lexical_alias
+    assert managed_path.read_bytes() == b"legacy shared managed asset"
+
+    service.delete_asset(second_id)
+    assert not managed_path.exists()
+    conn.close()
+
+
+def test_managed_stored_path_boundary_rejects_relative_escape(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path / "managed")
+
+    with pytest.raises(ValueError, match="must stay inside"):
+        service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                filename="escape.wav",
+                stored_path="asset_registry/../../escape.wav",
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                track_id=1,
+            )
+        )
+
+    assert service.list_assets() == []
+    stored_path = service.asset_store.write_bytes(
+        b"safe managed asset",
+        filename="safe.wav",
+        subdir="audio",
+    )
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename="safe.wav",
+            stored_path=stored_path,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    with pytest.raises(ValueError, match="must stay inside"):
+        service.update_asset(
+            asset_id,
+            AssetVersionPayload(
+                asset_type="main_master",
+                filename="escape.wav",
+                stored_path="asset_registry/../../escape.wav",
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                track_id=1,
+            ),
+        )
+    unchanged = service.fetch_asset(asset_id)
+    assert unchanged is not None
+    assert unchanged.stored_path == stored_path
+    conn.close()
+
+
+def test_delete_asset_keeps_file_when_remaining_path_is_malformed(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    stored_path = service.asset_store.write_bytes(
+        b"conservative managed asset",
+        filename="conservative.wav",
+        subdir="audio",
+    )
+    managed_path = service.resolve_asset_path(stored_path)
+    assert managed_path is not None
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename="conservative.wav",
+            stored_path=stored_path,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO AssetVersions (
+                asset_type, filename, stored_path, storage_mode, track_id
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            ("other", "malformed.wav", "malformed\x00path", STORAGE_MODE_MANAGED_FILE, 2),
+        )
+
+    service.delete_asset(asset_id)
+
+    assert service.fetch_asset(asset_id) is None
+    assert managed_path.read_bytes() == b"conservative managed asset"
+    conn.close()
+
+
+def test_delete_asset_preserves_file_referenced_by_managed_hardlink(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    stored_path = service.asset_store.write_bytes(
+        b"hardlinked managed asset",
+        filename="hardlinked.wav",
+        subdir="audio",
+    )
+    managed_path = service.resolve_asset_path(stored_path)
+    assert managed_path is not None
+    hardlink_path = managed_path.with_name("hardlink-alias.wav")
+    hardlink_path.hardlink_to(managed_path)
+    hardlink_stored_path = str(hardlink_path.relative_to(tmp_path))
+    first_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename="hardlinked.wav",
+            stored_path=stored_path,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    second_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="alt_master",
+            filename="hardlink-alias.wav",
+            stored_path=hardlink_stored_path,
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=2,
+        )
+    )
+
+    service.delete_asset(first_id)
+
+    assert service.fetch_asset(second_id) is not None
+    assert managed_path.read_bytes() == b"hardlinked managed asset"
+    assert hardlink_path.samefile(managed_path)
+    conn.close()
+
+
+def test_delete_asset_never_unlinks_absolute_reference_file(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path / "managed")
+    reference_path = tmp_path / "external-reference.wav"
+    reference_path.write_bytes(b"external reference")
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename=reference_path.name,
+            stored_path=str(reference_path),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+
+    service.delete_asset(asset_id)
+
+    assert service.fetch_asset(asset_id) is None
+    assert reference_path.read_bytes() == b"external reference"
+    conn.close()
+
+
+def test_delete_asset_never_unlinks_legacy_relative_escape(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    data_root = tmp_path / "managed"
+    service = AssetService(conn, data_root=data_root)
+    reference_path = tmp_path / "legacy-relative-reference.wav"
+    reference_path.write_bytes(b"legacy relative reference")
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            filename=reference_path.name,
+            stored_path=str(reference_path),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    relative_escape = str(reference_path.relative_to(data_root, walk_up=True))
+    with conn:
+        conn.execute(
+            "UPDATE AssetVersions SET stored_path=? WHERE id=?",
+            (relative_escape, asset_id),
+        )
+
+    service.delete_asset(asset_id)
+
+    assert service.fetch_asset(asset_id) is None
+    assert reference_path.read_bytes() == b"legacy relative reference"
+    conn.close()
+
+
+def test_delete_asset_rolls_back_row_when_managed_unlink_fails(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_asset_schema(conn)
+    service = AssetService(conn, data_root=tmp_path)
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"managed asset")
+    asset_id = service.create_asset(
+        AssetVersionPayload(
+            asset_type="main_master",
+            source_path=str(source),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            track_id=1,
+        )
+    )
+    asset = service.fetch_asset(asset_id)
+    assert asset is not None
+    managed_path = service.resolve_asset_path(asset.stored_path)
+    assert managed_path is not None
+
+    with (
+        mock.patch.object(Path, "unlink", side_effect=OSError("unlink denied")),
+        pytest.raises(OSError, match="unlink denied"),
+    ):
+        service.delete_asset(asset_id)
+
+    assert service.fetch_asset(asset_id) is not None
+    assert managed_path.exists()
+    conn.close()
+
+
 def test_extract_media_metadata_defaults_when_mutagen_fails(tmp_path: Path) -> None:
     conn = sqlite3.connect(":memory:")
     _create_asset_schema(conn)

@@ -515,6 +515,13 @@ def test_open_settings_dialog_accepts_cancels_and_reports_errors(
     before_values = _base_values()
     app._current_settings_values = mock.Mock(return_value=before_values)
     accepted_dialogs: list[object] = []
+    credential_reset_controller = SimpleNamespace(available=True, start=mock.Mock())
+    credential_reset_controller_factory = mock.Mock(return_value=credential_reset_controller)
+    monkeypatch.setattr(
+        settings_controller,
+        "CredentialResetController",
+        credential_reset_controller_factory,
+    )
 
     class _AcceptedDialog:
         def __init__(self, **kwargs):
@@ -535,6 +542,10 @@ def test_open_settings_dialog_accepts_cancels_and_reports_errors(
 
     assert accepted_dialogs[0].kwargs["party_service"] == "party-service"
     assert accepted_dialogs[0].kwargs["suppress_unencrypted_profile_warnings"] is False
+    assert (
+        accepted_dialogs[0].kwargs["credential_reset_callback"] == credential_reset_controller.start
+    )
+    credential_reset_controller_factory.assert_called_once_with(app)
     accepted_dialogs[0].focus_field.assert_called_once_with("artist_code")
     app._apply_settings_changes.assert_called_once()
 

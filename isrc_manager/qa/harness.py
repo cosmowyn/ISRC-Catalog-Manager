@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .deviations import DeviationRecorder
 from .evidence import EvidenceRecorder
+from .impact import ALL_COMPONENT_NAMES, COMPONENT_BY_NAME
 from .inventory import UIInventoryItem, discover_ui_inventory, write_inventory
 from .mocks import NoNetworkGuard
 from .scenarios import (
@@ -27,6 +28,7 @@ from .scenarios import (
     run_diagnostics_workflow,
     run_generated_output_qualification_workflow,
     run_help_documentation_workflow,
+    run_history_replay_workflow,
     run_media_audio_workflow,
     run_menu_inventory,
     run_relationship_workflow,
@@ -40,6 +42,35 @@ _QUALIFICATION_FONT_FAMILY = "Arial"
 _QUALIFICATION_FONT_POINT_SIZE = 11
 _QUALIFICATION_WINDOW_WIDTH = 1472
 _QUALIFICATION_WINDOW_HEIGHT = 800
+
+
+def _resolve_qualification_components(components: Iterable[str] | None) -> frozenset[str]:
+    """Validate requested components and add their canonical dependencies."""
+    if components is None:
+        return frozenset(ALL_COMPONENT_NAMES)
+    if isinstance(components, (str, bytes)):
+        raise TypeError("Qualification components must be an iterable of component names.")
+
+    requested: set[str] = set()
+    for name in components:
+        if not isinstance(name, str):
+            raise TypeError("Qualification component names must be strings.")
+        requested.add(name)
+
+    unknown = requested.difference(COMPONENT_BY_NAME)
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"Unknown QA/PQ qualification component(s): {names}")
+
+    resolved = set(requested)
+    pending = list(requested)
+    while pending:
+        name = pending.pop()
+        for dependency in COMPONENT_BY_NAME[name].dependencies:
+            if dependency not in resolved:
+                resolved.add(dependency)
+                pending.append(dependency)
+    return frozenset(resolved)
 
 
 def _no_background_refresh(_self: Any, *args: Any, **kwargs: Any) -> None:
@@ -158,12 +189,39 @@ def _run_background_task_immediately(_self: Any, *args: Any, **kwargs: Any) -> o
     if not callable(task_fn):
         return None
     progress = _ImmediateTaskProgress()
+    records: list[dict[str, Any]] | None = getattr(_self, "_qa_background_task_records", None)
+    if records is None:
+        records = []
+        setattr(_self, "_qa_background_task_records", records)
+    record: dict[str, Any] = {
+        "title": str(kwargs.get("title") or ""),
+        "description": str(kwargs.get("description") or ""),
+        "kind": str(kwargs.get("kind") or "read"),
+        "unique_key": kwargs.get("unique_key"),
+        "show_dialog": bool(kwargs.get("show_dialog", True)),
+        "cancellable": bool(kwargs.get("cancellable", False)),
+        "owner": kwargs.get("owner"),
+        "worker_progress": [],
+        "ui_progress": [],
+        "status": "running",
+    }
+    records.append(record)
     try:
         progress.set_status(str(kwargs.get("description") or ""))
         result = task_fn(progress)
+        worker_completion_progress = kwargs.get("worker_completion_progress")
+        if worker_completion_progress is not None:
+            value, message = worker_completion_progress
+            progress.report_progress(int(value), 100, str(message or ""))
+        record["worker_progress"] = list(progress.updates)
         _finish_immediate_task(kwargs, result, progress)
+        record["ui_progress"] = list(progress.updates[len(record["worker_progress"]) :])
+        record["status"] = "succeeded"
         return result
     except Exception as exc:
+        record["worker_progress"] = list(progress.updates)
+        record["status"] = "failed"
+        record["error"] = str(exc)
         on_error = kwargs.get("on_error")
         if callable(on_error):
             from isrc_manager.tasks.manager import TaskFailure
@@ -183,12 +241,39 @@ def _run_background_bundle_task_immediately(
     if not callable(task_fn):
         return None
     progress = _ImmediateTaskProgress()
+    records: list[dict[str, Any]] | None = getattr(self, "_qa_background_task_records", None)
+    if records is None:
+        records = []
+        setattr(self, "_qa_background_task_records", records)
+    record: dict[str, Any] = {
+        "title": str(kwargs.get("title") or ""),
+        "description": str(kwargs.get("description") or ""),
+        "kind": str(kwargs.get("kind") or "read"),
+        "unique_key": kwargs.get("unique_key"),
+        "show_dialog": bool(kwargs.get("show_dialog", True)),
+        "cancellable": bool(kwargs.get("cancellable", False)),
+        "owner": kwargs.get("owner"),
+        "worker_progress": [],
+        "ui_progress": [],
+        "status": "running",
+    }
+    records.append(record)
     try:
         progress.set_status(str(kwargs.get("description") or ""))
         result = task_fn(_ImmediateServiceBundle(self), progress)
+        worker_completion_progress = kwargs.get("worker_completion_progress")
+        if worker_completion_progress is not None:
+            value, message = worker_completion_progress
+            progress.report_progress(int(value), 100, str(message or ""))
+        record["worker_progress"] = list(progress.updates)
         _finish_immediate_task(kwargs, result, progress)
+        record["ui_progress"] = list(progress.updates[len(record["worker_progress"]) :])
+        record["status"] = "succeeded"
         return result
     except Exception as exc:
+        record["worker_progress"] = list(progress.updates)
+        record["status"] = "failed"
+        record["error"] = str(exc)
         on_error = kwargs.get("on_error")
         if callable(on_error):
             from isrc_manager.tasks.manager import TaskFailure
@@ -214,6 +299,7 @@ class UIQualificationHarness:
         self._network_guard: NoNetworkGuard | None = None
         self._has_run = False
         self.qa_data: dict[str, int] = {}
+        self.background_task_records: list[dict[str, Any]] = []
         self._original_app_font: QFont | None = None
         self._original_app_stylesheet: str | None = None
 
@@ -305,6 +391,8 @@ class UIQualificationHarness:
         self.app.setFont(qualification_font)
         self.app.setStyleSheet("")
         self.window = app_module.App()
+        self.background_task_records = list(getattr(self.window, "_qa_background_task_records", []))
+        self.window._qa_background_task_records = self.background_task_records
         self.window.show()
         self.window.resize(_QUALIFICATION_WINDOW_WIDTH, _QUALIFICATION_WINDOW_HEIGHT)
         self.process_events()
@@ -346,112 +434,146 @@ class UIQualificationHarness:
             self.app.processEvents()
 
     def run_full_qualification(self) -> None:
+        self.run_qualification(None)
+
+    def run_qualification(self, components: Iterable[str] | None) -> None:
+        """Run selected QA/PQ components and their prerequisite components once."""
+        selected = _resolve_qualification_components(components)
         if self._has_run:
             return
         self._has_run = True
-        self._run_step("UI-PQ-INV-001", "inventory", self.run_inventory)
-        self._run_step("UI-PQ-SMOKE-001", "startup smoke", lambda: run_startup_smoke(self))
-        self._run_step("UI-PQ-MENU-001", "menu/action inventory", lambda: run_menu_inventory(self))
-        self._run_step(
-            "UI-PQ-SET-001",
-            "visual/theme/dialog workflow",
-            lambda: run_visual_qualification_workflow(self),
-        )
-        self._run_step(
-            "UI-PQ-HELP-001",
-            "help documentation coverage",
-            lambda: run_help_documentation_workflow(self),
-        )
-        track_id = self._run_step(
-            "UI-PQ-CAT-001", "catalog workflow", lambda: run_catalog_workflow(self)
-        )
-        if isinstance(track_id, int):
-            self.qa_data["track_id"] = track_id
-        ids = None
-        if isinstance(track_id, int):
-            ids = self._run_step(
-                "UI-PQ-REL-001",
-                "relationship workflow",
-                lambda: run_relationship_workflow(self, track_id=track_id),
-            )
-        if ids is not None:
-            updated_ids = self._run_step(
-                "UI-PQ-CON-001",
-                "contract workflow",
-                lambda: run_contract_workflow(self, ids),
-            )
-            if updated_ids is not None:
-                ids = updated_ids
-            self.qa_data.update(
-                {
-                    "party_id": ids.party_id,
-                    "work_id": ids.work_id,
-                    "release_id": ids.release_id,
-                    "contract_id": ids.contract_id,
-                    "right_id": ids.right_id,
-                }
-            )
-            self._run_step(
-                "UI-PQ-ACC-001",
-                "accounting workflow",
-                lambda: run_accounting_workflow(self, ids),
-            )
-            self._run_step(
-                "UI-PQ-SC-001",
-                "soundcloud workflow",
-                lambda: run_soundcloud_workflow(self, ids),
-            )
-        self._run_step(
-            "UI-PQ-DIAG-001",
-            "diagnostics workflow",
-            lambda: run_diagnostics_workflow(self),
-        )
-        self._run_step(
-            "UI-PQ-IMP-001",
-            "generated output workflow",
-            lambda: run_generated_output_qualification_workflow(self),
-        )
-        workflow_track_id = int(self.qa_data.get("track_id") or track_id or 0)
-        if workflow_track_id > 0:
-            self._run_step(
-                "UI-PQ-ASSET-001",
-                "assets, deliverables, and derivative ledger workflow",
-                lambda: run_assets_deliverables_workflow(self, track_id=workflow_track_id),
-            )
-            self._run_step(
-                "UI-PQ-AUTH-001",
-                "authenticity, watermark, and forensic workflow",
-                lambda: run_authenticity_workflow(self, track_id=workflow_track_id),
-            )
-            self._run_step(
-                "UI-PQ-MEDIA-001",
-                "media player, audio attachment, conversion, and derivative ledger workflow",
-                lambda: run_media_audio_workflow(self, track_id=workflow_track_id),
-            )
-        else:
-            raise RuntimeError(
-                "UI PQ media/authenticity workflows require the catalog workflow track id."
-            )
-        self.finalize()
+        try:
+            if "core-inventory" in selected:
+                self._run_step("UI-PQ-INV-001", "inventory", self.run_inventory)
+                self._run_step("UI-PQ-SMOKE-001", "startup smoke", lambda: run_startup_smoke(self))
+                self._run_step(
+                    "UI-PQ-MENU-001", "menu/action inventory", lambda: run_menu_inventory(self)
+                )
+            if "visual-help" in selected:
+                self._run_step(
+                    "UI-PQ-SET-001",
+                    "visual/theme/dialog workflow",
+                    lambda: run_visual_qualification_workflow(self),
+                )
+                self._run_step(
+                    "UI-PQ-HELP-001",
+                    "help documentation coverage",
+                    lambda: run_help_documentation_workflow(self),
+                )
+
+            track_id = None
+            if "catalog" in selected:
+                track_id = self._run_step(
+                    "UI-PQ-CAT-001", "catalog workflow", lambda: run_catalog_workflow(self)
+                )
+                if isinstance(track_id, int):
+                    self.qa_data["track_id"] = track_id
+
+            if "diagnostics-history-storage" in selected and isinstance(track_id, int):
+                self._run_step(
+                    "UI-PQ-HIST-001",
+                    "responsive history replay workflow",
+                    lambda: run_history_replay_workflow(self, track_id=track_id),
+                )
+
+            ids = None
+            if "relationships-releases-parties" in selected and isinstance(track_id, int):
+                ids = self._run_step(
+                    "UI-PQ-REL-001",
+                    "relationship workflow",
+                    lambda: run_relationship_workflow(self, track_id=track_id),
+                )
+                if ids is not None:
+                    self.qa_data.update(
+                        {
+                            "party_id": ids.party_id,
+                            "work_id": ids.work_id,
+                            "release_id": ids.release_id,
+                            "contract_id": ids.contract_id,
+                            "right_id": ids.right_id,
+                        }
+                    )
+
+            if "contracts-rights" in selected and ids is not None:
+                updated_ids = self._run_step(
+                    "UI-PQ-CON-001",
+                    "contract workflow",
+                    lambda: run_contract_workflow(self, ids),
+                )
+                if updated_ids is not None:
+                    ids = updated_ids
+                self.qa_data.update(
+                    {
+                        "party_id": ids.party_id,
+                        "work_id": ids.work_id,
+                        "release_id": ids.release_id,
+                        "contract_id": ids.contract_id,
+                        "right_id": ids.right_id,
+                    }
+                )
+
+            if "accounting" in selected and ids is not None:
+                self._run_step(
+                    "UI-PQ-ACC-001",
+                    "accounting workflow",
+                    lambda: run_accounting_workflow(self, ids),
+                )
+            if "soundcloud" in selected and ids is not None:
+                self._run_step(
+                    "UI-PQ-SC-001",
+                    "soundcloud workflow",
+                    lambda: run_soundcloud_workflow(self, ids),
+                )
+
+            if "diagnostics-history-storage" in selected:
+                self._run_step(
+                    "UI-PQ-DIAG-001",
+                    "diagnostics workflow",
+                    lambda: run_diagnostics_workflow(self),
+                )
+            if "imports-exports-reports" in selected:
+                self._run_step(
+                    "UI-PQ-IMP-001",
+                    "generated output workflow",
+                    lambda: run_generated_output_qualification_workflow(self),
+                )
+
+            workflow_track_id = int(self.qa_data.get("track_id") or track_id or 0)
+            track_components = {
+                "assets": (
+                    "UI-PQ-ASSET-001",
+                    "assets, deliverables, and derivative ledger workflow",
+                    run_assets_deliverables_workflow,
+                ),
+                "authenticity-forensics": (
+                    "UI-PQ-AUTH-001",
+                    "authenticity, watermark, and forensic workflow",
+                    run_authenticity_workflow,
+                ),
+                "media-audio": (
+                    "UI-PQ-MEDIA-001",
+                    "media player, audio attachment, conversion, and derivative ledger workflow",
+                    run_media_audio_workflow,
+                ),
+            }
+            requested_track_components = [name for name in track_components if name in selected]
+            if requested_track_components and workflow_track_id <= 0:
+                raise RuntimeError(
+                    "UI PQ media, authenticity, and asset workflows require the catalog "
+                    "workflow track id."
+                )
+            for name, (test_id, label, workflow) in track_components.items():
+                if name in selected:
+                    self._run_step(
+                        test_id,
+                        label,
+                        lambda workflow=workflow: workflow(self, track_id=workflow_track_id),
+                    )
+        finally:
+            self.finalize()
 
     def run_help_documentation_qualification(self) -> None:
-        if self._has_run:
-            return
-        self._has_run = True
-        self._run_step("UI-PQ-INV-001", "inventory", self.run_inventory)
-        self._run_step("UI-PQ-SMOKE-001", "startup smoke", lambda: run_startup_smoke(self))
-        self._run_step("UI-PQ-MENU-001", "menu/action inventory", lambda: run_menu_inventory(self))
-        self._run_step(
-            "UI-PQ-SET-001",
-            "visual/theme/dialog workflow",
-            lambda: run_visual_qualification_workflow(self),
-        )
-        self._run_step(
-            "UI-PQ-HELP-001",
-            "help documentation coverage",
-            lambda: run_help_documentation_workflow(self),
-        )
-        self.finalize()
+        self.run_qualification(("visual-help",))
 
     def run_inventory(self) -> None:
         if self.window is None:

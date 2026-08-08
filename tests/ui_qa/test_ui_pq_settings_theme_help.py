@@ -17,6 +17,19 @@ def test_ui_pq_settings_theme_help(ui_pq_harness):
     assert event.data["comparison_count"] >= 33
     assert event.data["main_window_comparison"]["passed"] is True
     assert event.data["theme_comparison"]["passed"] is True
+    reset_control = event.data["credential_reset_control"]
+    assert reset_control == {
+        "present": True,
+        "object_name": "resetStoredCredentialsButton",
+        "text": "Reset Stored Credentials…",
+        "visible": True,
+        "enabled": reset_control["platform_supported"],
+        "platform_supported": reset_control["platform_supported"],
+        "activation_attempted": False,
+        "click_signal_count": 0,
+    }
+    assert isinstance(reset_control["enabled"], bool)
+    assert isinstance(reset_control["platform_supported"], bool)
     dialog_surfaces = {dialog["surface"] for dialog in event.data["dialogs"]}
     assert {"about_dialog", "help_contents_dialog"}.issubset(dialog_surfaces)
     help_surfaces = {surface["surface"] for surface in event.data["help_screenshot_surfaces"]}

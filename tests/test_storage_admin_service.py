@@ -129,6 +129,7 @@ class StorageAdminServiceTests(unittest.TestCase):
             self.deleted_profile_path,
             kind="profile_remove",
         )
+        self.deleted_profile_path.unlink()
         session_history.record_profile_remove(
             deleted_path=str(self.deleted_profile_path),
             current_path=str(self.db_path),
@@ -136,7 +137,6 @@ class StorageAdminServiceTests(unittest.TestCase):
             deleting_current=False,
             snapshot_path=deleted_snapshot_path,
         )
-        self.deleted_profile_path.unlink()
 
     def tearDown(self):
         self.settings.clear()

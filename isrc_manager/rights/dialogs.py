@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
 
 from PySide6.QtCore import Qt
@@ -491,6 +492,7 @@ class RightsBrowserPanel(QWidget):
         self.rights_service_provider = rights_service_provider
         self.party_service_provider = party_service_provider
         self.contract_service_provider = contract_service_provider
+        self.delete_right_handler: Callable[[int], object] | None = None
         self.setObjectName("rightsBrowserPanel")
         _apply_standard_widget_chrome(self, "rightsBrowserPanel")
 
@@ -706,7 +708,14 @@ class RightsBrowserPanel(QWidget):
             prompt="Delete the selected rights record?",
         ):
             return
-        service.delete_right(right_id)
+        try:
+            if callable(self.delete_right_handler):
+                self.delete_right_handler(right_id)
+            else:
+                service.delete_right(right_id)
+        except Exception as exc:
+            QMessageBox.critical(self, "Rights Matrix", str(exc))
+            return
         self.refresh()
 
     def show_conflicts(self) -> None:

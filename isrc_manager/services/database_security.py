@@ -12,10 +12,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from ..credential_namespaces import DATABASE_CREDENTIAL_SERVICE
+
 SQLITE_HEADER = b"SQLite format 3\x00"
 MIN_DATABASE_PASSWORD_LENGTH = 12
 REMEMBERED_DATABASE_PASSWORD_TTL_DAYS = 30
-DEFAULT_DATABASE_KEYRING_SERVICE = "isrc-catalog-manager.database"
+DEFAULT_DATABASE_KEYRING_SERVICE = DATABASE_CREDENTIAL_SERVICE
 SQLCIPHER_MEMORY_SECURITY_ENV = "ISRC_SQLCIPHER_MEMORY_SECURITY"
 
 
@@ -421,18 +423,71 @@ class SQLCipherDatabaseService:
         validate_database_password(new_password)
         conn = self.open(path, current_password)
         try:
-            conn.execute(f"PRAGMA rekey = '{_quote_sql_literal(new_password)}'")
-            conn.commit()
+            self._rekey_connection(conn, new_password)
+        finally:
+            conn.close()
+        try:
+            self._verify_password(path, new_password)
         except Exception as exc:
             try:
-                conn.rollback()
+                rollback_conn = self.open(path, new_password)
+                try:
+                    self._rekey_connection(rollback_conn, current_password)
+                finally:
+                    rollback_conn.close()
+                self._verify_password(path, current_password)
+            except Exception as rollback_exc:
+                raise DatabaseSecurityError(
+                    "The database password changed, but verification failed and the previous "
+                    "password could not be restored."
+                ) from rollback_exc
+            raise DatabaseSecurityError(
+                "Could not verify the changed database password; the previous password remains "
+                "in effect."
+            ) from exc
+
+    def change_open_database_password(
+        self,
+        path: str | Path,
+        connection: Any,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        """Rekey an active profile without invalidating its live app connection."""
+
+        validate_database_password(new_password)
+        self._rekey_connection(connection, new_password)
+        try:
+            self._verify_password(path, new_password)
+        except Exception as exc:
+            try:
+                self._rekey_connection(connection, current_password)
+                self._verify_password(path, current_password)
+            except Exception as rollback_exc:
+                raise DatabaseSecurityError(
+                    "The active database password changed, but verification failed and the "
+                    "previous password could not be restored."
+                ) from rollback_exc
+            raise DatabaseSecurityError(
+                "Could not verify the changed database password; the previous password remains "
+                "in effect."
+            ) from exc
+
+    def _verify_password(self, path: str | Path, password: str) -> None:
+        verify_conn = self.open(path, password)
+        verify_conn.close()
+
+    @staticmethod
+    def _rekey_connection(connection: Any, new_password: str) -> None:
+        try:
+            connection.execute(f"PRAGMA rekey = '{_quote_sql_literal(new_password)}'")
+            connection.commit()
+        except Exception as exc:
+            try:
+                connection.rollback()
             except Exception:
                 pass
             raise DatabaseSecurityError("Could not change the database password.") from exc
-        finally:
-            conn.close()
-        verify_conn = self.open(path, new_password)
-        verify_conn.close()
 
     def encrypt_plaintext_database(
         self,

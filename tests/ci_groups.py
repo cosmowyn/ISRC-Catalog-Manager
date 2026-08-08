@@ -1,4 +1,4 @@
-"""Grouped unittest ownership and CI shard helpers."""
+"""Grouped unittest/pytest ownership and CI shard helpers."""
 
 from __future__ import annotations
 
@@ -172,11 +172,18 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.history.test_history_recovery",
         "tests.history.test_history_settings",
         "tests.test_history_helpers",
+        "tests.test_history_replay_controller",
         "tests.test_history_retention_controller_clusters",
         "tests.history.test_history_snapshots",
+        "tests.history.test_snapshot_replay_scope",
+        "tests.history.test_snapshot_security",
         "tests.history.test_history_tracks",
+        "tests.test_asset_delete_history",
+        "tests.test_party_rights_history",
         "tests.test_database_admin_service",
         "tests.test_database_security",
+        "tests.test_credential_reset",
+        "tests.test_credential_reset_controller",
         "tests.test_file_storage_helpers",
         "tests.test_db_access",
         "tests.test_history_cleanup_service",
@@ -278,28 +285,22 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_work_dialogs",
         "tests.test_works_dialogs_coverage",
         "tests.reporting.test_reporting_dialogs_controller",
-        "tests.ui_qa.test_qa_helpers",
-        "tests.ui_qa.test_ui_pq_accounting_workflow",
-        "tests.ui_qa.test_ui_pq_authenticity_workflow",
-        "tests.ui_qa.test_ui_pq_catalog_workflow",
-        "tests.ui_qa.test_ui_pq_contract_workflow",
-        "tests.ui_qa.test_ui_pq_diagnostics_recovery",
-        "tests.ui_qa.test_ui_pq_help_documentation",
-        "tests.ui_qa.test_ui_pq_import_export",
-        "tests.ui_qa.test_ui_pq_inventory",
-        "tests.ui_qa.test_ui_pq_media_audio_workflow",
-        "tests.ui_qa.test_ui_pq_menus_actions",
-        "tests.ui_qa.test_ui_pq_settings_theme_help",
-        "tests.ui_qa.test_ui_pq_smoke",
-        "tests.ui_qa.test_ui_pq_soundcloud_mock_workflow",
-        "tests.ui_qa.test_ui_pq_traceability",
-        "tests.ui_qa.test_ui_pq_visual_framework",
-        "tests.ui_qa.test_ui_pq_work_release_party_workflow",
     ),
 }
 
 TEST_ROOT = Path(__file__).resolve().parent
 GROUP_ORDER = tuple(GROUP_MODULES)
+PYTEST_MANAGED_MODULES = frozenset(
+    {
+        "tests.test_apply_help_screenshots",
+        "tests.test_cleanup_github_builds",
+        "tests.test_qa_pq_artifacts",
+        "tests.test_qa_pq_execution",
+        "tests.test_qa_pq_impact",
+        "tests.test_trusted_ci_artifacts",
+    }
+)
+PYTEST_MANAGED_PREFIXES = ("tests.ui_qa.",)
 
 
 def _module_path(module_name: str) -> Path:
@@ -327,35 +328,53 @@ def discovered_modules() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=None)
-def _count_tests_in_file(path: Path) -> int:
+def _test_definition_counts(path: Path) -> tuple[int, int]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    count = 0
+    total_count = 0
+    module_level_count = 0
     for node in tree.body:
-        if not isinstance(node, ast.ClassDef):
-            continue
-        for statement in node.body:
+        statements = node.body if isinstance(node, ast.ClassDef) else (node,)
+        for statement in statements:
             if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if statement.name.startswith("test_"):
-                    count += 1
+                    total_count += 1
+                    module_level_count += int(not isinstance(node, ast.ClassDef))
             elif isinstance(statement, ast.Assign):
-                count += sum(
+                assignment_count = sum(
                     1
                     for target in statement.targets
                     if isinstance(target, ast.Name) and target.id.startswith("test_")
                 )
+                total_count += assignment_count
+                module_level_count += assignment_count * int(not isinstance(node, ast.ClassDef))
             elif isinstance(statement, ast.AnnAssign):
                 target = statement.target
                 if isinstance(target, ast.Name) and target.id.startswith("test_"):
-                    count += 1
-    return count
+                    total_count += 1
+                    module_level_count += int(not isinstance(node, ast.ClassDef))
+    return total_count, module_level_count
+
+
+def count_test_definitions(path: Path) -> int:
+    """Count statically declared test callables in a test module."""
+    return _test_definition_counts(path)[0]
+
+
+def has_module_level_test_definitions(path: Path) -> bool:
+    """Return whether unittest discovery would omit module-level tests."""
+    return _test_definition_counts(path)[1] > 0
 
 
 def discovered_test_count() -> int:
-    return sum(_count_tests_in_file(path) for path in _discovered_test_files())
+    return sum(count_test_definitions(path) for path in _discovered_test_files())
+
+
+def _is_pytest_managed(module: str) -> bool:
+    return module in PYTEST_MANAGED_MODULES or module.startswith(PYTEST_MANAGED_PREFIXES)
 
 
 def _count_tests_in_modules(modules: Iterable[str]) -> int:
-    return sum(_count_tests_in_file(_module_path(module)) for module in modules)
+    return sum(count_test_definitions(_module_path(module)) for module in modules)
 
 
 def group_modules(group: str) -> tuple[str, ...]:
@@ -375,11 +394,13 @@ def verify_grouping() -> list[str]:
     discovered_set = set(discovered)
     grouped_modules = tuple(module for group in GROUP_ORDER for module in GROUP_MODULES[group])
     grouped_set = set(grouped_modules)
+    pytest_managed = {module for module in discovered if _is_pytest_managed(module)}
     duplicate_modules = sorted(
         module for module, occurrences in Counter(grouped_modules).items() if occurrences > 1
     )
-    missing_grouped_modules = sorted(discovered_set - grouped_set)
+    missing_grouped_modules = sorted(discovered_set - grouped_set - pytest_managed)
     stale_group_modules = sorted(grouped_set - discovered_set)
+    incorrectly_grouped_pytest_modules = sorted(grouped_set & pytest_managed)
     discovered_count = discovered_test_count()
 
     if duplicate_modules:
@@ -388,15 +409,24 @@ def verify_grouping() -> list[str]:
         errors.append("discovered but ungrouped modules: " + ", ".join(missing_grouped_modules))
     if stale_group_modules:
         errors.append("grouped modules missing on disk: " + ", ".join(stale_group_modules))
+    if incorrectly_grouped_pytest_modules:
+        errors.append(
+            "pytest-managed modules assigned to unittest groups: "
+            + ", ".join(incorrectly_grouped_pytest_modules)
+        )
     if discovered_count < BASELINE_TEST_COUNT:
         errors.append(
             f"discovered test count dropped below baseline: {discovered_count} < {BASELINE_TEST_COUNT}"
         )
-    if not stale_group_modules:
+    if not stale_group_modules and not incorrectly_grouped_pytest_modules:
         grouped_count = _count_tests_in_modules(grouped_modules)
-        if grouped_count != discovered_count:
+        expected_grouped_count = _count_tests_in_modules(
+            module for module in discovered if module not in pytest_managed
+        )
+        if grouped_count != expected_grouped_count:
             errors.append(
-                f"grouped test count {grouped_count} does not match discovered count {discovered_count}"
+                f"grouped test count {grouped_count} does not match group-managed "
+                f"count {expected_grouped_count}"
             )
 
     return errors

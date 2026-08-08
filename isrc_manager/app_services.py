@@ -77,6 +77,7 @@ def initialize_foreground_services(app: Any) -> None:
             app.history_dir,
             app.data_root,
             app.backups_dir,
+            connection_factory=getattr(app, "sqlite_connection_factory", None),
         )
         if app.conn is not None and getattr(app, "current_db_path", None)
         else None

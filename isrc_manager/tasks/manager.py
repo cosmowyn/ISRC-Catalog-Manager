@@ -457,8 +457,12 @@ class _TaskCallbackRelay(QObject):
             progress_handler=progress_handler,
             status_handler=status_handler,
         )
-        self._success_result = None
+        self._success_result: object | None = None
         self._success_pending = False
+        self._outcome_received = False
+        self._outcome_finalizing = False
+        self._cleanup_pending = False
+        self._cleanup_complete = False
 
     @Slot(object)
     def handle_progress(self, update: object) -> None:
@@ -473,6 +477,8 @@ class _TaskCallbackRelay(QObject):
 
     @Slot(object)
     def handle_success(self, result: object) -> None:
+        self._outcome_received = True
+        self._outcome_finalizing = True
         self._success_result = result
         self._success_pending = True
         try:
@@ -489,22 +495,37 @@ class _TaskCallbackRelay(QObject):
                         traceback_text=traceback.format_exc(),
                     )
                 )
+        finally:
+            self._outcome_finalizing = False
+            self._flush_pending_cleanup()
 
     @Slot(object)
     def handle_error(self, failure: object) -> None:
-        if self._error_handler is None:
-            return
-        if isinstance(failure, TaskFailure):
-            self._error_handler(failure)
-            return
-        self._error_handler(
-            TaskFailure(message=str(failure or "Background task failed."), traceback_text="")
-        )
+        self._outcome_received = True
+        self._outcome_finalizing = True
+        try:
+            if self._error_handler is None:
+                return
+            if isinstance(failure, TaskFailure):
+                self._error_handler(failure)
+                return
+            self._error_handler(
+                TaskFailure(message=str(failure or "Background task failed."), traceback_text="")
+            )
+        finally:
+            self._outcome_finalizing = False
+            self._flush_pending_cleanup()
 
     @Slot()
     def handle_cancelled(self) -> None:
-        if self._cancelled_handler is not None:
-            self._cancelled_handler()
+        self._outcome_received = True
+        self._outcome_finalizing = True
+        try:
+            if self._cancelled_handler is not None:
+                self._cancelled_handler()
+        finally:
+            self._outcome_finalizing = False
+            self._flush_pending_cleanup()
 
     @Slot()
     def handle_finished(self) -> None:
@@ -513,6 +534,13 @@ class _TaskCallbackRelay(QObject):
 
     @Slot()
     def handle_cleanup(self) -> None:
+        if self._cleanup_complete:
+            return
+        if not self._outcome_received or self._outcome_finalizing:
+            self._cleanup_pending = True
+            return
+        self._cleanup_complete = True
+        self._cleanup_pending = False
         try:
             self._cleanup_handler()
             if self._success_pending and self._success_after_cleanup_handler is not None:
@@ -521,6 +549,10 @@ class _TaskCallbackRelay(QObject):
             if self._finished_handler is not None:
                 self._finished_handler()
             self.deleteLater()
+
+    def _flush_pending_cleanup(self) -> None:
+        if self._cleanup_pending and not self._cleanup_complete:
+            self.handle_cleanup()
 
 
 @dataclass(slots=True)

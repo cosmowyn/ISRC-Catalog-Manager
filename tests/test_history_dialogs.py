@@ -2,6 +2,8 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 try:
     from PySide6.QtCore import QSettings
@@ -35,6 +37,7 @@ class _FakeHistoryApp(QWidget):
         self.session_history_manager = _EmptySessionHistory()
         self.settings_reads = settings_reads
         self.history_dialog = None
+        self.replay_calls: list[tuple[str, object | None]] = []
 
     def _get_best_history_candidate(self, direction: str):
         if direction == "undo":
@@ -46,11 +49,13 @@ class _FakeHistoryApp(QWidget):
     def open_help_dialog(self, **_kwargs):
         return None
 
-    def history_undo(self):
-        return None
+    def history_undo(self, *, owner=None):
+        self.replay_calls.append(("undo", owner))
+        return "undo-task"
 
-    def history_redo(self):
-        return None
+    def history_redo(self, *, owner=None):
+        self.replay_calls.append(("redo", owner))
+        return "redo-task"
 
     def create_manual_snapshot(self):
         return None
@@ -194,6 +199,50 @@ class HistoryDialogTests(unittest.TestCase):
                 settings.clear()
                 settings.sync()
                 conn.close()
+
+    def test_history_dialog_defers_refresh_to_async_replay_completion_and_blocks_reentry(self):
+        entry = SimpleNamespace(
+            entry_id=7,
+            created_at="2026-08-08T10:00:00",
+            label="Delete Track: Async History",
+            action_type="track.delete",
+            is_current=True,
+        )
+        history = SimpleNamespace(
+            get_current_visible_entry=lambda: entry,
+            get_default_redo_entry=lambda: entry,
+            list_entries=lambda: [entry],
+            list_snapshots=lambda: [],
+            list_backups=lambda: [],
+        )
+        fake_app = _FakeHistoryApp(history)
+        dialog = HistoryDialog(fake_app)
+        fake_app.history_dialog = dialog
+        try:
+            with mock.patch.object(dialog, "refresh_data") as refresh_data:
+                dialog._undo()
+                dialog._redo()
+
+            self.assertEqual(
+                fake_app.replay_calls,
+                [("undo", dialog), ("redo", dialog)],
+            )
+            refresh_data.assert_not_called()
+
+            fake_app._history_replay_in_progress = True
+            HistoryDialog.refresh_data(dialog)
+            self.assertFalse(dialog.undo_btn.isEnabled())
+            self.assertFalse(dialog.redo_btn.isEnabled())
+
+            dialog.undo_btn.click()
+            dialog.redo_btn.click()
+            self.assertEqual(
+                fake_app.replay_calls,
+                [("undo", dialog), ("redo", dialog)],
+            )
+        finally:
+            dialog.close()
+            fake_app.close()
 
 
 if __name__ == "__main__":

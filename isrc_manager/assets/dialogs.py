@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -1318,10 +1319,18 @@ class _DerivativeLedgerPane(QWidget):
 class AssetBrowserPanel(QWidget):
     """Browse registered master and deliverable variants inside a workspace panel."""
 
-    def __init__(self, *, asset_service_provider, drill_in_host_provider=None, parent=None):
+    def __init__(
+        self,
+        *,
+        asset_service_provider,
+        drill_in_host_provider=None,
+        delete_asset_handler: Callable[[int], None] | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.asset_service_provider = asset_service_provider
         self.drill_in_host_provider = drill_in_host_provider
+        self.delete_asset_handler = delete_asset_handler
         self.setObjectName("assetBrowserPanel")
         _apply_standard_widget_chrome(self, "assetBrowserPanel")
 
@@ -1552,9 +1561,20 @@ class AssetBrowserPanel(QWidget):
             self,
             title="Delete Asset",
             prompt="Delete the selected asset record?",
+            consequences=[
+                "The database record and any app-managed file will be deleted.",
+                "Undo restores both. Files outside app-managed storage are never deleted.",
+            ],
         ):
             return
-        service.delete_asset(asset_id)
+        try:
+            if self.delete_asset_handler is not None:
+                self.delete_asset_handler(asset_id)
+            else:
+                service.delete_asset(asset_id)
+        except Exception as exc:
+            QMessageBox.critical(self, "Asset Registry", f"Could not delete the asset:\n{exc}")
+            return
         self.refresh()
 
     def mark_primary(self) -> None:

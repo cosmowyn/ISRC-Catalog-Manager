@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: version-bump-main
@@ -16,7 +16,10 @@ jobs:
   version-bump:
     name: Version bump
     runs-on: ubuntu-latest
-    if: ${{ github.actor != 'github-actions[bot]' }}
+    timeout-minutes: 10
+    if: >-
+      ${{ github.actor != 'github-actions[bot]' &&
+          !contains(github.event.head_commit.message, '[skip version]') }}
 
     steps:
       - uses: actions/checkout@v7
@@ -91,8 +94,10 @@ jobs:
       - name: Commit release metadata
         if: ${{ steps.freshness.outputs.fresh == 'true' && steps.release_metadata.outputs.bumped == 'true' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           MAIN_AUTOMATION_DEPLOY_KEY: ${{ secrets.MAIN_AUTOMATION_DEPLOY_KEY }}
         run: |
+          set -euo pipefail
           if git diff --quiet; then
             echo "No release metadata changes."
             exit 0
@@ -103,13 +108,21 @@ jobs:
             exit 1
           fi
 
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > ~/.ssh/main_automation_deploy_key
-          chmod 600 ~/.ssh/main_automation_deploy_key
-          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "Main advanced while release metadata was generated; the newer run will handle it."
+            exit 0
+          fi
+
+          key_file="$RUNNER_TEMP/main_automation_deploy_key"
+          known_hosts="$RUNNER_TEMP/github_known_hosts"
+          trap 'rm -f "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$MAIN_AUTOMATION_DEPLOY_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          gh api /meta --jq '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+          test -s "$known_hosts"
           git remote set-url origin "git@github.com:${{ github.repository }}.git"
-          git config core.sshCommand "ssh -i ~/.ssh/main_automation_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          git config core.sshCommand "ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
 
           VERSION="$(python -c 'from scripts.release_automation import read_project_version; print(read_project_version())')"
 
@@ -117,8 +130,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add pyproject.toml isrc_manager/version.py docs/releases RELEASE_NOTES.md README.md docs/release-builds.md
-          git commit -m "chore(release): v${VERSION} [skip version]"
+          git -c core.hooksPath=/dev/null commit -m "chore(release): v${VERSION} [skip version]"
 
           git tag "v${VERSION}"
-          git push origin HEAD:main
-          git push origin "v${VERSION}"
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"

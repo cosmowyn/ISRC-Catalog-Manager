@@ -392,6 +392,10 @@ def _on_auto_snapshot_timer(app) -> None:
     if not enabled:
         app.auto_snapshot_timer.stop()
         return
+    background_tasks = getattr(app, "background_tasks", None)
+    has_active_write_task = getattr(background_tasks, "has_active_write_task", None)
+    if callable(has_active_write_task) and has_active_write_task():
+        return
 
     marker = app._current_auto_snapshot_marker()
     if marker is None or marker == app._last_auto_snapshot_marker:
@@ -430,6 +434,11 @@ def _schedule_history_storage_budget_enforcement(app, *, trigger_label: str) -> 
     app._history_budget_enforcement_scheduled = True
 
     def _run() -> None:
+        background_tasks = getattr(app, "background_tasks", None)
+        has_active_write_task = getattr(background_tasks, "has_active_write_task", None)
+        if callable(has_active_write_task) and has_active_write_task():
+            QTimer.singleShot(250, _run)
+            return
         app._history_budget_enforcement_scheduled = False
         if app._history_budget_enforcement_running:
             return

@@ -4543,6 +4543,11 @@ def test_main_window_history_candidate_undo_redo_and_session_profile_workflows(
         "critical",
         lambda _parent, title, message: critical_messages.append((title, message)),
     )
+    monkeypatch.setattr(
+        main_window.history_replay_controller.QMessageBox,
+        "critical",
+        lambda _parent, title, message: critical_messages.append((title, message)),
+    )
 
     app.logger = SimpleNamespace(exception=lambda message: log_messages.append(message))
     app._refresh_history_actions = lambda: refresh_actions.append("actions")
@@ -4628,6 +4633,19 @@ def test_main_window_history_candidate_undo_redo_and_session_profile_workflows(
     session_history = FakeSessionHistoryManager()
     app.history_manager = history
     app.session_history_manager = session_history
+
+    def _run_profile_replay(_host, direction, _entry, *, owner=None):
+        assert owner is None
+        result = getattr(history, direction)()
+        if result is not None:
+            app._refresh_after_history_change()
+        return None
+
+    monkeypatch.setattr(
+        main_window.history_replay_controller,
+        "_start_profile_replay",
+        _run_profile_replay,
+    )
 
     assert App._history_time_key(None) == datetime.min
     assert App._history_time_key(SimpleNamespace(created_at="")) == datetime.min

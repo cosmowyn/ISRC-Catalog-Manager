@@ -17,3 +17,10 @@ def test_ui_pq_contract_workflow(ui_pq_harness):
     assert event.data["right_visible"] is True
     assert event.data["contract_dialog_visual"]["comparison_passed"] is True
     assert event.data["right_dialog_visual"]["comparison_passed"] is True
+    assert event.data["right_delete_handler_injected"] is True
+    assert event.data["right_delete_action_type"] == "right.delete"
+    assert event.data["right_delete_removed"] is True
+    assert event.data["right_delete_undo_restored"] is True
+    assert event.data["right_delete_undo_relationships_restored"] is True
+    assert event.data["right_delete_redo_removed"] is True
+    assert event.data["right_delete_primary_record_preserved"] is True

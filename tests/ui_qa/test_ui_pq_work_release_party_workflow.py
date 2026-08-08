@@ -20,3 +20,14 @@ def test_ui_pq_work_release_party_workflow(ui_pq_harness):
     assert event.data["party_dialog_visual"]["comparison_passed"] is True
     assert event.data["work_dialog_visual"]["comparison_passed"] is True
     assert event.data["release_panel_visual"]["comparison_passed"] is True
+    assert event.data["party_delete_handler_injected"] is True
+    assert event.data["party_delete_action_type"] == "party.delete"
+    assert event.data["party_delete_removed"] is True
+    assert event.data["party_delete_undo_restored"] is True
+    assert event.data["party_delete_undo_alias_restored"] is True
+    assert event.data["party_delete_redo_removed"] is True
+    assert event.data["party_merge_handler_injected"] is True
+    assert event.data["party_merge_action_type"] == "party.merge"
+    assert event.data["party_merge_applied"] is True
+    assert event.data["party_merge_undo_restored"] is True
+    assert event.data["party_merge_redo_applied"] is True

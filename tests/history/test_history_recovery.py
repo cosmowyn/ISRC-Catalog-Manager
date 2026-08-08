@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from isrc_manager.history import HistoryRecoveryError
 from isrc_manager.history.models import HistoryEntry
+from isrc_manager.history.snapshot_replay import SnapshotConnectionError
 from tests.history._support import HistoryManagerTestCase
 
 
@@ -174,7 +175,12 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
         before = self.history.capture_snapshot(kind="before_failed_replay", label="Before Replay")
         after = self.history.capture_snapshot(kind="after_failed_replay", label="After Replay")
         target = self.root / "snapshot-side-effect.txt"
-        target.write_text("side effect", encoding="utf-8")
+        absent_state = {
+            "target_path": str(target),
+            "companion_suffixes": [],
+            "exists": False,
+            "files": [],
+        }
         entry = self.history.record_snapshot_action(
             label="Replay Failure",
             action_type="snapshot.failure",
@@ -184,8 +190,8 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
                 "file_effects": [
                     {
                         "target_path": str(target),
-                        "before_state": {"companion_suffixes": []},
-                        "after_state": {"companion_suffixes": []},
+                        "before_state": absent_state,
+                        "after_state": absent_state,
                     }
                 ]
             },
@@ -410,11 +416,15 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
                     "managed_directories": {
                         "licenses": {"exists": True, "snapshot_path": str(self.root / "missing")}
                     }
-                }
+                },
+                snapshot_assets_root=self.root / "unused-assets",
             )
 
             self.history.managed_root = original_managed_root
-            self.history._restore_managed_state({})
+            self.history._restore_managed_state(
+                {},
+                snapshot_assets_root=self.root / "empty-assets",
+            )
 
             source_dir = self.data_root / "licenses"
             source_dir.mkdir(parents=True, exist_ok=True)
@@ -430,18 +440,27 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
             self.assertFalse((stale_dest / "stale.txt").exists())
             self.assertTrue((stale_dest / "license.pdf").exists())
 
+            missing_assets_root = self.root / "missing-assets"
             missing_manifest = {
                 "managed_directories": {
                     "licenses": {
                         "exists": True,
-                        "snapshot_path": str(self.root / "missing-assets"),
+                        "snapshot_path": str(missing_assets_root / "licenses"),
+                        "file_inventory": {},
                     }
                 }
             }
-            with self.assertRaises(FileNotFoundError):
-                self.history._clone_managed_manifest(missing_manifest, self.root / "clone")
-            with self.assertRaises(FileNotFoundError):
-                self.history._restore_managed_state(missing_manifest)
+            with self.assertRaises(SnapshotConnectionError):
+                self.history._clone_managed_manifest(
+                    missing_manifest,
+                    self.root / "clone",
+                    source_assets_dir=missing_assets_root,
+                )
+            with self.assertRaises(SnapshotConnectionError):
+                self.history._restore_managed_state(
+                    missing_manifest,
+                    snapshot_assets_root=missing_assets_root,
+                )
 
             with (
                 patch.object(
@@ -456,7 +475,9 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
                 ),
             ):
                 rollback_error = self.history._restore_external_state(
-                    rollback_manifest={}, settings_state={}
+                    rollback_manifest={},
+                    settings_state={},
+                    rollback_assets_root=self.root / "rollback-assets",
                 )
 
             self.assertIn("managed files: managed failed", rollback_error)
@@ -597,12 +618,18 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
             self.history._restore_external_state(
                 rollback_manifest={},
                 settings_state={},
+                rollback_assets_root=self.root / "rollback-assets",
             )
         )
 
     def test_snapshot_backup_sidecar_and_reload_boundaries_are_explicit(self):
-        snapshot_path = self.root / "explicit-snapshot.db"
-        snapshot_path.write_bytes(b"snapshot")
+        snapshot_path = self.history_root / "snapshots" / self.db_path.stem / "explicit-snapshot.db"
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_conn = sqlite3.connect(str(snapshot_path))
+        try:
+            self.conn.backup(snapshot_conn)
+        finally:
+            snapshot_conn.close()
         snapshot = self.history._insert_snapshot_row(
             snapshot_id=910,
             kind="manual",
@@ -614,13 +641,19 @@ class HistoryRecoveryTests(HistoryManagerTestCase):
         self.assertEqual(snapshot.snapshot_id, 910)
         self.assertTrue(self.history._snapshot_sidecar_path(snapshot_path).exists())
 
+        missing_reload_path = snapshot_path.with_name("missing-reload-snapshot.db")
+        reload_conn = sqlite3.connect(str(missing_reload_path))
+        try:
+            self.conn.backup(reload_conn)
+        finally:
+            reload_conn.close()
         with patch.object(self.history, "fetch_snapshot", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "Snapshot 911 could not be reloaded"):
                 self.history._insert_snapshot_row(
                     snapshot_id=911,
                     kind="manual",
                     label="Missing Reload Snapshot",
-                    db_snapshot_path=str(self.root / "missing-reload-snapshot.db"),
+                    db_snapshot_path=str(missing_reload_path),
                     settings_state={},
                     manifest={},
                 )

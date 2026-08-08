@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from isrc_manager.qa.assertions import require_artifact
@@ -16,10 +14,12 @@ def test_ui_pq_traceability(ui_pq_harness):
         if row.test_id
         in {
             "UI-PQ-CAT-001",
+            "UI-PQ-HIST-001",
             "UI-PQ-REL-001",
             "UI-PQ-CON-001",
             "UI-PQ-ACC-001",
             "UI-PQ-SC-001",
+            "UI-PQ-ASSET-001",
             "UI-PQ-AUTH-001",
             "UI-PQ-MEDIA-001",
         }
@@ -37,7 +37,7 @@ def test_ui_pq_traceability(ui_pq_harness):
         row for row in ui_pq_harness.traceability_rows if row.coverage_status == "pending_manual"
     ]
     assert len(pending_rows) <= len(ui_pq_harness.traceability_rows) // 2
-    require_artifact(Path("artifacts/ui_pq/traceability_matrix.csv"))
-    require_artifact(Path("artifacts/ui_pq/deviations.csv"))
-    require_artifact(Path("artifacts/ui_pq/evidence.json"))
-    require_artifact(Path("artifacts/ui_pq/summary.md"))
+    require_artifact(ui_pq_harness.artifact_dir / "traceability_matrix.csv")
+    require_artifact(ui_pq_harness.artifact_dir / "deviations.csv")
+    require_artifact(ui_pq_harness.artifact_dir / "evidence.json")
+    require_artifact(ui_pq_harness.artifact_dir / "summary.md")

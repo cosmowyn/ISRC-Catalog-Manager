@@ -89,14 +89,25 @@ class VisualQualificationService:
         self.captures.append(capture)
         return capture
 
-    def compare_capture_to_baseline(self, capture: VisualCapture) -> QualificationComparison:
+    def compare_capture_to_baseline(
+        self,
+        capture: VisualCapture,
+        *,
+        max_mean_channel_delta: float = 6.0,
+        max_changed_sample_ratio: float = 0.35,
+    ) -> QualificationComparison:
         actual = Path(capture.path)
         baseline = self.baseline_dir / actual.name
         baseline_created = False
         if not baseline.exists():
             shutil.copy2(actual, baseline)
             baseline_created = True
-        image_profile = _compare_image_files(actual, baseline)
+        image_profile = _compare_image_files(
+            actual,
+            baseline,
+            max_mean_channel_delta=max_mean_channel_delta,
+            max_changed_sample_ratio=max_changed_sample_ratio,
+        )
         passed = bool(baseline_created or image_profile["passed"])
         comparison = QualificationComparison(
             name=capture.name,
@@ -300,7 +311,13 @@ def _sample_image_colors(image: QImage) -> tuple[int, set[int]]:
     return count, colors
 
 
-def _compare_image_files(actual_path: Path, baseline_path: Path) -> dict[str, object]:
+def _compare_image_files(
+    actual_path: Path,
+    baseline_path: Path,
+    *,
+    max_mean_channel_delta: float = 6.0,
+    max_changed_sample_ratio: float = 0.35,
+) -> dict[str, object]:
     actual = QImage(str(actual_path))
     baseline = QImage(str(baseline_path))
     if actual.isNull() or baseline.isNull():
@@ -340,7 +357,10 @@ def _compare_image_files(actual_path: Path, baseline_path: Path) -> dict[str, ob
             sample_count += 1
     mean_channel_delta = total_delta / max(1, sample_count * 4)
     changed_sample_ratio = changed_samples / max(1, sample_count)
-    passed = mean_channel_delta <= 6.0 and changed_sample_ratio <= 0.35
+    passed = (
+        mean_channel_delta <= max_mean_channel_delta
+        and changed_sample_ratio <= max_changed_sample_ratio
+    )
     return {
         "passed": passed,
         "same_size": same_size,
@@ -349,8 +369,8 @@ def _compare_image_files(actual_path: Path, baseline_path: Path) -> dict[str, ob
         "changed_sample_ratio": changed_sample_ratio,
         "mean_channel_delta": mean_channel_delta,
         "tolerance": {
-            "max_mean_channel_delta": 6.0,
-            "max_changed_sample_ratio": 0.35,
+            "max_mean_channel_delta": max_mean_channel_delta,
+            "max_changed_sample_ratio": max_changed_sample_ratio,
         },
     }
 

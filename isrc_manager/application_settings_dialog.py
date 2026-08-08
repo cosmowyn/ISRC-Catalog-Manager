@@ -39,6 +39,7 @@ from isrc_manager.app_sounds import (
     normalize_app_sound_settings,
 )
 from isrc_manager.application_settings_gs1 import ApplicationSettingsGs1Mixin
+from isrc_manager.application_settings_security import ApplicationSettingsSecurityPanel
 from isrc_manager.application_settings_theme import ApplicationSettingsThemeMixin
 from isrc_manager.blob_icons import (
     BlobIconEditorWidget,
@@ -198,6 +199,7 @@ class ApplicationSettingsDialog(
         remember_database_password: bool = False,
         suppress_unencrypted_profile_warnings: bool = False,
         database_password_change_callback=None,
+        credential_reset_callback=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -244,11 +246,6 @@ class ApplicationSettingsDialog(
         )
         self._startup_sound_enabled = self._app_sound_settings[APP_SOUND_STARTUP]
         self._app_sound_checks: dict[str, QCheckBox] = {}
-        self._remember_database_password_warning_shown = bool(remember_database_password)
-        self._suppress_unencrypted_profile_warning_notice_shown = bool(
-            suppress_unencrypted_profile_warnings
-        )
-        self._database_password_change_callback = database_password_change_callback
         self._settings_builder_specs = (
             *self.THEME_PAGE_SPECS[:-1],
             (
@@ -376,55 +373,20 @@ class ApplicationSettingsDialog(
         profile_grid.addWidget(profile_path_lbl, 1, 1)
         general_layout.addWidget(profile_box)
 
-        security_box = QGroupBox("Security")
-        security_grid = QGridLayout(security_box)
-        self._configure_grid(security_grid)
-        self.remember_database_password_check = QCheckBox(
-            "Remember database password on this device"
+        self.security_panel = ApplicationSettingsSecurityPanel(
+            owner=self,
+            remember_database_password=remember_database_password,
+            suppress_unencrypted_profile_warnings=suppress_unencrypted_profile_warnings,
+            database_password_change_callback=database_password_change_callback,
+            credential_reset_callback=credential_reset_callback,
         )
-        self.remember_database_password_check.setChecked(bool(remember_database_password))
-        self.remember_database_password_check.setMinimumWidth(360)
-        self.remember_database_password_check.toggled.connect(
-            self._confirm_remember_database_password
+        self.remember_database_password_check = self.security_panel.remember_database_password_check
+        self.suppress_unencrypted_profile_warnings_check = (
+            self.security_panel.suppress_unencrypted_profile_warnings_check
         )
-        self.suppress_unencrypted_profile_warnings_check = QCheckBox(
-            "Do not warn when opening unencrypted profiles"
-        )
-        self.suppress_unencrypted_profile_warnings_check.setChecked(
-            bool(suppress_unencrypted_profile_warnings)
-        )
-        self.suppress_unencrypted_profile_warnings_check.setMinimumWidth(360)
-        self.suppress_unencrypted_profile_warnings_check.toggled.connect(
-            self._confirm_unencrypted_profile_warning_suppression
-        )
-        self.change_database_password_button = QPushButton("Change Password...")
-        self.change_database_password_button.setAutoDefault(False)
-        self.change_database_password_button.setEnabled(
-            callable(self._database_password_change_callback)
-        )
-        self.change_database_password_button.clicked.connect(self._change_database_password)
-        security_widget = QWidget(self)
-        security_row = QHBoxLayout(security_widget)
-        security_row.setContentsMargins(0, 0, 0, 0)
-        security_row.setSpacing(8)
-        security_row.addWidget(self.remember_database_password_check)
-        security_row.addWidget(self.change_database_password_button)
-        security_row.addStretch(1)
-        self._add_row(
-            security_grid,
-            0,
-            "Database Password",
-            security_widget,
-            "Stores the profile password only in the operating-system keychain/keyring and expires remembered login after 30 days.",
-        )
-        self._add_row(
-            security_grid,
-            1,
-            "Unencrypted Profiles",
-            self.suppress_unencrypted_profile_warnings_check,
-            "Turns off all unencrypted-profile safety prompts. Leave this off unless you intentionally accept the risk.",
-        )
-        general_layout.addWidget(security_box)
+        self.change_database_password_button = self.security_panel.change_database_password_button
+        self.reset_stored_credentials_button = self.security_panel.reset_stored_credentials_button
+        general_layout.addWidget(self.security_panel)
 
         app_box = QGroupBox("Application")
         app_grid = QGridLayout(app_box)
@@ -1152,6 +1114,10 @@ class ApplicationSettingsDialog(
                 self._general_tab_index,
                 self.suppress_unencrypted_profile_warnings_check,
             ),
+            "stored_credentials": (
+                self._general_tab_index,
+                self.reset_stored_credentials_button,
+            ),
             "startup_sound_enabled": (
                 self._sounds_tab_index,
                 self.startup_sound_enabled_check,
@@ -1842,52 +1808,6 @@ class ApplicationSettingsDialog(
                 notes=str(self._owner_party_settings.notes or "").strip(),
             )
         return OwnerPartySettings(party_id=self._owner_selected_party_id)
-
-    def _confirm_remember_database_password(self, checked: bool) -> None:
-        if not checked or self._remember_database_password_warning_shown:
-            return
-        result = QMessageBox.warning(
-            self,
-            "Remember Database Password",
-            (
-                "The database password will be stored in the operating-system "
-                "keychain/keyring on this device and reused for up to 30 days. "
-                "Do not enable this on shared or untrusted machines."
-            ),
-            QMessageBox.Ok | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if result != QMessageBox.Ok:
-            self.remember_database_password_check.blockSignals(True)
-            self.remember_database_password_check.setChecked(False)
-            self.remember_database_password_check.blockSignals(False)
-            return
-        self._remember_database_password_warning_shown = True
-
-    def _confirm_unencrypted_profile_warning_suppression(self, checked: bool) -> None:
-        if not checked or self._suppress_unencrypted_profile_warning_notice_shown:
-            return
-        result = QMessageBox.warning(
-            self,
-            "Unencrypted Profile Warnings",
-            (
-                "This turns off warnings for every unencrypted profile. Unencrypted SQLite "
-                "profiles do not protect catalog data or backups if copied or stolen. "
-                "Enable this only if you intentionally accept that risk."
-            ),
-            QMessageBox.Ok | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if result != QMessageBox.Ok:
-            self.suppress_unencrypted_profile_warnings_check.blockSignals(True)
-            self.suppress_unencrypted_profile_warnings_check.setChecked(False)
-            self.suppress_unencrypted_profile_warnings_check.blockSignals(False)
-            return
-        self._suppress_unencrypted_profile_warning_notice_shown = True
-
-    def _change_database_password(self) -> None:
-        if callable(self._database_password_change_callback):
-            self._database_password_change_callback()
 
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()

@@ -12,6 +12,7 @@ try:
         QApplication,
         QCheckBox,
         QComboBox,
+        QDialog,
         QGridLayout,
         QLabel,
         QLineEdit,
@@ -23,6 +24,7 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
     QCheckBox = None
     QComboBox = None
+    QDialog = None
     QGridLayout = None
     QLabel = None
     QLineEdit = None
@@ -36,6 +38,7 @@ else:
 
 from isrc_manager import application_settings_theme as theme_module
 from isrc_manager.application_settings_dialog import ApplicationSettingsDialog
+from isrc_manager.application_settings_security import ApplicationSettingsSecurityPanel
 from isrc_manager.application_settings_theme import ApplicationSettingsThemeMixin
 from isrc_manager.constants import (
     DEFAULT_HISTORY_RETENTION_MODE,
@@ -49,6 +52,38 @@ from isrc_manager.services.settings_reads import OwnerPartySettings
 
 def _dialog() -> ApplicationSettingsDialog:
     return ApplicationSettingsDialog.__new__(ApplicationSettingsDialog)
+
+
+def _dialog_kwargs(**overrides) -> dict[str, object]:
+    values: dict[str, object] = {
+        "window_title": "",
+        "effective_window_title": "ISRC Catalog Manager",
+        "owner_company_name": "",
+        "icon_path": "",
+        "artist_code": "00",
+        "auto_snapshot_enabled": True,
+        "auto_snapshot_interval_minutes": 15,
+        "isrc_prefix": "",
+        "sena_number": "",
+        "btw_number": "",
+        "buma_relatie_nummer": "",
+        "buma_ipi": "",
+        "gs1_template_asset": None,
+        "gs1_contracts_csv_path": "",
+        "gs1_contract_entries": (),
+        "gs1_active_contract_number": "",
+        "gs1_target_market": "",
+        "gs1_language": "",
+        "gs1_brand": "",
+        "gs1_subbrand": "",
+        "gs1_packaging_type": "",
+        "gs1_product_classification": "",
+        "theme_settings": {},
+        "stored_themes": {},
+        "current_profile_path": "",
+    }
+    values.update(overrides)
+    return values
 
 
 def _ensure_qapp() -> QApplication:
@@ -635,28 +670,145 @@ def test_settings_validation_rejects_blob_icon_theme_color_and_qss_errors() -> N
 
 def test_unencrypted_profile_warning_suppression_requires_confirmation() -> None:
     _ensure_qapp()
-    dialog = _dialog()
-    dialog._suppress_unencrypted_profile_warning_notice_shown = False
-    dialog.suppress_unencrypted_profile_warnings_check = QCheckBox()
-    dialog.suppress_unencrypted_profile_warnings_check.setChecked(True)
+    owner = QDialog()
+    panel = ApplicationSettingsSecurityPanel(owner=owner)
+    try:
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Cancel,
+        ):
+            panel.suppress_unencrypted_profile_warnings_check.setChecked(True)
 
-    with mock.patch(
-        "isrc_manager.application_settings_dialog.QMessageBox.warning",
-        return_value=QMessageBox.Cancel,
-    ):
-        ApplicationSettingsDialog._confirm_unencrypted_profile_warning_suppression(dialog, True)
+        assert panel.suppress_unencrypted_profile_warnings_check.isChecked() is False
 
-    assert dialog.suppress_unencrypted_profile_warnings_check.isChecked() is False
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Ok,
+        ):
+            panel.suppress_unencrypted_profile_warnings_check.setChecked(True)
 
-    dialog.suppress_unencrypted_profile_warnings_check.setChecked(True)
-    with mock.patch(
-        "isrc_manager.application_settings_dialog.QMessageBox.warning",
-        return_value=QMessageBox.Ok,
-    ):
-        ApplicationSettingsDialog._confirm_unencrypted_profile_warning_suppression(dialog, True)
+        assert panel.suppress_unencrypted_profile_warnings_check.isChecked() is True
+        assert panel._suppress_unencrypted_profile_warning_notice_shown is True
+    finally:
+        owner.close()
 
-    assert dialog.suppress_unencrypted_profile_warnings_check.isChecked() is True
-    assert dialog._suppress_unencrypted_profile_warning_notice_shown is True
+
+def test_stored_credentials_reset_is_disabled_without_callback() -> None:
+    _ensure_qapp()
+    owner = QDialog()
+    panel = ApplicationSettingsSecurityPanel(owner=owner)
+    try:
+        assert panel.reset_stored_credentials_button.objectName() == (
+            "resetStoredCredentialsButton"
+        )
+        assert panel.reset_stored_credentials_button.text() == "Reset Stored Credentials…"
+        assert panel.reset_stored_credentials_button.isEnabled() is False
+    finally:
+        owner.close()
+
+
+def test_security_panel_preserves_password_confirmation_and_change_callback() -> None:
+    _ensure_qapp()
+    owner = QDialog()
+    change_password_callback = mock.Mock()
+    panel = ApplicationSettingsSecurityPanel(
+        owner=owner,
+        database_password_change_callback=change_password_callback,
+    )
+    try:
+        assert panel.change_database_password_button.isEnabled() is True
+
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Cancel,
+        ):
+            panel.remember_database_password_check.setChecked(True)
+        assert panel.remember_database_password_check.isChecked() is False
+
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Ok,
+        ):
+            panel.remember_database_password_check.setChecked(True)
+        assert panel.remember_database_password_check.isChecked() is True
+
+        panel.change_database_password_button.click()
+        change_password_callback.assert_called_once_with()
+    finally:
+        owner.close()
+
+
+def test_stored_credentials_reset_requires_confirmation_and_calls_once() -> None:
+    _ensure_qapp()
+    owner = QDialog()
+    reset_callback = mock.Mock()
+    panel = ApplicationSettingsSecurityPanel(
+        owner=owner,
+        credential_reset_callback=reset_callback,
+    )
+    try:
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Cancel,
+        ) as warning:
+            panel.reset_stored_credentials_button.click()
+
+        reset_callback.assert_not_called()
+        warning.assert_called_once()
+        assert warning.call_args.args[1] == "Reset Stored Credentials"
+        confirmation_text = warning.call_args.args[2]
+        assert "all profiles" in confirmation_text
+        assert "SoundCloud client secrets and OAuth tokens" in confirmation_text
+        assert "database encryption passwords" in confirmation_text
+        assert "credentials stored by other applications" in confirmation_text
+        assert "revoke remote SoundCloud access" in confirmation_text
+        assert "Cancelling Application Settings afterwards cannot undo it" in confirmation_text
+        assert warning.call_args.args[3] == QMessageBox.Reset | QMessageBox.Cancel
+        assert warning.call_args.args[4] == QMessageBox.Cancel
+
+        with mock.patch(
+            "isrc_manager.application_settings_security.QMessageBox.warning",
+            return_value=QMessageBox.Reset,
+        ):
+            panel.reset_stored_credentials_button.click()
+
+        reset_callback.assert_called_once_with(owner)
+    finally:
+        owner.close()
+
+
+def test_settings_dialog_aliases_security_controls_and_focuses_reset_button() -> None:
+    app = _ensure_qapp()
+    reset_callback = mock.Mock()
+    dialog = ApplicationSettingsDialog(**_dialog_kwargs(credential_reset_callback=reset_callback))
+    try:
+        assert (
+            dialog.remember_database_password_check
+            is dialog.security_panel.remember_database_password_check
+        )
+        assert (
+            dialog.suppress_unencrypted_profile_warnings_check
+            is dialog.security_panel.suppress_unencrypted_profile_warnings_check
+        )
+        assert (
+            dialog.change_database_password_button
+            is dialog.security_panel.change_database_password_button
+        )
+        assert (
+            dialog.reset_stored_credentials_button
+            is dialog.security_panel.reset_stored_credentials_button
+        )
+
+        dialog.show()
+        dialog.focus_field("stored_credentials")
+        app.processEvents()
+
+        assert dialog.tabs.currentIndex() == dialog._general_tab_index
+        assert dialog.reset_stored_credentials_button.hasFocus()
+        assert "stored_credentials" not in dialog.values()
+        reset_callback.assert_not_called()
+    finally:
+        dialog.close()
 
 
 def test_settings_focus_wrapping_rows_and_artist_party_combo_behaviour() -> None:

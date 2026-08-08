@@ -1,14 +1,14 @@
 {
   "document_type": "direct_watermark",
-  "key_id": "ed25519-fd3be0b0d567d6ef",
+  "key_id": "ed25519-d883f8f8d9cb3b7f",
   "payload": {
     "app_version": "6.1.1",
     "artist_ref": {
       "primary_artist_name": "UI PQ Artist"
     },
     "authenticity_version": 1,
-    "created_at_utc": "2026-06-16T08:58:57Z",
-    "manifest_id": "5450fa0e498f41927afe57c26937010a",
+    "created_at_utc": "2026-08-08T10:05:33Z",
+    "manifest_id": "8bcd8fe0f219efe40b3c4253b4058a6f",
     "reference_audio": {
       "bit_depth": 24,
       "filename": "ui-pq-authenticity-master.wav",
@@ -26,7 +26,7 @@
       {
         "catalog_number": null,
         "profile_name": "default.db",
-        "release_date": "2026-06-16",
+        "release_date": "2026-08-08",
         "release_id": 1,
         "title": "UI PQ Release",
         "upc": null
@@ -41,7 +41,8 @@
         }
       ],
       "right_ids": [
-        1
+        1,
+        2
       ],
       "track_control": {
         "exclusive_territories": [],
@@ -57,7 +58,7 @@
       ]
     },
     "signer": {
-      "key_id": "ed25519-fd3be0b0d567d6ef",
+      "key_id": "ed25519-d883f8f8d9cb3b7f",
       "signer_label": "UI PQ Authenticity Signer"
     },
     "track_ref": {
@@ -66,15 +67,15 @@
       "isrc": "",
       "iswc": null,
       "profile_name": "default.db",
-      "release_date": "2026-06-16",
+      "release_date": "2026-08-08",
       "track_id": 2,
       "track_title": "UI PQ Qualification Track Edited",
       "upc": null
     },
     "watermark_binding": {
-      "manifest_digest_prefix": "aff98e938d0534c8",
-      "watermark_id": 8258891872884075248,
-      "watermark_nonce": 1573592983,
+      "manifest_digest_prefix": "3d78afe06bd40937",
+      "watermark_id": 1262314999568883816,
+      "watermark_nonce": 497018869,
       "watermark_version": 1
     },
     "watermark_version": 1,
@@ -89,9 +90,9 @@
     ],
     "workflow_kind": "authenticity_master"
   },
-  "payload_sha256": "db89b98c39311c428d9bd65dad3401ea861a7bf808096cabcf2425ad541ce978",
-  "public_key_b64": "rKOFBsaUUEr3QDfGfVpx0E8QqcHJ8+6kozf+I4hudvw=",
+  "payload_sha256": "6e2ac158ceffe64c627a99a9a1bf8ca2b4b4357b15579806fe99a08c01d40ec0",
+  "public_key_b64": "CeYqJ8JGrpCE//EBvvxI8Cp5VPTmtjtQQg7idw0CbNw=",
   "schema_version": 1,
-  "signature_b64": "oQjKVYYHkspDa85zrnezF7upiq6ZIJROj/7KT+x5nLUsN+uFectCfrWvs8nSSIbSfjmZv2aWXnIxD39wadhdAg==",
+  "signature_b64": "eiStzzdo4M7HRJ6ObFC9uiYJraInaObGoDYag7SKC7QhrWLp4FZ4TMw3DmnoUTV9brjFQ2FRanruFiSOZ5R0Ag==",
   "workflow_kind": "authenticity_master"
 }
