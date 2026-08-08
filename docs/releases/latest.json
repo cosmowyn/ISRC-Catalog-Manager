@@ -1,7 +1,7 @@
 {
-  "version": "6.2.3",
+  "version": "6.2.4",
   "released_at": "2026-08-08",
-  "summary": "stabilize cross-platform visual baselines [bump version]",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.2.3.md",
+  "summary": "validate repaired CI pipeline [bump version]",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.2.4.md",
   "minimum_supported_version": null
 }
