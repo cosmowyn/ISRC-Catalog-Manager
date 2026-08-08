@@ -1,7 +1,7 @@
 {
-  "version": "6.1.3",
-  "released_at": "2026-08-07",
-  "summary": "distribute metadata, ISRC, layout, and dependency updates",
-  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.1.3.md",
+  "version": "6.2.0",
+  "released_at": "2026-08-08",
+  "summary": "harden history, credentials, and CI workflows",
+  "release_notes_url": "https://github.com/cosmowyn/ISRC-Catalog-Manager/blob/main/docs/releases/v6.2.0.md",
   "minimum_supported_version": null
 }
