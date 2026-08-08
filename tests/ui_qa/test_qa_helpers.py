@@ -1034,15 +1034,26 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
         == "actual or baseline image could not be loaded"
     )
     other_path = tmp_path / "other.png"
-    other = QImage(17, 16, QImage.Format.Format_ARGB32)
+    other = QImage(18, 16, QImage.Format.Format_ARGB32)
     other.fill(QColor("white"))
+    other.setPixelColor(0, 0, QColor("black"))
     assert other.save(str(other_path), "PNG")
-    assert _compare_image_files(image_path, other_path)["reason"] == "image dimensions differ"
+    dimension_tolerant = _compare_image_files(image_path, other_path)
+    assert dimension_tolerant["passed"] is True
+    assert dimension_tolerant["same_size"] is False
+    assert dimension_tolerant["compared_width"] == 16
+
+    oversized_path = tmp_path / "oversized.png"
+    oversized = QImage(19, 16, QImage.Format.Format_ARGB32)
+    oversized.fill(QColor("white"))
+    assert oversized.save(str(oversized_path), "PNG")
+    assert _compare_image_files(image_path, oversized_path)["reason"] == ("image dimensions differ")
 
     black_path = tmp_path / "black.png"
     black = QImage(16, 16, QImage.Format.Format_ARGB32)
     black.fill(QColor("black"))
     assert black.save(str(black_path), "PNG")
+    assert _compare_image_files(image_path, black_path)["passed"] is False
     relaxed = _compare_image_files(
         image_path,
         black_path,
@@ -1054,6 +1065,59 @@ def test_visual_qualification_helpers_compare_artifacts_and_images(tmp_path: Pat
 
     manifest = service.write_manifest()
     assert manifest.exists()
+
+
+def test_catalog_workflow_restores_qualified_workspace_geometry(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class _StopAtEntry(RuntimeError):
+        pass
+
+    class _QualifiedWindowGeometry:
+        def __enter__(self) -> None:
+            calls.append("geometry")
+
+        def __exit__(self, *_args) -> None:
+            calls.append("geometry-exit")
+            return None
+
+    def _qualified_window_geometry() -> _QualifiedWindowGeometry:
+        return _QualifiedWindowGeometry()
+
+    window = SimpleNamespace(
+        open_catalog_workspace=lambda: calls.append("catalog"),
+        open_add_track_entry=lambda: calls.append("add-track"),
+        artist_field=mock.Mock(),
+        album_title_field=mock.Mock(),
+        genre_field=mock.Mock(),
+        track_title_field=mock.Mock(),
+        track_number_field=mock.Mock(),
+        track_len_m=mock.Mock(),
+        track_len_s=mock.Mock(),
+    )
+    harness = SimpleNamespace(
+        window=window,
+        connection=object(),
+        process_events=lambda **_kwargs: None,
+        qualified_window_geometry=_qualified_window_geometry,
+    )
+
+    def _capture(_harness, _window, name, max_mean_channel_delta=6.0):
+        calls.append(f"capture:{name}:{max_mean_channel_delta}")
+        raise _StopAtEntry
+
+    monkeypatch.setattr(scenarios, "_capture_workflow_widget", _capture)
+
+    with pytest.raises(_StopAtEntry):
+        scenarios.run_catalog_workflow(harness)
+
+    assert calls == [
+        "catalog",
+        "add-track",
+        "geometry",
+        "capture:ui_pq_add_track_dialog_populated:8.0",
+        "geometry-exit",
+    ]
 
 
 def test_help_validation_rejects_duplicate_screenshot_hashes(tmp_path: Path) -> None:

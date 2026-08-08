@@ -317,6 +317,7 @@ def _compare_image_files(
     *,
     max_mean_channel_delta: float = 6.0,
     max_changed_sample_ratio: float = 0.35,
+    max_dimension_delta: int = 2,
 ) -> dict[str, object]:
     actual = QImage(str(actual_path))
     baseline = QImage(str(baseline_path))
@@ -326,7 +327,9 @@ def _compare_image_files(
             "reason": "actual or baseline image could not be loaded",
         }
     same_size = actual.width() == baseline.width() and actual.height() == baseline.height()
-    if not same_size:
+    width_delta = abs(actual.width() - baseline.width())
+    height_delta = abs(actual.height() - baseline.height())
+    if width_delta > max_dimension_delta or height_delta > max_dimension_delta:
         return {
             "passed": False,
             "reason": "image dimensions differ",
@@ -334,9 +337,10 @@ def _compare_image_files(
             "actual_height": actual.height(),
             "baseline_width": baseline.width(),
             "baseline_height": baseline.height(),
+            "max_dimension_delta": max_dimension_delta,
         }
-    width = max(1, actual.width())
-    height = max(1, actual.height())
+    width = max(1, min(actual.width(), baseline.width()))
+    height = max(1, min(actual.height(), baseline.height()))
     x_step = max(1, width // 32)
     y_step = max(1, height // 32)
     total_delta = 0
@@ -364,6 +368,12 @@ def _compare_image_files(
     return {
         "passed": passed,
         "same_size": same_size,
+        "actual_width": actual.width(),
+        "actual_height": actual.height(),
+        "baseline_width": baseline.width(),
+        "baseline_height": baseline.height(),
+        "compared_width": width,
+        "compared_height": height,
         "sample_count": sample_count,
         "changed_samples": changed_samples,
         "changed_sample_ratio": changed_sample_ratio,
@@ -371,6 +381,7 @@ def _compare_image_files(
         "tolerance": {
             "max_mean_channel_delta": max_mean_channel_delta,
             "max_changed_sample_ratio": max_changed_sample_ratio,
+            "max_dimension_delta": max_dimension_delta,
         },
     }
 

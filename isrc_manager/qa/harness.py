@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -432,6 +433,25 @@ class UIQualificationHarness:
             return
         for _ in range(max(1, int(cycles))):
             self.app.processEvents()
+
+    @contextmanager
+    def qualified_window_geometry(self) -> Iterator[None]:
+        """Temporarily restore the canonical viewport for full-window captures."""
+        if self.window is None:
+            raise AssertionError("QA harness window is not open.")
+        old_minimum = self.window.minimumSize()
+        old_maximum = self.window.maximumSize()
+        old_size = self.window.size()
+        capture_width = max(_QUALIFICATION_WINDOW_WIDTH, self.window.minimumWidth())
+        self.window.setFixedSize(capture_width, _QUALIFICATION_WINDOW_HEIGHT)
+        self.process_events(cycles=8)
+        try:
+            yield
+        finally:
+            self.window.setMinimumSize(old_minimum)
+            self.window.setMaximumSize(old_maximum)
+            self.window.resize(old_size)
+            self.process_events(cycles=8)
 
     def run_full_qualification(self) -> None:
         self.run_qualification(None)

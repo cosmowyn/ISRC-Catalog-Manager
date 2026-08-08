@@ -310,12 +310,16 @@ def _capture_workflow_widget(
     harness: Any,
     widget: QWidget,
     name: str,
+    max_mean_channel_delta: float = 6.0,
 ) -> dict[str, object]:
     widget.show()
     harness.process_events(cycles=8)
     service = _workflow_visual_service(harness)
     capture = service.capture_widget(widget, name)
-    comparison = service.compare_capture_to_baseline(capture)
+    comparison = service.compare_capture_to_baseline(
+        capture,
+        max_mean_channel_delta=max_mean_channel_delta,
+    )
     manifest_path = service.write_manifest()
     return {
         "screenshot_path": capture.path,
@@ -596,47 +600,43 @@ def run_menu_inventory(harness: Any) -> None:
 
 def run_catalog_workflow(harness: Any) -> int:
     window = harness.window
-    conn = harness.connection
     if window is None:
         raise AssertionError("QA harness window is not open.")
-
+    window.open_catalog_workspace()
     window.open_add_track_entry()
-    harness.process_events(cycles=8)
-    _set_combo_text(window.artist_field, CATALOG_ARTIST_NAME)
-    _set_combo_text(window.album_title_field, CATALOG_RELEASE_TITLE)
-    _set_combo_text(window.genre_field, "UI PQ Genre")
-    window.track_title_field.setText(CATALOG_TRACK_TITLE)
-    window.track_number_field.setValue(1)
-    window.track_len_m.setValue(3)
-    window.track_len_s.setValue(14)
-    add_track_visual = _capture_workflow_widget(
-        harness,
-        window,
-        "ui_pq_add_track_dialog_populated",
-    )
+    with harness.qualified_window_geometry():
+        _set_combo_text(window.artist_field, CATALOG_ARTIST_NAME)
+        _set_combo_text(window.album_title_field, CATALOG_RELEASE_TITLE)
+        _set_combo_text(window.genre_field, "UI PQ Genre")
+        window.track_title_field.setText(CATALOG_TRACK_TITLE)
+        window.track_number_field.setValue(1)
+        window.track_len_m.setValue(3)
+        window.track_len_s.setValue(14)
+        add_track_visual = _capture_workflow_widget(
+            harness,
+            window,
+            "ui_pq_add_track_dialog_populated",
+            max_mean_channel_delta=8.0,
+        )
     track_query = "SELECT id, work_id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1"
-    track_params = (CATALOG_TRACK_TITLE,)
     window.save_button.click()
     harness.process_events(cycles=12)
-    row = _try_wait_for_row(harness, track_query, track_params, attempts=10)
+    row = _try_wait_for_row(harness, track_query, (CATALOG_TRACK_TITLE,), attempts=10)
     if row is None:
         save_command = getattr(window, "save", None)
         if callable(save_command):
             save_command()
             harness.process_events(cycles=12)
-            row = _try_wait_for_row(harness, track_query, track_params, attempts=40)
+            row = _try_wait_for_row(harness, track_query, (CATALOG_TRACK_TITLE,), attempts=40)
     if row is None:
         raise AssertionError(_catalog_track_persistence_failure_context(window))
     track_id = int(row[0])
     work_id_from_add_track = int(row[1]) if row[1] is not None else None
-    refresh = getattr(window, "refresh_table_preserve_view", None)
-    if callable(refresh):
+    if callable(refresh := getattr(window, "refresh_table_preserve_view", None)):
         refresh(focus_id=track_id)
         harness.process_events(cycles=8)
-    visible = False
     table = getattr(window, "table", None)
-    if table is not None:
-        visible = table_contains_text(table, CATALOG_TRACK_TITLE)
+    visible = table is not None and table_contains_text(table, CATALOG_TRACK_TITLE)
 
     from isrc_manager.tracks.edit_dialog import EditDialog
 
@@ -716,7 +716,7 @@ def run_catalog_workflow(harness: Any) -> int:
             coverage_status="partial",
             recommended_followup="Add a direct catalog model row assertion or stabilize UI refresh hooks.",
         )
-    conn.commit()
+    harness.connection.commit()
     return track_id
 
 

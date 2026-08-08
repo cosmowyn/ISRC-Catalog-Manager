@@ -90,6 +90,30 @@ def test_full_entrypoint_delegates_to_component_aware_execution() -> None:
     harness.run_qualification.assert_called_once_with(None)
 
 
+def test_qualified_window_geometry_restores_constraints_after_failure() -> None:
+    harness = object.__new__(UIQualificationHarness)
+    window = mock.Mock()
+    old_minimum = object()
+    old_maximum = object()
+    old_size = object()
+    window.minimumSize.return_value = old_minimum
+    window.maximumSize.return_value = old_maximum
+    window.size.return_value = old_size
+    window.minimumWidth.return_value = 1506
+    harness.window = window
+    harness.process_events = mock.Mock()
+
+    with pytest.raises(RuntimeError, match="capture failed"):
+        with harness.qualified_window_geometry():
+            window.setFixedSize.assert_called_once_with(1506, 800)
+            raise RuntimeError("capture failed")
+
+    window.setMinimumSize.assert_called_once_with(old_minimum)
+    window.setMaximumSize.assert_called_once_with(old_maximum)
+    window.resize.assert_called_once_with(old_size)
+    assert harness.process_events.call_args_list == [mock.call(cycles=8), mock.call(cycles=8)]
+
+
 def test_isolated_asset_execution_adds_only_its_canonical_dependencies() -> None:
     harness, step_ids = _recording_harness()
 
