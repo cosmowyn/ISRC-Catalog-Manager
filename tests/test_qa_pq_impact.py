@@ -288,8 +288,11 @@ def test_component_unions_and_hashes_are_deterministic() -> None:
 
 
 def test_cli_reads_change_file_and_writes_json_and_github_outputs(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GITHUB_REF", raising=False)
     changes_path = tmp_path / "changes.txt"
     changes_path.write_text(
         "M\tisrc_manager/media/bookmarks.py\nD\tdocs/obsolete-guide.md\n",
