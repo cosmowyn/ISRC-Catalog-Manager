@@ -104,6 +104,15 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      - name: Install Linux Qt runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          mapfile -t qt_packages < <(python scripts/qa_pq_runtime.py system-packages)
+          test ${#qt_packages[@]} -gt 0
+          sudo apt-get install -y "${qt_packages[@]}"
+
       - name: Install release QA dependencies
         run: |
           python -m pip install --upgrade pip

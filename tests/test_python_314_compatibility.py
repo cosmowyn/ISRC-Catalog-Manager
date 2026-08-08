@@ -170,6 +170,18 @@ class Python314CompatibilityTests(unittest.TestCase):
         self.assertIn("moved after validation; refusing to publish", workflow)
         self.assertIn("scripts/qa_pq_runtime.py system-packages", workflow)
 
+    def test_release_qa_installs_linux_qt_runtime_before_validation(self):
+        workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+        qa_section = workflow.split("\n  qa:\n", maxsplit=1)[1].split("\n  build:\n", maxsplit=1)[0]
+
+        install_at = qa_section.index("scripts/qa_pq_runtime.py system-packages")
+        dependencies_at = qa_section.index("Install release QA dependencies")
+        validation_at = qa_section.index("Run release-neutral validation")
+
+        self.assertLess(install_at, dependencies_at)
+        self.assertLess(dependencies_at, validation_at)
+        self.assertEqual(workflow.count("scripts/qa_pq_runtime.py system-packages"), 2)
+
     def test_version_bump_pushes_release_commit_and_tag_atomically(self):
         workflow = VERSION_WORKFLOW_PATH.read_text(encoding="utf-8")
 
