@@ -59,11 +59,11 @@
     }
   ],
   "coveredBranches": 22568,
-  "coveredLines": 83521,
+  "coveredLines": 83520,
   "excludedFiles": [],
   "filesExcluded": 0,
   "filesMeasured": 294,
-  "linePercent": 92.44,
+  "linePercent": 92.43,
   "lowestFiles": [
     {
       "branch": 16.96,
@@ -151,9 +151,9 @@
     }
   ],
   "missingBranches": 3874,
-  "missingLines": 4808,
+  "missingLines": 4809,
   "schemaVersion": 1,
   "statementPercent": 94.56,
   "statements": 88329,
-  "timestamp": "2026-08-08T22:09:36.981978"
+  "timestamp": "2026-08-09T15:47:38.262786"
 }
