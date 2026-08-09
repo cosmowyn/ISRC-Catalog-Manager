@@ -11338,35 +11338,55 @@ class AppShellTestCase(unittest.TestCase):
             album_art_path=self._create_png_file("image-controls.png", color="#8D53E2", size=320),
         )
 
-        with mock.patch.object(self.window, "_export_bytes_with_picker") as export_mock:
-            dialog = self._open_image_preview_dialog(track_id)
+        dialog = self._open_image_preview_dialog(track_id)
 
-            fit_percent = dialog._fit_percent()
-            self.assertEqual(dialog._zoom_slider.value(), fit_percent)
+        fit_percent = dialog._fit_percent()
+        self.assertEqual(dialog._zoom_slider.value(), fit_percent)
 
-            wheel_event = _FakeWheelEvent(angle_y=120, modifiers=Qt.ControlModifier)
-            handled = dialog.eventFilter(dialog._image_label, wheel_event)
-            self.assertTrue(handled)
-            self.assertTrue(wheel_event.accepted)
-            self.assertGreater(dialog._zoom_slider.value(), fit_percent)
+        wheel_event = _FakeWheelEvent(angle_y=120, modifiers=Qt.ControlModifier)
+        handled = dialog.eventFilter(dialog._image_label, wheel_event)
+        self.assertTrue(handled)
+        self.assertTrue(wheel_event.accepted)
+        self.assertGreater(dialog._zoom_slider.value(), fit_percent)
 
-            native_zoom = _FakeNativeGestureEvent(Qt.ZoomNativeGesture, 0.2)
-            handled = dialog.eventFilter(dialog._image_label, native_zoom)
-            self.assertTrue(handled)
-            self.assertTrue(native_zoom.accepted)
-            self.assertTrue(dialog._user_zoomed)
+        native_zoom = _FakeNativeGestureEvent(Qt.ZoomNativeGesture, 0.2)
+        handled = dialog.eventFilter(dialog._image_label, native_zoom)
+        self.assertTrue(handled)
+        self.assertTrue(native_zoom.accepted)
+        self.assertTrue(dialog._user_zoomed)
 
-            dialog._set_zoom_percent(175, user_initiated=True)
-            double_click = _FakeMouseDoubleClickEvent()
-            handled = dialog.eventFilter(dialog._image_label, double_click)
-            self.assertTrue(handled)
-            self.assertTrue(double_click.accepted)
-            self.assertEqual(dialog._zoom_slider.value(), dialog._fit_percent())
-            self.assertFalse(dialog._user_zoomed)
+        dialog._set_zoom_percent(175, user_initiated=True)
+        double_click = _FakeMouseDoubleClickEvent()
+        handled = dialog.eventFilter(dialog._image_label, double_click)
+        self.assertTrue(handled)
+        self.assertTrue(double_click.accepted)
+        self.assertEqual(dialog._zoom_slider.value(), dialog._fit_percent())
+        self.assertFalse(dialog._user_zoomed)
 
+        export_path = self.root / "image-preview-export.png"
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), ""),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information") as information_mock,
+            mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
+            mock.patch.object(
+                self.window,
+                "_run_file_history_action",
+                wraps=self.window._run_file_history_action,
+            ) as history_action_mock,
+        ):
             self.assertEqual(dialog._export_button.text(), "Export Image…")
             dialog._export_button.click()
-            export_mock.assert_called_once()
+
+        self.assertEqual(export_path.read_bytes(), dialog._current_data)
+        self.assertEqual(
+            history_action_mock.call_args.kwargs["action_type"], "file.export_image_preview"
+        )
+        information_mock.assert_called_once()
+        critical_mock.assert_not_called()
 
 
 if __name__ == "__main__":

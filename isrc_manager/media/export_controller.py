@@ -476,7 +476,7 @@ def _export_bytes_with_picker(
                     track_id=int(catalog_track_id),
                 )
 
-        self.__run_file_history_action(
+        self._run_file_history_action(
             action_label=action_label.format(filename=resolved_dest_path.name),
             action_type=action_type,
             target_path=resolved_dest_path,

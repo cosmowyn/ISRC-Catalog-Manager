@@ -441,7 +441,7 @@ def test_export_bytes_with_picker_handles_cancel_validation_success_and_failure(
         history_actions.append(kwargs)
         return kwargs["mutation"]()
 
-    setattr(app, "__run_file_history_action", run_history_action)
+    setattr(app, "_run_file_history_action", run_history_action)
 
     export_controller._export_bytes_with_picker(
         app,
@@ -486,11 +486,12 @@ def test_export_bytes_with_picker_handles_cancel_validation_success_and_failure(
     assert dest.read_bytes() == b"audio"
     assert history_actions[-1]["action_label"] == "Export: song.wav"
     assert "Metadata embedding skipped: tag service offline." in messages.information_calls[-1][1]
+    assert messages.critical_calls == []
 
     def failing_history_action(**_kwargs):
         raise RuntimeError("disk full")
 
-    setattr(app, "__run_file_history_action", failing_history_action)
+    setattr(app, "_run_file_history_action", failing_history_action)
     file_dialog.save_path = str(tmp_path / "failure.wav")
     export_controller._export_bytes_with_picker(
         app,

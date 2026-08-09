@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QAbstractButton, QComboBox, QDialog, QMenu, QWidget
 
 from isrc_manager.assets.models import AssetVersionPayload
@@ -277,6 +278,19 @@ def _attach_synthetic_audio_to_track(
     if not window.track_service.has_media(int(track_id), "audio_file"):
         raise AssertionError("Synthetic audio attachment was not persisted on the QA track.")
     return fixture_path, dict(meta), progress_messages
+
+
+def _write_synthetic_png_fixture(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = QImage(192, 128, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#17324D"))
+    accent = QColor("#E5A84B")
+    for y in range(image.height()):
+        image.setPixelColor((y * 3) % image.width(), y, accent)
+        image.setPixelColor((image.width() - 1 - y) % image.width(), y, accent)
+    if not image.save(str(path), "PNG"):
+        raise AssertionError(f"Could not write deterministic UI PQ image fixture: {path}")
+    return path
 
 
 def _reset_generated_artifact_dir(harness: Any, name: str) -> Path:
@@ -2986,6 +3000,96 @@ def run_media_audio_workflow(harness: Any, *, track_id: int) -> None:
         "ui_pq_media_player_dialog",
     )
 
+    image_source_path = _write_synthetic_png_fixture(
+        harness.artifact_dir / "fixtures" / "ui-pq-image-preview.png"
+    )
+    image_source_bytes = image_source_path.read_bytes()
+    image_export_path = (
+        _reset_generated_artifact_dir(harness, "image_preview_exports") / "ui-pq-image-preview.png"
+    )
+    image_dialog = None
+    image_visual: dict[str, object] = {}
+    try:
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(image_export_path), "PNG Images (*.png)"),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information") as image_export_info,
+            mock.patch.object(app_module.QMessageBox, "warning") as image_export_warning,
+            mock.patch.object(app_module.QMessageBox, "critical") as image_export_critical,
+            mock.patch.object(
+                window,
+                "_run_file_history_action",
+                wraps=window._run_file_history_action,
+            ) as image_history_action,
+        ):
+            window._open_image_preview(image_source_bytes, "UI PQ Image Preview")
+            harness.process_events(cycles=8)
+            image_dialog = getattr(window, "image_preview_dialog", None)
+            if not isinstance(image_dialog, QWidget):
+                raise AssertionError("Image Preview command did not open the real preview dialog.")
+            if image_dialog.objectName() != "imagePreviewDialog":
+                raise AssertionError(
+                    f"Unexpected Image Preview surface: {image_dialog.objectName()!r}"
+                )
+            image_visual = _capture_workflow_widget(
+                harness,
+                image_dialog,
+                "ui_pq_image_preview_dialog",
+            )
+            export_button = image_dialog.findChild(QAbstractButton, "imagePreviewExportButton")
+            if export_button is None:
+                raise AssertionError("Image Preview export control was not reachable.")
+            export_button.click()
+            harness.process_events(cycles=4)
+
+            if image_export_critical.call_count or image_export_warning.call_count:
+                raise AssertionError(
+                    "Image Preview export reported an unexpected warning or error: "
+                    f"warning={image_export_warning.call_args_list!r}, "
+                    f"critical={image_export_critical.call_args_list!r}"
+                )
+            if image_export_info.call_count != 1:
+                raise AssertionError("Image Preview export did not report exactly one success.")
+            if image_history_action.call_count != 1:
+                raise AssertionError("Image Preview export did not route one file-history action.")
+            history_kwargs = dict(image_history_action.call_args.kwargs)
+            if history_kwargs.get("action_type") != "file.export_image_preview":
+                raise AssertionError(
+                    "Image Preview export used an unexpected history action: "
+                    f"{history_kwargs.get('action_type')!r}"
+                )
+            if Path(history_kwargs.get("target_path", "")) != image_export_path:
+                raise AssertionError("Image Preview history target did not match the chosen path.")
+    finally:
+        if isinstance(image_dialog, QWidget):
+            image_dialog.close()
+            harness.process_events(cycles=2)
+
+    if not image_export_path.is_file():
+        raise AssertionError("Image Preview export did not create the chosen file.")
+    image_export_bytes = image_export_path.read_bytes()
+    image_source_sha256 = hashlib.sha256(image_source_bytes).hexdigest()
+    image_export_sha256 = hashlib.sha256(image_export_bytes).hexdigest()
+    if image_export_bytes != image_source_bytes or image_export_sha256 != image_source_sha256:
+        raise AssertionError("Image Preview export did not preserve the exact source bytes.")
+    image_export_evidence = {
+        "source_path": str(image_source_path),
+        "output_path": str(image_export_path),
+        "output_exists": image_export_path.is_file(),
+        "source_size": len(image_source_bytes),
+        "output_size": len(image_export_bytes),
+        "source_sha256": image_source_sha256,
+        "output_sha256": image_export_sha256,
+        "bytes_match": image_export_bytes == image_source_bytes,
+        "history_action_type": str(history_kwargs["action_type"]),
+        "history_action_count": image_history_action.call_count,
+        "success_message_count": image_export_info.call_count,
+        "error_message_count": (image_export_warning.call_count + image_export_critical.call_count),
+    }
+
     conversion_service = _QAAudioConversionService()
     coordinator = ManagedDerivativeExportCoordinator(
         conn=harness.connection,
@@ -3041,8 +3145,9 @@ def run_media_audio_workflow(harness: Any, *, track_id: int) -> None:
         "UI-PQ-MEDIA-001",
         status="passed",
         message=(
-            "Media audio attachment, media player command routing, no-ffmpeg conversion "
-            "boundary, managed derivative export, and derivative ledger drill-in were verified."
+            "Media audio attachment, media player command routing, exact Image Preview export "
+            "with file history, no-ffmpeg conversion, managed derivative export, and derivative "
+            "ledger drill-in were verified."
         ),
         data={
             "workflow_status": "fully_automated_local_fixture",
@@ -3054,6 +3159,7 @@ def run_media_audio_workflow(harness: Any, *, track_id: int) -> None:
             "attachment_progress_count": len(attachment_progress),
             "media_player_track_id": media_dialog.opened_track_id,
             "media_player_source_spec": media_dialog.opened_source_spec,
+            "image_preview_export": image_export_evidence,
             "conversion_calls": list(conversion_service.calls),
             "derivative_batch_id": derivative_result.batch_public_id,
             "derivative_ids": list(derivative_result.derivative_ids),
@@ -3076,11 +3182,12 @@ def run_media_audio_workflow(harness: Any, *, track_id: int) -> None:
             "visual_evidence": {
                 "bulk_audio_attach_dialog": attach_visual,
                 "media_player_dialog": media_visual,
+                "image_preview_dialog": image_visual,
                 "derivative_ledger_panel": ledger_visual,
             },
             "help_reference": _require_help_reference(
                 harness,
-                "Attach Audio, Preview Playback, and Review Managed Derivatives",
+                "Attach Audio, Export an Image Preview, and Review Managed Derivatives",
             ),
         },
     )
