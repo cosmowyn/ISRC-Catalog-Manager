@@ -1,5 +1,5 @@
 pyinstaller==6.21.0
-coverage[toml]==7.15.0
+coverage[toml]==7.15.4
 pytest==9.1.1
 pytest-cov==7.1.0
 PySide6==6.11.1
