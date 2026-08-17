@@ -21,7 +21,7 @@ dependencies = [
   "pillow==12.3.0",
   "openpyxl==3.1.5",
   "mutagen==1.48.1",
-  "numpy==2.5.1",
+  "numpy==2.5.2",
   "soundfile==0.14.0",
   "scipy==1.18.0",
   "cryptography==50.0.0",
@@ -31,11 +31,11 @@ dependencies = [
 
 [project.optional-dependencies]
 build = [
-  "pyinstaller==6.21.0",
+  "pyinstaller==6.22.0",
 ]
 dev = [
   "black==26.5.1",
-  "coverage[toml]==7.15.0",
+  "coverage[toml]==7.15.4",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
   "mypy==2.2.0",
